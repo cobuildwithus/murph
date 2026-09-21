@@ -2672,9 +2672,14 @@ write's promise cleanup, so shutdown retains its hold through final settlement
 and observes any failure. Failed accounting or exhausted allowance closes voice;
 usage notices explicitly suppress fallback delivery on another channel. Pricing
 subtracts cumulative costs so event frequency cannot multiply rounding charges.
-A lost call is not resumed under the same call id, and unconfirmed provider closure
-does not fabricate final usage. The Cloudflare invocation supplies the existing
-platform usage port; the complete real-provider hosted journey remains unverified.
+A lost call never resumes normal input or replays uncertain speech. Its native
+sideband owner makes one close-only attachment to the same call, bounded together
+with final-usage draining by the existing five-second shutdown deadline. A provider
+close already observed needs no attachment; failed cleanup remains unconfirmed
+and does not fabricate final usage. The Cloudflare invocation supplies the existing
+platform usage port. A synthetic real-provider hosted journey on native Linux
+verifies durable input, a read-only tool, audible output, confirmed closure, and
+trusted usage settlement.
 
 For established hosted conversation work, the first fresh auto-reply-enabled
 pre-pass Linq or Telegram input candidate staged after restore and final Codex

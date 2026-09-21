@@ -351,6 +351,25 @@ Updated: 2026-09-21
 - Passed `pnpm test:assistant:live -- --test "real model canonical meal persists across assistant restart"` on the previously verified local subscription profile with `gpt-5.6-terra`: two provider turns, one canonical meal save, then correct readback after assistant restart and vault restore. Reviewed both synthetic replies: Ready for this preserved text journey. Website voice remains Hold.
 - ReviewGPT review of the complete stable candidate; provider and deployment evidence remain separate completion requirements.
 
+## Review round 1 remediation
+
+- Accepted the original-PR finding that sideband loss could release the runtime
+  usage owner while independent browser/provider media remained active. The user
+  resumed remediation. The native owner now makes one close-only attachment to
+  the same call, within its existing five-second shutdown deadline, and drains
+  the provider's final usage before completion. It neither creates a new session
+  nor replays uncertain outbound work; failed cleanup remains unconfirmed.
+- Real-socket regression: the three cleanup cases failed before the fix; afterward
+  all seven public-Live app-server cases passed, including confirmed close, EOF,
+  timeout, already-confirmed closure, and both native tool-backed turn modes.
+  Four cases needed the runner's retry after an app-server initialization timeout.
+  Formatting and pinned upstream patch applicability pass.
+- Reconciled main while preserving voice ownership and mailbox wake high-water
+  handling. Container-entrypoint tests (63), shared protocol tests (76), image
+  contracts (21), and relevant shared/Cloudflare typechecks pass. The merged
+  parser derives its effective processing mode once for both admission guards
+  and the existing runtime admission check.
+
 ## Current prerequisites
 
 - The clean native AMD64 hosted browser/tool/speech/accounting journey now passes.

@@ -271,6 +271,7 @@ export function parseHostedRuntimeEnsureProcessingRequest(
         "Hosted runtime ensure-processing request processingMode",
         HOSTED_RUNTIME_PROCESSING_MODES,
       );
+  const effectiveProcessingMode = processingMode ?? "default";
   const assistantExecutionBlocked = record.assistantExecutionBlocked === undefined
     ? undefined
     : requireExactTrue(
@@ -282,7 +283,7 @@ export function parseHostedRuntimeEnsureProcessingRequest(
       "Hosted runtime ensure-processing request assistantExecutionBlocked requires system_mailbox processingMode.",
     );
   }
-  if (record.voiceCallId !== undefined && processingMode != null && processingMode !== "default") {
+  if (record.voiceCallId !== undefined && effectiveProcessingMode !== "default") {
     throw new TypeError("Voice reservation requires default processing mode.");
   }
   const mailboxWakeHighWater = readHostedMailboxWakeHighWater(record.mailboxWakeHighWater);
@@ -295,7 +296,7 @@ export function parseHostedRuntimeEnsureProcessingRequest(
         record.conversationWorkPending,
         "Hosted runtime ensure-processing request conversationWorkPending",
       );
-  if (conversationWorkPending && processingMode != null && processingMode !== "default") {
+  if (conversationWorkPending && effectiveProcessingMode !== "default") {
     throw new TypeError(
       "Hosted runtime ensure-processing request conversationWorkPending requires default processingMode.",
     );
@@ -304,7 +305,7 @@ export function parseHostedRuntimeEnsureProcessingRequest(
   return {
     ...(record.voiceCallId === undefined ? {} : { voiceCallId: parseHostedVoiceCallId(record.voiceCallId) }),
     ...(record.admission === undefined ? {} : {
-      admission: parseRuntimeProcessingAdmission(record.admission, processingMode ?? "default"),
+      admission: parseRuntimeProcessingAdmission(record.admission, effectiveProcessingMode),
     }),
     ...(assistantExecutionBlocked === undefined
       ? {}

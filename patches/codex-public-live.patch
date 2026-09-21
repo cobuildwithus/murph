@@ -4591,15 +4591,17 @@ index c9e0d18..f802362 100644
              flush_transcript_tail_on_session_end: None,
 diff --git a/codex-rs/app-server/tests/suite/v2/realtime_public_live_tests.rs b/codex-rs/app-server/tests/suite/v2/realtime_public_live_tests.rs
 new file mode 100644
-index 0000000..811e8b6
+index 0000000000000000000000000000000000000000..599b16652dd550590f9b6907c4cb0f1f482a13ee
 --- /dev/null
 +++ b/codex-rs/app-server/tests/suite/v2/realtime_public_live_tests.rs
-@@ -0,0 +1,534 @@
+@@ -0,0 +1,593 @@
 +//! Real sideband sockets exercise native and host-managed input ownership.
 +use super::*;
 +use futures::SinkExt;
 +use futures::StreamExt;
 +use pretty_assertions::assert_eq;
++use std::sync::atomic::AtomicUsize;
++use std::sync::atomic::Ordering;
 +use test_case::test_case;
 +use tokio::net::TcpListener;
 +use tokio::sync::mpsc as async_mpsc;
@@ -4635,6 +4637,7 @@ index 0000000..811e8b6
 +    send: async_mpsc::UnboundedSender<Option<Value>>,
 +    received: async_mpsc::UnboundedReceiver<Value>,
 +    task: JoinHandle<()>,
++    attachments: Arc<AtomicUsize>,
 +}
 +
 +impl PublicSideband {
@@ -4643,37 +4646,47 @@ index 0000000..811e8b6
 +        let uri = format!("ws://{}", listener.local_addr()?);
 +        let (send, mut send_rx) = async_mpsc::unbounded_channel::<Option<Value>>();
 +        let (received_tx, received) = async_mpsc::unbounded_channel();
++        let attachments = Arc::new(AtomicUsize::new(0));
++        let attachment_count = attachments.clone();
 +        let task = tokio::spawn(async move {
-+            let (stream, _) = listener.accept().await.expect("accept public sideband");
-+            let mut socket = accept_hdr_async(stream, |request: &Request, response: Response| {
-+                assert_eq!(
-+                    request.uri().to_string(),
-+                    "/v1/live/sessions/live_session_public/attach"
-+                );
-+                assert_eq!(request.headers()["authorization"], "Bearer sk-test-key");
-+                assert!(request.headers().get("openai-alpha").is_none());
-+                Ok(response)
-+            })
-+            .await
-+            .expect("complete public sideband handshake");
-+            loop {
-+                tokio::select! {
-+                    event = send_rx.recv() => match event {
-+                        Some(Some(value)) => {
-+                            let closed = value["type"] == "session.closed";
-+                            socket.send(Message::Text(value.to_string().into())).await.expect("send public event");
-+                            if closed { break; }
++            for _ in 0..2 {
++                let (stream, _) = listener.accept().await.expect("accept public sideband");
++                let mut socket =
++                    accept_hdr_async(stream, |request: &Request, response: Response| {
++                        assert_eq!(
++                            request.uri().to_string(),
++                            "/v1/live/sessions/live_session_public/attach"
++                        );
++                        assert_eq!(request.headers()["authorization"], "Bearer sk-test-key");
++                        assert!(request.headers().get("openai-alpha").is_none());
++                        Ok(response)
++                    })
++                    .await
++                    .expect("complete public sideband handshake");
++                attachment_count.fetch_add(1, Ordering::SeqCst);
++                loop {
++                    tokio::select! {
++                        event = send_rx.recv() => match event {
++                            Some(Some(value)) => {
++                                let closed = value["type"] == "session.closed";
++                                socket.send(Message::Text(value.to_string().into())).await.expect("send public event");
++                                if closed { return; }
++                            }
++                            // Deliberate transport loss, without a provider close record.
++                            Some(None) => break,
++                            None => return,
++                        },
++                        event = socket.next() => match event {
++                            Some(Ok(Message::Text(text))) => {
++                                received_tx.send(serde_json::from_str(&text).expect("decode public request")).expect("record public request");
++                            }
++                            Some(Ok(Message::Close(_))) | None => return,
++                            Some(Err(tokio_tungstenite::tungstenite::Error::Protocol(
++                                tokio_tungstenite::tungstenite::error::ProtocolError::ResetWithoutClosingHandshake
++                            ))) => return,
++                            Some(Err(error)) => panic!("unexpected client socket failure: {error}"),
++                            Some(Ok(_)) => {}
 +                        }
-+                        // Deliberate transport loss, without a provider close record.
-+                        Some(None) | None => break,
-+                    },
-+                    event = socket.next() => match event {
-+                        Some(Ok(Message::Text(text))) => {
-+                            received_tx.send(serde_json::from_str(&text).expect("decode public request")).expect("record public request");
-+                        }
-+                        Some(Ok(Message::Close(_))) | None => break,
-+                        Some(Err(error)) => panic!("unexpected client socket failure: {error}"),
-+                        Some(Ok(_)) => {}
 +                    }
 +                }
 +            }
@@ -4683,6 +4696,7 @@ index 0000000..811e8b6
 +            send,
 +            received,
 +            task,
++            attachments,
 +        })
 +    }
 +
@@ -4987,10 +5001,20 @@ index 0000000..811e8b6
 +    harness.shutdown().await
 +}
 +
-+#[test_case(false; "EOF is unconfirmed and retains the last cumulative usage")]
-+#[test_case(true; "provider final usage survives subsequent EOF")]
++#[derive(Clone, Copy)]
++enum PublicClosure {
++    ProviderClosed,
++    CleanupConfirmed,
++    CleanupEof,
++    CleanupTimeout,
++}
++
++#[test_case(PublicClosure::ProviderClosed; "provider final usage survives subsequent EOF")]
++#[test_case(PublicClosure::CleanupConfirmed; "sideband loss closes the same call and drains final usage")]
++#[test_case(PublicClosure::CleanupEof; "cleanup EOF remains unconfirmed")]
++#[test_case(PublicClosure::CleanupTimeout; "cleanup timeout remains unconfirmed")]
 +#[tokio::test]
-+async fn public_live_transport_loss_and_final_usage(provider_closed: bool) -> Result<()> {
++async fn public_live_transport_loss_and_final_usage(closure: PublicClosure) -> Result<()> {
 +    skip_if_no_network!(Ok(()));
 +    let mut harness = PublicHarness::start(
 +        Vec::new(),
@@ -5004,32 +5028,67 @@ index 0000000..811e8b6
 +        read_public_item(&mut harness.mcp, "session.usage.updated").await?,
 +        usage
 +    );
-+    if provider_closed {
-+        harness
-+            .socket
-+            .send
-+            .send(Some(public_closed(8.25, "connection_lost")))?;
-+        assert_eq!(
-+            read_public_item(&mut harness.mcp, "session.closed").await?,
-+            public_closed(8.25, "connection_lost")
-+        );
-+        // The provider record, not the close-handshake outcome, is authoritative.
-+    } else {
++    let provider_closed = matches!(closure, PublicClosure::ProviderClosed);
++    if !provider_closed {
 +        harness.socket.send.send(None)?;
-+        let error: ThreadRealtimeErrorNotification =
-+            read_notification(&mut harness.mcp, "thread/realtime/error").await?;
-+        assert!(error.message.contains("live_session_public"));
-+        assert!(
-+            error
-+                .message
-+                .contains("closure and final usage are unconfirmed")
++        assert_eq!(
++            harness.socket.next_request().await?,
++            json!({"type": "session.close"}),
++            "the only replacement attachment is close-only"
 +        );
++    }
++    match closure {
++        PublicClosure::ProviderClosed | PublicClosure::CleanupConfirmed => {
++            if !provider_closed {
++                // Cleanup must not admit a new backing turn while draining usage.
++                harness.socket.send.send(Some(json!({
++                    "type": "session.delegation.created",
++                    "offset_ms": 100,
++                    "delegation": {"id": "cleanup_delegation", "type": "delegation", "target": "client"},
++                })))?;
++            }
++            harness
++                .socket
++                .send
++                .send(Some(public_closed(8.25, "connection_lost")))?;
++            assert_eq!(
++                read_public_item(&mut harness.mcp, "session.closed").await?,
++                public_closed(8.25, "connection_lost")
++            );
++        }
++        PublicClosure::CleanupEof | PublicClosure::CleanupTimeout => {
++            if matches!(closure, PublicClosure::CleanupEof) {
++                harness.socket.send.send(None)?;
++            }
++            let error: ThreadRealtimeErrorNotification =
++                read_notification(&mut harness.mcp, "thread/realtime/error").await?;
++            assert!(error.message.contains("live_session_public"));
++            assert!(
++                error
++                    .message
++                    .contains("closure and final usage are unconfirmed")
++            );
++        }
 +    }
 +    let _: ThreadRealtimeClosedNotification =
 +        read_notification(&mut harness.mcp, "thread/realtime/closed").await?;
++    assert_eq!(
++        harness.socket.attachments.load(Ordering::SeqCst),
++        if provider_closed { 1 } else { 2 }
++    );
 +    assert!(
 +        harness.socket.received.try_recv().is_err(),
-+        "no session.close replay after loss or confirmed closure"
++        "no normal-input replay or repeated close"
++    );
++    assert!(
++        harness
++            .responses
++            .received_requests()
++            .await
++            .unwrap()
++            .iter()
++            .all(|request| request.url.path() != "/v1/responses"),
++        "cleanup must not start a new backing turn"
 +    );
 +    harness.shutdown().await
 +}
@@ -6776,7 +6835,7 @@ index a810a48..23ece85 100644
              RealtimeOutbound::StandaloneHandoff { text, phase: _ } => {
                  if let Err(err) = writer
 diff --git a/codex-rs/core/src/realtime_conversation/sideband.rs b/codex-rs/core/src/realtime_conversation/sideband.rs
-index 08d2aeb..e54c0d6 100644
+index 08d2aeb5a3da93e8f0e7716bd3ec653ec917c3cc..9e4f805f6d19659cc495c3d338e4ff170504cbde 100644
 --- a/codex-rs/core/src/realtime_conversation/sideband.rs
 +++ b/codex-rs/core/src/realtime_conversation/sideband.rs
 @@ -5,10 +5,12 @@ use super::RealtimeWebrtcSidebandInputTask;
@@ -6911,7 +6970,7 @@ index 08d2aeb..e54c0d6 100644
                      if !realtime_active.load(Ordering::Relaxed) || stop_token.is_cancelled() {
                          break;
                      }
-@@ -110,37 +159,80 @@ pub(super) fn spawn_webrtc_sideband_input_task(
+@@ -110,37 +159,95 @@ pub(super) fn spawn_webrtc_sideband_input_task(
                  }
              };
 
@@ -6992,13 +7051,28 @@ index 08d2aeb..e54c0d6 100644
              };
 +            if event_parser == RealtimeEventParser::PublicLive {
 +                // Never replay a possibly accepted append or create a replacement paid
-+                // session. The last cumulative usage remains observable, but is not final.
++                // session. Reattach only to close the owned call and drain final usage.
 +                if owns_live_session {
-+                    let _ = events_tx
-+                        .send(RealtimeEvent::Error(format!(
-+                            "Live session {call_id} closure and final usage are unconfirmed: {err}"
-+                        )))
-+                        .await;
++                    let shutdown = timeout(SHUTDOWN_TIMEOUT, async {
++                        let connection = client
++                            .connect_webrtc_sideband(
++                                session_config.clone(),
++                                &call_id,
++                                sideband_headers.clone(),
++                                default_headers(),
++                                transcript_state.clone(),
++                            )
++                            .await?;
++                        close_owned_session(&connection, event_parser, &events_tx).await
++                    })
++                    .await;
++                    if !matches!(shutdown, Ok(Ok(()))) {
++                        let _ = events_tx
++                            .send(RealtimeEvent::Error(format!(
++                                "Live session {call_id} closure and final usage are unconfirmed: transport lost ({err}); close-only shutdown did not finish"
++                            )))
++                            .await;
++                    }
 +                } else {
 +                    report_realtime_transport_loss(&events_tx, err).await;
 +                }
@@ -7012,7 +7086,7 @@ index 08d2aeb..e54c0d6 100644
                  break;
              }
              if event_parser != RealtimeEventParser::FramelessBidi {
-@@ -160,7 +252,11 @@ pub(super) fn spawn_webrtc_sideband_input_task(
+@@ -160,7 +267,11 @@ pub(super) fn spawn_webrtc_sideband_input_task(
              reconnecting = true;
              tokio::select! {
                  biased;
@@ -7025,7 +7099,7 @@ index 08d2aeb..e54c0d6 100644
                  _ = sleep(delay) => {}
              }
          }
-@@ -170,6 +266,41 @@ pub(super) fn spawn_webrtc_sideband_input_task(
+@@ -170,6 +281,41 @@ pub(super) fn spawn_webrtc_sideband_input_task(
      })
  }
 
