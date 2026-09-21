@@ -1,3 +1,4 @@
+import type { ConversationPollTool } from "@murphai/hosted-execution/conversation-polls";
 import { createHash } from 'node:crypto'
 
 import type {
@@ -145,6 +146,7 @@ export interface AssistantHostedToolContext {
   readonly groupPermissionOfferTool?: AssistantHostedGroupPermissionOfferTool | null
   readonly groupSharedReader?: AssistantHostedGroupSharedReader | null
   readonly groupTool?: AssistantHostedGroupTool | null
+  readonly pollTool?: ConversationPollTool | null
   readonly imessageContactTool?: AssistantHostedIMessageContactTool | null
   readonly labsTool?: AssistantHostedLabsTool | null
   readonly imageGenerationLauncher?: AssistantHostedImageGenerationLauncher | null
@@ -425,6 +427,7 @@ export function createAssistantHostedToolContext(input: {
       executionContext?.groupPermissionOfferTool ?? null,
     groupSharedReader: executionContext?.groupSharedReader ?? null,
     groupTool: executionContext?.groupTool ?? null,
+    pollTool: readPollTool(executionContext),
     imessageContactTool: executionContext?.imessageContactTool ?? null,
     labsTool: executionContext?.labsTool ?? null,
     imageGenerationLauncher: imageGenerationLauncher
@@ -713,4 +716,8 @@ function normalizeHostedDeliveryContextValue(value: unknown): string | null {
   return typeof value === 'string' && value.trim().length > 0
     ? value.trim()
     : null
+}
+
+function readPollTool(context: AssistantHostedExecutionContext | null): ConversationPollTool | null {
+  return context?.pollTool ?? null
 }

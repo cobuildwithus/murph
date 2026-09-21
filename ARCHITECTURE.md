@@ -1216,6 +1216,42 @@ durably publishes its replacement, and atomically consumes the claim while
 returning browser control to the assistant. An ambiguous failure retains the
 claim for bounded stale-owner recovery; overlapping resumes cannot call Kernel.
 
+## Native Conversation Polls
+
+`murph.poll` is an attended current-conversation tool for hosted iMessage and
+Telegram. Its public contract lives at `@murphai/hosted-execution/conversation-polls`;
+the runtime injects a signed transport port and Web owns authorization and provider
+effects in `apps/web/src/lib/hosted-polls`. Accepted mailbox input supplies the
+channel and target; tool arguments cannot select another conversation or member.
+Canonical routing, current runtime ownership and active access are checked before
+an action. Creation rechecks route and access before claiming dispatch.
+
+`HostedConversationPoll` owns encrypted definitions and provider receipts. Member
+and conversation blind indexes scope reads; the Telegram poll ID is blind-indexed
+for secret-verified poll webhooks. Definitions, routing coordinates and snapshots
+are encrypted in the existing member private lane, and member deletion cascades
+receipts. Provider calls and encryption stay outside short database transactions.
+One creation per accepted input has a durable dispatch claim; replay returns its
+receipt or an explicit unknown outcome without sending again. A lost response may
+leave an unknown receipt. List is capped at ten polls created by Murph in this
+conversation. Neither arbitrary provider IDs nor voter identities enter the tool.
+
+Linq uses its SDK's native poll create/read methods. The question is a separate
+idempotent text message, followed by an iMessage poll with public multiple-choice
+voting. Reads fetch current counts and distinct total voters from Linq. Telegram
+uses anonymous single-choice `sendPoll`, stores aggregate `poll` webhook updates,
+and supports explicit `stopPoll` with final counts. Telegram reads return the last
+observed snapshot and timestamp; they cannot fetch a live tally. Duplicate/older
+updates cannot overwrite newer or closed results. A bounded creation-binding race
+returns a retryable webhook response. Votes do not wake Murph or send replies.
+
+Deploy the additive poll migration, then Web, then the runtime tool. Existing
+runtimes remain compatible. Keep Web's poll callback while new runtimes exist;
+keep Telegram poll webhook consumption while open polls exist. Ensure a manually
+restricted Telegram webhook `allowed_updates` includes `poll`. Default Telegram
+updates include it. After rollout, create/read a synthetic poll on each channel
+and vote/read/close on Telegram; verify no assistant turn starts for votes.
+
 ## Hosted Phone Calls
 
 Outbound hosted phone calls are a web-owned Retell side effect reached through

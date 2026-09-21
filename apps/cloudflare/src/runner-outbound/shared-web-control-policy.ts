@@ -1,3 +1,4 @@
+import { HOSTED_RUNTIME_POLL_TOOL_PATH } from "@murphai/hosted-execution/routes";
 import {
   HOSTED_CONNECTED_APPS_PATH,
 } from "@murphai/hosted-execution/connected-apps";
@@ -229,6 +230,7 @@ export const HOSTED_RUNNER_WEB_CONTROL_ROUTES = {
     "group_tool",
     HOSTED_RUNTIME_GROUP_TOOL_PATH,
   ),
+  pollTool: defineHostedRunnerWebControlPostRoute("poll_tool", HOSTED_RUNTIME_POLL_TOOL_PATH),
   imessageContactTool: defineHostedRunnerWebControlPostRoute(
     "imessage_contact_tool",
     HOSTED_RUNTIME_IMESSAGE_CONTACT_TOOL_PATH,

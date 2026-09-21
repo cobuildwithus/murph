@@ -41593,3 +41593,68 @@ async function refreshJournalTestContext(vaultRoot: string, instant: string) {
   const state = await readAssistantContextSnapshotState(vaultRoot)
   return upcomingContextSchema.parse(state?.lastCompleted?.upcomingContext)
 }
+
+describeRealCodex('real Codex native conversation polls e2e', () => {
+  it.each(['create', 'read', 'unknown'] as const)('native conversation polls %s', async (scenario) => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-poll-e2e-'))
+    const { MURPH_POLL_TOOL } = await import('../src/assistant-codex/dynamic-tools/conversation-polls.js')
+    const pollRef = 'poll_' + 'a'.repeat(32)
+    const calls: Array<import('@murphai/hosted-execution/conversation-polls').ConversationPollRequest> = []
+    try {
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions: buildAssistantSystemPrompt({
+          assistantCliContract: null, assistantKnowledgeToolsAvailable: false,
+          channel: 'telegram', cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+          conversationScope: 'group', currentLocalDate: '2026-09-21',
+          currentInstant: '2026-09-21T16:00:00.000Z', currentTimeZone: 'America/New_York',
+          hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false,
+          turnTrigger: null,
+        }),
+        dynamicTools: [MURPH_POLL_TOOL], env: config.env,
+        hostedToolContext: {
+          computerToolsAvailable: false, vaultFileSendAvailable: false,
+          pollTool: { request: async (request) => {
+            calls.push(request)
+            return scenario === 'unknown' ? { status: 'unknown', polls: [] } : {
+              status: scenario === 'create' ? 'sent' : 'results',
+              polls: [{ pollRef, channel: 'telegram', question: 'Which day for our walk?',
+                options: [{ text: 'Saturday', votes: scenario === 'read' ? 3 : 0 }, { text: 'Sunday', votes: scenario === 'read' ? 1 : 0 }],
+                totalVoters: scenario === 'read' ? 4 : 0, anonymous: true, multipleAnswers: false,
+                closed: false, observedAt: '2026-09-21T15:59:00.000Z',
+                freshness: scenario === 'read' ? 'provider_update' : 'creation' }],
+            }
+          } },
+          currentInvocationScope: () => ({ origin: { kind: 'accepted_input', sessionId: 'synthetic-poll-session', assistantInputId: 'ain_' + 'b'.repeat(32) }, conversationScope: 'group' }),
+          currentHostedDeliveryContext: () => null, currentHostedMailboxItemIds: () => [],
+          sendVaultFile: async () => { throw new Error('No file send authorized.') },
+        },
+        model: config.model, modelProvider: config.modelProvider,
+        prompt: scenario === 'read'
+          ? `Read results for our walk poll ${pollRef}. Which day is ahead and who voted? Please leave voting open.`
+          : 'Please create a poll here: Which day for our walk? Options: Saturday and Sunday.',
+        reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
+      })
+      process.stdout.write(JSON.stringify({ scenario: 'native poll ' + scenario, reply: result.finalMessage, actions: calls.map((call) => call.request.action) }) + '\n')
+      expect(calls).toHaveLength(1)
+      expect(calls[0]?.request).toEqual(scenario === 'read' ? { action: 'read', pollRef } : { action: 'create', question: 'Which day for our walk?', options: ['Saturday', 'Sunday'] })
+      if (scenario === 'read') {
+        expect(result.finalMessage).toMatch(/Saturday/iu)
+        expect(result.finalMessage).toMatch(/3/)
+        expect(result.finalMessage).toMatch(/1/)
+        expect(result.finalMessage).toMatch(/anonymous|can't see who|cannot see who/iu)
+        expect(result.finalMessage).not.toMatch(/closed|stopped voting/iu)
+      } else if (scenario === 'unknown') {
+        expect(result.finalMessage).toMatch(/confirm|sure|unclear|may have|couldn't tell/iu)
+        expect(result.finalMessage).not.toMatch(/successfully|created (?:the|your) poll|poll is live/iu)
+      } else {
+        // The native poll itself fulfills the request; a second message is optional.
+        if (result.finalMessage.trim()) expect(result.finalMessage).toMatch(/poll|vote|posted|sent|done/iu)
+        expect(result.finalMessage).not.toMatch(/vote by replying|reply with (?:Saturday|Sunday)/iu)
+      }
+    } finally { await rm(workingDirectory, { force: true, recursive: true }) }
+  }, 720_000)
+})

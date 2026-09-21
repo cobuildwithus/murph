@@ -609,3 +609,7 @@ Query page packing and unused date-index removal are tracked in
 
 Query metric payload deduplication and transaction/restore proof are tracked in
 [`metric payload storage`](exec-plans/completed/2026-09-21-workspace-metric-dedup.md).
+
+Native conversation polls are owned by `ARCHITECTURE.md` (Native Conversation
+Polls). The execution plan is
+[`2026-09-21-native-chat-polls.md`](exec-plans/active/2026-09-21-native-chat-polls.md).

@@ -459,6 +459,10 @@ interface AssistantRouteTurnPlanInput {
   messageTargetAuthorizerAvailable?: boolean | null
 }
 
+function areConversationPollsAvailable(input: AssistantRouteTurnPlanInput, acceptedInputIds: readonly string[], channel: string | null): boolean {
+  return acceptedInputIds.length > 0 && (channel === 'linq' || channel === 'telegram') && input.hostedToolContext?.pollTool != null
+}
+
 function resolvePrivateMemberToolAvailability({
   input,
   privateInteractiveAudience,
@@ -500,6 +504,7 @@ function resolvePrivateMemberToolAvailability({
     planUsageAvailable:
       privateInteractiveAudience &&
       input.hostedToolContext?.planUsageTool != null,
+    pollsAvailable: areConversationPollsAvailable(input, userActionAcceptedInputIds, currentAudienceDeliveryFields.channel),
     imessageContactAvailable:
       privateUserAction &&
       currentAudienceDeliveryFields.channel === 'telegram' &&

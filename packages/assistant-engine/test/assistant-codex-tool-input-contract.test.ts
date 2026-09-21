@@ -851,3 +851,59 @@ describe('Codex canonical tool input contract upgrade guard', () => {
     expect(parseGenerateSongArguments({ prompt: 'x' })).toMatchObject({ ok: true, args: { durationSeconds: schema.durationSeconds.default, instrumental: schema.instrumental.default, prompt: 'x' } })
   })
 })
+
+describe('native poll input measurement', () => {
+  it.skipIf(process.env.MURPH_MEASURE_POLL_INPUT !== '1').each(['direct', 'group'] as const)(
+    'polls: complete first provider input (%s)', { timeout: 180_000 }, async (scope) => {
+      stub ??= await startScriptedResponsesStub()
+      const scenario = await prepareScriptedTurnScenario(stub, temporaryPaths)
+      const layers = buildAssistantSystemPromptLayers({
+        assistantCliContract: null, assistantHostedAutomationAvailable: true,
+        assistantHostedGroupToolSurface: scope === 'group' ? 'shared_read' : 'none',
+        channel: 'linq', cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+        conversationScope: scope, currentLocalDate: '2026-09-21',
+        currentInstant: '2026-09-21T16:00:00.000Z', currentTimeZone: 'America/New_York',
+        hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false,
+        ordinaryInboundTurn: true,
+      })
+      const catalog = await writeHostedOpenAiMixedModeModelCatalogJson({
+        codexCommand: scenario.turnInput.codexCommand, directory: scenario.turnInput.codexHome,
+      })
+      const developerInstructions = [layers.staticCacheableCorePrompt, layers.stableRouteCapabilityPrompt, layers.threadContextPrompt].join('\n\n')
+      const measurements = []
+      for (const phase of ['base', 'head'] as const) {
+        const tools = resolveMurphDynamicTools({
+          allowFinishWithoutReply: true, automationAvailable: true, personalizationAvailable: true,
+          groupSharedReadAvailable: scope === 'group', responseCardsAvailable: scope === 'direct',
+          imageGenerationAvailable: false, progressUpdatesAvailable: false,
+          pollsAvailable: phase === 'head',
+        })
+        await stopWarmCodexAppServer()
+        stub.markRequestBaseline()
+        stub.captureProviderRequestDiagnostics({ completeInput: true })
+        stub.queue({ text: CONTRACT_CAPTURE_DONE })
+        const result = await executeCodexAppServerTurn({
+          ...scenario.turnInput, baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          developerInstructions, dynamicTools: tools,
+          prompt: [layers.dynamicTurnContextPrompt, 'Please make a poll for our walk day.'].join('\n\n'),
+          groupConversation: scope === 'group',
+          env: { ...scenario.turnInput.env, [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: catalog },
+        })
+        assert.equal(result.finalMessage, CONTRACT_CAPTURE_DONE)
+        assert.equal(stub.requestCountSinceBaseline(), 1)
+        const captured = stub.requestSummariesSinceBaseline()[0]?.completeProviderInput
+        assert.ok(captured)
+        const body = readRecord(JSON.parse(captured.json))
+        assert.ok(body)
+        delete body.prompt_cache_key
+        measurements.push({ phase, bytes: Buffer.byteLength(JSON.stringify(body)),
+          toolsBytes: Buffer.byteLength(JSON.stringify(tools)), instructionsBytes: Buffer.byteLength(developerInstructions),
+          exclusions: [...new Set([...captured.excludedTransportFields, 'prompt_cache_key'])] })
+      }
+      process.stdout.write('[poll-input-proof] ' + JSON.stringify({ scope, measurements,
+        tokens: null, tokenLimitation: 'No exact Terra tokenizer configured.',
+        baseline: 'Same production inputs with new poll capability disabled; no other initial-input changes.',
+      }) + '\n')
+    },
+  )
+})
