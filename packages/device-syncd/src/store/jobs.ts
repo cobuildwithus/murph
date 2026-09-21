@@ -1091,7 +1091,24 @@ const EMPTY_WEIGHT_HISTORY_ROOT_FIELDS = new Set([
   "resource", "resourceCategory", "historicalBackfill", "historicalBackfillVersion",
   "sourceProviderSlug", "sourceLifecycleEpoch", "historicalWindowStart", "windowStart", "windowEnd",
   "historicalPullPending", "historicalRecordsSeen", "historicalProviderRecordsSeen", "emptyBackfillAttempts",
+  "historicalUnresolvedProviderRecordCount", "historicalUnresolvedProviderRecordIdentitiesJson",
 ]);
+
+function hasEmptyHistoricalUnresolvedEvidence(payload: Record<string, unknown>): boolean {
+  const count = payload.historicalUnresolvedProviderRecordCount;
+  if (count !== undefined && count !== 0) return false;
+  const encoded = payload.historicalUnresolvedProviderRecordIdentitiesJson;
+  if (encoded === undefined) return true;
+  if (typeof encoded !== "string") return false;
+  try {
+    const evidence = maybeParseJsonObject(encoded);
+    return evidence.v === 1 && Array.isArray(evidence.i) && evidence.i.length === 0
+      && (evidence.u === undefined || evidence.u === false)
+      && Object.keys(evidence).every((key) => key === "v" || key === "i" || key === "u");
+  } catch {
+    return false;
+  }
+}
 
 function isCompleteHistoryRootWindow(payload: Record<string, unknown>): boolean {
   const start = payload.windowStart;
@@ -1110,7 +1127,7 @@ function readEmptyWeightHistoryRootKey(input: Pick<DeviceSyncJobInput, "kind" | 
     || payload.historicalBackfill !== true
     || payload.historicalBackfillVersion !== resolveJunctionExtendedTimeseriesHistoryBackfillVersion("weight")
     || payload.historicalRecordsSeen === true || payload.historicalProviderRecordsSeen === true
-    || payload.historicalUnresolvedProviderRecordCount || payload.historicalUnresolvedProviderRecordIdentitiesJson
+    || !hasEmptyHistoricalUnresolvedEvidence(payload)
     || payload.windowStart !== payload.historicalWindowStart
     || Object.keys(payload).some((key) => !EMPTY_WEIGHT_HISTORY_ROOT_FIELDS.has(key))) return null;
   const epoch = payload.sourceLifecycleEpoch;

@@ -569,3 +569,6 @@ Interactive voice-orb design playground implementation and proof are tracked in
 
 Voice-orb browser and PNG fallback proof is tracked in
 [`2026-09-20-voice-orb-browser-support.md`](exec-plans/completed/2026-09-20-voice-orb-browser-support.md).
+
+Retained-owner device cadence and encoded-empty history convergence proof is tracked in
+[`device wake follow-up`](exec-plans/active/2026-09-21-device-wake-followup.md).

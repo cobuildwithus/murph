@@ -15,6 +15,8 @@ function fixture() {
     accountId: account.id, provider: "junction", kind: "resource", dedupeKey: key, availableAt: NOW,
     payload: {
       resource: "weight", resourceCategory: "timeseries", historicalBackfill: true,
+      historicalUnresolvedProviderRecordIdentitiesJson: JSON.stringify({ v: 1, i: [] }),
+      historicalUnresolvedProviderRecordCount: 0,
       historicalBackfillVersion: 2, sourceProviderSlug: "apple_health_kit", sourceLifecycleEpoch: 1,
       historicalWindowStart: "2026-01-01T00:00:00.000Z", windowStart: "2026-01-01T00:00:00.000Z",
       windowEnd: "2026-06-01T00:00:00.000Z", historicalPullPending: true,
@@ -24,14 +26,24 @@ function fixture() {
   return { store, account, enqueue };
 }
 
-test("cold-restored empty weight roots share one retry retaining every accepted day", () => {
+test.each([
+  ["encoded empty", {}],
+  ["legacy absent", {
+    historicalUnresolvedProviderRecordIdentitiesJson: undefined,
+    historicalUnresolvedProviderRecordCount: undefined,
+  }],
+  ["explicitly known empty", {
+    historicalUnresolvedProviderRecordIdentitiesJson: '{"v":1,"i":[],"u":false}',
+  }],
+])("cold-restored empty weight roots share one retry retaining every accepted day (%s)", (_label, evidence) => {
   const { store, account, enqueue } = fixture();
   try {
     const later = enqueue("legacy-later", {
+      ...evidence,
       historicalWindowStart: "2026-01-02T00:00:00.000Z", windowStart: "2026-01-02T00:00:00.000Z",
       windowEnd: "2026-06-02T00:00:00.000Z",
     });
-    const earlier = enqueue("legacy-earlier");
+    const earlier = enqueue("legacy-earlier", evidence);
     assert.equal(earlier.id, later.id);
     assert.equal(earlier.payload.windowStart, "2026-01-01T00:00:00.000Z");
     assert.equal(earlier.payload.historicalWindowStart, earlier.payload.windowStart);
@@ -50,6 +62,11 @@ for (const [label, payload] of [
   ["partial scan", { windowStart: "2026-03-01T00:00:00.000Z" }],
   ["accepted evidence", { historicalRecordsSeen: true }],
   ["unresolved evidence", { historicalUnresolvedProviderRecordCount: 1 }],
+  ["encoded unresolved identities", { historicalUnresolvedProviderRecordIdentitiesJson: '{"v":1,"i":["synthetic-record"]}' }],
+  ["unidentified unresolved records", { historicalUnresolvedProviderRecordIdentitiesJson: '{"v":1,"i":[],"u":true}' }],
+  ["malformed encoding", { historicalUnresolvedProviderRecordIdentitiesJson: '{' }],
+  ["unknown encoding version", { historicalUnresolvedProviderRecordIdentitiesJson: '{"v":2,"i":[]}' }],
+  ["unknown encoded evidence", { historicalUnresolvedProviderRecordIdentitiesJson: '{"v":1,"i":[],"cursor":"pending"}' }],
   ["older generation", { historicalBackfillVersion: 1 }],
   ["unrecognized continuation state", { providerCursor: "synthetic-cursor" }],
   ["another lifecycle", { sourceLifecycleEpoch: 2 }],
