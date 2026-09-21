@@ -5,6 +5,7 @@ import path from "node:path";
 import { beforeEach, test, vi } from "vitest";
 
 import {
+  buildHostedExecutionConversationMessageWake,
   buildHostedExecutionDeviceSyncWake,
   buildHostedExecutionLinqConversationMessageWake,
   buildHostedExecutionMemberActivatedWake,
@@ -958,6 +959,28 @@ test("hosted wake context does not change auto-reply state on non-channel follow
       assert.deepEqual((await readAutomationState(vaultRoot)).autoReply, autoReplyAfterActivation);
     });
   } finally {
+    await cleanup();
+  }
+});
+
+test("accepted voice enables ordinary replies without requiring a live media port", async () => {
+  const { cleanup, operatorHomeRoot, vaultRoot } = await createHostedRuntimeWorkspace("hosted-voice-context-");
+  const previousHostedAssistantEnv = setHostedAssistantSeedEnv();
+  try {
+    await withOperatorHomeRoot(operatorHomeRoot, async () => {
+      const config = { channelCapabilities: { emailSendReady: false, telegramBotConfigured: false }, deviceSync: null };
+      const wake = buildHostedExecutionConversationMessageWake({
+        eventId: "synthetic-voice-accepted", userId: "member_synthetic_voice",
+        occurredAt: "2026-09-21T12:00:00.000Z",
+        message: { channel: "voice", callId: "synthetic-call", inputId: "synthetic-input", text: "Read the current record." },
+      });
+      const state = await prepareHostedAssistantAutoReplyForWake(vaultRoot, wake, buildHostedAssistantSeedRuntimeEnv(), config);
+      assert.equal(state.assistantConfigured, true);
+      assert.equal(state.voiceAutoReplyEnabled, true);
+      assert.deepEqual(summarizeAutoReply(await readAutomationState(vaultRoot)), [{ channel: "voice", eligibleAfter: null }]);
+    });
+  } finally {
+    restoreHostedAssistantSeedEnv(previousHostedAssistantEnv);
     await cleanup();
   }
 });

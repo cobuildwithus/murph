@@ -124,6 +124,66 @@ afterEach(async () => {
 });
 
 describe("hosted mailbox conversation import adapter", () => {
+  test("stages voice once through the text path and keeps successive inputs on their call", async () => {
+    const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-voice-input-"));
+    tempRoots.push(parentRoot);
+    const vaultRoot = path.join(parentRoot, "vault");
+    const project = vi.fn(async () => { throw new Error("Voice text must not open inbox projection."); });
+    const importInput = async (ordinal: number, callId: string) => {
+      const text = `Read synthetic record ${ordinal}.`;
+      const inputId = `synthetic-voice-input-${ordinal}`;
+      const wake = createConversationWake({
+        eventId: inputId,
+        message: { channel: "voice", callId, inputId, text },
+      });
+      return await importHostedConversationMailboxItem({
+        decodePayload: createDecodedPayloadDecoder(wake),
+        importConversationWake: project,
+        async prepareWakeContext() {},
+        item: createResolvedConversationMailboxItem({
+          id: `mailbox-voice-${ordinal}`, dedupeKey: inputId, laneSeq: String(ordinal),
+        }),
+        runtime: createRuntime(),
+        vaultRoot,
+      });
+    };
+    expect((await importInput(1, "synthetic-call-one")).status).toBe("imported");
+    const initial = (await listAssistantInputEvents({ vault: vaultRoot })).events[0]!;
+    const key = resolveAssistantConversationLookupKey({
+      conversation: conversationRefFromAssistantInputConversation(initial.conversation!),
+    });
+    assert(key);
+    const admitted = vi.fn(async () => {
+      const stored = await listAssistantInputEvents({ vault: vaultRoot });
+      expect(stored.events.some(event => event.content.text === "Read synthetic record 2.")).toBe(true);
+      return { kind: "no-new-input" as const };
+    });
+    const controller = createAssistantActiveTurnInputController({
+      admissionHook: admitted, conversationKeys: [key], sessionId: "synthetic-voice-turn-session",
+      turnId: "synthetic-voice-turn", vault: vaultRoot,
+    });
+    try {
+      await importInput(2, "synthetic-call-one");
+      expect(admitted).toHaveBeenCalledTimes(1);
+    } finally { controller.close(); }
+    await importInput(3, "synthetic-call-two");
+    await importInput(1, "synthetic-call-one");
+    const { events } = await listAssistantInputEvents({ vault: vaultRoot });
+    expect(events).toHaveLength(3);
+    expect(project).not.toHaveBeenCalled();
+    const first = events.find(event => event.content.text === "Read synthetic record 1.")!;
+    const second = events.find(event => event.content.text === "Read synthetic record 2.")!;
+    const third = events.find(event => event.content.text === "Read synthetic record 3.")!;
+    expect(first.conversation).toMatchObject({ source: "voice", threadIsDirect: true, actorIsSelf: false });
+    expect(first.conversation?.threadId).toMatch(HASHED_IDENTIFIER_PATTERN);
+    expect(first.conversation?.threadId).toBe(second.conversation?.threadId);
+    expect(first.conversation?.threadId).not.toBe(third.conversation?.threadId);
+    expect(first.replyTarget).toEqual({ channel: "voice", messageId: "synthetic-voice-input-1", threadId: "synthetic-call-one" });
+    expect(first.sourceRef.kind).toBe("hosted-mailbox");
+    expect(first.content.attachmentDescriptors).toEqual([]);
+    expect(first.projection.status).toBe("not_attempted");
+  });
+
   test("keeps staged link-only Linq input imported when projection is interrupted", async () => {
     const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-link-input-"));
     tempRoots.push(parentRoot);

@@ -2498,6 +2498,16 @@ Only native provider receipts establish confirmed closure and cumulative usage;
 the attachment itself owns no mailbox, billing ledger, or replay. Authenticated
 website and hosted lifetime wiring remain disabled until their owners are composed.
 
+Normalized voice inputs use the existing `conversation.message` mailbox shape
+with a call and input identity. The ordinary text admission path persists and
+deduplicates them before notifying a running turn. Successive inputs share a
+blinded call conversation; delivery retains the exact opaque call target.
+Accepted work remains eligible after media closes. The ordinary channel adapter
+requires accepted mailbox input identities and an invocation-bound speech port,
+with no ambient provider or other-channel fallback. Speech is non-idempotent, so
+uncertain delivery remains governed by the existing outbox policy. This channel
+contract does not itself admit a browser call or create a new work queue.
+
 Native Live duration uses the existing immutable hosted usage ledger. The call's
 runtime recorder coalesces cumulative provider updates with one request in flight,
 records non-overlapping intervals, and retains an uncertain charge unchanged for
