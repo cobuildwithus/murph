@@ -6738,8 +6738,8 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       let pendingCheckpointWakeLatencySeed: HostedRuntimeWakeLatencySeed | null = null;
       const readBackgroundCheckpointWaitDeadline = (): number | null => {
         if (options.shutdownSignal?.aborted) return null;
-        const diagnosticDeadline = resolveHostedBackgroundReadCheckpointDeadline({
-          diagnosticDeadline: detachedAssistantAskController?.activeDiagnosticDeadline() ?? null,
+        const backgroundReadDeadline = resolveHostedBackgroundReadCheckpointDeadline({
+          assistantAskDeadline: detachedAssistantAskController?.activeDeadline() ?? null,
           clinicalDeadline: clinicalEnrichmentController?.activeDeadline() ?? null,
           canonicalReceiptCount: pendingCanonicalReceiptCount,
           durableEffectCount: pendingDurableCheckpointEffects.length + readyDurableCheckpointEffects.length,
@@ -6747,9 +6747,9 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         });
         let workDeadline = !runtimeOwnerHandoffRequested
           && !runtimeAbortController.signal.aborted
-          && diagnosticDeadline !== null
-          && diagnosticDeadline > Date.now()
-            ? diagnosticDeadline
+          && backgroundReadDeadline !== null
+          && backgroundReadDeadline > Date.now()
+            ? backgroundReadDeadline
             : null;
         if (imageGenerationController?.hasCompleted()) return Date.now();
         if (

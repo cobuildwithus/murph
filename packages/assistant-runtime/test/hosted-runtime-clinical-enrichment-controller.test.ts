@@ -22,13 +22,13 @@ async function flushMicrotasks(): Promise<void> {
 
 describe("clinical enrichment controller", () => {
   it("does not delay foreground durability for document extraction", () => {
-    const input = { diagnosticDeadline: null, clinicalDeadline: 125_000,
+    const input = { assistantAskDeadline: null, clinicalDeadline: 125_000,
       canonicalReceiptCount: 0, durableEffectCount: 0, durableFollowUpPending: false };
     expect(resolveHostedBackgroundReadCheckpointDeadline(input)).toBe(125_000);
     expect(resolveHostedBackgroundReadCheckpointDeadline({ ...input, canonicalReceiptCount: 1 })).toBeNull();
     expect(resolveHostedBackgroundReadCheckpointDeadline({ ...input, durableEffectCount: 1 })).toBeNull();
     expect(resolveHostedBackgroundReadCheckpointDeadline({ ...input, durableFollowUpPending: true })).toBeNull();
-    expect(resolveHostedBackgroundReadCheckpointDeadline({ ...input, clinicalDeadline: null, diagnosticDeadline: 50_000 })).toBe(50_000);
+    expect(resolveHostedBackgroundReadCheckpointDeadline({ ...input, clinicalDeadline: null, assistantAskDeadline: 50_000 })).toBe(50_000);
   });
   it("does not defer checkpoints while discovering an empty queue", async () => {
     const discovery = deferred<HostedClinicalEnrichmentRunResult>();

@@ -764,10 +764,13 @@ temporary working directory with approval policy `never`, no inherited shell
 environment, and no network, project configuration, mutation, effect, or
 delivery authority. Only member disclosure flows use the separate reviewer.
 The child never shares the resident process, provider thread, interruption
-domain, or route grant. Before checkpoint, invocation return, fence loss,
-workspace replacement, or shutdown, the runtime aborts and awaits the exact
-owned child before releasing the workspace. Further asks remain pending in the
-same mailbox; there is no second queue, projection, table, workflow, container,
+domain, or route grant. A claimed detached request publishes its existing expiry
+before preparation marks the workspace dirty. Ordinary idle checkpointing waits
+for that request to settle or expire, including preparation and child execution;
+completed background work adds no idle delay. At an actual checkpoint, invocation
+return, fence loss, workspace replacement, or shutdown boundary, the runtime
+aborts and awaits the exact owned child before releasing the workspace. Further
+asks remain pending in the same mailbox; there is no second queue, projection, table, workflow, container,
 or general agent registry.
 
 For a consented member or a fixed-audience current-sender request, the
