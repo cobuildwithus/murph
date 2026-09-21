@@ -7097,7 +7097,7 @@ describe("runHostedDeviceSyncWakeLane", () => {
     ]);
   });
 
-  it("totals all source reads while emitting only the 16 slowest job timings", async () => {
+  it("totals all source reads and committed continuation progress while emitting only the 16 slowest job timings", async () => {
     const logRequests: HostedRuntimeLogRequest[] = [];
     const elapsedMsByClaim = [
       3_000,
@@ -7133,6 +7133,7 @@ describe("runHostedDeviceSyncWakeLane", () => {
         at: "2026-04-08T00:00:45.000Z",
         attempts: 1,
         canonicalProgressCommitted: true as const,
+        ...(elapsedMs <= 2_000 ? { continuationProgressCommitted: true as const } : {}),
         connectionSourceReadCount: elapsedMs / 1_000,
         connectionSourceReadElapsedMs: 0,
         credentialRefreshCount: 0,
@@ -7207,6 +7208,7 @@ describe("runHostedDeviceSyncWakeLane", () => {
     >;
     expect(finishedEntry?.redactedJson).toEqual(expect.objectContaining({
       deviceSyncConnectionSourceReadCount: 171,
+      deviceSyncContinuationProgressCommittedCount: 2,
       deviceSyncImportAppliedCount: 18,
       deviceSyncImportNoopCount: 18,
       deviceSyncImportFailedCount: 18,
@@ -7233,6 +7235,7 @@ describe("runHostedDeviceSyncWakeLane", () => {
     }));
     const sharedDetails = sanitizeHostedExecutionStructuredLogDetails(finishedEntry.redactedJson);
     expect(sharedDetails).toMatchObject({
+      deviceSyncContinuationProgressCommittedCount: 2,
       deviceSyncBloodOxygenCompletedJobCount: 1,
       deviceSyncBloodOxygenImportAppliedCount: 1,
       deviceSyncEcgCompletedJobCount: 1,
@@ -7258,7 +7261,12 @@ describe("runHostedDeviceSyncWakeLane", () => {
     })).not.toThrow();
   });
 
-  it.each([false, true])("reports system progress only for proven continuation advancement: %s", async (continuationProgress) => {
+  it.each([
+    { commitSucceeds: false, continuationProgress: false },
+    { commitSucceeds: true, continuationProgress: false },
+    { commitSucceeds: true, continuationProgress: true },
+  ])("reports only committed continuation advancement: $commitSucceeds, $continuationProgress", async ({ commitSucceeds, continuationProgress }) => {
+    const logRequests: HostedRuntimeLogRequest[] = [];
     mocks.requireHostedRuntimeDeviceSyncStore.mockReturnValue({
       listPendingJobsForAccount: vi.fn(() => []),
     });
@@ -7276,12 +7284,12 @@ describe("runHostedDeviceSyncWakeLane", () => {
         connectionSourceReadElapsedMs: 0,
         credentialRefreshCount: 0,
         credentialRefreshElapsedMs: 0,
-        durableProgressCommitted: true,
+        durableProgressCommitted: commitSucceeds,
         ...(continuationProgress ? { continuationProgressCommitted: true as const } : {}),
         elapsedMs: 1,
         jobCount: 1,
         jobKind: "resource",
-        outcome: "completed",
+        outcome: commitSucceeds ? "completed" : "cancelled",
         provider: "junction",
         providerExecutionElapsedMs: 1,
         providerInventoryRequestCount: 0,
@@ -7307,6 +7315,15 @@ describe("runHostedDeviceSyncWakeLane", () => {
       resolvedConfig: {
         deviceSync: DEVICE_SYNC_CONFIG,
       },
+      runtimeLogPlatform: {
+        logPort: {
+          async write(request) {
+            const parsed = parseHostedRuntimeLogRequest(request);
+            logRequests.push(parsed);
+            return { loggedCount: parsed.entries.length };
+          },
+        },
+      },
       timeoutMs: 45_000,
       vaultRoot: "/tmp/vault-root",
       wake: {
@@ -7319,6 +7336,14 @@ describe("runHostedDeviceSyncWakeLane", () => {
     });
 
     assert.equal(result.systemProgressed === true, continuationProgress);
+    await drainHostedRuntimeLogWritesBestEffort();
+    const finishedEntry = logRequests
+      .flatMap((request) => request.entries)
+      .find((entry) => entry.eventCode === "device-sync.pass_finished");
+    assert.equal(
+      finishedEntry?.redactedJson?.deviceSyncContinuationProgressCommittedCount,
+      continuationProgress ? 1 : 0,
+    );
   });
 
   it.each(["drained", "foreground", "outer", "timeout"] as const)(

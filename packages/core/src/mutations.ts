@@ -407,7 +407,7 @@ export interface AppliedDeviceBatchImportResult extends ImportDeviceBatchResultB
   applied: true;
   ingestId: string;
   ingestShardPath: string;
-  auditPath: string;
+  auditPath: null;
 }
 
 export interface NoopDeviceBatchImportResult extends ImportDeviceBatchResultBase {
@@ -6030,33 +6030,6 @@ function buildIntegrationEventOutputs(
     .map(([id, roles]) => ({ id, roles: [...roles].sort() }));
 }
 
-function buildDeviceBatchAuditSummary(input: {
-  provider: string;
-  eventCount: number;
-  sampleCount: number;
-  skippedDuplicateCount: number;
-  supersededCount: number;
-  retractedCount: number;
-}): string {
-  const dedupeNotes: string[] = [];
-
-  if (input.skippedDuplicateCount > 0) {
-    dedupeNotes.push(`${input.skippedDuplicateCount} duplicate event(s) skipped by externalRef`);
-  }
-
-  if (input.supersededCount > 0) {
-    dedupeNotes.push(`${input.supersededCount} event(s) updated in place by externalRef`);
-  }
-
-  if (input.retractedCount > 0) {
-    dedupeNotes.push(`${input.retractedCount} omitted authoritative event(s) retracted`);
-  }
-
-  const dedupeSuffix = dedupeNotes.length > 0 ? ` (${dedupeNotes.join(", ")})` : "";
-
-  return `Imported ${input.provider} device batch with ${input.eventCount} event(s) and ${input.sampleCount} sample(s)${dedupeSuffix}.`;
-}
-
 function prepareDeviceSampleEntries(
   samples: readonly NormalizedDeviceSample[],
 ): PreparedJsonlEntry<SampleRecord>[] {
@@ -8211,6 +8184,11 @@ timing: DeviceBatchImportTiming,
     eventCount: eventOutputs.length,
     sampleCount: sampleRecords.length,
     provenance: deviceBatchPlan.provenance,
+    publication: {
+      skippedDuplicateCount: eventReconciliation.skippedDuplicateCount,
+      supersededCount: eventReconciliation.supersededCount,
+      retractedCount: eventReconciliation.retractedCount,
+    },
   });
   const persistedImportIdWasInspected = ingestIdInspection.requestedIds.has(persistedImportId);
   const ingestAppendPlan = !persistedImportIdWasInspected
@@ -8253,29 +8231,6 @@ timing: DeviceBatchImportTiming,
       await stageJsonlAppendPlan(batch, eventAppendPlan);
       await stageJsonlAppendPlan(batch, sampleAppendPlan);
 
-      const touchedPaths = [
-        ...ingestAppendPlan.targetShardPaths,
-        ...eventAppendPlan.appendedShardPaths,
-        ...sampleAppendPlan.appendedShardPaths,
-      ];
-      const audit = await emitAuditRecord({
-        vaultRoot,
-        batch,
-        action: "device_import",
-        commandName: "core.importDeviceBatch",
-        summary: buildDeviceBatchAuditSummary({
-          provider: deviceBatchPlan.provider,
-          eventCount: eventOutputs.length,
-          sampleCount: sampleRecords.length,
-          skippedDuplicateCount: eventReconciliation.skippedDuplicateCount,
-          supersededCount: eventReconciliation.supersededCount,
-          retractedCount: eventReconciliation.retractedCount,
-        }),
-        occurredAt: deviceBatchPlan.importedAt,
-        files: touchedPaths,
-        targetIds: [persistedImportId],
-      });
-
       return {
         ...(affectedEventDayKeys.length > 0
           ? { affectedEventDayKeys, affectedSparseCalendarTargets }
@@ -8297,7 +8252,7 @@ timing: DeviceBatchImportTiming,
         sampleShardPaths: sampleAppendPlan.targetShardPaths,
         evidencePartCount: deviceBatchPlan.preparedEvidenceParts.length,
         persistedEvidencePartCount: retainedEvidenceParts.length,
-        auditPath: audit.relativePath,
+        auditPath: null,
       };
     },
   });
