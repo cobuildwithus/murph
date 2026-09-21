@@ -137,6 +137,7 @@ import type {
 } from "./hosted-runtime/models.ts";
 import {
   canUseHostedMailboxPrefixPrefetch,
+  hostedMailboxPrefixPrefetchCoversWake,
   HOSTED_FOREGROUND_MAILBOX_PREFETCH_LANES,
   resolveHostedWorkspaceRunMailboxFetchLimit,
 } from "./hosted-runtime/mailbox-prefetch.ts";
@@ -573,7 +574,7 @@ async function readHostedVaultStoredFormatVersion(vaultRoot: string): Promise<nu
 }
 
 async function importHostedInitialMailboxForWorkspaceRunner(input: {
-  hasPendingWake?: boolean;
+  pendingWake?: RuntimeWakeNotification | null;
   prefetch?: HostedMailboxPrefixPrefetch | null;
   observePrefetchResponse?: (response: HostedMailboxFetchResponse) => HostedMailboxFetchResponse;
   plan: HostedInitialMailboxImportPlan;
@@ -587,7 +588,8 @@ async function importHostedInitialMailboxForWorkspaceRunner(input: {
   const prefetch = plan.bootstrapRequired
     ? null
     : await createHostedForegroundMailboxPrefetch({
-        prefetch: input.hasPendingWake ? null : input.prefetch,
+        prefetch: input.prefetch,
+        pendingWake: input.pendingWake,
         observePrefetchResponse: input.observePrefetchResponse,
         lanes: input.prefetchLanes,
         limitPerLane: input.runnerInput.limitPerLane,
@@ -623,6 +625,7 @@ async function importHostedInitialMailboxForWorkspaceRunner(input: {
 }
 
 async function createHostedForegroundMailboxPrefetch(input: {
+  pendingWake?: RuntimeWakeNotification | null;
   prefetch?: HostedMailboxPrefixPrefetch | null;
   observePrefetchResponse?: (response: HostedMailboxFetchResponse) => HostedMailboxFetchResponse;
   lanes: readonly HostedMailboxLane[];
@@ -639,7 +642,9 @@ async function createHostedForegroundMailboxPrefetch(input: {
     limitPerLane: input.limitPerLane,
     prefetch: input.prefetch,
     state,
-  })) {
+  }) && (!input.pendingWake || await hostedMailboxPrefixPrefetchCoversWake(
+    input.prefetch, input.pendingWake.mailboxWakeHighWater,
+  ))) {
     const response = input.observePrefetchResponse
       ? input.prefetch.response.then(input.observePrefetchResponse)
       : input.prefetch.response;
@@ -2580,14 +2585,14 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
     // it here would hide the wake from that check.
     const initialPendingRuntimeWake = systemMailboxProcessingMode
       ? null
-      : consumePendingHostedRuntimeWake(
-          options.runtimeWakeSignal ?? null,
-          options.shutdownSignal ?? null,
-        );
+      : consumePendingRuntimeWakeUnlessShuttingDown({
+          runtimeWakeSignal: options.runtimeWakeSignal ?? null,
+          shutdownSignal: options.shutdownSignal ?? null,
+        });
     const initialMailboxImportContext: HostedWorkspaceRunnerMailboxImportContext = {
       ...createHostedRuntimeWakeInitialImportContext(
         mergeHostedRuntimeWakeLatencySeeds(
-          initialPendingRuntimeWake,
+          createHostedRuntimeWakeLatencySeed(initialPendingRuntimeWake),
           invocationOrchestrationLatencySeed,
         ),
       ),
@@ -2607,7 +2612,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
     // Keep the container's single-runner ownership until that work settles so
     // an aborted invocation cannot write into a newer restore at the same path.
     const initialMailboxImportResult = await importHostedInitialMailboxForWorkspaceRunner({
-      hasPendingWake: initialPendingRuntimeWake !== null,
+      pendingWake: initialPendingRuntimeWake,
       prefetch: initialMailboxPrefetch,
       observePrefetchResponse: observeMailboxResponse,
       plan: initialMailboxImportPlan,

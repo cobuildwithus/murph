@@ -648,6 +648,13 @@ Request summary:
   standby claim without changing runtime admission, consent, write fences,
   activity priority, or Web-direct latency attribution. Timers, retries, and
   continued executions rederive it; it is not persisted workflow policy.
+- `mailboxWakeHighWater`: optional complete conversation/system maximum sequences
+  from mailbox-only reconciliation. It permits the startup importer to reuse a
+  covering prefetched response; it never advances a cursor or authorizes effects.
+  Due, unknown, or mixed control work omits it. The Worker and container consumer
+  must deploy before the optional Temporal producer; older readers may reject
+  the new ensure field. Disable or roll back the producer before restoring an
+  older Worker parser. Missing hints retain fresh-fetch behavior.
 - `assistantExecutionBlocked`: an optional positive-only execution guard valid
   only with `system_mailbox`. Temporal includes it when Web blocks assistant
   admission but retained model-free system work remains runnable. Cloudflare
