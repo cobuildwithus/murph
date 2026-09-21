@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { createReadStream, createWriteStream } from "node:fs";
-import { lstat, open as openFile, readFile, stat, unlink } from "node:fs/promises";
+import { appendFile, lstat, open as openFile, readFile, stat, unlink } from "node:fs/promises";
 import { createInterface } from "node:readline";
 import { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
@@ -32,7 +32,7 @@ import {
   shardCompressionFromPath,
   type ShardCompression,
 } from "./shard-compression.ts";
-import { INTEGRATION_INGEST_ARCHIVE_SUFFIXES } from "./write-policy.ts";
+import { applyJsonlAppendTarget, INTEGRATION_INGEST_ARCHIVE_SUFFIXES } from "./write-policy.ts";
 import { VAULT_LAYOUT } from "./constants.ts";
 import { VaultError } from "./errors.ts";
 import { pathExists, walkVaultFiles } from "./fs.ts";
@@ -1993,11 +1993,22 @@ export async function appendArchivedIntegrationIngestShard({
   }
 
   if (isShardCompression(source.kind)) {
-    await rewriteCompressedIntegrationIngestArchive({
-      appendPayload: Buffer.from(appendPayload, "utf8"),
-      source,
-      vaultRoot,
-    });
+    try {
+      await rewriteCompressedIntegrationIngestArchive({
+        appendPayload: Buffer.from(appendPayload, "utf8"),
+        source,
+        vaultRoot,
+      });
+    } catch (error) {
+      if (!(error instanceof VaultError) || error.code !== "INTEGRATION_INGEST_ARCHIVE_TOO_LARGE") throw error;
+      await restorePlainIntegrationIngestShard(vaultRoot, source, validatedBase);
+      const target = resolveVaultPath(vaultRoot, targetRelativePath);
+      await applyJsonlAppendTarget({
+        target,
+        readPayload: async () => appendPayload,
+        appendPayload: (chunk) => appendFile(target.absolutePath, chunk, "utf8"),
+      });
+    }
   } else {
     const baseContent = await readIntegrationIngestSourceText(vaultRoot, source);
     await writeIntegrationIngestArchiveText(vaultRoot, source, `${baseContent}${appendPayload}`);
@@ -2005,6 +2016,36 @@ export async function appendArchivedIntegrationIngestShard({
   return {
     originalSize,
   };
+}
+
+// Publish the identical base before retiring the archive. An interruption leaves
+// either exact duplicates (handled by existing recovery) or the verified plain
+// base; the existing write receipt owns append replay and rollback in both cases.
+async function restorePlainIntegrationIngestShard(
+  vaultRoot: string,
+  source: IntegrationIngestRowSource,
+  expected: ArchivedIntegrationIngestShardContentReceipt,
+): Promise<void> {
+  const target = resolveVaultPath(vaultRoot, source.logicalPath);
+  await prepareFileAtomicExclusive(target.absolutePath, async (tempAbsolutePath) => {
+    await pipeline(
+      Readable.from(openIntegrationIngestSourceByteChunks(vaultRoot, source)),
+      createWriteStream(tempAbsolutePath, { flags: "wx", mode: 0o600 }),
+    );
+    const actual = await validateRawIntegrationIngestSource({
+      absolutePath: tempAbsolutePath,
+      logicalPath: source.logicalPath,
+      signal: null,
+    });
+    if (actual.byteLength !== expected.byteLength || actual.sha256 !== expected.sha256) {
+      throw new VaultError(
+        "INTEGRATION_INGEST_ARCHIVE_BASE_MISMATCH",
+        "Restored integration ingest base does not match its validated receipt.",
+        { relativePath: source.logicalPath },
+      );
+    }
+  });
+  await unlink(resolveVaultPath(vaultRoot, source.sourcePath).absolutePath);
 }
 
 export async function truncateArchivedIntegrationIngestShard({
