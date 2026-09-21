@@ -49,6 +49,7 @@ import {
   computeAssistantCronBackgroundMaintenanceYieldRetryAt,
   executeClaimedAssistantCronJob,
   isAssistantCronBackgroundMaintenanceYieldError,
+  resolveAssistantCronWakeEntries,
   type AssistantCronRunnableProjectionInput,
 } from './cron/execution.ts'
 import {
@@ -502,9 +503,16 @@ export async function getAssistantCronStatus(
     runtimeStore,
   })
   const canonicalJobs = projection.jobs
+  const wakeEntries = await resolveAssistantCronWakeEntries({
+    entries: projection.canonicalEntries,
+    vault,
+  })
   const now = new Date().toISOString()
   const enabledJobs = canonicalJobs.filter((job) => job.enabled)
-  const dueJobs = enabledJobs.filter((job) => isAssistantCronJobDue(job, now)).length
+  const dueJobs = [
+    ...projection.visibleLocalStore.jobs,
+    ...wakeEntries.map((entry) => entry.job),
+  ].filter((job) => job.enabled && isAssistantCronJobDue(job, now)).length
   const runningJobs = canonicalJobs.filter((job) => job.state.runningAt !== null).length
   // A canonical running claim keeps its historical occurrence as nextRunAt so
   // execution can resume that exact occurrence after reclamation. Status owns
@@ -514,7 +522,7 @@ export async function getAssistantCronStatus(
     ...projection.visibleLocalStore.jobs
       .filter((job) => job.enabled)
       .map((job) => job.state.nextRunAt),
-    ...projection.canonicalEntries
+    ...wakeEntries
       .filter((entry) => entry.job.enabled)
       .map((entry) =>
         entry.runtimeState.state.runningAt === null
