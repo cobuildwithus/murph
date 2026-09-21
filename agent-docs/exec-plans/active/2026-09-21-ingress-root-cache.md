@@ -76,3 +76,9 @@ focused proof, green required checks and a resolved final ReviewGPT review.
   the installed exporter's identity-wait implementation, without altering capture
   metadata or skipping response/artifact validation. No shared tool files changed.
 - Parent verdict: Ready for PR review. No live latency or deployment claim.
+
+## PR handoff in progress
+
+- Draft PR: https://github.com/cobuildwithus/murph/pull/3633.
+- Changelog archive proof: 10 tests passed; source attribution now names this PR.
+- Final ReviewGPT and required CI will start together after the candidate push.
