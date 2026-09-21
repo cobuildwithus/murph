@@ -608,4 +608,4 @@ Query metric payload deduplication and transaction/restore proof are tracked in
 
 Requested delegated-answer waiting and preserved nonblocking onboarding are
 owned by `ARCHITECTURE.md`; verification is tracked in
-`exec-plans/active/2026-09-21-delegated-answer-wait.md`.
+`exec-plans/completed/2026-09-21-delegated-answer-wait.md`.
