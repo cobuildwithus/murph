@@ -1,6 +1,6 @@
 # Reduce redundant device history and reconcile wakes
 
-Status: active
+Status: completed
 Created: 2026-09-20
 Updated: 2026-09-20
 
@@ -48,3 +48,17 @@ This changes the timing of a full pull, not the maximum allowed recovery gap.
 3. Update durable contracts and public changelog; focused tests and typechecks.
 4. Parent review, exact-head CI and ReviewGPT, then authorized merge/deploy.
 5. Verify deployed revisions and inspect bounded production outcomes.
+
+## Validation and handoff
+
+Completed implementation and parent diff review. Focused proof passed: 316
+queue/history/service/preflight tests, 150 hosted runtime tests, two importer
+weight tests, four contract policy tests, and contracts/device-syncd/runtime
+typechecks. Complexity guard passed with no debt increase. Changelog content
+uses the existing archive renderer. Production reduction remains an observation
+for the authorized release, not a claim from synthetic tests.
+
+PR 3621 owns exact-head CI and final ReviewGPT. Merge and protected deployment
+are explicitly authorized; production data and credentials remain excluded
+from the patch and review artifacts.
+Completed: 2026-09-20
