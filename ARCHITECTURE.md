@@ -3078,6 +3078,36 @@ summary lookup: a member/home binding identifies an owner, not an audience.
 New group setup retains roster reads for participant and setup authority; those
 reads are not ordinary direct-message classification.
 
+Web's crypto owner (`domain-root-store.ts` / `domain-root-unwrap-cache.ts`)
+may reuse successfully unwrapped **ingress** root bytes across requests in the
+same process. The process cache has a fixed, non-sliding 30-second lifetime per
+successful entry and FIFO capacity of 128 roots (4 KiB of owned plaintext root
+material, apart from request/caller copies). Its identity hashes the complete
+verified envelope, including member, domain, root, generation, wraps, contexts
+and authority signature, plus the loaded environment, Web wrapping key and
+authority verification keyring; the KMS client must also be the same owner.
+The existing `env.ts` configuration lifetime remains unchanged. Changed local
+crypto context misses the cache; malformed envelopes and disabled/unknown
+signers fail before reuse. No active-root alias, row status, decryptability,
+member access, routing authority or prepared token is retained there. Each new
+request still reads current root metadata and verifies its envelope and expected
+wrap; transaction owners retain their locked authority revalidation and
+provider-disabled gates. A process hit is never a substitute for preparation.
+
+The cache owns independent key copies, zeroized on FIFO eviction or expiry.
+Unreferenced expiry timers erase idle entries, and monotonic deadline checks
+reject expired reads even when timers were delayed; a frozen process can only
+perform erasure when its event loop resumes. Request-scoped masters still wipe
+at scope end and callers still receive independent buffers. Only successful,
+32-byte, non-aborted unwrap completions are admitted. Concurrent cold requests
+may each call KMS: no cross-request in-flight promise, cancellation, failure or
+retry state is shared. Control and device roots remain request-local and Web
+still cannot unwrap runtime roots. This is a best-effort **same-Web-process**
+hit, not a guaranteed hot-workspace hit: hosted runtimes are separate processes.
+Durable envelope/AEAD message encryption is unchanged; the explicit plaintext
+retention and provider-policy revocation tradeoff is owned by
+`agent-docs/SECURITY.md`.
+
 Hosted thread routing prepares thread-container domain envelopes, delivery-route
 ciphertext, and mailbox ingress roots before the planner transaction.
 Telegram sender authority and Linq pending-contact authority resolve

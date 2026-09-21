@@ -1,0 +1,17 @@
+{
+  "publishedOn": "2026-09-21",
+  "order": 100,
+  "item": {
+    "id": "less-repeated-message-preparation",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Less setup between messages",
+    "summary": "Murph can begin responding sooner in established conversations by reusing recent message preparation.",
+    "details": "Messages stay encrypted, and each message still checks current access and conversation ownership. New or changed conversations receive fresh preparation. Reply times continue to vary.",
+    "relevanceTags": [
+      "conversations",
+      "performance"
+    ],
+    "sourcePullRequests": []
+  }
+}
