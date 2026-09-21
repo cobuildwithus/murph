@@ -8,6 +8,7 @@ Updated: 2026-09-21
 
 - Reject incomplete vault checkpoints and preserve a bounded, decryptable recovery history.
 - Assess surviving encrypted recovery sources and restore only validated canonical state through an authorized protected path.
+- When complete restoration is impossible, preserve authenticated recoverable information and restore runtime progress and connected-provider backfill without claiming missing files were recovered.
 
 ## Success criteria
 
@@ -16,6 +17,7 @@ Updated: 2026-09-21
 - Superseded accepted snapshots retain their encrypted object and complete recovery reference for a documented window; ordinary orphan cleanup and account deletion remain bounded.
 - Synthetic tests prove rejection, retention, cleanup, and ownership boundaries; relevant typechecks pass.
 - Recovery reports distinguish restored canonical data, reconstructed data, unavailable data, and unverified evidence. Runtime progress must be read back after any restore.
+- Partial recovery preserves completed onboarding, existing account/device authority, and mailbox delivery boundaries. Connected-provider imports must make observable canonical progress after publication.
 
 ## Scope
 
@@ -44,6 +46,8 @@ Updated: 2026-09-21
 5. Deploy authorized fixes and verify the serving release and recovered runtime progress.
 
 ## Decisions
+
+- The operator has authorized a partial rebuild and runtime reactivation if the original starting files cannot be recovered. Use the current accepted Browser Vault copy as a lossy recovery source, never an exact file backup. Validate its authenticated member, source, time, and version binding; preserve recoverable source information with explicit provenance. Reuse canonical initialization and onboarding's existing manual-completion reason instead of inventing prior answers. Staging only records the candidate's existing orphan-cleanup obligation. Publication revalidates the exact workspace and full replica references under existing owner locks, atomically retires any old attempt and replaces the checkpoint. Native stop and subsequent admission remain owned by the existing adapter. External reads, encryption and upload stay outside the transaction. No account, provider identity, billing, or mailbox cursor reset or acknowledgment is authorized or required.
 
 - A complete artifact census can still fail canonical replay because its starting state or write history is incomplete. Extend the existing protected validation result with bounded aggregate history and failed-action diagnostics. Reuse fixed vault-family identities and the metadata contract; never emit paths, content hashes, operation identifiers, or raw errors, and never bypass a conflict or adopt an unproven base.
 
@@ -76,3 +80,5 @@ Updated: 2026-09-21
 - Assessment review found a mismatched nested receipt size field. The candidate now reads the canonical `contentRef.byteSize` contract; a typed real-contract fixture covers text, raw, and append references plus missing and wrong-sized payloads. All eight focused tests, Cloudflare typecheck, and complexity checks pass. Recovery is still unperformed.
 - Cross-repository integration review identified three assessment caller mismatches: the private job must forward the canonical deployed bucket variable, R2 object paths require literal separators, and signed workspace reads must advertise the existing custom-inference consumer version. The corrected caller is covered by literal-path inventory, query-bound signature verification, the shared capability validator, and the Web owner's selected-custom-route success/rejection tests. No restoration has been performed.
 - The assessment implementation and protected workflow are merged. A public-checkout Node version filename mismatch was corrected through the private workflow's reviewed setup contract. The first bounded artifact census reached its execution deadline without a complete result. A follow-up uses the existing S3 signing owner for object reads, leaving REST for bounded metadata listing. It admits at most 50,000 objects over twenty minutes, retains the 512 MiB shared streamed byte budget, reads at most eight artifacts concurrently, drains and clears every wave, and emits incomplete aggregate progress and closed failure diagnostics. Recovery remains Hold pending a complete assessment and validated reconstruction.
+
+- Partial recovery implementation proof: authenticated replica reads and full-reference normalization, canonical initialization with manual onboarding completion, preservation of surviving files through encrypted archive round-trip, immutable upload/readback ordering, signed operator routing, and real PostgreSQL publication/retirement/retry tests pass. Recovery does not acknowledge pending mailbox work. Relevant Web, Cloudflare and hosted-execution typechecks and the complexity guard pass. The protected production dry run and actual runtime/provider progress remain outstanding; the plan stays active.

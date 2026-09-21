@@ -205,14 +205,19 @@ export async function retireHostedRuntime(input: {
   identity: HostedRuntimeIdentity;
   completed?: boolean;
 }): Promise<boolean> {
-  return input.prisma.$transaction(async tx => {
-    const where = { ...identityWhere(input.identity), phase: { in: ["starting", "active", "retiring"] } };
-    const result = await tx.hostedRuntimeOwner.updateMany({ where, data: { phase: "retiring", platformAiUsageAllowed: false } });
-    if (result.count === 1 && input.completed) await tx.hostedRuntimeOwner.updateMany({
-      where: { ...identityWhere(input.identity), phase: "retiring", completedAt: null }, data: { completedAt: new Date() },
-    });
-    return result.count === 1;
-  }, OWNER_TRANSACTION_OPTIONS);
+  return input.prisma.$transaction(tx => retireHostedRuntimeTx(tx, input), OWNER_TRANSACTION_OPTIONS);
+}
+
+export async function retireHostedRuntimeTx(
+  tx: Prisma.TransactionClient,
+  input: { identity: HostedRuntimeIdentity; completed?: boolean },
+): Promise<boolean> {
+  const where = { ...identityWhere(input.identity), phase: { in: ["starting", "active", "retiring"] } };
+  const result = await tx.hostedRuntimeOwner.updateMany({ where, data: { phase: "retiring", platformAiUsageAllowed: false } });
+  if (result.count === 1 && input.completed) await tx.hostedRuntimeOwner.updateMany({
+    where: { ...identityWhere(input.identity), phase: "retiring", completedAt: null }, data: { completedAt: new Date() },
+  });
+  return result.count === 1;
 }
 
 /** The trusted adapter must first prove this exact target cannot execute again.

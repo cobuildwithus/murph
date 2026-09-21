@@ -66,6 +66,13 @@ describe("hosted recovery request boundary", () => {
     await expect(assessCheckpointRecovery({}, fetchImpl)).rejects.toThrow("hosted_recovery_boundary_required");
     expect(fetchImpl).not.toHaveBeenCalled();
   });
+  it("binds explicit partial recovery instructions inside the encrypted request", () => {
+    const partialRecovery = { timezone: "UTC", completedOnboarding: true };
+    const sealed = sealRecoveryAssessmentRequest({ ...request, partialRecovery }, TEST_AUTOMATION_RECIPIENT_PUBLIC_JWK);
+    expect(openRecoveryAssessmentRequest(sealed, privateJwk, now).partialRecovery).toEqual(partialRecovery);
+    const invalid = sealRecoveryAssessmentRequest({ ...request, partialRecovery: { ...partialRecovery, timezone: "invalid-zone" } }, TEST_AUTOMATION_RECIPIENT_PUBLIC_JWK);
+    expect(() => openRecoveryAssessmentRequest(invalid, privateJwk, now)).toThrow("invalid_recovery_request");
+  });
 });
 
 describe("unindexed artifact authentication", () => {
