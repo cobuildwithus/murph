@@ -45,6 +45,8 @@ Updated: 2026-09-21
 
 ## Decisions
 
+- Add an optional protected candidate-validation mode before considering restoration. Reuse canonical replay and the Browser Vault source fingerprint in private ephemeral scratch, retain bounded authenticated bytes, and report only aggregate validation. Neither timestamp ordering nor a matching projection source hash certifies accepted history or all files. The assessment and runtime remain read-only.
+
 - Measured protected S3 census throughput showed the twenty-minute deadline could expire before the admitted namespace was exhausted, with authenticated reads still succeeding. Raise only the scan deadline to forty-five minutes and the enclosing protected job to fifty-five minutes; preserve object, byte, concurrency, request-expiry, and per-request limits. A deadline still produces incomplete evidence and never authorizes restoration.
 
 - The previously merged enumeration race fix remains in place; this task adds independent integrity and recoverability boundaries.
