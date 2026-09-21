@@ -1,0 +1,19 @@
+{
+  "publishedOn": "2026-09-21",
+  "order": 100,
+  "item": {
+    "id": "oxygen-analytics-storage",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Less redundant oxygen history",
+    "summary": "Murph keeps oxygen readings and current analytics without generating the older duplicate set of oxygen statistics.",
+    "details": "Untouched older statistics leave default searches and metric queries. Original evidence and records with later revisions remain intact.",
+    "relevanceTags": [
+      "wearables",
+      "data"
+    ],
+    "sourcePullRequests": [
+      3634
+    ]
+  }
+}

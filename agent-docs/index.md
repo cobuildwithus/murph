@@ -106,6 +106,10 @@ preflight admission budget are owned by `agent-docs/RELIABILITY.md`; the
 implementation record is
 [`2026-09-15-device-sweep-capacity.md`](exec-plans/completed/2026-09-15-device-sweep-capacity.md).
 
+System-mailbox shutdown handoff is owned by `packages/assistant-runtime/README.md`;
+its checkpoint/restore proof is recorded in
+[`2026-09-21-device-shutdown-handoff.md`](exec-plans/completed/2026-09-21-device-shutdown-handoff.md).
+
 Container CPU profiling implementation and synthetic verification are recorded in
 [`2026-09-21-container-cpu-profiling.md`](exec-plans/completed/2026-09-21-container-cpu-profiling.md).
 
@@ -526,6 +530,9 @@ The broader dashboard latency work is recorded in
 The admission and runtime launch reduction is recorded in
 [`2026-09-17-ingress-admission-simplification.md`](exec-plans/completed/2026-09-17-ingress-admission-simplification.md).
 
+Five-minute ingress cache retention and member isolation proof are tracked in
+[`ingress cache retention`](exec-plans/completed/2026-09-21-ingress-cache-five-minutes.md).
+
 ## Conventions
 
 Local feedback diagnostics are documented in
@@ -602,6 +609,9 @@ Query page packing and unused date-index removal are tracked in
 
 Query metric payload deduplication and transaction/restore proof are tracked in
 [`metric payload storage`](exec-plans/completed/2026-09-21-workspace-metric-dedup.md).
+
+Legacy oxygen analytics retirement is tracked in
+[`oxygen analytics`](exec-plans/completed/2026-09-21-retire-oxygen-v1.md).
 
 Single device publication receipts are tracked in
 [`device receipts`](exec-plans/completed/2026-09-21-single-import-receipt.md).
