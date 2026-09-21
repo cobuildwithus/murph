@@ -2689,14 +2689,8 @@ describe("hosted device-sync runtime", () => {
       });
       const localAccountId = firstState.hostedToLocalAccountIds.get(hostedConnectionId);
       assert.ok(localAccountId);
-      const fitbitSourceInstanceKey = buildJunctionProviderSourceInstanceKey({
-        connectionId: localAccountId,
-        sourceProviderSlug: "fitbit",
-      });
-      const googleSourceInstanceKey = buildJunctionProviderSourceInstanceKey({
-        connectionId: localAccountId,
-        sourceProviderSlug: "google_health",
-      });
+      const fitbitSourceInstanceKey = hostedFitbitSourceInstanceKey;
+      const googleSourceInstanceKey = hostedGoogleSourceInstanceKey;
       assert.ok(fitbitSourceInstanceKey);
       assert.ok(googleSourceInstanceKey);
       const firstSources = getStore(service).listConnectionSources({
@@ -3604,7 +3598,7 @@ describe("hosted device-sync runtime", () => {
           finalSources.find((source) => source.sourceProviderSlug === "garmin")
             ?.sourceInstanceKey,
           buildJunctionProviderSourceInstanceKey({
-            connectionId: localAccountId,
+            connectionId: hostedConnectionId,
             sourceProviderSlug: "garmin",
           }),
         );

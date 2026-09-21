@@ -1096,6 +1096,55 @@ test("device sync store prunes processed webhook traces older than the retention
   }
 });
 
+test("cold hosted hydration preserves the authoritative Junction source identity", () => {
+  const now = "2026-04-07T00:00:00.000Z";
+  const localAccountIds = new Set<string>();
+  for (let restore = 0; restore < 2; restore += 1) {
+    const store = new SqliteDeviceSyncStore(":memory:");
+    try {
+      const account = store.hydrateHostedAccount({
+        hostedConnectionId: "hosted-junction-identity",
+        hostedObservedTokenVersion: null,
+        hostedObservedUpdatedAt: now,
+        connection: {
+          provider: "junction", externalAccountId: "synthetic-junction-account",
+          displayName: "Junction", scopes: [], metadata: {}, status: "active",
+          connectedAt: now, updatedAt: now,
+        },
+        credential: { kind: "provider_config", providerConfigKey: "junction", credentialMetadata: {} },
+        localState: {
+          lastErrorCode: null, lastErrorMessage: null, lastSyncCompletedAt: null,
+          lastSyncErrorAt: null, lastSyncStartedAt: null, lastWebhookAt: null, nextReconcileAt: null,
+        },
+      });
+      assert.ok(account);
+      localAccountIds.add(account.id);
+      // Legacy hosted keys are authoritative too; do not reconstruct them.
+      for (const [slug, key] of [
+        ["apple_health_kit", "hosted-legacy-source"],
+        ["garmin", buildJunctionProviderSourceInstanceKey({
+          connectionId: "hosted-junction-identity", sourceProviderSlug: "garmin",
+        })!],
+      ]) {
+        const source = store.upsertConnectionSource({
+          connectionId: account.id, sourceInstanceKey: key!, sourceProviderSlug: slug!,
+          lifecycleEpoch: 1, status: "connected", firstSeenAt: now, lastSeenAt: now,
+        });
+        assert.equal(source.sourceInstanceKey, key);
+        const projected = store.upsertConnectionSource({
+          connectionId: account.id, sourceInstanceKey: "transient-projection-key", sourceProviderSlug: slug!,
+          lifecycleEpoch: 1, status: "connected", firstSeenAt: now, lastSeenAt: now,
+        });
+        assert.equal(projected.sourceInstanceKey, key);
+      }
+      assert.equal(store.listConnectionSources({ connectionId: account.id }).length, 2);
+    } finally {
+      store.close();
+    }
+  }
+  assert.equal(localAccountIds.size, 2);
+});
+
 test("device sync store hosted hydration preserves existing tokens until disconnect and sanitizes mirrored metadata", async () => {
   const tempDir = await makeTempDirectory("murph-device-syncd-store-hosted");
   const store = new SqliteDeviceSyncStore(path.join(tempDir, "state.sqlite"));
