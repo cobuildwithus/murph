@@ -4,6 +4,9 @@ import type { HostedBrowserVaultReplicaRef } from "@murphai/hosted-execution/con
 import { parseBrowserVaultReplica, type BrowserVaultReplica } from "@murphai/query/browser";
 import { createBrowserVaultReplicaAadFields, createHostedBrowserVaultReplicaStore } from "../src/browser-vault-store.ts";
 
+// AES-GCM tag, base64 expansion, and bounded JSON envelope metadata.
+export const RECOVERY_REPLICA_ENVELOPE_MAX_BYTES = Math.ceil((HOSTED_BROWSER_VAULT_REPLICA_MAX_BYTES + 16) / 3) * 4 + 64 * 1024;
+
 // A published browser copy is a lossy recovery source. Keep its contents inside
 // the protected process; only the closed summary may be emitted as diagnostics.
 export async function readRecoveryReplica(input: {

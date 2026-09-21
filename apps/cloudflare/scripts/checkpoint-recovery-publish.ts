@@ -12,7 +12,7 @@ import { createHostedR2PresignedGetUrl, createHostedR2PresignedPutUrl } from "..
 import { fetchHostedWorkerRuntimeRootByRootKeyId, type HostedWorkerCryptoEnv } from "../src/hosted-crypto/runtime-crypto-context.ts";
 import { requireHostedRecoveryBoundary, readRecoveryResponse } from "./checkpoint-recovery-assessment.ts";
 import { openRecoveryAssessmentRequest } from "./checkpoint-recovery-envelope.ts";
-import { readRecoveryReplica } from "./checkpoint-recovery-replica.ts";
+import { readRecoveryReplica, RECOVERY_REPLICA_ENVELOPE_MAX_BYTES } from "./checkpoint-recovery-replica.ts";
 import { withPartialRecoverySnapshot } from "./checkpoint-recovery-snapshot.ts";
 
 type Env = Readonly<Record<string, string | undefined>>;
@@ -79,7 +79,7 @@ export async function publishPartialCheckpointRecovery(env: Env, fetchImpl: type
   try {
     const recovered = await readRecoveryReplica({ userId: request.userId, ref: replicaRef, before: request.before,
       rootKey: await root(replicaRef.runtimeRootKeyId), rootKeyId: replicaRef.runtimeRootKeyId, signal,
-      readObject: key => readObject(key, 32 * 1024 * 1024) });
+      readObject: key => readObject(key, RECOVERY_REPLICA_ENVELOPE_MAX_BYTES) });
     sourceBytes = recovered.sourceBytes;
     const sourceObjectKey = source.objectKey;
     async function* sourceEncryptedStream() { yield await readObject(sourceObjectKey, HOSTED_WORKSPACE_SNAPSHOT_MAX_SINGLE_PART_BYTES); }

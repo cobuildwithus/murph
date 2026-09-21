@@ -49,7 +49,7 @@ export async function rebuildPartialRecoveryVault(input: {
       throw new Error("recovery_source_preservation_failed");
     }
     input.signal.throwIfAborted();
-    if (input.completedOnboarding) await completeAssistantOnboarding({
+    if (input.completedOnboarding && (await readAssistantOnboardingState(input.vaultRoot)).status !== "completed") await completeAssistantOnboarding({
       vault: input.vaultRoot, reason: "manual", completedAt: input.recoveredAt,
     });
     const validation = await validateVault({ vaultRoot: input.vaultRoot });

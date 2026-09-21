@@ -1,4 +1,6 @@
 import { createHash } from "node:crypto";
+import { HOSTED_BROWSER_VAULT_REPLICA_MAX_BYTES } from "@murphai/hosted-execution/browser-vault";
+import { RECOVERY_REPLICA_ENVELOPE_MAX_BYTES } from "../scripts/checkpoint-recovery-replica.ts";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -23,13 +25,13 @@ vi.mock("../scripts/checkpoint-recovery-snapshot.ts", () => ({ withPartialRecove
 const scratch: string[] = [];
 afterEach(async () => { for (const directory of scratch.splice(0)) await rm(directory, { recursive: true, force: true }); });
 
-async function fixture(mode: "prepare-partial" | "recover-partial") {
+async function fixture(mode: "prepare-partial" | "recover-partial", rows = 4) {
   const userId = "synthetic-recovery-member";
   const rootKeyId = "udrk:runtime:test-root";
   const privateJwk = JSON.stringify(TEST_AUTOMATION_RECIPIENT_PRIVATE_JWK);
   const context = await createTestHostedRuntimeCryptoContext(userId);
   const bucket = new MemoryEncryptedR2Bucket();
-  const replica = createSyntheticBrowserVaultReplica(4);
+  const replica = createSyntheticBrowserVaultReplica(rows);
   const replicaRef = await createHostedBrowserVaultReplicaStore({ bucket, userId, rootKeyId,
     rootKey: getTestHostedRuntimeRootKey("runtime") }).writeBrowserVaultReplica({ replica, userId });
   const snapshotId = "synthetic-existing";
@@ -49,6 +51,7 @@ async function fixture(mode: "prepare-partial" | "recover-partial") {
   scratch.push(directory);
   const encryptedFilePath = path.join(directory, "candidate.enc");
   await writeFile(encryptedFilePath, encrypted);
+  builder.mockReset();
   builder.mockImplementation(async (input: Parameters<typeof withPartialRecoverySnapshot>[0]) => {
     expect(Buffer.from(input.rebuild.sourceBytes).equals(Buffer.from(JSON.stringify(replica)))).toBe(true);
     expect(input.rebuild.completedOnboarding).toBe(true);
@@ -65,6 +68,7 @@ async function fixture(mode: "prepare-partial" | "recover-partial") {
   let changed = false;
   let corrupt = false;
   let reads = 0;
+  let oversizedEnvelope = false;
   const fetchImpl: typeof fetch = async (url, init) => {
     const target = new URL(String(url));
     if (target.origin === "https://www.withmurph.ai") {
@@ -95,6 +99,7 @@ async function fixture(mode: "prepare-partial" | "recover-partial") {
     const key = target.pathname.slice("/synthetic-bucket/".length);
     if (key === source.objectKey) return new Response(encrypted);
     if (key === replacement.objectKey) { operations.push("verify-upload"); return new Response(corrupt ? "bad" : encrypted); }
+    if (oversizedEnvelope) return new Response("", { headers: { "content-length": String(RECOVERY_REPLICA_ENVELOPE_MAX_BYTES + 1) } });
     const object = await bucket.get(key);
     if (!object) throw new Error("Unexpected synthetic object");
     return new Response(await object.arrayBuffer());
@@ -111,7 +116,8 @@ async function fixture(mode: "prepare-partial" | "recover-partial") {
     HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM: TEST_HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM,
     HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID: TEST_HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID,
     HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: privateJwk, HOSTED_CRYPTO_ENV: "test" };
-  return { env, fetchImpl, operations, changeWorkspace: () => { changed = true; }, corruptUpload: () => { corrupt = true; } };
+  return { env, fetchImpl, operations, oversizeEnvelope: () => { oversizedEnvelope = true; },
+    oversizePlaintextReference: () => { replicaRef.byteLength = HOSTED_BROWSER_VAULT_REPLICA_MAX_BYTES + 1; }, changeWorkspace: () => { changed = true; }, corruptUpload: () => { corrupt = true; } };
 }
 
 it("prepares with no storage or runtime mutation", async () => {
@@ -138,4 +144,20 @@ it("refuses local recovery before touching a credential or network", async () =>
   const fetchImpl = vi.fn();
   await expect(publishPartialCheckpointRecovery({}, fetchImpl)).rejects.toThrow("hosted_recovery_boundary_required");
   expect(fetchImpl).not.toHaveBeenCalled();
+});
+
+it("prepares a supported 28-MiB replica through the bounded encrypted response reader", async () => {
+  const f = await fixture("prepare-partial", 25_000);
+  expect(await publishPartialCheckpointRecovery(f.env, f.fetchImpl)).toMatchObject({ restorationPerformed: false, workspaceUnchanged: true });
+  expect(f.operations).toEqual([]);
+});
+
+it("rejects oversized encrypted responses and plaintext references before rebuilding", async () => {
+  for (const boundary of ["envelope", "plaintext"] as const) {
+    const f = await fixture("prepare-partial");
+    if (boundary === "envelope") f.oversizeEnvelope(); else f.oversizePlaintextReference();
+    await expect(publishPartialCheckpointRecovery(f.env, f.fetchImpl)).rejects.toThrow();
+    expect(builder).not.toHaveBeenCalled();
+    expect(f.operations).toEqual([]);
+  }
 });

@@ -157,7 +157,12 @@ proof and subsequent execution. Recovery clears obsolete receipt-chain hints
 and omits mailbox acknowledgment fields, preserving the mailbox counters and
 pending items. Partial rebuilds preserve the original authenticated projection
 as a labelled source document and use manual onboarding completion only when
-explicitly instructed; they do not claim the missing canonical files were restored.
+explicitly instructed, leaving existing completed onboarding unchanged. Surviving
+files remain byte-identical except the current audit shard, whose original byte
+prefix and two validated canonical recovery appends must survive the encrypted
+round-trip. The encrypted replica read bound includes base64/envelope overhead
+above the supported plaintext maximum. Partial recovery does not claim the
+missing canonical files were restored.
 Deploy the Web recovery reader before enabling protected recovery workflow modes.
 
 Owner locks return the current row, and callback/provider admission reads member

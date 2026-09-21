@@ -3,7 +3,8 @@ import { createReadStream } from "node:fs";
 import { mkdir, mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { validateVault, walkVaultFiles, statAndHashVaultFile } from "@murphai/core";
+import { auditRecordSchema } from "@murphai/contracts";
+import { validateVault, walkVaultFiles, statAndHashVaultFile, VAULT_LAYOUT } from "@murphai/core";
 import { readAssistantOnboardingState } from "@murphai/assistant-engine/assistant-state";
 import { collectHostedWorkspaceSnapshotArchivePlan } from "@murphai/runtime-state/node";
 import { hostedWorkspaceSnapshotObjectKey } from "@murphai/hosted-execution/storage-paths";
@@ -15,8 +16,10 @@ import { buildHostedWorkspaceSnapshotV2Aad, createHostedWorkspaceSnapshotV2DataK
 import { createEncryptedWorkspaceSnapshotFile, restoreEncryptedWorkspaceSnapshotFromEncryptedStream } from "../src/workspace-snapshot-local.ts";
 import { rebuildPartialRecoveryVault } from "./checkpoint-recovery-rebuild.ts";
 
-async function fileInventory(root: string, signal: AbortSignal): Promise<Map<string, string>> {
-  const files = new Map<string, string>();
+type SurvivingFile = { sha256: string; bytes: number };
+
+async function fileInventory(root: string, signal: AbortSignal): Promise<Map<string, SurvivingFile>> {
+  const files = new Map<string, SurvivingFile>();
   let entries = 0;
   async function visit(relative: string) {
     signal.throwIfAborted();
@@ -26,8 +29,9 @@ async function fileInventory(root: string, signal: AbortSignal): Promise<Map<str
       if (entry.isDirectory()) await visit(name);
       else if (entry.isFile()) {
         const hash = createHash("sha256");
-        for await (const chunk of createReadStream(path.join(root, name), { signal })) hash.update(chunk);
-        files.set(name, hash.digest("hex"));
+        let bytes = 0;
+        for await (const chunk of createReadStream(path.join(root, name), { signal })) { hash.update(chunk); bytes += chunk.length; }
+        files.set(name, { sha256: hash.digest("hex"), bytes });
       } else throw new Error("recovery_inventory_unsupported_entry");
     }
   }
@@ -35,8 +39,45 @@ async function fileInventory(root: string, signal: AbortSignal): Promise<Map<str
   return files;
 }
 
+function validateRecoveryAuditAppend(appended: string, timestamp: string): void {
+  const records = appended.trimEnd().split("\n").map(line => auditRecordSchema.parse(JSON.parse(line)));
+  if (!appended.endsWith("\n") || records.length !== 2
+    || records[0]?.commandName !== "core.initializeVault" || records[0]?.action !== "vault_init"
+    || records[1]?.commandName !== "core.importDocument" || records[1]?.action !== "document_import"
+    || records.some(record => record.occurredAt !== timestamp || record.status !== "success")) {
+    throw new Error("recovery_snapshot_unexpected_audit_append");
+  }
+}
+
+// Rebuilding adds exactly two canonical audit records. Only that shard may
+// grow; its complete original prefix and every other survivor remain unchanged.
+export async function assertRecoverySurvivingFiles(input: {
+  original: ReadonlyMap<string, SurvivingFile>; verified: ReadonlyMap<string, SurvivingFile>;
+  verifiedRoot: string; recoveredAt: string;
+}): Promise<void> {
+  const timestamp = new Date(input.recoveredAt).toISOString();
+  const auditPath = path.join("vault", VAULT_LAYOUT.auditDirectory, timestamp.slice(0, 4), `${timestamp.slice(0, 7)}.jsonl`);
+  for (const [name, original] of input.original) {
+    const current = input.verified.get(name);
+    if (current?.sha256 === original.sha256) continue;
+    if (name !== auditPath || !current || current.bytes <= original.bytes || current.bytes - original.bytes > 64 * 1024) {
+      throw new Error("recovery_snapshot_surviving_file_changed");
+    }
+    const file = path.join(input.verifiedRoot, name);
+    const prefix = createHash("sha256");
+    if (original.bytes > 0) for await (const chunk of createReadStream(file, { end: original.bytes - 1 })) prefix.update(chunk);
+    if (prefix.digest("hex") !== original.sha256) {
+      throw new Error("recovery_snapshot_surviving_file_changed");
+    }
+    const tail: Buffer[] = [];
+    for await (const chunk of createReadStream(file, { start: original.bytes, end: current.bytes - 1 })) tail.push(chunk);
+    const appended = Buffer.concat(tail).toString("utf8");
+    validateRecoveryAuditAppend(appended, timestamp);
+  }
+}
+
 /** Private scratch lifetime encloses optional publication. All original surviving
- * files must round-trip byte-for-byte through the normal encrypted archive path.
+ * files must round-trip unchanged, allowing only verified canonical audit appends.
  * The only emitted plaintext evidence is bounded counts and validation booleans. */
 export async function withPartialRecoverySnapshot<T>(input: {
   userId: string;
@@ -98,7 +139,7 @@ export async function withPartialRecoverySnapshot<T>(input: {
         dataKey: encodeHostedWorkspaceSnapshotV2DataKey(verifyKey), encryptedStream: createReadStream(encrypted.encryptedFilePath, { signal }) });
     } finally { verifyKey.fill(0); }
     const verified = await fileInventory(verifiedRoot, signal);
-    for (const [name, hash] of original) if (verified.get(name) !== hash) throw new Error("recovery_snapshot_surviving_file_changed");
+    await assertRecoverySurvivingFiles({ original, verified, verifiedRoot, recoveredAt: input.rebuild.recoveredAt });
     const verifiedVault = path.join(verifiedRoot, "vault");
     if (!(await validateVault({ vaultRoot: verifiedVault })).valid
       || input.rebuild.completedOnboarding && (await readAssistantOnboardingState(verifiedVault)).status !== "completed") {
