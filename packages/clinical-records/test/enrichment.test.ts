@@ -126,6 +126,10 @@ describe("clinical document extraction proposals", () => {
         if (object.type === "object") {
           expect(object.additionalProperties).toBe(false);
           expect(object.required).toEqual(Object.keys(object.properties as Record<string, unknown>));
+          const dateBasis = (object.properties as Record<string, unknown>).dateBasis;
+          if (dateBasis) {
+            expect(dateBasis).toEqual({ type: "string", enum: ["document", "source", "unknown"] });
+          }
         }
         Object.values(object).forEach(inspect);
       };

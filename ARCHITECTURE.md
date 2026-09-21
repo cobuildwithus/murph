@@ -1131,15 +1131,29 @@ Checkpoint-only return paths keep extraction paused for the durable successor.
 If this invocation instead accepts another foreground pass after checkpointing,
 it resumes its paused extractor unless shutdown or owner handoff has started.
 
+Before freezing proposals, extraction uses the shared date consistency check
+with the vault timezone. An affected family gets one read-only, date-only
+correction turn against the same bound source, capped at 30 seconds within the
+existing page deadline. Correction is skipped unless its full 30-second budget
+and the child's interrupt/stop cleanup budget plus five seconds to return remain.
+The cleanup allowance derives from the existing child timeout constants.
+Supported calendar-only dates stay
+calendar dates without an invented time. Only invalid record indices can change,
+and only their date fields. Valid siblings survive failed or unusable corrections; unresolved
+dates remain held. Authority checks and cancellation also fence correction,
+whose usage has a separate review-stage identity. Replay uses frozen results
+without another correction call.
+
 `@murphai/vault-usecases/clinical-enrichment` freezes validated proposals in
 private operational state. A separate short `apply-clinical-enrichment` action
 uses the canonical writer, attaches host-derived source identity and evidence,
 requires an explicit document date with supporting excerpt or resolves a
 source-based date against the attested parent, checks existing facts and reads
 back accepted writes before advancing the page. Host-owned date provenance tags
-and evidence travel with accepted records. Legacy frozen proposals with ambiguous
-retrieval-day dates are held rather than rewritten; independently dated facts
-retain their dates. Extraction cache v2 binds bytes, media type and parent clinical-date context;
+and evidence travel with accepted records. Missing date provenance is held for
+both fresh and previously frozen proposals. Document evidence must contain a
+matching full date and no conflicting dates; valid siblings continue to import.
+Extraction cache v3 binds bytes, media type and parent clinical-date context;
 cached source-based proposals resolve against each current attested parent.
 Derived records use the attested parent source identity, an extraction facet and
 the parent revision. The existing writer index enforces parent revision guards

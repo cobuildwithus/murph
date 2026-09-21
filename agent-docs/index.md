@@ -572,6 +572,15 @@ The Responses relay queue-pressure observation and implementation proof are reco
 Clinical Journal date provenance and native record presentation cleanup:
 [`2026-09-18-clinical-journal-cleanup.md`](exec-plans/completed/2026-09-18-clinical-journal-cleanup.md).
 
+Fresh clinical date validation and partial-import proof:
+[`2026-09-21-clinical-date-validation.md`](exec-plans/completed/2026-09-21-clinical-date-validation.md).
+
+Clinical extraction date recovery: [`2026-09-21-clinical-date-recovery.md`](exec-plans/completed/2026-09-21-clinical-date-recovery.md).
+
+Clinical date review remediation: [`2026-09-21-clinical-date-review-remediation.md`](exec-plans/completed/2026-09-21-clinical-date-review-remediation.md).
+
+Clinical correction cleanup budget: [`2026-09-21-clinical-correction-cleanup-budget.md`](exec-plans/completed/2026-09-21-clinical-correction-cleanup-budget.md).
+
 Zero-valued SpO2 sample handling is tracked in
 [`2026-09-18-spo2-zero-samples.md`](exec-plans/completed/2026-09-18-spo2-zero-samples.md).
 
