@@ -44,7 +44,13 @@ missing or unknown provenance and document excerpts that lack a matching full
 date or mix conflicting dates. Common ISO, named-month and numeric date forms
 remain supported, including timezone normalization. Source-based records use
 only the attested parent clinical date. Valid siblings still import when another
-fact is held; retrieval timestamps never establish a visit date.
+fact is held; retrieval timestamps never establish a visit date. Before freezing,
+extraction shares the canonical date check and vault timezone, then gives an
+affected family one read-only correction turn against the same source. Only date
+fields on invalid records may change. The turn has a 30-second cap inside the
+existing page deadline, rechecks provider authority, honors cancellation, and
+uses a separate review usage identity. Failed corrections preserve successful
+facts; unresolved dates remain held without retrying frozen proposals.
 
 Vault use cases freeze proposals in private operational state. A separate
 bounded canonical apply derives source identity and raw/page evidence, checks

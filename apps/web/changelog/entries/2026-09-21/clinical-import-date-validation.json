@@ -7,7 +7,7 @@
     "priority": 3,
     "title": "More reliable dates for imported records",
     "summary": "New medical-record imports check supporting dates before adding extracted events to your health history.",
-    "details": "Records with missing or conflicting date evidence stay out of dated summaries, while supported records from the same document can still import. Original source documents remain available.",
+    "details": "If an extracted date is missing or conflicts with its evidence, Murph checks the source again and corrects it when supported. Other valid records keep importing. Dates the source cannot establish stay out of dated summaries, and original documents remain available.",
     "relevanceTags": ["medical-records", "journal"],
     "sourcePullRequests": []
   }

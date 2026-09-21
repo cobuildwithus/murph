@@ -371,6 +371,66 @@ function describeRealCodex(name: string, factory: () => void): void {
 }
 
 describeRealCodex('real clinical document extraction journeys', () => {
+  it('clinical extraction live recovers unsupported dates without rewriting valid siblings', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const fixture = await createCanonicalLiveFixture(config)
+    const rawRef = 'raw/clinical/fhir/synthetic-source/synthetic-batch/attachments/recovery.txt'
+    const documentPath = path.join(fixture.vault, rawRef)
+    const sourceText = [
+      'SYNTHETIC HISTORY REPORT. Three separate visits for the current member.',
+      'Routine review: 2025-02-03T15:00:00Z.',
+      'Mobility review: March 12, 2020 at noon UTC.',
+      'Exercise counseling: 2026-07-10T12:00:00Z.',
+      'Exported 2026-07-10. Export time is not a visit date.',
+    ].join('\n')
+    const initialRecords = [
+      { payload: { kind: 'note', occurredAt: '2025-02-03T15:00:00Z', title: 'Routine review', note: 'Routine review.' }, dateBasis: 'document', dateEvidence: '2025-02-03T15:00:00Z' },
+      { payload: { kind: 'note', occurredAt: '2026-07-10T12:00:00Z', title: 'Mobility review', note: 'Mobility review.' }, dateBasis: 'document', dateEvidence: 'March 12, 2020' },
+      { payload: { kind: 'note', occurredAt: '2026-07-10T12:00:00Z', title: 'Exercise counseling', note: 'Exercise counseling.' } },
+    ]
+    const nativeExecute = clinicalExtractionCodex.executeCodexAppServerTurn
+    // Seed the exact bad proposal, then use the real provider for recovery.
+    const observer = vi.spyOn(clinicalExtractionCodex, 'executeCodexAppServerTurn')
+      .mockResolvedValueOnce({
+        finalMessage: JSON.stringify({ status: 'complete', records: initialRecords }),
+        transcriptMessage: null, acceptedNoReplyDeliveryContextOrdinals: [], finalAction: null, finalActionExplicit: false,
+        reactions: [], precedingAgentMessageSegments: [], responseDeliveryContextOrdinal: 0, targetInputId: null,
+        additionalUsages: [], responseMedia: [], followUpRequest: null, responseCard: null, jsonEvents: [],
+        providerActionCount: 0, runtimeIssueInputs: [], rolloutRelativePath: null, sessionId: null,
+        stderr: '', stdout: '', threadId: null, turnId: null,
+      })
+      .mockImplementation(nativeExecute)
+    let providerEntries = 0
+    try {
+      await mkdir(path.dirname(documentPath), { recursive: true })
+      await writeFile(documentPath, sourceText)
+      const writesBefore = await listWriteOperationMetadataPaths(fixture.vault)
+      const result = await executeClinicalDocumentExtraction({
+        workspaceRoot: fixture.vault, documentPath, timeZone: 'UTC', extractedText: sourceText,
+        source: { rawRef, sha256: createHash('sha256').update(sourceText).digest('hex'), mediaType: 'text/plain' },
+        family: 'history', codexCommand: fixture.codexCommand, codexHome: fixture.codexHome,
+        env: fixture.env, model: config.model, modelProvider: config.modelProvider, reasoningEffort: 'low',
+        beforeProviderEntry: async () => { providerEntries += 1 },
+        onProviderUsage: ({ usage }) => { recordRealCodexProviderUsage(usage.usage) },
+      })
+      expect(providerEntries).toBe(2)
+      expect(observer).toHaveBeenCalledTimes(2)
+      expect(result.status).toBe('complete')
+      expect(result.records).toHaveLength(3)
+      expect(result.records[0]).toEqual(initialRecords[0])
+      expect(result.records.map((record) => new Date(record.payload.occurredAt).toISOString()))
+        .toEqual(['2025-02-03T15:00:00.000Z', '2020-03-12T12:00:00.000Z', '2026-07-10T12:00:00.000Z'])
+      expect(result.records.every((record) => record.dateBasis === 'document' && sourceText.includes(record.dateEvidence!))).toBe(true)
+      expect(await listWriteOperationMetadataPaths(fixture.vault)).toEqual(writesBefore)
+      expect(await readFile(documentPath, 'utf8')).toBe(sourceText)
+      process.stdout.write(`[clinical-date-recovery-live] ${JSON.stringify(result)}\n`)
+    } finally {
+      observer.mockRestore()
+      await fixture.close()
+      await removeRealCodexTemporaryPaths(config.temporaryPaths)
+    }
+  }, 360_000)
+
   it('clinical extraction live preserves supported dates across import-day context', async () => {
     const config = await resolveRealCodexE2eConfig()
     const fixture = await createCanonicalLiveFixture(config)
@@ -390,7 +450,7 @@ describeRealCodex('real clinical document extraction journeys', () => {
       await writeFile(documentPath, sourceText)
       const writesBefore = await listWriteOperationMetadataPaths(fixture.vault)
       const result = await executeClinicalDocumentExtraction({
-        workspaceRoot: fixture.vault, documentPath, extractedText: sourceText,
+        workspaceRoot: fixture.vault, documentPath, timeZone: 'UTC', extractedText: sourceText,
         source: { rawRef, sha256: createHash('sha256').update(sourceText).digest('hex'), mediaType: 'text/plain' },
         family: 'history', codexCommand: fixture.codexCommand, codexHome: fixture.codexHome,
         env: fixture.env, model: config.model, modelProvider: config.modelProvider, reasoningEffort: 'low',
@@ -463,7 +523,7 @@ describeRealCodex('real clinical document extraction journeys', () => {
         await execFileAsync('pdftoppm', ['-png', '-scale-to', '1400', '-singlefile', documentPath, path.join(renderRoot, 'page-1')], { timeout: 30_000 })
         const writesBefore = await listWriteOperationMetadataPaths(fixture.vault)
         const result = await executeClinicalDocumentExtraction({
-          workspaceRoot: fixture.vault, documentPath,
+          workspaceRoot: fixture.vault, documentPath, timeZone: 'UTC',
           source: { rawRef, sha256: createHash('sha256').update(pdf).digest('hex'), mediaType: 'application/pdf' },
           renderedPages: [{ page: 1, path: path.join(renderRoot, 'page-1.png') }], scratchRoots: [renderRoot],
           family, codexCommand: fixture.codexCommand, codexHome: fixture.codexHome,
@@ -524,6 +584,7 @@ describeRealCodex('real clinical document extraction journeys', () => {
         const result = await executeClinicalDocumentExtraction({
           workspaceRoot: fixture.vault,
           documentPath,
+          timeZone: 'UTC',
           extractedText: sourceText,
           source: { rawRef, sha256: createHash('sha256').update(sourceText).digest('hex'), mediaType: 'text/plain' },
           family: 'labs',

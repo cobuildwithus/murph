@@ -1131,6 +1131,15 @@ Checkpoint-only return paths keep extraction paused for the durable successor.
 If this invocation instead accepts another foreground pass after checkpointing,
 it resumes its paused extractor unless shutdown or owner handoff has started.
 
+Before freezing proposals, extraction uses the shared date consistency check
+with the vault timezone. An affected family gets one read-only, date-only
+correction turn against the same bound source, capped at 30 seconds within the
+existing page deadline. Only invalid record indices can change, and only their
+date fields. Valid siblings survive failed or unusable corrections; unresolved
+dates remain held. Authority checks and cancellation also fence correction,
+whose usage has a separate review-stage identity. Replay uses frozen results
+without another correction call.
+
 `@murphai/vault-usecases/clinical-enrichment` freezes validated proposals in
 private operational state. A separate short `apply-clinical-enrichment` action
 uses the canonical writer, attaches host-derived source identity and evidence,

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { clinicalDateEvidenceMatches } from "../src/clinical-enrichment-date.ts";
+import { clinicalDateEvidenceMatches } from "../src/enrichment-date.ts";
 
 describe("clinical document date evidence", () => {
   it.each([

@@ -3,6 +3,7 @@ import { mkdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 
 import {
+  clinicalExtractionDateIsSupported,
   clinicalDocumentExtractionOutputSchemaForFamily,
   clinicalDocumentExtractionOutputSchema,
   clinicalRawManifestSchema,
@@ -18,7 +19,6 @@ import { listCanonicalEntities, readVaultMetadataSource, type CanonicalEntity } 
 import { resolveRuntimePaths, writeJsonFileAtomic } from "@murphai/runtime-state/node";
 
 import { clinicalEnrichmentLabHoldReason } from "./clinical-enrichment-labs.ts";
-import { clinicalDateEvidenceMatches } from "./clinical-enrichment-date.ts";
 import { readClinicalEnrichmentParentEligibility } from "./clinical-enrichment-parent.ts";
 
 const digestSchema = z.string().regex(/^[a-f0-9]{64}$/u);
@@ -46,7 +46,7 @@ const jobSchema = z.object({
 type Job = z.infer<typeof jobSchema>;
 export type ClinicalEnrichmentSource = Pick<z.infer<typeof sourceSchema>, "rawRef" | "sha256" | "mediaType"> & { clinicalOccurredAt?: string };
 export type ClinicalEnrichmentWork =
-  | { status: "extract"; jobId: string; source: ClinicalEnrichmentSource; documentPath: string; page: number }
+  | { status: "extract"; jobId: string; source: ClinicalEnrichmentSource; documentPath: string; page: number; timeZone: string }
   | { status: "deferred"; jobId: string; nextAttemptAt: string }
   | { status: "apply" | "advance"; jobId: string };
 const indexSchema = z.object({ schema: z.literal("murph.clinical-enrichment-index.v1"), pending: z.array(digestSchema).max(128) }).strict();
@@ -185,7 +185,8 @@ async function prepareCurrentClinicalDocument(
     return { status: "apply", jobId: job.jobId };
   }
   await saveJob(vaultRoot, job);
-  return { status: "extract", jobId: job.jobId, source: { rawRef: job.source.rawRef, sha256: job.source.sha256, mediaType: job.source.mediaType, clinicalOccurredAt: attested.parent.clinicalOccurredAt }, documentPath: attested.documentPath, page: job.page };
+  const metadata = vaultMetadataSchema.parse(await readVaultMetadataSource(vaultRoot));
+  return { status: "extract", jobId: job.jobId, source: { rawRef: job.source.rawRef, sha256: job.source.sha256, mediaType: job.source.mediaType, clinicalOccurredAt: attested.parent.clinicalOccurredAt }, documentPath: attested.documentPath, page: job.page, timeZone: metadata.timezone };
 }
 
 export async function persistClinicalEnrichmentProposals(input: { vaultRoot: string; jobId: string; sourceSha256: string; page: number; totalPages: number; outputs: Record<(typeof families)[number], ClinicalDocumentExtractionOutput> }): Promise<void> {
@@ -309,9 +310,8 @@ function clinicalProposalDate(
   timeZone: string,
 ): ClinicalDocumentExtractionPayload | null {
   const payload = record.payload;
-  if (record.dateBasis === "document") {
-    return clinicalDateEvidenceMatches(payload.occurredAt, record.dateEvidence, timeZone) ? payload : null;
-  }
+  if (!clinicalExtractionDateIsSupported(record, parent.clinicalOccurredAt, timeZone)) return null;
+  if (record.dateBasis === "document") return payload;
   if (record.dateBasis === "source") {
     // Resolve against this attested parent, including when identical document
     // bytes reused a cached extraction made for another parent.

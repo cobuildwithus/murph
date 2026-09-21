@@ -566,7 +566,7 @@ Clinical Journal date provenance and native record presentation cleanup:
 [`2026-09-18-clinical-journal-cleanup.md`](exec-plans/completed/2026-09-18-clinical-journal-cleanup.md).
 
 Fresh clinical date validation and partial-import proof:
-[`2026-09-21-clinical-date-validation.md`](exec-plans/active/2026-09-21-clinical-date-validation.md).
+[`2026-09-21-clinical-date-validation.md`](exec-plans/completed/2026-09-21-clinical-date-validation.md).
 
 Zero-valued SpO2 sample handling is tracked in
 [`2026-09-18-spo2-zero-samples.md`](exec-plans/completed/2026-09-18-spo2-zero-samples.md).
@@ -605,3 +605,5 @@ Query page packing and unused date-index removal are tracked in
 
 Query metric payload deduplication and transaction/restore proof are tracked in
 [`metric payload storage`](exec-plans/completed/2026-09-21-workspace-metric-dedup.md).
+
+Clinical extraction date recovery: [`2026-09-21-clinical-date-recovery.md`](exec-plans/completed/2026-09-21-clinical-date-recovery.md).

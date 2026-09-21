@@ -1,4 +1,14 @@
 import { isStrictIsoDate, isWritableIsoDateTime, toLocalDayKey } from "@murphai/contracts";
+import type { ClinicalDocumentExtractionOutput } from "./enrichment.ts";
+
+export function clinicalExtractionDateIsSupported(
+  record: ClinicalDocumentExtractionOutput["records"][number],
+  clinicalOccurredAt: string | undefined,
+  timeZone: string,
+): boolean {
+  return record.dateBasis === "source" ? Boolean(clinicalOccurredAt)
+    : record.dateBasis === "document" && clinicalDateEvidenceMatches(record.payload.occurredAt, record.dateEvidence, timeZone);
+}
 
 const MONTHS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
 const MONTH = "(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\\.?";

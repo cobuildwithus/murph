@@ -161,6 +161,7 @@ async function extractClinicalEnrichmentFamilies({ input, work, prepared, signal
         codexHome: input.codexHome, env: { ...input.env },
         model: input.model, modelProvider: input.modelProvider,
         workspaceRoot: input.vaultRoot, source: work.source, documentPath: work.documentPath,
+        timeZone: work.timeZone,
         family, extractedText: prepared.extractedText, renderedPages: prepared.renderedPages,
         scratchRoots: prepared.scratchRoots,
         onProviderUsage(event) { usages.push({ family, event }); },
