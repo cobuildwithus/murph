@@ -1,6 +1,6 @@
 # GPT-Live voice on the website
 
-Status: active
+Status: completed
 Created: 2026-09-20
 Updated: 2026-09-21
 
@@ -370,14 +370,40 @@ Updated: 2026-09-21
   parser derives its effective processing mode once for both admission guards
   and the existing runtime admission check.
 
+## Implementation and review closeout
+
+- Final GPT-6 Pro round 2 passed with zero findings at
+  `9908459e4165ff1d6bef6147b69b53b939f6affe`. Exact response identity, model, and
+  response hash were verified; capture took more than twelve minutes. The
+  original sideband-loss finding is resolved, and the owned browser target is
+  closed. The parent agrees with the result.
+- CI exposed stale inventories for the new Worker route, hosted exports, and
+  static voice page. Test-only corrections preserve vendor telemetry suppression
+  on voice. Their focused suites pass 163, 10, and 11 tests, with Cloudflare,
+  shared-protocol, and Web typechecks passing.
+- The latency proof's ten-minute native-image setup deadline expired before any
+  benchmark ran. Image preparation now permits up to ninety minutes per checkout;
+  the enclosing step permits two builds and the existing benchmark budget. The
+  one-vCPU sample limits, semantic checks, and regression thresholds are unchanged.
+  Comparator tests, workflow policy, syntax checks, Actionlint, and complexity
+  checks pass. The task-owned Frog entry records this setup failure.
+- These post-review edits are isolated verification scaffolding and explanatory
+  evidence; production source, deployment configuration, schemas, and the reviewed
+  native patch are unchanged. They use the review loop's non-substantive-change
+  exception. Final exact-head CI remains a live PR gate after this closeout commit.
+- The user waived preview publication. The URL-shape evidence check remains an
+  explicitly disclosed waiver, not a fabricated preview or weakened guard.
+  Neither PR has been merged, and no deployment or binary publication occurred.
+
 ## Current prerequisites
 
 - The clean native AMD64 hosted browser/tool/speech/accounting journey now passes.
   Earlier acknowledgement-only timeouts are retained as a provider-repeatability
   limitation; the final review must not infer a production reliability rate.
-- Complete stable-head feature ReviewGPT, required exact-head CI, parent final
-  review, and plan closure. The temporary public preview is waived by the user;
-  keep the resulting PR Evidence URL-gate limitation explicit.
+- Feature ReviewGPT and parent final review are complete. Required exact-head CI
+  for the final verification-only commit remains pending in the live PR. The
+  temporary public preview is waived by the user; keep the resulting PR Evidence
+  URL-gate limitation explicit.
 - [Deployment companion PR #166](https://github.com/cobuildwithus/murph-cloud/pull/166)
   passes typecheck, 827 coverage tests, 131 controller tests, production build,
   10 built-worker tests, exact-head CI, and final GPT-6 Pro review with zero
@@ -398,3 +424,4 @@ Updated: 2026-09-21
 - ReviewGPT recommends proving those boundaries on the actual hosted runner before committing to a full adapter. Waiting for native support could remove transcript/delegation glue, but would still require website auth, runtime lifetime, and billing integration. This historical assessment preceded the user's choice of the minimal native compatibility patch; it does not authorize another task/recovery owner.
 
 - Selected direction after discussion: native compatibility patch. The public adapter remains a comparison, not the implementation plan. Prove the patch and its distribution before changing Murph's dependency or admitting website voice work.
+Completed: 2026-09-21

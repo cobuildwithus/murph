@@ -681,7 +681,8 @@ jobs:
         run: node candidate/scripts/check-runner-bundle-budget-ci.mjs compare base candidate
 
       - name: Check one-vCPU container latency
-        timeout-minutes: 15
+        # Two bounded native source builds, then the unchanged benchmark budget.
+        timeout-minutes: 195
         run: |
           node --test candidate/scripts/check-container-latency-ci.test.mjs
           node candidate/scripts/check-container-latency-ci.mjs base candidate
