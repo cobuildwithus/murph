@@ -5015,6 +5015,10 @@ test("rebuildQueryProjection recreates v24 stores without unused indexes", async
       assert.equal(columnNames.includes("context_json"), false);
 
       for (const indexName of [
+        "query_entities_date_idx",
+        "query_entities_occurred_at_idx",
+        "query_search_document_date_idx",
+        "query_search_document_occurred_at_idx",
         "query_entities_experiment_idx",
         "query_entities_record_class_idx",
         "query_entities_stream_idx",
@@ -5024,16 +5028,12 @@ test("rebuildQueryProjection recreates v24 stores without unused indexes", async
       }
 
       for (const indexName of [
-        "query_entities_date_idx",
         "query_entities_family_idx",
         "query_entities_kind_idx",
-        "query_entities_occurred_at_idx",
         "query_metric_points_biomarker_latest_idx",
         "query_metric_points_metric_latest_idx",
-        "query_search_document_date_idx",
         "query_search_document_experiment_idx",
         "query_search_document_kind_idx",
-        "query_search_document_occurred_at_idx",
         "query_search_document_record_type_idx",
         "query_search_document_stream_idx",
       ]) {

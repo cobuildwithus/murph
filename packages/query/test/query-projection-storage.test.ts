@@ -7,7 +7,7 @@ import { deflateSync } from "node:zlib";
 
 import { addMeal, initializeVault } from "@murphai/core";
 import type { MetricPoint } from "@murphai/health-metrics";
-import { withImmediateTransaction } from "@murphai/runtime-state/node";
+import { openSqliteRuntimeDatabase, withImmediateTransaction } from "@murphai/runtime-state/node";
 import { test } from "vitest";
 
 import { getQueryProjectionStatus, listCanonicalEntitiesRuntime, rebuildQueryProjection } from "../src/query-projection.ts";
@@ -104,7 +104,8 @@ test("query replacement clears retired payloads for compression and preserves ro
   }
 });
 
-test("v29 caches rebuild once and current SQLite bytes remain reusable after restore", async () => {
+for (const version of [29, 30]) {
+test(`v${version} caches rebuild once and current SQLite bytes remain reusable after restore`, async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "murph-query-storage-upgrade-"));
   try {
     await initializeVault({ vaultRoot: root });
@@ -112,14 +113,23 @@ test("v29 caches rebuild once and current SQLite bytes remain reusable after res
     await rebuildQueryProjection(root);
     const before = await listCanonicalEntitiesRuntime(root);
     const location = currentQueryProjectionLocation(root);
-    const database = openQueryProjectionDatabase(location);
+    const database = openSqliteRuntimeDatabase(location.absolutePath, { journalMode: "DELETE" });
     try {
-      database.exec(`
-        DROP INDEX query_metric_points_biomarker_latest_idx;
-        CREATE INDEX query_metric_points_biomarker_latest_idx
-          ON query_metric_points(biomarker_key, effective_date DESC, observed_at DESC);
-        PRAGMA user_version = 29;
-      `);
+      // Recreate the physical layout of the previous cache generations.
+      database.exec(`PRAGMA page_size = 4096; VACUUM; PRAGMA user_version = ${version};`);
+      assert.equal(database.prepare("PRAGMA page_size").get()?.page_size, 4096);
+      if (version === 29) {
+        database.exec(`
+          DROP INDEX query_metric_points_biomarker_latest_idx;
+          CREATE INDEX query_metric_points_biomarker_latest_idx
+            ON query_metric_points(biomarker_key, effective_date DESC, observed_at DESC);
+        `);
+      }
+      for (const table of ["query_entities", "query_search_document"]) {
+        for (const column of ["date", "occurred_at"]) {
+          database.exec(`CREATE INDEX ${table}_${column}_idx ON ${table}(${column})`);
+        }
+      }
     } finally {
       database.close();
     }
@@ -128,6 +138,7 @@ test("v29 caches rebuild once and current SQLite bytes remain reusable after res
     assert.equal((await getQueryProjectionStatus(root)).fresh, true);
     const current = openQueryProjectionDatabase(location, { readOnly: true });
     try {
+      assert.equal(current.prepare("PRAGMA page_size").get()?.page_size, 8192);
       assert.equal(current.prepare("PRAGMA index_list(query_metric_points)").all()
         .find(row => row.name === "query_metric_points_biomarker_latest_idx")?.partial, 1);
     } finally {
@@ -141,3 +152,4 @@ test("v29 caches rebuild once and current SQLite bytes remain reusable after res
     await rm(root, { recursive: true, force: true });
   }
 });
+}

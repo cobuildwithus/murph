@@ -28,7 +28,8 @@ export const QUERY_PROJECTION_SCHEMA_ID = "murph.query-projection";
 // 28: Independently certify wearable rows; older full rebuilders must reset them.
 // 29: Rebuild sleep summaries and metrics with session classification and provider state.
 // 30: Omit null biomarker index entries and clear obsolete rebuild payloads.
-export const QUERY_PROJECTION_SQLITE_VERSION = 30;
+// 31: Pack JSON-heavy query rows in 8 KiB pages and omit unused date indexes.
+export const QUERY_PROJECTION_SQLITE_VERSION = 31;
 
 export interface QueryProjectionLocation {
   absolutePath: string;
@@ -96,7 +97,7 @@ export function openQueryProjectionDatabase(
   options: { create?: boolean; readOnly?: boolean; wearableOnly?: boolean } = {},
 ): DatabaseSync {
   const { wearableOnly = false, ...runtimeOptions } = options;
-  const database = openSqliteRuntimeDatabase(location.absolutePath, runtimeOptions);
+  const database = openSqliteRuntimeDatabase(location.absolutePath, { ...runtimeOptions, pageSize: 8192 });
 
   if (!(options.readOnly ?? false)) {
     // Rebuilds replace whole tables. Zero retired payloads so compressed
@@ -202,8 +203,6 @@ export function ensureQueryProjectionSchema(database: DatabaseSync): void {
 
     CREATE INDEX IF NOT EXISTS query_entities_family_idx ON query_entities(family);
     CREATE INDEX IF NOT EXISTS query_entities_kind_idx ON query_entities(kind);
-    CREATE INDEX IF NOT EXISTS query_entities_date_idx ON query_entities(date);
-    CREATE INDEX IF NOT EXISTS query_entities_occurred_at_idx ON query_entities(occurred_at);
 
     CREATE TABLE IF NOT EXISTS query_metric_points (
       id TEXT PRIMARY KEY,
@@ -279,8 +278,6 @@ export function ensureQueryProjectionSchema(database: DatabaseSync): void {
     CREATE INDEX IF NOT EXISTS query_search_document_kind_idx ON query_search_document(kind);
     CREATE INDEX IF NOT EXISTS query_search_document_stream_idx ON query_search_document(stream);
     CREATE INDEX IF NOT EXISTS query_search_document_experiment_idx ON query_search_document(experiment_slug);
-    CREATE INDEX IF NOT EXISTS query_search_document_date_idx ON query_search_document(date);
-    CREATE INDEX IF NOT EXISTS query_search_document_occurred_at_idx ON query_search_document(occurred_at);
 
     CREATE VIRTUAL TABLE IF NOT EXISTS query_search_fts USING fts5(
       title_text,

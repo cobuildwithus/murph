@@ -18,6 +18,12 @@ carrying previous generations into compressed workspace snapshots. This adds
 no vacuum pass or work to fresh read-only queries. The complete query database
 and its required sidecars remain eligible for encrypted checkpoint/restore;
 canonical source manifests still decide whether a restored cache is fresh.
+Version 31 creates query databases with 8 KiB pages to reduce overflow-page
+waste for JSON-heavy rows. The four standalone entity/search date indexes are
+omitted: existing date predicates use `COALESCE`/`substr`, while lexical search
+uses FTS rowids. Family/kind, metric, and wearable range indexes remain. No
+in-place vacuum changes existing files; the version reset creates the new
+layout. Runtime SQLite stores outside query retain their default page size.
 Older runners reject the new cache version and rebuild derived state through
 the existing reset path; the canonical format and query results do not change.
 
