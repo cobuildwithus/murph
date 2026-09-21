@@ -39,7 +39,7 @@ export const PINNED_CODEX_OPENAI_EGRESS_INVENTORY = {
   ],
   routes: [
     {
-      disposition: "blocked",
+      disposition: "allowed",
       feature: "public Live session setup (native patch)",
       method: "POST",
       owner: "codex",
@@ -49,7 +49,7 @@ export const PINNED_CODEX_OPENAI_EGRESS_INVENTORY = {
       transport: "http",
     },
     {
-      disposition: "blocked",
+      disposition: "allowed_scoped_websocket_only",
       feature: "public Live attachment (native patch)",
       method: "GET",
       owner: "codex",

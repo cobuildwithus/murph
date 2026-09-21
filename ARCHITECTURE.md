@@ -2531,6 +2531,17 @@ checks member, attempt, and generation before touching its existing voice handle
 Old containers without this capability reject the call; connection retries reuse
 the same offer. SDP travels only in bounded control requests, never in job state.
 
+Public Live egress reuses the runner's signed OpenAI credential and existing
+runtime authority. Creation admits only the bounded native WebRTC/client-delegation
+shape, with browser events limited to media controls and closure. The Worker wraps
+the provider's session id in a stateless, signed reference bound to member,
+attempt, and generation; attachment verifies that exact current owner before
+restoring the provider id upstream. An existing resource remains attachable while
+that owner retires or loses allowance so native cancellation can finish closing it.
+Creation still requires current spend authority. The Worker returns WebSocket
+upgrades unaccepted; native Codex owns frames and closure. There is no call table,
+second sideband, or JavaScript frame relay.
+
 Normalized input admission uses the existing signed Web callback and encrypted
 mailbox. Its narrow request contains only the call id, native input id, original
 timestamp, and bounded text. Web derives the member from authentication and checks

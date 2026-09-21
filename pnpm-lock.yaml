@@ -205,6 +205,9 @@ importers:
       '@types/node':
         specifier: ^25.6.2
         version: 25.6.2
+      '@types/ws':
+        specifier: 8.18.1
+        version: 8.18.1
       esbuild:
         specifier: ^0.28.1
         version: 0.28.1
@@ -223,6 +226,9 @@ importers:
       wrangler:
         specifier: 4.93.0
         version: 4.93.0(patch_hash=4034c9d23db261a0da21ef2d5ffa979a0ed4af7e395e09b0ac27db76ead6b83b)(@cloudflare/workers-types@4.20260518.1)(bufferutil@4.1.0)(utf-8-validate@6.0.6)
+      ws:
+        specifier: 8.21.0
+        version: 8.21.0(bufferutil@4.1.0)(utf-8-validate@6.0.6)
 
   apps/web:
     dependencies:

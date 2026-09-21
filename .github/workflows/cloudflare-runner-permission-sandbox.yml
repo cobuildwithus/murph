@@ -103,7 +103,7 @@ jobs:
       - name: Prove deployed Codex native Live and provider compatibility
         run: |
           pnpm --dir packages/assistant-engine exec vitest run --config vitest.config.ts test/assistant-codex-native-voice.test.ts --no-coverage
-          pnpm exec vitest run --config apps/cloudflare/vitest.config.ts apps/cloudflare/test/codex-openai-egress-conformance.test.ts --no-coverage
+          pnpm exec vitest run --config apps/cloudflare/vitest.config.ts apps/cloudflare/test/codex-openai-egress-conformance.test.ts apps/cloudflare/test/runner-egress-openai-live.test.ts --no-coverage
 
       - name: Allow capability-bearing nested user namespaces
         run: |

@@ -51,6 +51,25 @@ Updated: 2026-09-21
 
 ## Verification
 
+- Public Live creation and attachment now pass through the existing Worker egress
+  owner. A stateless signed reference binds the provider resource to the exact
+  member and runtime; native cancellation can still attach and close while that
+  owner retires. Browser permissions stay restricted to media controls and close.
+  The packaged patched CLI passes both ordinary closure and cancellation during
+  an in-flight creation through the actual egress implementation, with trusted
+  final usage. Eighteen focused cases pass with the native binary; 39 egress,
+  inventory, and image-contract cases pass without it (two opt-in native cases
+  skip). Cloudflare typecheck and complexity pass; egress debt falls from 11 to 7.
+  The Linux image workflow now runs the same native egress cases. These fixtures
+  prove native/policy composition, not Cloudflare's deployed WebSocket forwarding
+  or the complete authenticated browser/mailbox journey.
+- Dependency policy and ignored-build review pass without new script approvals.
+  The two test-only WebSocket dependencies reuse versions and snapshots already
+  present in the lockfile; no package snapshot or production dependency changes.
+  `pnpm deps:audit` fails with 109 repository-wide advisories (3 critical, 45 high,
+  54 moderate, 7 low). This is an unresolved audit result, not a passing check;
+  the patch does not introduce or upgrade any audited package version.
+
 - Public Live media now selects the managed OpenAI API provider even when local
   text turns use ChatGPT subscription authentication. Generated configuration
   registers both providers without changing the backing target or process owner.

@@ -164,6 +164,16 @@ to apply after cutover.
   and absent from job state, errors, and logs. Browser media carries no provider
   key or runtime credential. Native normalized input still requires the signed
   durable mailbox admission before ordinary backing work can run.
+- Public Live creation requires the signed runner-scoped OpenAI credential and
+  current runtime/spend authority. The bounded request permits only native client
+  delegation; browser events cannot append instructions, commentary, or start
+  another session. Attachment requires a signed resource reference bound to the
+  authenticated member and current attempt/generation, including its persisted
+  runner target. Raw provider ids and replaced owners are rejected. An existing
+  resource may attach during that exact owner's retirement or after allowance
+  revocation so native cancellation can close it; this cannot create a session.
+  Worker-owned credentials stay upstream, redirects are not followed, and neither
+  resource references nor private media payloads enter diagnostics.
 - The database-health cron is a platform operation, not runner provider egress.
   Its PlanetScale service-token id/token, Linq token, and two operator chat ids
   are required Worker-only secrets and must never enter runner env, URLs, logs,
