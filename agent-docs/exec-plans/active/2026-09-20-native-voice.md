@@ -61,7 +61,9 @@ Updated: 2026-09-21
   container/abort/owner cases, 18 shared parser cases, and 15 Web route cases.
   Cloudflare, Web, shared protocol, and control client typechecks pass. Complexity
   passes; extracting the existing wake request body lowers container entrypoint
-  debt by 12. These are component proofs; provider egress authorization, browser
+  debt by 11. Another 77 container/control, 26 Worker authorization, and 80 control
+  client/route checks pass, including private malformed-body rejection. These are
+  component proofs; provider egress authorization, browser
   UI, and the final composed journey remain unfinished.
 
 - The Cloudflare wrapper now supplies the invocation's voice handle with its
