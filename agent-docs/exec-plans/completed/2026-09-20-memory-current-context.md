@@ -71,8 +71,27 @@ now asserts retention of ended, ambiguous, mixed, and unfinished context.
   installation IDs, temp paths, and start time normalized; transport-only fields
   excluded by the scripted capture. Eight-preference identical fixture at base
   a32e29827edf and candidate; all eight vs three appear in private context.
-- Real-model journey: final nondestructive-policy run pending on the working
-  local subscription. Earlier auth-only failures reached no provider action.
+- Real-model journey: Ready on gpt-5.6-terra via local subscription. First
+  pass: exactly show, version-checked update, and upsert; no forget. Overlapping
+  replay: show only, identical records. Fresh conversation: two supplied options,
+  no tool calls, no memory preamble, and no extra check-in. Dates and exceptions
+  survived compaction; ended, ambiguous, mixed, and unfinished context remained.
+  Earlier auth-only failures reached no provider action.
 - Existing Frog entries cover the documented changelog cwd/generated-input
   workaround; no new friction entry created.
-- PR, exact-head CI, and final review: pending.
+- PR: #3617 opened and ready. ReviewGPT Round 1 passed on
+  `6abceb9f883607628d468da87ccd25877cd7ba32`, with zero qualifying findings.
+  Requested and reported model: gpt-6-pro, managed Mountain lane. Concrete model
+  and response hash match; exact committed turn and full attached snapshot were
+  confirmed. Wrapper-to-response wall time was approximately 389 seconds with
+  the enforced 180-second marked-response minimum. The response checked all 21
+  head blob hashes, traced the affected boundaries, and ran 150 selector cases;
+  substantive scope and artifact quality accepted by the parent.
+- Parent final review: scope, privacy, canonical ownership, bounded selection,
+  no new foreground I/O, backward-compatible record shape, and evidence reviewed.
+  No accepted findings remain. Explanatory plan closure does not change the
+  reviewed production behavior. Required CI is pending on the final PR head;
+  the PR body carries the eventual result. No merge or deployment performed.
+Status: completed
+Updated: 2026-09-20
+Completed: 2026-09-20
