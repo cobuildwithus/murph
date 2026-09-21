@@ -1,6 +1,6 @@
 # Preserve system mailbox handoff during shutdown
 
-Status: active
+Status: completed
 Created: 2026-09-21
 Updated: 2026-09-21
 
@@ -43,7 +43,8 @@ compatible, with the correction effective after the runner is replaced.
 
 ## Verification
 
-Pending reproduction and implementation. Production rollout is outside this PR task.
+Implementation and local verification are complete. Final external review and
+exact-head CI are tracked in PR #3640. Production rollout is outside this task.
 
 ### Candidate evidence
 
@@ -51,5 +52,15 @@ Three initial shutdown regressions failed before the fix with the synthetic
 shutdown AbortError. Six shutdown cases now pass with and without notifications,
 prove owned-work draining, restore checkpoints, finish once, and remain idle
 on later restores. Four focused runtime suites pass 129 tests. Runtime typecheck
-and complexity guard pass (debt 482, maximum 223, both unchanged). Changelog
-validation, external review, and exact-head CI remain pending.
+and complexity guard pass (debt 482, maximum 223, both unchanged). Web typecheck
+and all 10 changelog rendering tests pass. The documented app-directory test
+command misses root-relative discovery; the existing Frog entries
+`20260911184822-documented-changelog-test` and
+`20260912202546-changelog-focused-test` cover this friction. The passing command
+was `pnpm exec vitest run --config apps/web/vitest.config.ts --no-coverage apps/web/test/changelog-page.test.tsx`.
+
+Parent candidate review: Product UX Ready. The patch retains existing state and
+ownership, adds no calls or awaited stages, preserves two local result cases,
+and introduces no dependency or protocol change. Synthetic fixtures and the
+authored diff pass privacy review. Final review and CI remain PR completion gates.
+Completed: 2026-09-21

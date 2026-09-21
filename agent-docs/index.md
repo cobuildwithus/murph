@@ -108,7 +108,7 @@ implementation record is
 
 System-mailbox shutdown handoff is owned by `packages/assistant-runtime/README.md`;
 its checkpoint/restore proof is recorded in
-[`2026-09-21-device-shutdown-handoff.md`](exec-plans/active/2026-09-21-device-shutdown-handoff.md).
+[`2026-09-21-device-shutdown-handoff.md`](exec-plans/completed/2026-09-21-device-shutdown-handoff.md).
 
 Container CPU profiling implementation and synthetic verification are recorded in
 [`2026-09-21-container-cpu-profiling.md`](exec-plans/completed/2026-09-21-container-cpu-profiling.md).
