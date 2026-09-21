@@ -520,6 +520,9 @@ The broader dashboard latency work is recorded in
 The admission and runtime launch reduction is recorded in
 [`2026-09-17-ingress-admission-simplification.md`](exec-plans/completed/2026-09-17-ingress-admission-simplification.md).
 
+Five-minute ingress cache retention and member isolation proof are tracked in
+[`ingress cache retention`](exec-plans/active/2026-09-21-ingress-cache-five-minutes.md).
+
 ## Conventions
 
 Local feedback diagnostics are documented in
@@ -586,6 +589,3 @@ Covered startup mailbox-prefetch reuse and unknown-wake fallback are owned by
 
 WhatsApp phone verification across web and native clients is tracked in
 [`2026-09-21-whatsapp-phone-auth.md`](exec-plans/active/2026-09-21-whatsapp-phone-auth.md).
-
-Five-minute ingress cache retention and member isolation proof are tracked in
-[`ingress cache retention`](exec-plans/active/2026-09-21-ingress-cache-five-minutes.md).
