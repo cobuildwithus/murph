@@ -37,6 +37,10 @@ import { createCoalescingRuntimeWakeSignal } from "../src/hosted-runtime/runtime
 const completionStages = ["scopes", "delivery", "browser-write", "browser-publish", "acknowledgment", "checkpoint"] as const;
 type CompletionStage = typeof completionStages[number];
 const scenarios = [
+  ...(["before-completion", "scopes", "delivery"] as const).flatMap((stage) => [
+    { stage, wake: "shutdown" as const },
+    { stage, wake: "shutdown without notifications" as const },
+  ]),
   { stage: "scopes" as const, wake: "quiet" as const },
   { stage: "before-completion" as const, wake: "empty" as const },
   { stage: "before-completion" as const, wake: "conversation after empty" as const },
@@ -49,8 +53,10 @@ const scenarios = [
 test.each(scenarios)(
   "checkpointed completion at $stage with $wake wakes",
   async ({ stage, wake }) => {
+    const shutdown = wake === "shutdown" || wake === "shutdown without notifications";
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-projection-convergence-"));
     const controller = new AbortController();
+    const shutdownController = new AbortController();
     const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const events: string[] = [];
@@ -66,6 +72,7 @@ test.each(scenarios)(
     const mailboxItems: ReturnType<typeof createMailboxItem>[] = [];
     const emptyWakeChecked = createDeferred<void>();
     const releaseDelivery = createDeferred<void>();
+    const shutdownObserved = createDeferred<void>();
     const foregroundReached = new Error("Synthetic foreground phase reached.");
     let wakeChecks = 0;
     let injected = false;
@@ -75,6 +82,13 @@ test.each(scenarios)(
     const injectWake = async (at: CompletionStage, signal?: AbortSignal | null) => {
       if (wake === "quiet" || at !== stage || injected) return;
       injected = true;
+      if (shutdown) {
+        shutdownController.abort(new DOMException("Synthetic container shutdown.", "AbortError"));
+        shutdownObserved.resolve();
+        await withRealTimeout(releaseDelivery.promise, 2_000, () => "Shutdown did not drain owned projection work.");
+        signal?.throwIfAborted();
+        return;
+      }
       // Same-tick duplicate hints must collapse into one bounded mailbox read.
       for (let duplicate = 0; duplicate < 3; duplicate += 1) {
         runtimeWakeSignal.notify({ requestedProcessingMode: "default" });
@@ -101,6 +115,7 @@ test.each(scenarios)(
     let acknowledgments = 0;
     let scopeReads = 0;
     let emptyMailboxReads = 0;
+    let settledCheckpointCount = 0;
     const returnedWakes: (string | null)[] = [];
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date(TEST_NOW));
@@ -140,12 +155,17 @@ test.each(scenarios)(
           }),
           {
             vaultRoot,
-            runtimeWakeSignal,
+            runtimeWakeSignal: wake === "shutdown without notifications" ? undefined : runtimeWakeSignal,
             signal: controller.signal,
+            shutdownSignal: invocation === 0 ? shutdownController.signal : null,
             async createCheckpointSnapshot(_input, context) {
               if (stage === "before-completion" && !injected) {
                 injected = true;
-                runtimeWakeSignal.notify({ requestedProcessingMode: "default" });
+                if (shutdown) {
+                  shutdownController.abort(new DOMException("Synthetic container shutdown.", "AbortError"));
+                } else {
+                  runtimeWakeSignal.notify({ requestedProcessingMode: "default" });
+                }
               }
               if ((await readHostedSystemMailboxState(vaultRoot)).pending.length === 0) {
                 await injectWake("checkpoint", context?.signal);
@@ -253,6 +273,14 @@ test.each(scenarios)(
             }),
           },
         );
+        if (shutdown && invocation === 0 && stage !== "before-completion") {
+          let settled = false;
+          void run.then(() => { settled = true; }, () => { settled = true; });
+          await withRealTimeout(shutdownObserved.promise, 2_000, () => "Shutdown did not reach projection work.");
+          await setImmediate();
+          assert.equal(settled, false, "Shutdown must join owned work before returning.");
+          releaseDelivery.resolve();
+        }
         if (wake === "conversation after empty") {
           await assert.rejects(run, (error) => error === foregroundReached);
           assert.equal(injected, true);
@@ -264,8 +292,20 @@ test.each(scenarios)(
         const result = await run;
         returnedWakes.push(result.nextWakeAt ?? null);
         assert.notEqual(result.immediateRecheckRequested, true);
-        if (invocation > 0) {
-          assert.equal(checkpointRequests.length, 2, "Restores of completed work must not checkpoint again.");
+        if (shutdown && invocation === 0) {
+          assert.equal(injected, true);
+          assert.equal(acknowledgments, 0, "Shutdown must leave unfinished work unacknowledged.");
+          assert.equal(scopeReads, stage === "before-completion" ? 0 : 1);
+          assert.equal(browserWrites, 0, "Shutdown must not admit browser publication.");
+          assert.equal((await readHostedSystemMailboxState(vaultRoot)).pending[0]?.status, "recording");
+          assert.notEqual(workspace.redactedStatus?.hostedMailboxSystemHandledThroughSeq, "1");
+          assert.ok(result.nextWakeAt && Date.parse(result.nextWakeAt) <= Date.now(),
+            "Saved recording must remain due for the successor.");
+        } else if (settledCheckpointCount === 0) {
+          settledCheckpointCount = checkpointRequests.length;
+        } else {
+          assert.equal(checkpointRequests.length, settledCheckpointCount,
+            "Restores of completed work must not checkpoint again.");
         }
       }
 
@@ -280,16 +320,17 @@ test.each(scenarios)(
         handledThrough: workspace.redactedStatus?.hostedMailboxSystemHandledThroughSeq,
       });
       assert.equal(injected, wake !== "quiet");
-      assert.equal(wakeChecks, wake === "quiet" ? 0 : 1, evidence);
-      assert.equal(scopeReads, 1, evidence);
-      assert.equal(deliveries, 1, evidence);
+      assert.equal(wakeChecks, wake === "quiet" || shutdown ? 0 : 1, evidence);
+      assert.equal(scopeReads, shutdown && stage !== "before-completion" ? 2 : 1, evidence);
+      assert.equal(deliveries, shutdown && stage === "delivery" ? 2 : 1, evidence);
       assert.equal(browserWrites, 1, evidence);
       assert.equal(browserPublishes, 1, evidence);
-      assert.equal(checkpointRequests.length, 2, evidence);
+      if (!shutdown) assert.equal(checkpointRequests.length, 2, evidence);
       assert.equal(acknowledgments, 1, evidence);
       assert.deepEqual(pending.pending, [], evidence);
       assert.equal(workspace.redactedStatus?.hostedMailboxSystemHandledThroughSeq, "1", evidence);
-      assert.deepEqual(returnedWakes, [null, null, null], evidence);
+      assert.deepEqual(shutdown ? returnedWakes.slice(1) : returnedWakes,
+        shutdown ? [null, null] : [null, null, null], evidence);
       assert.equal(deviceSyncPort.fetchSnapshotCalls, 0, "Restored completion must not repeat provider work.");
     } finally {
       releaseDelivery.resolve();
