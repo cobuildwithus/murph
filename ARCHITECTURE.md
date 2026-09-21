@@ -2497,6 +2497,18 @@ explicit, and process shutdown closes native voice before terminating the CLI.
 Only native provider receipts establish confirmed closure and cumulative usage;
 the attachment itself owns no mailbox, billing ledger, or replay. Authenticated
 website and hosted lifetime wiring remain disabled until their owners are composed.
+The hosted voice entrypoint derives the identical process launch configuration
+used by ordinary turns. Its media thread may select the configured OpenAI provider
+without replacing a Venice or custom-inference backing target or process.
+
+The invocation's ephemeral call handle expires an unattached reservation after
+30 seconds, serializes native input admission, and wakes the runtime only after
+the mailbox owner accepts each input. It joins pending admission and trusted usage
+settlement when closing, including cancellation during startup. Selected delivery
+requires the exact call and accepted mailbox ids; the hosted outbox checks runtime
+liveness around speech and owns uncertain sends. Progress delivery has no speech
+port. These components still require the authenticated call-control and invocation
+keepalive integration; the handle alone does not hold a running workspace lease.
 
 Normalized voice inputs use the existing `conversation.message` mailbox shape
 with a call and input identity. The ordinary text admission path persists and
