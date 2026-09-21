@@ -17,16 +17,20 @@ import { getPrisma } from "../prisma";
 
 // One request-local projection serves both access and read-only allowance.
 // Mutating admission still re-reads allowance under its own beneficiary lock.
-export const hostedRuntimeUsageMemberSelect = {
-  ...hostedRuntimeAiMemberAccessSelect,
-  ...hostedAiUsageMemberSelect,
-  threadContainer: {
-    select: {
-      ...hostedRuntimeAiMemberAccessSelect.threadContainer.select,
-      monthlyUsageLimitUsdMicros: true,
+export function getHostedRuntimeUsageMemberSelect() {
+  // Construct at request time: allowance and runtime signaling already share
+  // an import cycle, so module initialization must not read their projections.
+  return {
+    ...hostedRuntimeAiMemberAccessSelect,
+    ...hostedAiUsageMemberSelect,
+    threadContainer: {
+      select: {
+        ...hostedRuntimeAiMemberAccessSelect.threadContainer.select,
+        monthlyUsageLimitUsdMicros: true,
+      },
     },
-  },
-} as const;
+  } as const;
+}
 
 export type HostedRuntimeUsageGateCheck =
   | {
@@ -62,7 +66,7 @@ export async function resolveHostedRuntimeAiUsageGate(input: {
   const memberState = input.memberState ?? (input.mode === "mutating"
     ? undefined
     : await prisma.hostedMember.findUnique({
-        select: hostedRuntimeUsageMemberSelect,
+        select: getHostedRuntimeUsageMemberSelect(),
         where: { id: input.userId },
       }) ?? undefined);
   const access = await readHostedRuntimeAiAccessDecision({
