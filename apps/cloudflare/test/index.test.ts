@@ -3371,6 +3371,17 @@ describe("cloudflare worker routes", () => {
 
   describe("hosted runtime control", () => {
     beforeEach(() => installOidcJwksFetch());
+    it("rejects voice reservations from signed runtime callbacks before admission", async () => {
+      const env = createWorkerEnv(createUserRunnerStub());
+      const ensure = vi.spyOn(runtimeProcessing, "ensurePostgresRuntimeProcessing");
+      const request = await signWebCallbackControlRequest(new Request("https://runner.example.test/internal/users/test-user/runtime/ensure-processing", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ voiceCallId: "call-synthetic", orchestrationAttemptId: "voice-synthetic" }),
+      }), env);
+      const response = await worker.fetch(request, env);
+      expect(response.status).toBe(400);
+      expect(ensure).not.toHaveBeenCalled();
+    });
     it("wakes the Postgres-owned runtime through the native adapter without activating UserRunner", async () => {
       const wake = vi.fn(async () => ({ kind: "accepted" as const, action: "woken" as const }));
       const env = createWorkerEnv(createUserRunnerStub(), {

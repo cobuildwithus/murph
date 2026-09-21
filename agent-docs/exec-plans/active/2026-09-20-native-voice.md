@@ -51,6 +51,19 @@ Updated: 2026-09-21
 
 ## Verification
 
+- Web reservation, connection, and close now reach the existing invocation's
+  voice handle through member-bound OIDC control and the persisted container
+  target. Admission checks session, origin, active access, consent, and allowance;
+  close remains available after policy revocation. Every effect retains the exact
+  member, attempt, generation, and call. The container forwards over direct TCP
+  without starting a stopped runner. Old containers reject missing capability,
+  and stale commands cannot affect a current call. Focused proof passes 276
+  container/abort/owner cases, 18 shared parser cases, and 15 Web route cases.
+  Cloudflare, Web, shared protocol, and control client typechecks pass. Complexity
+  passes; extracting the existing wake request body lowers container entrypoint
+  debt by 12. These are component proofs; provider egress authorization, browser
+  UI, and the final composed journey remain unfinished.
+
 - The Cloudflare wrapper now supplies the invocation's voice handle with its
   actual signed mailbox and usage ports. Cold admission carries only an opaque
   reservation in the existing job; warm admission forwards it through the exact

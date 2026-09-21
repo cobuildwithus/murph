@@ -1,4 +1,5 @@
 import { parseHostedRuntimeResourcePurge, parseHostedRuntimeResourcePurgeResponse, type HostedRuntimeResourcePurge } from "@murphai/hosted-execution/runtime-resource-purge";
+import { parseHostedVoiceControlRequest, parseHostedVoiceControlResponse, type HostedVoiceControlRequest, type HostedVoiceControlResponse } from "@murphai/hosted-execution";
 import {
   parseHostedCipherEnvelope,
   parseHostedUserRecipientPublicKeyJwk,
@@ -62,6 +63,7 @@ import {
   CLOUDFLARE_HOSTED_CONTROL_MEAL_PHOTO_KEY_HEADER,
   CLOUDFLARE_HOSTED_CONTROL_MEAL_PHOTO_SHA256_HEADER,
   buildCloudflareHostedControlBrowserVaultSessionPath,
+  buildCloudflareHostedControlVoiceControlPath,
   buildCloudflareHostedControlEnvironmentRealtimeCallPath,
   buildCloudflareHostedControlEnvironmentVoiceDeletePath,
   buildCloudflareHostedControlEnvironmentVoiceStagePath,
@@ -241,6 +243,7 @@ export type CloudflareHostedControlTelegramUsageLimitNoticeResponse =
   };
 
 export interface CloudflareHostedControlClient {
+  controlVoice(input: { userId: string; request: HostedVoiceControlRequest; signal?: AbortSignal }): Promise<HostedVoiceControlResponse>;
   createEnvironmentRealtimeCall(input: {
     sdp: string;
     userId: string;
@@ -274,6 +277,7 @@ export interface CloudflareHostedControlClient {
     userId: string;
   }): Promise<void>;
   ensureRuntimeProcessing(input: {
+    voiceCallId?: string;
     admission?: import("@murphai/hosted-execution/runtime-owner").HostedRuntimeOwnerResponse;
     commandTimeoutMs?: number;
     onTiming?: (timing: CloudflareHostedControlRuntimeEnsureProcessingTiming) => void;
@@ -500,6 +504,20 @@ export function createCloudflareHostedControlClient(
   };
 
   return {
+    controlVoice(input) {
+      const userId = requireCloudflareHostedControlUserId(input.userId);
+      return requestHostedExecutionAuthorizedJson({
+        baseUrl, boundUserId: userId, fetchImpl, getAuthorizationHeader,
+        label: "voice control",
+        parse: parseHostedVoiceControlResponse,
+        path: buildCloudflareHostedControlVoiceControlPath(userId),
+        request: {
+          method: "POST", headers: { "content-type": "application/json" },
+          body: JSON.stringify(parseHostedVoiceControlRequest(input.request)),
+        },
+        signal: input.signal, timeoutMs: 45_000,
+      });
+    },
     createEnvironmentRealtimeCall(input) {
       const userId = requireCloudflareHostedControlUserId(input.userId);
       const sdp = requireString(
@@ -652,6 +670,7 @@ export function createCloudflareHostedControlClient(
         request: {
           body: JSON.stringify({
             orchestrationAttemptId: input.orchestrationAttemptId,
+            voiceCallId: input.voiceCallId,
             ...(input.admission === undefined ? {} : { admission: input.admission }),
           }),
           headers: {

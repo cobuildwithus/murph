@@ -155,6 +155,15 @@ to apply after cutover.
 
 ## Runtime Security Posture
 
+- Website voice reservation and connection require the authenticated member,
+  same-origin mutation policy, active access, consent, and managed AI allowance.
+  Close remains available to that authenticated member after policy revocation.
+  Web derives member identity; the OIDC-bound Worker route and active container
+  invocation enforce the exact runtime attempt/generation and opaque call id.
+  Control commands cannot allocate or start a container. SDP is bounded in transit
+  and absent from job state, errors, and logs. Browser media carries no provider
+  key or runtime credential. Native normalized input still requires the signed
+  durable mailbox admission before ordinary backing work can run.
 - The database-health cron is a platform operation, not runner provider egress.
   Its PlanetScale service-token id/token, Linq token, and two operator chat ids
   are required Worker-only secrets and must never enter runner env, URLs, logs,

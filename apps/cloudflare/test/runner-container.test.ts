@@ -140,6 +140,29 @@ function expectRunnerContainerStartupFailureObservation(input: {
 }
 
 describe("RunnerContainer", () => {
+  it("forwards voice controls directly to an existing container without startup", async () => {
+    const fetchControl = vi.fn(async () => Response.json({ kind: "connected", sdp: "v=0\r\nanswer" }));
+    const h = createContainerDouble({ platformRunning: true, containerFetch: fetchControl });
+    const request = { action: "connect" as const, callId: "call-synthetic", attemptId: "attempt-synthetic",
+      leaseGeneration: "1", userId: "member-synthetic", sdp: "v=0\r\noffer" };
+    expect(await h.container.controlVoice(request)).toEqual({ kind: "connected", sdp: "v=0\r\nanswer" });
+    expect(fetchControl).toHaveBeenCalledWith("http://container/internal/voice-control", expect.objectContaining({
+      method: "POST", body: JSON.stringify(request),
+    }));
+    expect(h.start).not.toHaveBeenCalled();
+    expect(h.startAndWaitForPorts).not.toHaveBeenCalled();
+  });
+
+  it("never starts a stopped container for a voice command", async () => {
+    const h = createContainerDouble({ platformRunning: false });
+    expect(await h.container.controlVoice({
+      action: "close", callId: "call-synthetic", attemptId: "attempt-synthetic",
+      leaseGeneration: "1", userId: "member-synthetic",
+    })).toEqual({ kind: "unavailable" });
+    expect(h.containerFetch).not.toHaveBeenCalled();
+    expect(h.start).not.toHaveBeenCalled();
+    expect(h.startAndWaitForPorts).not.toHaveBeenCalled();
+  });
   beforeEach(() => {
     vi.clearAllMocks();
     vi.spyOn(runtimeOwnerClient, "commandHostedRuntimeOwner").mockResolvedValue({ cutover: "postgres", status: "updated", owner: null });

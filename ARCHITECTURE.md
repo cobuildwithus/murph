@@ -2496,7 +2496,7 @@ are consumed before another turn's transcript/event capture. Selected speech is
 explicit, and process shutdown closes native voice before terminating the CLI.
 Only native provider receipts establish confirmed closure and cumulative usage;
 the attachment itself owns no mailbox, billing ledger, or replay. Authenticated
-website and hosted lifetime wiring remain disabled until their owners are composed.
+website UI remains disabled until the complete hosted journey is verified.
 The hosted voice entrypoint derives the identical process launch configuration
 used by ordinary turns. Its media thread may select the configured OpenAI provider
 without replacing a Venice or custom-inference backing target or process.
@@ -2518,8 +2518,16 @@ handle with its signed mailbox and usage ports. An opaque call reservation trave
 through the existing fresh invocation or exact-owner wake; SDP is not job state.
 Before runtime readiness, ordinary wakes may coalesce but call reservations are
 rejected for retry. The wrapper exposes connection/close callbacks and joins
-cleanup even if invocation setup fails. Authenticated browser call-control still
-needs to expose those callbacks.
+cleanup even if invocation setup fails. The authenticated Web call controller
+checks origin, member access, consent, and allowance before reservation or connect.
+It returns the existing runtime attempt/generation; subsequent commands retain
+that fence and call id. Closing requires the member session and origin but remains
+available after allowance or consent changes. The OIDC-bound Worker route reads
+the current owner and forwards only to its persisted container target. The
+container uses direct TCP without starting a stopped runner, and the invocation
+checks member, attempt, and generation before touching its existing voice handle.
+Old containers without this capability reject the call; connection retries reuse
+the same offer. SDP travels only in bounded control requests, never in job state.
 
 Normalized input admission uses the existing signed Web callback and encrypted
 mailbox. Its narrow request contains only the call id, native input id, original
@@ -2547,7 +2555,8 @@ the final flush to replay. Failed accounting or exhausted allowance closes voice
 usage notices explicitly suppress fallback delivery on another channel. Pricing
 subtracts cumulative costs so event frequency cannot multiply rounding charges.
 A lost call is not resumed under the same call id, and unconfirmed provider closure
-does not fabricate final usage. This recorder is not yet attached to hosted calls.
+does not fabricate final usage. The Cloudflare invocation supplies the existing
+platform usage port; the complete real-provider hosted journey remains unverified.
 
 For established hosted conversation work, the first fresh auto-reply-enabled
 pre-pass Linq or Telegram input candidate staged after restore and final Codex
