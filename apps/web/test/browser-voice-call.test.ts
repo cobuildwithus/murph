@@ -16,6 +16,27 @@ class SyntheticPeer {
   createDataChannel() { return this.channel; }
   connected() { this.connectionState = "connected"; this.onconnectionstatechange?.(); }
 }
+class SyntheticAnalyser {
+  fftSize = 512;
+  amplitude = 0;
+  disconnect = vi.fn();
+  getFloatTimeDomainData(samples: Float32Array) { samples.fill(this.amplitude); }
+}
+class SyntheticAudioContext {
+  static latest: SyntheticAudioContext;
+  state = "running";
+  analysers: SyntheticAnalyser[] = [];
+  sources: Array<{ connect: ReturnType<typeof vi.fn>; disconnect: ReturnType<typeof vi.fn> }> = [];
+  resume = vi.fn(async () => {});
+  close = vi.fn(async () => { this.state = "closed"; });
+  constructor() { SyntheticAudioContext.latest = this; }
+  createAnalyser() { const analyser = new SyntheticAnalyser(); this.analysers.push(analyser); return analyser; }
+  createMediaStreamSource() {
+    const source = { connect: vi.fn(), disconnect: vi.fn() };
+    this.sources.push(source);
+    return source;
+  }
+}
 function pending<T>() {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>((done) => { resolve = done; });
@@ -46,6 +67,53 @@ beforeEach(() => vi.useFakeTimers());
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
 describe("browser voice media ownership", () => {
+  it("meters local speech, masks muted input and blocked output, and disposes before server closure", async () => {
+    vi.stubGlobal("AudioContext", SyntheticAudioContext);
+    const h = fixture();
+    await h.call.start();
+    SyntheticPeer.latest.ontrack?.({ streams: [h.stream] });
+    await Promise.resolve();
+    const context = SyntheticAudioContext.latest;
+    expect(context.analysers).toHaveLength(2);
+    context.sources.forEach((source, index) => expect(source.connect).toHaveBeenCalledExactlyOnceWith(context.analysers[index]));
+    context.analysers[0]!.amplitude = 0.1;
+    context.analysers[1]!.amplitude = 0.08;
+    SyntheticPeer.latest.connected();
+    await vi.advanceTimersByTimeAsync(50);
+    expect(h.states.at(-1)?.inputLevel).toBeGreaterThan(0.04);
+    expect(h.states.at(-1)?.outputLevel).toBeGreaterThan(0.04);
+    h.call.mute();
+    expect(h.states.at(-1)?.inputLevel).toBe(0);
+    await vi.advanceTimersByTimeAsync(50);
+    expect(h.states.at(-1)?.inputLevel).toBe(0);
+    expect(h.states.at(-1)?.outputLevel).toBeGreaterThan(0.04);
+    h.audio.play.mockRejectedValueOnce(new Error("blocked"));
+    await h.call.play();
+    await vi.advanceTimersByTimeAsync(50);
+    expect(h.states.at(-1)?.outputLevel).toBe(0);
+    const closure = pending<Response>();
+    h.fetch.mockImplementationOnce(() => closure.promise);
+    const closing = h.call.close();
+    expect(context.close).toHaveBeenCalledOnce();
+    context.sources.forEach((source) => expect(source.disconnect).toHaveBeenCalledOnce());
+    context.analysers.forEach((analyser) => expect(analyser.disconnect).toHaveBeenCalledOnce());
+    expect(h.states.at(-1)).toMatchObject({ phase: "ending", inputLevel: 0, outputLevel: 0 });
+    const count = h.states.length;
+    await vi.advanceTimersByTimeAsync(100);
+    expect(h.states).toHaveLength(count);
+    closure.resolve(Response.json({ kind: "closed", providerConfirmed: true, seconds: 12 }));
+    await closing;
+  });
+
+  it("keeps voice usable when optional audio metering is unavailable", async () => {
+    vi.stubGlobal("AudioContext", class { constructor() { throw new Error("unsupported"); } });
+    const h = fixture();
+    await h.call.start();
+    SyntheticPeer.latest.connected();
+    expect(h.states.at(-1)?.phase).toBe("connected");
+    await h.call.close();
+    expect(h.states.at(-1)?.phase).toBe("ended");
+  });
   it("starts only on request, uses one fenced call, mutes locally, and releases media before awaiting closure", async () => {
     const h = fixture();
     expect(h.getUserMedia).not.toHaveBeenCalled();
@@ -74,6 +142,7 @@ describe("browser voice media ownership", () => {
   });
 
   it("stops a microphone permission result arriving after cancellation without reserving work", async () => {
+    vi.stubGlobal("AudioContext", SyntheticAudioContext);
     const h = fixture();
     const permission = pending<typeof h.stream>();
     h.getUserMedia.mockImplementationOnce(() => permission.promise);
@@ -84,6 +153,8 @@ describe("browser voice media ownership", () => {
     expect(h.track.stop).toHaveBeenCalledOnce();
     expect(h.fetch).not.toHaveBeenCalled();
     expect(h.states.at(-1)?.phase).toBe("ended");
+    expect(SyntheticAudioContext.latest.close).toHaveBeenCalledOnce();
+    expect(SyntheticAudioContext.latest.analysers).toHaveLength(0);
   });
 
   it("closes an acknowledged reservation arriving after cancellation without connecting", async () => {

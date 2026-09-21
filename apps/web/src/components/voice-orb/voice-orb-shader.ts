@@ -35,18 +35,28 @@ void main() {
   float depth = sqrt(max(0.0, 1.0 - dot(uv, uv)));
   vec2 p = uv + pointer * 0.13 * depth;
   float t = time * 0.24;
-  vec2 flow = vec2(cloud(p * 1.7 + vec2(t, -t * 0.7)),
-                   cloud(p * 1.8 + vec2(-t * 0.5, t + 8.0)));
-  float billow = cloud(p * (2.0 + detail) + flow * 2.6 + vec2(t * 0.4, -t));
-  float wave = p.y - 0.36 * sin(p.x * 2.7 + t)
-    + (billow - 0.5) * (0.6 + detail * 0.7)
-    + 0.10 * sin(t * 3.0 + p.x * 4.0) * energy;
-  vec3 color = mix(mist, ink, smoothstep(-0.5, 0.55, wave));
-  float ribbonDistance = (wave + 0.07) * (4.2 + detail);
-  float ribbon = exp(-ribbonDistance * ribbonDistance);
-  color = mix(color, vec3(0.98, 0.985, 1.0), ribbon * 0.93);
-  float veil = cloud(p * 3.3 + flow + vec2(-t * 0.6, t));
-  color = mix(color, mist, smoothstep(0.43, 0.85, veil) * 0.35);
+
+  // Rotate a cloud bank through the sphere, with independent tilt and travel.
+  float angle = t * 0.22 + 0.55 * sin(t * 0.37) + 0.35 * sin(t * 0.83);
+  vec3 direction = normalize(vec3(sin(angle), cos(angle), 0.65 * sin(t * 0.29)));
+  float travel = 0.38 * sin(t * 0.61) + 0.2 * sin(t * 0.97 + 2.0)
+    + energy * 0.22 * sin(t * 0.43 + 1.3);
+  vec2 drift = vec2(t * 0.18, -t * 0.27);
+  vec2 flow = vec2(cloud(p * 1.4 + drift),
+                   cloud(p * 1.6 - drift * 0.7 + 8.0));
+  float billow = cloud(p * (2.2 + detail) + flow * 1.8 + drift);
+  float bank = dot(vec3(p, depth), direction) - travel
+    + (billow - 0.5) * (0.24 + detail * 0.3);
+
+  // Broad white banks dissolve into blue; fine wisps live at their edges.
+  vec3 color = mix(mist, ink, smoothstep(-0.25, 0.75, bank));
+  float softness = 2.4 + detail * 0.6;
+  float cloudDistance = (bank + 0.05) * softness;
+  float whiteCloud = exp(-cloudDistance * cloudDistance);
+  float wisps = cloud(p * 5.0 + flow * 2.0 + vec2(-t * 0.31, t * 0.23));
+  color = mix(color, vec3(0.96, 0.975, 1.0), whiteCloud * (0.78 + wisps * 0.2));
+  float veil = cloud(p * 1.8 - flow + vec2(t * 0.13, t * 0.19));
+  color = mix(color, mist, smoothstep(0.4, 0.85, veil) * (0.1 + energy * 0.08));
   color += pow(1.0 - depth, 3.0) * 0.075;
   gl_FragColor = vec4(color, alpha);
 }

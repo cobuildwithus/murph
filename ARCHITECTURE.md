@@ -2614,6 +2614,13 @@ connection failure release local media before awaiting server closure. A late
 startup cannot reopen an ended call or overwrite a newer call's UI/audio. Browser
 provider events supply bounded answer captions and request closure, but never
 establish trusted settlement. The existing native attachment owns final receipts.
+The shared decorative orb also serves the design playground. The browser call
+owns an optional local amplitude meter for microphone and received audio, and
+disposes it with media before awaiting server closure. Levels are transient UI
+state, never persisted or transmitted. Muting suppresses input motion while
+playback can continue; blocked playback suppresses output motion. The orb's
+call action mutes, and a separate end action closes the call. Graphics or meter
+unavailability does not prevent calls; reduced motion also disables speech scaling.
 
 Normalized input admission uses the existing signed Web callback and encrypted
 mailbox. Its narrow request contains only the call id, native input id, original

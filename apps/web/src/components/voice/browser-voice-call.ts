@@ -1,5 +1,6 @@
 import { parseHostedVoiceControlRequest, parseHostedVoiceControlResponse } from "@murphai/hosted-execution/voice-control";
 import { HostedOnboardingApiError, requestHostedOnboardingJson } from "@/src/components/hosted-onboarding/client-api";
+import { VoiceAudio, type VoiceLevels } from "./voice-audio";
 
 export type VoiceCallState = {
   phase: "idle" | "starting" | "connected" | "ending" | "ended" | "error";
@@ -7,7 +8,7 @@ export type VoiceCallState = {
   audioBlocked: boolean;
   transcript: string;
   message: string | null;
-};
+} & Partial<VoiceLevels>;
 export const INITIAL_VOICE_CALL_STATE: VoiceCallState = {
   phase: "idle", muted: false, audioBlocked: false, transcript: "", message: null,
 };
@@ -28,6 +29,7 @@ export function createBrowserVoiceCall(
   let events: RTCDataChannel | null = null;
   let connectionTimer: ReturnType<typeof setTimeout> | undefined;
   let closing: Promise<void> | null = null;
+  let levels: VoiceAudio | null = null;
   const changed = (patch: Partial<VoiceCallState>) => {
     state = { ...state, ...patch };
     onChange(state);
@@ -38,6 +40,8 @@ export function createBrowserVoiceCall(
     });
   function releaseMedia() {
     clearTimeout(connectionTimer);
+    levels?.dispose();
+    levels = null;
     for (const track of stream?.getTracks() ?? []) track.stop();
     events?.close();
     peer?.close();
@@ -56,7 +60,7 @@ export function createBrowserVoiceCall(
   function close(message: string | null = null): Promise<void> {
     if (closing) return closing;
     stopped = true;
-    changed({ phase: "ending", message });
+    changed({ phase: "ending", message, inputLevel: 0, outputLevel: 0 });
     // Release microphone synchronously, before any network or provider wait.
     releaseMedia();
     closing = closeOnServer().catch(() => {
@@ -116,8 +120,15 @@ export function createBrowserVoiceCall(
       if (!navigator.mediaDevices?.getUserMedia || typeof RTCPeerConnection === "undefined") {
         throw new Error("Voice is not supported.");
       }
+      levels = new VoiceAudio((next) => {
+        if (!stopped) changed({
+          inputLevel: state.muted ? 0 : next.inputLevel,
+          outputLevel: state.audioBlocked ? 0 : next.outputLevel,
+        });
+      });
       stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       if (stopped) { releaseMedia(); return; }
+      levels.attach("input", stream);
       peer = new RTCPeerConnection();
       for (const track of stream.getAudioTracks()) {
         peer.addTrack(track, stream);
@@ -127,6 +138,7 @@ export function createBrowserVoiceCall(
         if (stopped) return;
         remoteStream = event.streams[0] ?? new MediaStream([event.track]);
         audio.srcObject = remoteStream;
+        levels?.attach("output", remoteStream);
         void play();
       };
       peer.onconnectionstatechange = () => {
@@ -134,6 +146,7 @@ export function createBrowserVoiceCall(
         if (peer?.connectionState === "connected") {
           clearTimeout(connectionTimer);
           changed({ phase: "connected" });
+          levels?.setActive(true);
         } else if (peer?.connectionState === "failed" || peer?.connectionState === "disconnected") {
           void close("Connection lost. Start a new call when you are ready.");
         }
@@ -163,7 +176,7 @@ export function createBrowserVoiceCall(
       if (stopped || state.phase !== "connected") return;
       const muted = !state.muted;
       for (const track of stream?.getAudioTracks() ?? []) track.enabled = !muted;
-      changed({ muted });
+      changed({ muted, inputLevel: 0 });
     },
   };
 }
