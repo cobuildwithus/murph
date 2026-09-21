@@ -35,8 +35,9 @@ old/new processes can coexist and process replacement clears cached material.
 - [x] Extend TTL and current owner documentation.
 - [x] Prove five-minute reuse, fixed expiry, member isolation and revocation.
 - [x] Run focused crypto tests, Web typecheck, complexity and diff checks.
-- [ ] Push the owned PR and run ReviewGPT round 2 concurrently with exact-head CI.
-- [ ] Validate review, close this plan, verify CI and current-base mergeability.
+- [x] Push the owned PR and run ReviewGPT round 2 concurrently with exact-head CI.
+- [x] Validate review and close implementation plan. Final exact-head CI remains
+  tracked in the PR body by the same completion owner.
 
 Focused proof: 104 tests in five crypto/composition suites passed; the 29-case
 ingress suite passed again after adding four-minute revocation timing. The
@@ -45,3 +46,24 @@ complexity guard passed with no new debt. Existing changelog item
 Web typecheck passed after the final TypeScript edit. Parent candidate review
 confirmed only the TTL changes production behavior; key identity, authority,
 capacity, cancellation and erasure owners are unchanged. Product UX: Ready.
+
+## Review and handoff
+
+ReviewGPT round 2 passed on `844d67a557dfcb38a34f56ac4ba37c944e1701a8`,
+with zero findings and no unresolved accepted findings. Full sensitive snapshot,
+verified GPT-6 Pro response, exact capture/hash/marker, and over eight minutes of
+response time were validated. The reviewer traced member/domain/root identity,
+signed envelope and KMS context validation, request/transaction authority, real
+secure-box crypto and buffer ownership; 20 isolated actual-owner checks passed.
+Five-minute retention explicitly extends resident-key exposure and KMS-only
+revocation lag, while fresh database authority remains mandatory.
+
+After review, only the documentation index placement changed to avoid a current
+base append conflict. Merge-tree succeeds against fetched base
+`94698dcbfb8b9fdaa04b22539cf32f4cf6add769`. This closeout also changes only docs;
+production, tests, configuration and implemented contract equal the reviewed head.
+Final required CI is pending for the closeout head and must finish before PR
+completion. No merge, deployment or production performance claim.
+Status: completed
+Updated: 2026-09-21
+Completed: 2026-09-21
