@@ -576,3 +576,6 @@ Retained-owner device cadence and encoded-empty history convergence proof is tra
 Covered startup mailbox-prefetch reuse and unknown-wake fallback are owned by
 `references/hosted-runtime-protocol.md`; implementation is tracked in
 `exec-plans/completed/2026-09-21-startup-prefetch-wake.md`.
+
+WhatsApp phone verification across web and native clients is tracked in
+[`2026-09-21-whatsapp-phone-auth.md`](exec-plans/active/2026-09-21-whatsapp-phone-auth.md).
