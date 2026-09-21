@@ -2,7 +2,7 @@
 
 Canonical device import preparation reuse is owned by `packages/core/README.md`;
 regression proof and local measurements are tracked in
-[`2026-09-21-device-import-write-cost.md`](exec-plans/active/2026-09-21-device-import-write-cost.md).
+[`2026-09-21-device-import-write-cost.md`](exec-plans/completed/2026-09-21-device-import-write-cost.md).
 
 Direct meal execution and official nutrition-source inspection are owned by
 `packages/assistant-engine/skills/food-journal/SKILL.md`; focused proof is tracked in
