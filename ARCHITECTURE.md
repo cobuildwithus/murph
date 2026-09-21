@@ -2591,7 +2591,10 @@ deduplicates them before notifying a running turn. Successive inputs share a
 blinded call conversation; delivery retains the exact opaque call target.
 Accepted work remains eligible after media closes. The ordinary channel adapter
 requires accepted mailbox input identities and an invocation-bound speech port,
-with no ambient provider or other-channel fallback. Speech is non-idempotent, so
+with no ambient provider or other-channel fallback. Speech joins pending admission
+responses before checking local receipts, because the post-commit wake can run
+backing work before Web's response arrives; it rechecks call liveness afterward.
+Speech is non-idempotent, so
 uncertain delivery remains governed by the existing outbox policy. This channel
 contract does not itself admit a browser call or create a new work queue.
 

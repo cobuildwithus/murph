@@ -73,6 +73,15 @@ Updated: 2026-09-21
 
 ## Verification
 
+- Parent review reproduced an admission-response race: Web can commit and wake
+  backing work before the call receives its local acceptance receipt, causing a
+  valid selected answer to be rejected. Speech now joins the existing admission
+  promise before validating the receipt and rechecking call liveness. The new
+  delayed-response case failed before the fix; it and the concurrent-hangup case
+  now pass with 24 focused lifecycle, checkpoint, and usage checks. Runtime
+  typecheck and complexity pass, with no new state or queue. The queued hosted
+  proof launcher was stopped before rebuilding the changed runner bundle; the
+  local native image build and independent Linux CI continue.
 - The hosted voice proof additionally requires existing runtime diagnostics to
   show a successful tool action with no file changes, alongside the correct
   spoken fixture answer. Cloudflare typecheck and the focused durable tool-log

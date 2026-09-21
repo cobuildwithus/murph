@@ -129,6 +129,10 @@ export function createHostedRuntimeVoiceCall(input: {
       message: string;
       answeredMailboxItemIds: readonly string[];
     }): Promise<void> {
+      // Web wakes committed work before returning its admission response. Join
+      // that response before checking the local acceptance receipt, then recheck
+      // call liveness so a hangup during admission cannot speak a stale result.
+      await admissions.catch(() => { throw unavailable(); });
       if (
         !native || abort.signal.aborted || input.signal.aborted
         || request.callId !== input.callId

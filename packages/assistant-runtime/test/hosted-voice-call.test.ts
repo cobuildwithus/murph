@@ -80,7 +80,6 @@ describe("invocation-bound native voice", () => {
     f.options().onInput({ inputId: "two", text: "Synthetic correction" });
     await vi.waitFor(() => expect(f.admitInput).toHaveBeenCalledTimes(1));
     expect(f.notifyRuntime).not.toHaveBeenCalled();
-    await expect(f.call.speak({ callId: f.call.callId, message: "Too early", answeredMailboxItemIds: ["mailbox_one"] })).rejects.toThrow();
     first.resolve({ mailboxItemId: "mailbox_one" });
     await vi.waitFor(() => expect(f.notifyRuntime).toHaveBeenCalledTimes(2));
     expect(f.admitInput.mock.calls.map(([value]) => value)).toEqual([
@@ -90,6 +89,25 @@ describe("invocation-bound native voice", () => {
     expect(f.native.speak).not.toHaveBeenCalled();
     await f.call.speak({ callId: f.call.callId, message: "Selected result", answeredMailboxItemIds: ["mailbox_one", "mailbox_two"] });
     expect(f.native.speak).toHaveBeenCalledExactlyOnceWith("Selected result");
+  });
+
+  it.each([false, true])("joins a delayed admission response before speaking, closed=%s", async (closeBeforeResponse) => {
+    const f = fixture();
+    const admission = deferred<{ mailboxItemId: string }>();
+    f.admitInput.mockImplementationOnce(() => admission.promise);
+    await f.call.connect("offer", f.start);
+    f.options().onInput({ inputId: "one", text: "Synthetic request" });
+    await vi.waitFor(() => expect(f.admitInput).toHaveBeenCalledOnce());
+    // Web can commit and wake backing work before its HTTP response returns.
+    const delivery = f.call.speak({
+      callId: f.call.callId, message: "Selected result", answeredMailboxItemIds: ["mailbox_one"],
+    }).then(() => "sent", () => "unavailable");
+    expect(f.native.speak).not.toHaveBeenCalled();
+    const closing = closeBeforeResponse ? f.call.close() : null;
+    admission.resolve({ mailboxItemId: "mailbox_one" });
+    expect(await delivery).toBe(closeBeforeResponse ? "unavailable" : "sent");
+    expect(f.native.speak).toHaveBeenCalledTimes(closeBeforeResponse ? 0 : 1);
+    await closing;
   });
 
   it("fences wrong calls and unaccepted inputs and leaves uncertain speech to the outbox", async () => {
