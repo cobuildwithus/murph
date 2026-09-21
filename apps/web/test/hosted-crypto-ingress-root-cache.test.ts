@@ -111,11 +111,14 @@ test("two independent prepared requests seal/open real ciphertext with one KMS u
   expect(fixture.lock).toHaveBeenCalledTimes(2);
 });
 
-test("fixed TTL expires even after a warm hit; the next request unwraps again", async () => {
+test("five-minute fixed TTL survives spaced hits and expires without sliding", async () => {
   const fixture = createFixture();
   await fixture.addRoot();
   await fixture.unwrap();
-  vi.advanceTimersByTime(HOSTED_INGRESS_ROOT_CACHE_TTL_MS - 1);
+  vi.advanceTimersByTime(60_000);
+  await fixture.unwrap();
+  expect(fixture.decrypt).toHaveBeenCalledTimes(1);
+  vi.advanceTimersByTime(239_999);
   await fixture.unwrap();
   expect(fixture.decrypt).toHaveBeenCalledTimes(1);
   vi.advanceTimersByTime(1);
@@ -185,6 +188,7 @@ test("fresh status controls historical decryptability; a warm key cannot revive 
   const fixture = createFixture();
   const row = await fixture.addRoot();
   await fixture.unwrap();
+  vi.advanceTimersByTime(240_000);
   row.status = "decrypt_only";
   await expect(fixture.unwrap()).rejects.toThrow("not available for decrypt");
   await fixture.unwrapReference(row);
@@ -265,6 +269,53 @@ test("member/root identity stays isolated and non-ingress domains remain request
   }
   await expect(fixture.unwrap("runtime")).rejects.toThrow("not allowed");
   expect(fixture.decrypt).toHaveBeenCalledTimes(6);
+});
+
+test("concurrent members retain distinct warm keys and cannot open each other's ciphertext", async () => {
+  const fixture = createFixture();
+  const members = [USER, "member-cache-other"] as const;
+  for (const userId of members) await fixture.addRoot("ingress", userId);
+  const ciphertexts = new Map<string, string>();
+  const coldKeys = new Map<string, Uint8Array>();
+  const box = {
+    aad: { purpose: "synthetic-member-isolation", rowId: "same-synthetic-row" },
+    lane: "mailbox-payload" as const,
+    scope: "same-synthetic-mailbox",
+  };
+  try {
+    for (const phase of ["cold", "warm"] as const) {
+      if (phase === "warm") vi.advanceTimersByTime(240_000);
+      await Promise.all(members.map((userId) => runWithFreshHostedDomainRootUnwrapCache(async () => {
+        const prepared = await prepareHostedDomainRootForWeb({
+          domain: "ingress", prisma: fixture.prisma, reason: "test.member-isolation", userId,
+        });
+        const local = readPreparedHostedDomainRootForWebLocal(prepared);
+        const { rootKey } = await local.root;
+        if (phase === "cold") {
+          coldKeys.set(userId, Uint8Array.from(rootKey));
+          const ciphertext = await sealHostedUserSecureBoxStringFromPreparedRoot({
+            ...box, preparedRoot: local.root, preparedRootKeyId: local.rootKeyId,
+            userId, value: `synthetic private value for ${userId}`,
+          });
+          if (!ciphertext) throw new Error("Expected encrypted member payload.");
+          ciphertexts.set(userId, ciphertext);
+        } else {
+          const other = members.find((member) => member !== userId)!;
+          expect(rootKey).toEqual(coldKeys.get(userId));
+          expect(rootKey).not.toEqual(coldKeys.get(other));
+          await expect(openHostedUserSecureBoxStringFromPreparedRoot({
+            ...box, preparedRootKeyId: local.rootKeyId, userId, value: ciphertexts.get(userId),
+          })).resolves.toBe(`synthetic private value for ${userId}`);
+          await expect(openHostedUserSecureBoxStringFromPreparedRoot({
+            ...box, preparedRootKeyId: local.rootKeyId, userId, value: ciphertexts.get(other),
+          })).rejects.toThrow();
+        }
+      })));
+      expect(fixture.decrypt).toHaveBeenCalledTimes(2);
+    }
+  } finally {
+    for (const rootKey of coldKeys.values()) rootKey.fill(0);
+  }
 });
 
 test("changed signed generation, wraps, and signature never reuse the old immutable envelope entry", async () => {

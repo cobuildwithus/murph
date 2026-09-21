@@ -78,7 +78,7 @@ export function areHostedDomainRootProviderCallsDisabled(): boolean {
 
 // Non-sliding retention from successful unwrap, not last use. At most 4 KiB of
 // process-owned plaintext roots (plus independent request/caller copies).
-export const HOSTED_INGRESS_ROOT_CACHE_TTL_MS = 30_000;
+export const HOSTED_INGRESS_ROOT_CACHE_TTL_MS = 5 * 60_000;
 export const HOSTED_INGRESS_ROOT_CACHE_MAX_ENTRIES = 128;
 
 interface CachedHostedIngressRootKey {

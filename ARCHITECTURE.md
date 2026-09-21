@@ -3080,7 +3080,7 @@ reads are not ordinary direct-message classification.
 
 Web's crypto owner (`domain-root-store.ts` / `domain-root-unwrap-cache.ts`)
 may reuse successfully unwrapped **ingress** root bytes across requests in the
-same process. The process cache has a fixed, non-sliding 30-second lifetime per
+same process. The process cache has a fixed, non-sliding five-minute lifetime per
 successful entry and FIFO capacity of 128 roots (4 KiB of owned plaintext root
 material, apart from request/caller copies). Its identity hashes the complete
 verified envelope, including member, domain, root, generation, wraps, contexts
