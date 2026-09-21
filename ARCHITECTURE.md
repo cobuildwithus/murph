@@ -2498,6 +2498,15 @@ Only native provider receipts establish confirmed closure and cumulative usage;
 the attachment itself owns no mailbox, billing ledger, or replay. Authenticated
 website and hosted lifetime wiring remain disabled until their owners are composed.
 
+Native Live duration uses the existing immutable hosted usage ledger. The call's
+runtime recorder coalesces cumulative provider updates with one request in flight,
+records non-overlapping intervals, and retains an uncertain charge unchanged for
+the final flush to replay. Failed accounting or exhausted allowance closes voice;
+usage notices explicitly suppress fallback delivery on another channel. Pricing
+subtracts cumulative costs so event frequency cannot multiply rounding charges.
+A lost call is not resumed under the same call id, and unconfirmed provider closure
+does not fabricate final usage. This recorder is not yet attached to hosted calls.
+
 For established hosted conversation work, the first fresh auto-reply-enabled
 pre-pass Linq or Telegram input candidate staged after restore and final Codex
 config/auth preparation may begin process-only spawn and initialization while

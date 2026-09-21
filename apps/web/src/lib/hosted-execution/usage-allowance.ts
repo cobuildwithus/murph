@@ -74,6 +74,11 @@ import {
 import { renderUserFacingMessage } from "../hosted-messages/user-facing-messages";
 import { settleHostedUsageCreditForUsageTx } from "./usage-credits";
 import {
+  HOSTED_LIVE_PRICING_SOURCE,
+  HOSTED_LIVE_PRICING_VERSION,
+  priceHostedLiveUsage,
+} from "./usage-live";
+import {
   HOSTED_LOB_USAGE_PRICING_SOURCE,
   HOSTED_LOB_USAGE_PRICING_VERSION,
   matchHostedLobPhysicalNoteUsageRecord,
@@ -716,6 +721,11 @@ function resolveHostedAiUsageAllowancePricingDecision(
   const tokenPricingBasis =
     normalizeAssistantUsageTokenPricingBasis(record.tokenPricingBasis);
 
+  const audioPricing = resolveHostedAiUsageAudioPricingDecision({
+    record, counted, credentialSource, tokenPricingBasis,
+  });
+  if (audioPricing) return audioPricing;
+
   const lobPhysicalNote = matchHostedLobPhysicalNoteUsageRecord(record);
   if (lobPhysicalNote !== null) {
     assertHostedAiUsageLobPhysicalNoteTokenPricingBasis(tokenPricingBasis);
@@ -802,18 +812,6 @@ function resolveHostedAiUsageAllowancePricingDecision(
     };
   }
 
-  if (isHostedAiUsageAllowanceAudioModelRecord(record)) {
-    assertHostedAiUsageAllowanceAudioTokenPricingBasis(tokenPricingBasis);
-    return {
-      kind: "priced",
-      priced: priceHostedAiUsageAudioForAllowance({
-        counted,
-        credentialSource,
-        record,
-      }),
-    };
-  }
-
   const imageMatch = matchHostedAiUsageOpenAiImageRecord(record);
   if (imageMatch !== null) {
     assertHostedAiUsageAllowanceOpenAiImageTokenPricingBasis(tokenPricingBasis);
@@ -834,34 +832,6 @@ function resolveHostedAiUsageAllowancePricingDecision(
         counted,
         credentialSource,
         match: imageMatch,
-        record,
-      }),
-    };
-  }
-
-  const ttsMatch = matchHostedAiUsageElevenLabsTtsRecord(record);
-  if (ttsMatch !== null) {
-    assertHostedAiUsageAllowanceElevenLabsTokenPricingBasis(tokenPricingBasis, "TTS");
-    return {
-      kind: "priced",
-      priced: priceHostedAiUsageElevenLabsTtsForAllowance({
-        counted,
-        credentialSource,
-        match: ttsMatch,
-        record,
-      }),
-    };
-  }
-
-  const musicMatch = matchHostedAiUsageElevenLabsMusicRecord(record);
-  if (musicMatch !== null) {
-    assertHostedAiUsageAllowanceElevenLabsTokenPricingBasis(tokenPricingBasis, "Music");
-    return {
-      kind: "priced",
-      priced: priceHostedAiUsageElevenLabsMusicForAllowance({
-        counted,
-        credentialSource,
-        match: musicMatch,
         record,
       }),
     };
@@ -3296,6 +3266,79 @@ function readHostedAiUsageNonNegativeInteger(value: unknown): bigint | null {
       && value >= 0
     ? BigInt(value)
     : null;
+}
+
+function resolveHostedAiUsageAudioPricingDecision(input: {
+  record: AssistantUsageRecord;
+  counted: boolean;
+  credentialSource: AssistantUsageCredentialSource;
+  tokenPricingBasis: AssistantUsageTokenPricingBasis;
+}): HostedAiUsageAllowancePricingDecision | null {
+  const { record, counted, credentialSource, tokenPricingBasis } = input;
+  const liveCost = priceHostedLiveUsage(record);
+  if (liveCost !== null) {
+    return {
+      kind: "priced",
+      priced: {
+        costUsdMicros: counted ? liveCost : 0n,
+        counted,
+        pricingSnapshot: {
+          credentialSource,
+          audio: {
+            startDurationMs: String(record.rawUsageJson?.startDurationMs),
+            endDurationMs: String(record.rawUsageJson?.endDurationMs),
+            usdMicrosPerAudioMinute: "50000",
+          },
+          pricingSource: HOSTED_LIVE_PRICING_SOURCE,
+          schema: "murph.hosted-ai-usage-allowance-pricing.v1",
+          tokenPricingBasis,
+        },
+        pricingVersion: HOSTED_LIVE_PRICING_VERSION,
+      },
+    };
+  }
+
+  if (isHostedAiUsageAllowanceAudioModelRecord(record)) {
+    assertHostedAiUsageAllowanceAudioTokenPricingBasis(tokenPricingBasis);
+    return {
+      kind: "priced",
+      priced: priceHostedAiUsageAudioForAllowance({
+        counted,
+        credentialSource,
+        record,
+      }),
+    };
+  }
+
+  const ttsMatch = matchHostedAiUsageElevenLabsTtsRecord(record);
+  if (ttsMatch !== null) {
+    assertHostedAiUsageAllowanceElevenLabsTokenPricingBasis(tokenPricingBasis, "TTS");
+    return {
+      kind: "priced",
+      priced: priceHostedAiUsageElevenLabsTtsForAllowance({
+        counted,
+        credentialSource,
+        match: ttsMatch,
+        record,
+      }),
+    };
+  }
+
+  const musicMatch = matchHostedAiUsageElevenLabsMusicRecord(record);
+  if (musicMatch !== null) {
+    assertHostedAiUsageAllowanceElevenLabsTokenPricingBasis(tokenPricingBasis, "Music");
+    return {
+      kind: "priced",
+      priced: priceHostedAiUsageElevenLabsMusicForAllowance({
+        counted,
+        credentialSource,
+        match: musicMatch,
+        record,
+      }),
+    };
+  }
+
+  return null;
 }
 
 // Only Worker-recorded Workers AI transcription rows take the audio-priced

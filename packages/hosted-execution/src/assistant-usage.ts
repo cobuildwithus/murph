@@ -50,6 +50,8 @@ const ASSISTANT_USAGE_RAW_DETAIL_TOKEN_KEYS = new Map<string, ReadonlySet<string
 const ASSISTANT_USAGE_RAW_AUDIO_KEYS = new Set<string>([
   "audioBytes",
   "durationMs",
+  "startDurationMs",
+  "endDurationMs",
 ]);
 const ASSISTANT_USAGE_RAW_TTS_KEYS = new Set<string>([
   "characterCount",
@@ -590,6 +592,55 @@ export function buildAssistantMaintenanceUsageRecord(input: {
       attemptCount: 1,
       turnId,
     }),
+  });
+}
+
+export const HOSTED_LIVE_USAGE_SOURCE = "codex.live.session.usage";
+export const HOSTED_LIVE_USAGE_VERSION = "codex-live-duration-v1";
+
+/** One non-overlapping interval from trusted native cumulative usage. */
+export function buildHostedLiveUsageRecord(input: {
+  sessionId: string;
+  memberId: string;
+  occurredAt: string;
+  startDurationMs: number;
+  endDurationMs: number;
+}): AssistantUsageRecord {
+  if (!input.sessionId.trim() || !input.memberId.trim()) {
+    throw new TypeError("Live usage requires a session and member.");
+  }
+  if (!Number.isSafeInteger(input.startDurationMs) || input.startDurationMs < 0
+    || !Number.isSafeInteger(input.endDurationMs)
+    || input.endDurationMs <= input.startDurationMs) {
+    throw new TypeError("Live usage requires an increasing duration interval.");
+  }
+  const digest = createHash("sha256")
+    .update(JSON.stringify([input.memberId, input.sessionId, input.startDurationMs, input.endDurationMs]))
+    .digest("hex");
+  const turnId = `turn_live_${digest}`;
+  return parseAssistantUsageRecord({
+    apiKeyEnv: "OPENAI_API_KEY",
+    attemptCount: 1,
+    baseUrl: "https://api.openai.com/v1",
+    credentialSource: "platform",
+    featureKey: "live-voice",
+    memberId: input.memberId,
+    occurredAt: input.occurredAt,
+    provider: "codex-cli",
+    providerName: "openai",
+    rawUsageJson: {
+      startDurationMs: input.startDurationMs,
+      endDurationMs: input.endDurationMs,
+    },
+    requestedModel: "gpt-live-1",
+    schema: ASSISTANT_USAGE_SCHEMA,
+    sessionId: input.sessionId,
+    surface: "hosted-runtime",
+    triggerKind: "live-voice",
+    turnId,
+    usageId: createAssistantUsageId({ attemptCount: 1, turnId }),
+    usageExtractionSourcePath: HOSTED_LIVE_USAGE_SOURCE,
+    usageExtractionVersion: HOSTED_LIVE_USAGE_VERSION,
   });
 }
 

@@ -51,6 +51,8 @@ Updated: 2026-09-21
 
 ## Verification
 
+- Native voice billing now has a bounded recorder and pricing through the existing immutable usage ledger, without a new billing table or queue. One in-flight write coalesces provider totals; an uncertain response retains the exact immutable record for final-flush replay. Failed accounting or exhausted allowance closes the call, and an explicit null notice target prevents cross-channel fallback. Pricing is the difference between cumulative costs at the [published $0.05/minute rate](https://developers.openai.com/api/docs/models/gpt-live-1), so event partitioning does not compound rounding. The runtime recorder's seven cases and 149 Web pricing/allowance cases pass, as do runtime, shared-contract, and Web typechecks. Complexity passes, reducing the existing pricing dispatcher debt by grouping its audio pricing branches. This is component evidence: the recorder still needs the actual hosted call owner, and no website voice feature is enabled by this commit.
+
 - Pinned-binary local provider probe: verify exact RPC, HTTP, and sideband event shapes without provider calls.
 - Passed the pinned 0.153.4 native V3 compatibility test: one WebRTC create, one native sideband, two successive backing turns, two tool calls on the same thread, native result forwarding, and explicit stop. No host `turn/start` requests or live provider calls were used.
 - `pnpm --dir packages/assistant-engine exec vitest run --config vitest.config.ts test/assistant-codex-native-voice.test.ts --no-coverage`: passed.
