@@ -605,3 +605,7 @@ Query page packing and unused date-index removal are tracked in
 
 Query metric payload deduplication and transaction/restore proof are tracked in
 [`metric payload storage`](exec-plans/completed/2026-09-21-workspace-metric-dedup.md).
+
+Requested delegated-answer waiting and preserved nonblocking onboarding are
+owned by `ARCHITECTURE.md`; verification is tracked in
+`exec-plans/active/2026-09-21-delegated-answer-wait.md`.

@@ -1412,6 +1412,50 @@ describeRealCodex('real Codex Astra configuration e2e', () => {
   }, 180_000)
 })
 
+describeRealCodex('real Codex requested delegation e2e', () => {
+  it('returns the requested child lookup answer before ending the root turn', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-delegated-answer-e2e-'))
+    const childUsages: AssistantProviderUsageDraft[] = []
+    try {
+      await writeFile(path.join(workingDirectory, 'trip-note.txt'), 'Pack a folding umbrella.\n')
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never',
+        baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome,
+        configOverrides: CHILD_MODEL_SELECTION_CONFIG_OVERRIDES,
+        developerInstructions: buildDirectConversationDeveloperInstructions(),
+        dynamicTools: [],
+        env: config.env,
+        model: config.model,
+        modelProvider: config.modelProvider,
+        onAdditionalUsage: async (usage) => { childUsages.push(usage) },
+        prompt: 'Please delegate reading trip-note.txt to one subagent and tell me what it says to pack.',
+        reasoningEffort: 'low',
+        sandbox: 'read-only',
+        workingDirectory,
+      })
+      process.stdout.write(`[delegated-answer-e2e] ${JSON.stringify({
+        reply: result.finalMessage.trim(), childCount: childUsages.length,
+      })}\n`)
+      expect(result.finalMessage).toMatch(/folding umbrella/iu)
+      expect(result.finalMessage).not.toMatch(/still (?:checking|working)|will (?:send|let you know)|I'll (?:send|let you know)|check back/iu)
+      expect(childUsages).toHaveLength(1)
+      expect(childUsages[0]?.providerRequestOutcome).toBe('succeeded')
+      // The child owns the lookup; the root must not duplicate the file read.
+      expect(readCapabilityRoutingActions(result.jsonEvents).filter((action) =>
+        action.kind === 'command' && action.command.includes('trip-note.txt'),
+      )).toEqual([])
+      // Native waiting must also remain compatible with the hosted checkpoint boundary.
+      await waitForWarmCodexBackgroundWork()
+    } finally {
+      await stopWarmCodexAppServer('delegated-answer-e2e-complete')
+      await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+    }
+  }, 360_000)
+})
+
 describeRealCodex('real Codex child model selection e2e', () => {
   it(
     'runs a Luna child through native collaboration',
