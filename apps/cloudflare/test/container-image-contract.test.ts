@@ -498,7 +498,7 @@ describe("hosted runner container image contract", () => {
     expect(baseDockerfile).toContain("export CODEX_BWRAP_SHA256=");
     expect(baseDockerfile).toContain("ARG CODEX_CLI_VERSION=0.153.4");
     expect(baseDockerfile).toContain("COPY --from=codex-package /opt/codex/ /opt/codex/");
-    expect(baseDockerfile).toContain("cargo build --locked --release --target x86_64-unknown-linux-gnu --bin codex");
+    expect(baseDockerfile).toContain("cargo build --locked --release --target x86_64-unknown-linux-gnu --bin codex --jobs 2");
     expect(baseDockerfile).toContain("sha256sum /opt/codex/codex-resources/bwrap");
     expect(baseDockerfile).toContain("COPY --from=codex-builder /opt/codex/ /usr/local/lib/murph-codex/");
     expect(baseDockerfile).toContain("test -x /usr/local/lib/murph-codex/bin/codex-code-mode-host");

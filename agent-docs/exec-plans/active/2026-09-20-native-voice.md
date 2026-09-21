@@ -73,6 +73,12 @@ Updated: 2026-09-21
 
 ## Verification
 
+- The local Linux release link exhausted Docker memory after about 74 minutes;
+  Docker recovered without a restart. Cargo now uses two jobs instead of the
+  VM's full CPU count, retaining the upstream release optimization profile.
+  Twenty-one packaging/fingerprint checks and Cloudflare typecheck pass; a fresh
+  bounded build is running, so resource sufficiency is not yet proven. The
+  admission-order runner bundle passed size and executable parity guards.
 - Parent review reproduced an admission-response race: Web can commit and wake
   backing work before the call receives its local acceptance receipt, causing a
   valid selected answer to be rejected. Speech now joins the existing admission

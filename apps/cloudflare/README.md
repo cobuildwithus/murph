@@ -965,6 +965,8 @@ release archive, Rust builder, and matching npm helper package, applies
 `patches/codex-public-live.patch`, and replaces only the CLI. The bundled Code Mode
 host, shell resources, and sandbox helper remain from the same release. The image
 records the upstream revision and patch SHA-256 in `murph-source-revision`.
+Cargo concurrency is capped at two jobs so a high CPU count does not expand the
+native build's memory demand; the upstream release optimization profile is kept.
 
 Public WebRTC sessions restrict browser commands to mute, unmute, and close.
 Instructions and delegated results stay on the native trusted connection; the

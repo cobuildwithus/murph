@@ -43,12 +43,13 @@ RUN python3 -c 'import pathlib, sys, tomllib; p = pathlib.Path("codex-rs/Cargo.l
 
 # Embed the checksum of the exact bundled sandbox helper we preserve, then
 # replace only the CLI. No separate helper or native-package release is needed.
+# Bound compiler concurrency instead of using every CPU in a local Docker VM.
 RUN git apply --check /tmp/codex-public-live.patch \
   && git apply /tmp/codex-public-live.patch \
   && cd codex-rs \
   && export CODEX_BWRAP_SHA256="$(sha256sum /opt/codex/codex-resources/bwrap | cut -d ' ' -f 1)" \
   && export STABLE_GIT_COMMIT="${CODEX_UPSTREAM_REVISION}.murph.$(sha256sum /tmp/codex-public-live.patch | cut -d ' ' -f 1)" \
-  && cargo build --locked --release --target x86_64-unknown-linux-gnu --bin codex \
+  && cargo build --locked --release --target x86_64-unknown-linux-gnu --bin codex --jobs 2 \
   && strip --strip-debug --strip-unneeded target/x86_64-unknown-linux-gnu/release/codex \
   && install -m 0755 target/x86_64-unknown-linux-gnu/release/codex /opt/codex/bin/codex \
   && printf '%s\n' "${STABLE_GIT_COMMIT}" > /opt/codex/murph-source-revision
