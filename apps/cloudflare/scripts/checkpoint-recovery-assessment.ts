@@ -153,6 +153,8 @@ function inventoryObjectKey(object: unknown, prefix: string): string {
 }
 
 function inventoryCursor(info: unknown): string | undefined {
+  // R2 omits this optional section entirely on its final listing page.
+  if (info === undefined) return undefined;
   if (!record(info)) throw new Error("invalid_recovery_listing");
   if (info.cursor === undefined || info.cursor === null || info.cursor === "") return undefined;
   if (typeof info.cursor !== "string" || info.cursor.length > 4096) throw new Error("invalid_recovery_cursor");

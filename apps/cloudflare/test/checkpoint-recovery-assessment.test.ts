@@ -96,6 +96,23 @@ describe("unindexed artifact authentication", () => {
 });
 
 describe("bounded recovery census", () => {
+  it("finishes a paginated R2 listing when the final page omits result_info", async () => {
+    const prefix = "users/synthetic/artifacts/";
+    const keys = ["a", "b", "c"].map((letter) => `${prefix}${letter.repeat(48)}.artifact.bin`);
+    let pages = 0;
+    const fetchImpl: typeof fetch = async (url) => {
+      pages++;
+      if (pages === 1) return Response.json({ success: true, result: keys.slice(0, 2).map((key) => ({ key })),
+        result_info: { cursor: "synthetic-cursor", is_truncated: true, per_page: 1000 } });
+      expect(new URL(String(url)).searchParams.get("cursor")).toBe("synthetic-cursor");
+      return Response.json({ success: true, result: [{ key: keys[2] }] });
+    };
+    const found: string[] = [];
+    for await (const item of readArtifactInventory({ api: "https://storage.invalid/objects", prefix, token: "synthetic",
+      fetchImpl, readObject: async () => new Response("synthetic"), stats: { objects: 0, bytes: 0 } })) found.push(item.key);
+    expect(found).toEqual(keys);
+    expect(pages).toBe(2);
+  });
   it("charges concurrent streams against one total byte budget", async () => {
     const budget = { bytes: 512 * 1024 * 1024 - 3 };
     const results = await Promise.allSettled([
