@@ -1,6 +1,6 @@
 # Close retained device wake and empty history convergence gaps
 
-Status: active
+Status: completed
 Created: 2026-09-21
 Updated: 2026-09-21
 
@@ -35,9 +35,12 @@ Proof: composed mailbox-to-maintenance admission and cold-restored job convergen
 - Parent candidate review preserves account/lifecycle boundaries, accepted history-window union, foreground yield and malformed/nonempty evidence exclusion. No schema, protocol, dependency or new state owner.
 - Product UX: Ready for the bounded internal scheduling correction. Existing coverage and freshness remain; actual container savings require post-deployment observation.
 - Changelog: not applicable; internal background compute scheduling and retry consolidation with unchanged member-facing data, controls and freshness contract.
-- Final ReviewGPT, exact-head CI, merge and protected deployment remain pending in the PR lane.
+- Final ReviewGPT: PASS on `07d58221e71e0d1e93917f664edb5201e808c746`, Eragon lane, requested and response model `gpt-6-pro`. Exact prompt/response identities and response SHA match; the completed substantive review inspected all seven files and both changed owner paths, reported no qualifying findings, and passed the enforced 180-second minimum. Review: https://chatgpt.com/c/6ab151b9-0748-83ea-9932-6767565f0432.
+- Base reconciliation at `ad8972e57159552cb0805b2d20896338fc8ea0fd` preserved both independent index entries. The production correction is byte-identical to the reviewed head. Runtime/coverage tests, both package typechecks and docs drift passed again.
+- Parent final review accepts the review and finds no unresolved issues. Implementation and local verification are complete. PR #3627 owns remaining exact-head CI, authorized merge, protected deployment and production observation; these external outcomes are not claimed by this implementation record.
 
 ## Compatibility and ownership
 
 The existing account-scoped scheduler owns the early full pull; actual dirty job admission qualifies a retained reconciliation wake. The existing SQLite admission owner recognizes only absent or valid version-one empty unresolved evidence and preserves all other retry owners. Old and new runtimes read the same job and mailbox payloads. No Web or Temporal wire contract changes or migration is required; mixed runtimes may retain redundant work until the candidate serves them. No production cadence proof is fabricated from partial webhook work.
 
+Completed: 2026-09-21
