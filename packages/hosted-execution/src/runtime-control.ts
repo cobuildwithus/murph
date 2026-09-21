@@ -1,3 +1,16 @@
+import {
+  HOSTED_MAILBOX_LANES,
+  type HostedMailboxLane,
+  type HostedWorkspaceInvocationProcessingMode,
+} from "./runtime-control-values.ts";
+export {
+  HOSTED_MAILBOX_LANES,
+  HOSTED_WORKSPACE_INVOCATION_PROCESSING_MODES,
+  isHostedMailboxLane,
+  type HostedMailboxLane,
+  type HostedWorkspaceInvocationProcessingMode,
+} from "./runtime-control-values.ts";
+
 import type { HostedGroupSharedReadOptions, HostedGroupSharedDateCoverage } from "./group-shared-history.ts";
 export { parseHostedGroupSharedReadOptions, pageHostedGroupSharedHistory, parseHostedGroupSharedDateCoverage,
   HOSTED_GROUP_SHARED_READ_RESPONSE_MAX_BYTES, HOSTED_GROUP_SHARED_HISTORY_PAGE_MAX_BYTES,
@@ -58,13 +71,6 @@ import {
 import type {
   HostedRuntimePendingGroupSetupInput,
 } from "./pending-group-setup.ts";
-
-export const HOSTED_MAILBOX_LANES = [
-  "system",
-  "conversation",
-] as const;
-
-export type HostedMailboxLane = (typeof HOSTED_MAILBOX_LANES)[number];
 
 export const HOSTED_RUNTIME_FAILURE_PHASE_NAMES = [
   "browser_vault.refresh",
@@ -3979,15 +3985,6 @@ export interface HostedWorkspaceInvocationBudget {
   maxRuntimeMs?: number | null;
 }
 
-export const HOSTED_WORKSPACE_INVOCATION_PROCESSING_MODES = [
-  "default",
-  "inbox_media_retention",
-  "system_mailbox",
-] as const;
-
-export type HostedWorkspaceInvocationProcessingMode =
-  (typeof HOSTED_WORKSPACE_INVOCATION_PROCESSING_MODES)[number];
-
 export interface HostedWorkspaceInvocationRequest {
   assistantExecutionBlocked?: true;
   attemptId: string;
@@ -4070,10 +4067,6 @@ function readHostedRuntimeRetryableMailboxBlockedCount(value: unknown): bigint {
   throw new TypeError(
     "Hosted runtime retryable mailbox blocked count must be a non-negative integer.",
   );
-}
-
-export function isHostedMailboxLane(value: string): value is HostedMailboxLane {
-  return HOSTED_MAILBOX_LANES.includes(value as HostedMailboxLane);
 }
 
 export function isHostedMailboxKind(value: string): value is HostedMailboxKind {
