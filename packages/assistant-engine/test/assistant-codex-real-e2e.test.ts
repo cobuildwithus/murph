@@ -3168,6 +3168,28 @@ describe('real Codex live fixture contracts', () => {
     }
   })
 
+  it('keeps restaurant fixture batch reads on the CLI result contract', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'restaurant-batch-contract-'))
+    try {
+      const binDirectory = path.join(root, 'bin')
+      const commandLogPath = path.join(root, 'commands')
+      await materializeRestaurantMealVaultCli({ binDirectory, commandLogPath, scenario: 'official-source' })
+      const cli = path.join(binDirectory, 'vault-cli')
+      const argv = [
+        ['memory', 'show', '--compact', '--format', 'json'],
+        ['food', 'search-labels', '--query', 'Harbor Bowl chicken plate', '--format', 'json'],
+      ]
+      const result = await execFileAsync(cli, ['batch', '--compact', '--format', 'json',
+        ...argv.flatMap(command => ['--command', JSON.stringify(command)])])
+      const batch = vaultCliBatchResultSchema.parse(JSON.parse(result.stdout))
+      expect(batch).toMatchObject({ count: 2, failed: 0, succeeded: 2 })
+      expect(batch.commands.map(command => command.argv)).toEqual(argv)
+      expect(batch.commands[1]).toMatchObject({ ok: true, data: { items: [] } })
+      expect(await readFile(commandLogPath, 'utf8')).not.toContain('meal add')
+      await expect(execFileAsync(cli, ['meal', 'add', '--schema'])).rejects.toThrow()
+    } finally { await removeRealCodexTemporaryPath(root) }
+  })
+
   it('keeps automatic meal closeout fixture help read-only', async () => {
     const root = await mkdtemp(path.join(tmpdir(), 'automatic-meal-help-'))
     try {
@@ -30805,15 +30827,25 @@ describeRealCodex('real Codex restaurant meal nutrition e2e', () => {
     }
   })
 
-  it('uses the official restaurant source after an exact menu miss', {
+  it.each(['item-page', 'landing-page'] as const)('uses the official restaurant source after an exact menu miss: %s', {
     timeout: 900_000,
-  }, async () => {
+  }, async (entryPage) => {
     const config = await resolveRealCodexE2eConfig()
     const workingDirectory = await mkdtemp(
       path.join(tmpdir(), 'murph-restaurant-official-source-e2e-'),
     )
     const officialNutritionUrl =
       'https://harbor-bowl.example.test/nutrition'
+    const startUrl = entryPage === 'landing-page'
+      ? 'https://harbor-bowl.example.test/'
+      : officialNutritionUrl
+    const nutritionText = [
+      'Harbor Bowl official nutrition',
+      'Standard Chicken Plate — serving size: 1 plate',
+      'Calories 640; protein 44 g; carbohydrates 70 g; fat 21 g; fiber 9 g.',
+    ].join('\n')
+    let nutritionPageLoaded = entryPage === 'item-page'
+    let commandsBeforeOpen: string[] = []
     const computerRequests: Array<{
       body: Record<string, unknown>
       url: string
@@ -30877,18 +30909,37 @@ describeRealCodex('real Codex restaurant meal nutrition e2e', () => {
           const body = JSON.parse(String(init?.body)) as Record<string, unknown>
           computerRequests.push({ body, url })
           if (url === 'http://web-control.worker/api/internal/computer/runs') {
+            if (commandsBeforeOpen.length === 0) {
+              commandsBeforeOpen = (await readFile(commandLogPath, 'utf8')).trim().split('\n')
+            }
             return new Response(JSON.stringify({
               expiresAt: '2026-08-26T20:00:00.000Z',
               reused: false,
               runId: 'run_synthetic_restaurant_nutrition',
               status: 'running',
               title: 'Harbor Bowl official nutrition',
+              url: nutritionPageLoaded ? officialNutritionUrl : startUrl,
+              visibleText: nutritionPageLoaded
+                ? nutritionText
+                : `Welcome to Harbor Bowl. Link: Nutrition (${officialNutritionUrl}). Order online. Locations.`,
+            }), {
+              headers: { 'content-type': 'application/json' },
+              status: 200,
+            })
+          }
+          if (
+            url
+            === 'http://web-control.worker/api/internal/computer/runs/run_synthetic_restaurant_nutrition/act'
+          ) {
+            // Facts become available only after the assistant follows the visible link.
+            const code = String(body.code ?? '')
+            expect(code).toMatch(/nutrition/iu)
+            expect(code).toMatch(/click|goto/iu)
+            nutritionPageLoaded = true
+            return new Response(JSON.stringify({
+              result: { url: officialNutritionUrl, text: nutritionText },
+              title: 'Harbor Bowl official nutrition',
               url: officialNutritionUrl,
-              visibleText: [
-                'Harbor Bowl official nutrition',
-                'Standard Chicken Plate — serving size: 1 plate',
-                'Calories 640; protein 44 g; carbohydrates 70 g; fat 21 g; fiber 9 g.',
-              ].join('\n'),
             }), {
               headers: { 'content-type': 'application/json' },
               status: 200,
@@ -30914,7 +30965,7 @@ describeRealCodex('real Codex restaurant meal nutrition e2e', () => {
         modelProvider: config.modelProvider,
         prompt: [
           'Log dinner: one standard chicken plate from Harbor Bowl, no substitutions.',
-          `The restaurant lists its official nutrition at ${officialNutritionUrl}.`,
+          `The restaurant official site is ${startUrl}.`,
         ].join(' '),
         reasoningEffort: 'low',
         sandbox: 'workspace-write',
@@ -30935,8 +30986,7 @@ describeRealCodex('real Codex restaurant meal nutrition e2e', () => {
       const addCommand = commands[addIndex] ?? ''
       const actions = readCapabilityRoutingActions(result.jsonEvents)
       const searchAction = actions.find((action) =>
-        action.kind === 'command'
-        && action.command.includes('food search-labels')
+        action.kind === 'command' && action.ok && action.command.includes('search-labels')
       )
       const openAction = actions.find((action) =>
         action.kind === 'dynamic'
@@ -30950,6 +31000,8 @@ describeRealCodex('real Codex restaurant meal nutrition e2e', () => {
 
       process.stdout.write(
         `[restaurant-meal-official-source-e2e] ${JSON.stringify({
+          entryPage,
+          foodJournalRead: actions.some(action => action.kind === 'command' && action.output.includes('# Food journal')),
           commands,
           computerRequests,
           finalMessage: result.finalMessage,
@@ -30959,17 +31011,31 @@ describeRealCodex('real Codex restaurant meal nutrition e2e', () => {
       expect(commands[searchIndex]).toMatch(/Harbor\s+Bowl/iu)
       expect(commands[searchIndex]).toMatch(/chicken\s+plate/iu)
       expect(addIndex).toBeGreaterThan(searchIndex)
+      expect(commandsBeforeOpen).toContain(commands[searchIndex])
       expect(searchAction).toBeDefined()
+      expect(openAction?.eventIndex).toBeGreaterThan(searchAction?.eventIndex ?? Infinity)
       expect(openAction).toMatchObject({
-        argumentsValue: { startUrl: officialNutritionUrl },
+        argumentsValue: { startUrl },
       })
       expect(addAction).toBeDefined()
-      expect(openAction?.eventIndex).toBeGreaterThan(
-        searchAction?.eventIndex ?? Number.POSITIVE_INFINITY,
-      )
       expect(addAction?.eventIndex).toBeGreaterThan(
         openAction?.eventIndex ?? Number.POSITIVE_INFINITY,
       )
+      expect(commands.filter((command) => command.startsWith('meal add ') && !isRecordedVaultHelpCommand(command))).toHaveLength(1)
+      expect(commands.filter(isRecordedVaultHelpCommand)).toEqual([])
+      expect(actions.some(action => action.kind === 'command' && action.output.includes('# Food journal'))).toBe(true)
+      expect(actions.flatMap(action => action.kind === 'command'
+        && /\b(?:cat|sed|head|tail)\b[^;\n]*bin\/vault-cli\b/u.test(action.command) ? [action.command] : [])).toEqual([])
+      const acts = actions.filter((action) =>
+        action.kind === 'dynamic' && action.tool === MURPH_COMPUTER_ACT_TOOL.name
+      )
+      expect(acts).toHaveLength(entryPage === 'landing-page' ? 1 : 0)
+      if (entryPage === 'landing-page') {
+        expect(acts[0]?.eventIndex).toBeGreaterThan(openAction?.eventIndex ?? Infinity)
+        expect(addAction?.eventIndex).toBeGreaterThan(acts[0]?.eventIndex ?? Infinity)
+      }
+      expect(result.finalMessage).toMatch(/logged|saved/iu)
+      expect(result.finalMessage).not.toMatch(/estimated|couldn.t (?:find|access)/iu)
       expect(addCommand).toMatch(/--nutrition-calories\s+640\b/u)
       expect(addCommand).toMatch(/--nutrition-protein-grams\s+44\b/u)
       expect(addCommand).toMatch(
@@ -31170,6 +31236,23 @@ async function materializeRestaurantMealVaultCli(input: {
   const emit = (value: unknown) =>
     `printf '%s\\n' ${quoteNutritionShellLiteral(JSON.stringify(value))}`
 
+  const batchPath = path.join(input.binDirectory, 'restaurant-batch.cjs')
+  await writeFile(batchPath, [
+    "const { spawnSync } = require('node:child_process');",
+    'const args = process.argv.slice(2);',
+    'const commands = [];',
+    'for (let i = 0; i < args.length; i++) {',
+    "  if (args[i] !== '--command') continue;",
+    '  const argv = JSON.parse(args[++i]);',
+    "  if (!Array.isArray(argv) || !argv.every(value => typeof value === 'string') || !['memory', 'food'].includes(argv[0])) throw new Error('Unsupported restaurant fixture batch');",
+    `  const child = spawnSync(${JSON.stringify(executablePath)}, argv, { encoding: 'utf8' });`,
+    "  const data = child.status === 0 ? JSON.parse(child.stdout) : undefined;",
+    "  commands.push({ index: commands.length, argv, ok: child.status === 0, durationMs: 0, stdout: '', outputBytes: Buffer.byteLength(child.stdout), outputChars: child.stdout.length, ...(data ? { data } : { error: { message: child.stderr } }) });",
+    '}',
+    "if (commands.length === 0) throw new Error('Missing fixture batch commands');",
+    "console.log(JSON.stringify({ schema: 'murph.vault-cli.batch-result.v1', vault: 'synthetic-vault', count: commands.length, requested: commands.length, executed: commands.length, succeeded: commands.filter(c => c.ok).length, failed: commands.filter(c => !c.ok).length, stoppedEarly: false, commands }));",
+  ].join('\n'), 'utf8')
+
   await writeFile(
     executablePath,
     [
@@ -31177,6 +31260,8 @@ async function materializeRestaurantMealVaultCli(input: {
       'set -eu',
       `printf '%s\\n' "$*" >> ${quoteNutritionShellLiteral(input.commandLogPath)}`,
       'case "$*" in',
+      `  batch\\ *) exec node ${quoteNutritionShellLiteral(batchPath)} "$@" ;;`,
+      '  *--schema*|*-h) printf \'unexpected restaurant fixture introspection\\n\' >&2; exit 64 ;;',
       `  meal\\ --help|meal\\ add\\ --help) printf '%s\\n' ${quoteNutritionShellLiteral([
         'Usage: vault-cli meal add [options]',
         'Options:',
@@ -31679,9 +31764,9 @@ describeRealCodex('real Codex totals-only nutrition journeys', () => {
 })
 
 describeRealCodex('real Codex daily nutrition-card authority e2e', () => {
-  it('saves a nutrition-resolved meal and attaches its card without redundant reads', {
+  it.each([false, true])('saves a nutrition-resolved meal without discovery; requested day read: %s', {
     timeout: 1_800_000,
-  }, async () => {
+  }, async (readDayFirst) => {
     const config = await resolveRealCodexE2eConfig()
     const startedAt = performance.now()
     try {
@@ -31689,6 +31774,7 @@ describeRealCodex('real Codex daily nutrition-card authority e2e', () => {
         config, conditionRecovery: 'none', goalScenario: 'no-goals', realVault: true,
         seedMeals: false, allowMealWrites: true,
         initialPrompt: [
+          ...(readDayFirst ? ['First check my saved meals for July 30, 2026, to confirm this lunch is not already there. Then log it if missing.'] : []),
           'Log my lunch for July 30 at noon: a chickpea and rice bowl.',
           'My recipe totals for the entire portion I ate are 560 calories,',
           '22 g protein, 82 g carbs, 16 g fat, and 12 g fiber.',
@@ -31709,11 +31795,22 @@ describeRealCodex('real Codex daily nutrition-card authority e2e', () => {
       const actions = commands.filter((command) => !isRecordedVaultHelpCommand(command))
       process.stdout.write('[meal-short-workflow] ' + JSON.stringify({
         elapsedMs: Math.round(performance.now() - startedAt), commands,
-        attachCallCount: result.attachCallCount,
+        readDayFirst, attachCallCount: result.attachCallCount,
+        reply: result.finalMessage, foodJournalRead: result.foodJournalRead,
       }) + '\n')
+      expect(result.foodJournalRead).toBe(true)
       expect(actions.filter((command) => command.startsWith('meal add '))).toHaveLength(1)
       expect(actions.find((command) => command.startsWith('meal add '))).toContain('--with-daily-totals')
-      expect(commands.filter((command) => /^meal (?:show|list|totals)\b/u.test(command))).toEqual([])
+      expect(commands.filter((command) => command.startsWith('meal ') && isRecordedVaultHelpCommand(command))).toEqual([])
+      expect(commands.filter((command) => /^meal (?:show|totals)\b/u.test(command))).toEqual([])
+      const lists = commands.filter((command) => command.startsWith('meal list '))
+      expect(lists).toHaveLength(readDayFirst ? 1 : 0)
+      if (readDayFirst) {
+        expect(lists[0]).toMatch(/--from(?:=|\s+)2026-07-30\b/u)
+        expect(lists[0]).toMatch(/--to(?:=|\s+)2026-07-30\b/u)
+        expect(lists[0]).not.toMatch(/--date\b/u)
+        expect(commands.indexOf(lists[0]!)).toBeLessThan(commands.findIndex((command) => command.startsWith('meal add ')))
+      }
       expect(readNutritionGoalMutationCommands(commands)).toEqual([])
       expect(result.attachCallCount).toBe(1)
       expect(result.card).toMatchObject({ kind: 'daily_nutrition', version: 2,
@@ -34344,6 +34441,7 @@ async function runRealNutritionCardAuthorityScenario(input: {
   commands: string[]
   deliveryContextOrdinal: number
   finalMessage: string
+  foodJournalRead: boolean
   progressUpdates: string[]
 }> {
   const workingDirectory = await mkdtemp(
@@ -34489,6 +34587,9 @@ async function runRealNutritionCardAuthorityScenario(input: {
       card: result.responseCard,
       commands: commandText === '' ? [] : commandText.split('\n'),
       deliveryContextOrdinal: result.responseDeliveryContextOrdinal,
+      foodJournalRead: readCapabilityRoutingActions(result.jsonEvents).some((action) =>
+        action.kind === 'command' && action.output.includes('# Food journal')
+      ),
       finalMessage: result.finalMessage,
       progressUpdates,
     }
