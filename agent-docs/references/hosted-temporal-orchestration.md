@@ -743,7 +743,12 @@ Cloudflare uses its existing web-control/readiness timeout values as per-step
 caps inside that budget and never lets unsigned timeout metadata increase the
 configured Cloudflare wait.
 The Web direct-wake lane supplies a 25-second end-to-end command budget inside
-a shared 29-second outer deadline. Cloudflare starts its server-side clock at
+a shared 29-second outer deadline. Web executes canonical Postgres admission
+locally before each attempt and sends that response with its OIDC request,
+skipping the initial Worker-to-Web claim callback. Local admission consumes the
+same outer deadline; a blocked result stops the direct hint. Temporal callers
+continue to claim through Web, and Temporal still owns durable recovery if a
+Web claim is followed by an uncertain or absent dispatch. Cloudflare starts its server-side clock at
 runtime-control authorization, before route parsing, Durable Object dispatch,
 consent serialization, and health-data admission. Container readiness is capped at 20
 wall-clock seconds end to end: at most 15 seconds for readiness, including

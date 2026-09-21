@@ -10245,6 +10245,91 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
   )
 
   it(
+    'qualifies short and tentative sleep without scoring them as complete nights',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-qualified-sleep-e2e-'))
+      const sharedRequests: unknown[] = []
+      try {
+        const skillsRoot = path.join(workingDirectory, 'skills')
+        await materializeAssistantSkill({ skillsRoot, slug: 'group-chat' })
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions: buildScheduledAutomationDeveloperInstructions('group', 'shared_read'),
+          dynamicTools: [MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL],
+          env: { ...config.env, [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot },
+          groupConversation: true,
+          hostedToolContext: {
+            computerToolsAvailable: false,
+            currentHostedDeliveryContext: () => null,
+            currentHostedMailboxItemIds: () => [],
+            groupSharedReader: {
+              request: async (request) => {
+                sharedRequests.push(request)
+                return {
+                  status: 'ok', requestedProjectionScopeKeys: ['sleep-duration-days.v0'],
+                  members: ([
+                    { displayName: 'Avery', value: 42, sleepType: 'short_sleep', sleepState: 'confirmed' },
+                    { displayName: 'Jordan', value: 405, sleepType: 'main_sleep', sleepState: 'tentative' },
+                    { displayName: 'Casey', value: 450, sleepType: 'main_sleep', sleepState: 'confirmed' },
+                  ] as const).map((entry, index) => ({
+                    displayName: entry.displayName, currentTurnHandles: [],
+                    memberId: `member_qualified_${index}`, participantId: `participant_qualified_${index}`,
+                    projections: [{
+                      dataStatus: 'available', grantStatus: 'granted',
+                      grantedAt: '2026-07-01T12:00:00.000Z',
+                      projectionScope: { projectionKind: 'sleep-duration-days.v0' },
+                      projectionScopeKey: 'sleep-duration-days.v0',
+                      records: [{
+                        recordKey: '2026-08-04.garmin', occurredAt: '2026-08-04T00:00:00.000Z',
+                        source: { source: 'garmin', label: 'Garmin' },
+                        data: { date: '2026-08-04', metricKey: 'total-sleep-minutes', unit: 'minutes',
+                          value: entry.value, sleepType: entry.sleepType, sleepState: entry.sleepState },
+                      }],
+                    }],
+                  })),
+                } satisfies AssistantHostedGroupSharedReadResponse
+              },
+            },
+            sendVaultFile: async () => { throw new Error('No file delivery in this journey.') },
+            vaultFileSendAvailable: false,
+          },
+          model: config.model, modelProvider: config.modelProvider,
+          prompt: 'Scheduled group check-in: report sleep for August 4. The group target is seven hours. Keep each person on a separate line and mark completed results with a check or cross.',
+          reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
+        })
+        const actions = readCapabilityRoutingActions(result.jsonEvents).filter((action) => action.kind === 'dynamic')
+        expect(actions).toHaveLength(1)
+        expect(actions[0]).toMatchObject({ tool: MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL.name,
+          argumentsValue: { action: 'read_shared', projectionScopes: [{ projectionKind: 'sleep-duration-days.v0' }] } })
+        expect(sharedRequests).toHaveLength(1)
+        const decision = parseAssistantNotificationDecision(result.finalMessage)
+        expect(decision.kind).toBe('send_message')
+        if (decision.kind !== 'send_message') throw new Error('Expected a qualified sleep report.')
+        const reply = renderMarkdownMessageText(decision.text).text
+        process.stdout.write(`[qualified-sleep-e2e] ${JSON.stringify({ model: config.model, reply })}\n`)
+        const rows = reply.split('\n')
+        const short = rows.find((row) => row.includes('Avery')) ?? ''
+        const tentative = rows.find((row) => row.includes('Jordan')) ?? ''
+        const complete = rows.find((row) => row.includes('Casey')) ?? ''
+        expect(short).toMatch(/42\s*m|42 minutes/iu)
+        expect(short).toMatch(/short|session/iu)
+        expect(tentative).toMatch(/tentative|preliminary|provisional|unconfirmed|estimate/iu)
+        expect(`${short} ${tentative}`).not.toMatch(/[✅✓✔☑❌✗✘✖×]|failed|fell short|missed.{0,15}target/iu)
+        expect(complete).toMatch(/7\s*h(?:ours?)?\s*30|7:30|450/iu)
+        expect(complete).toMatch(/[✅✓✔☑]/u)
+        expect(reply).not.toMatch(/disconnected|reconnect|definitely a nap/iu)
+      } finally {
+        await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+      }
+    },
+    360_000,
+  )
+
+  it(
     'keeps four-person scheduled sleep and steps reports in separate participant rows',
     async () => {
       const config = await resolveRealCodexE2eConfig()
@@ -14550,6 +14635,87 @@ describeRealCodex('real Codex Personal Patterns typed-ledger Luna high digest e2
         && /(?:50|fifty)\s*(?:ms|milliseconds)/iu.test(message)
       expect(reportsDelta || reportsMeans).toBe(true)
       expect(message).toMatch(/without|(?:non|not)[ -]yard[ -]work|days (?:you |with )?(?:didn.t|did not|weren.t)/iu)
+    } finally {
+      await removeRealCodexTemporaryPath(workingDirectory)
+      await removeRealCodexTemporaryPaths(config.temporaryPaths)
+    }
+  }, 720_000)
+})
+
+describeRealCodex('real Codex Personal Pattern cross-automation history e2e', () => {
+  it.each([
+    { priorFinding: 'covered', initialDigestSent: false },
+    { priorFinding: 'covered', initialDigestSent: true },
+    { priorFinding: 'unrelated', initialDigestSent: true },
+  ] as const)('checks prior $priorFinding insight before sending (initial digest: $initialDigestSent)', async ({ priorFinding, initialDigestSent }) => {
+    const config = await resolveRealCodexE2eConfig()
+    const automation = MURPH_MANAGED_AUTOMATIONS.find(
+      (candidate) => candidate.slug === 'personal-patterns-update',
+    )
+    if (!automation) throw new Error('Expected the managed Personal Patterns automation.')
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-pattern-history-e2e-'))
+    try {
+      const binDirectory = path.join(workingDirectory, 'bin')
+      const commandCapturePath = path.join(workingDirectory, 'commands.txt')
+      const ledgerCapturePath = path.join(workingDirectory, 'ledger-write.txt')
+      await materializePersonalPatternsBaselineVaultCli({
+        binDirectory,
+        commandCapturePath,
+        initialDigestSent,
+        ledgerCapturePath,
+        onlyPrimaryOutcome: true,
+        vocabularyCapturePath: path.join(workingDirectory, 'vocabulary-write.txt'),
+        weeklyHistory: priorFinding === 'covered'
+          ? '## 2026-08-28\nOutdoor chores were associated with higher heart-rate variability the following morning. This is the yard-work result; the comparison is with days without those chores. The useful interpretation is that the apparent link also tracks lighter workdays.'
+          : '## 2026-08-02\nEvening coffee was associated with later sleep onset. No other factor or outcome was discussed.',
+      })
+      const result = await executeRealCodexAppServerTurn({
+        allowFinishWithoutReply: true,
+        approvalPolicy: 'never',
+        baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions: buildWeeklyHealthInsightDeveloperInstructions({
+          currentLocalDate: '2026-08-29',
+          scheduledOccurrenceAt: '2026-08-29T17:00:00.000Z',
+        }),
+        dynamicTools: [MURPH_FINISH_WITHOUT_REPLY_TOOL],
+        env: config.env,
+        fixtureBinDirectory: binDirectory,
+        model: config.model,
+        modelProvider: config.modelProvider,
+        prompt: automation.instructions,
+        reasoningEffort: automation.assistantTargetOverride?.reasoningEffort ?? 'high',
+        sandbox: 'workspace-write',
+        workingDirectory,
+      })
+      const actions = readCapabilityRoutingActions(result.jsonEvents)
+      const finishedQuietly = actions.some((action) =>
+        action.kind === 'dynamic' && action.tool === MURPH_FINISH_WITHOUT_REPLY_TOOL.name)
+      const decision = finishedQuietly && result.finalMessage.trim() === ''
+        ? { kind: 'skip' as const }
+        : parseAssistantNotificationDecision(result.finalMessage)
+      const commands = (await readFile(commandCapturePath, 'utf8')).trim().split('\n')
+      expect(commands.filter((command) => command.startsWith('knowledge show weekly-health-insights '))).toHaveLength(1)
+      expect(commands.filter((command) => command === 'knowledge upsert --slug personal-pattern-notifications')).toHaveLength(1)
+      const ledger = parsePersonalPatternNotificationLedger(await readFile(ledgerCapturePath, 'utf8'))
+      expect(ledger).toMatchObject({ version: 1, initialDigestSent: true, reviewedFactorIds: ['yard-work'] })
+      expect(ledger?.results).toHaveLength(1)
+      expect(ledger?.results[0]).toMatchObject({ factorId: 'yard-work', outcomeId: 'hrv', lagDays: 1 })
+      process.stdout.write(`[pattern-history-e2e] ${JSON.stringify({
+        priorFinding, initialDigestSent, decision,
+      })}\n`)
+      if (priorFinding === 'covered') {
+        expect(decision.kind).toBe('skip')
+        expect(ledger?.results[0]?.firstSharedDate).toBeNull()
+      } else {
+        expect(finishedQuietly).toBe(false)
+        expect(decision.kind).toBe('send_message')
+        if (decision.kind !== 'send_message') throw new Error('Expected a genuinely new finding.')
+        expect(decision.text).toMatch(/yard work/iu)
+        expect(decision.text).toMatch(/HRV|heart.rate variability/iu)
+        expect(decision.text).not.toMatch(/coffee|sleep onset|already|again|ledger|weekly insight/iu)
+      }
     } finally {
       await removeRealCodexTemporaryPath(workingDirectory)
       await removeRealCodexTemporaryPaths(config.temporaryPaths)
@@ -31429,6 +31595,7 @@ describeRealCodex('real Codex totals-only nutrition journeys', () => {
           if (breakfastId) expect(commands.filter((command) =>
             /^(?:meal show|meal edit) /u.test(command) && command.includes(breakfastId!))).toEqual([])
           if (scenario === 'number-sensitive') {
+            expect(commands.some((command) => command.includes('--with-daily-totals'))).toBe(false)
             // A meal date is not a nutrition number. Reject nutrient values and goal offers.
             expect(result.finalMessage).not.toMatch(/calories|kcal|\d\s*(?:g\b|grams)|protein|carb(?:s|ohydrate)?|\bfat\b|fiber|\bgoals?\b/iu)
           }
@@ -31512,6 +31679,51 @@ describeRealCodex('real Codex totals-only nutrition journeys', () => {
 })
 
 describeRealCodex('real Codex daily nutrition-card authority e2e', () => {
+  it('saves a nutrition-resolved meal and attaches its card without redundant reads', {
+    timeout: 1_800_000,
+  }, async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const startedAt = performance.now()
+    try {
+      const result = await runRealNutritionCardAuthorityScenario({
+        config, conditionRecovery: 'none', goalScenario: 'no-goals', realVault: true,
+        seedMeals: false, allowMealWrites: true,
+        initialPrompt: [
+          'Log my lunch for July 30 at noon: a chickpea and rice bowl.',
+          'My recipe totals for the entire portion I ate are 560 calories,',
+          '22 g protein, 82 g carbs, 16 g fat, and 12 g fiber.',
+          'Use those provided totals. I am comfortable with nutrition numbers.',
+          'I already declined nutrition goals and do not want another invitation.',
+        ].join(' '),
+        setupVault: async (vaultRoot) => {
+          await upsertMemory(vaultRoot, { section: 'Instructions',
+            text: 'Comfortable with nutrition tracking. Declined nutrition goals; do not offer them again.' })
+        },
+        verifyVault: async (vaultRoot) => {
+          const meals = (await readVaultRawTolerant(vaultRoot)).events.filter((event) => event.kind === 'meal')
+          expect(meals).toHaveLength(1)
+          expect(meals[0]).toMatchObject({ attributes: { nutrition: { totals: { calories: 560, fiberGrams: 12 } } } })
+        },
+      })
+      const commands = expandRecordedVaultCommands(result.commands)
+      const actions = commands.filter((command) => !isRecordedVaultHelpCommand(command))
+      process.stdout.write('[meal-short-workflow] ' + JSON.stringify({
+        elapsedMs: Math.round(performance.now() - startedAt), commands,
+        attachCallCount: result.attachCallCount,
+      }) + '\n')
+      expect(actions.filter((command) => command.startsWith('meal add '))).toHaveLength(1)
+      expect(actions.find((command) => command.startsWith('meal add '))).toContain('--with-daily-totals')
+      expect(commands.filter((command) => /^meal (?:show|list|totals)\b/u.test(command))).toEqual([])
+      expect(readNutritionGoalMutationCommands(commands)).toEqual([])
+      expect(result.attachCallCount).toBe(1)
+      expect(result.card).toMatchObject({ kind: 'daily_nutrition', version: 2,
+        localDate: '2026-07-30', mealCount: 1, goals: ALL_NULL_NUTRITION_GOALS,
+        totals: { calories: { total: 560, mealCount: 1 }, fiberGrams: { total: 12, mealCount: 1 } } })
+      expect(result.progressUpdates).toEqual([])
+      expect(result.finalMessage).not.toContain(DAILY_NUTRITION_OPTIONAL_GOALS_INTRO)
+    } finally { await removeRealCodexTemporaryPaths(config.temporaryPaths) }
+  })
+
   it.each([
     ['rolling-legacy', true],
     ['date-window', true],
@@ -37113,6 +37325,8 @@ async function materializePersonalPatternsBaselineVaultCli(input: {
   initialDigestSent: boolean
   ledgerCapturePath: string
   vocabularyCapturePath: string
+  weeklyHistory?: string
+  onlyPrimaryOutcome?: boolean
 }): Promise<void> {
   await mkdir(input.binDirectory, { recursive: true })
   const executablePath = path.join(input.binDirectory, 'vault-cli')
@@ -37157,7 +37371,7 @@ async function materializePersonalPatternsBaselineVaultCli(input: {
           outcomeId,
           stage: grade === 'C' ? 'seen_again' : 'new_clue',
         })),
-      ],
+      ].filter((cell) => !input.onlyPrimaryOutcome || cell.outcomeId === 'hrv'),
       factors: [
         {
           id: 'yard-work',
@@ -37191,6 +37405,11 @@ async function materializePersonalPatternsBaselineVaultCli(input: {
       '  *"knowledge show personal-pattern-notifications"*)',
       ...(input.initialDigestSent
         ? ["    printf '%s\\n' '{\"initialDigestSent\":true,\"results\":[]}'"]
+        : ["    printf '%s\\n' 'knowledge page not found' >&2", '    exit 1']),
+      '    ;;',
+      '  *"knowledge show weekly-health-insights"*)',
+      ...(input.weeklyHistory
+        ? [`    printf '%s\\n' ${quoteNutritionShellLiteral(input.weeklyHistory)}`]
         : ["    printf '%s\\n' 'knowledge page not found' >&2", '    exit 1']),
       '    ;;',
       '  *"knowledge show journal-pattern-vocabulary"*)',

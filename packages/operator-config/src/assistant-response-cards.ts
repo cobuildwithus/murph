@@ -178,10 +178,12 @@ export const assistantResponseCardAuthoringSchema: z.ZodType<
 export const assistantWorkoutResponseCardSemanticSchema =
   compactTableWorkoutSemanticResponseCardV1Schema
 
+// Authoring schemas are optional for runtime consumers. These builders only
+// return schema objects, so unused exports need no initialization.
 export const assistantResponseCardJsonSchema =
-  createAssistantResponseCardJsonSchema()
+  /* @__PURE__ */ createAssistantResponseCardJsonSchema()
 export const exerciseRoutineResponseCardJsonSchema =
-  createExerciseRoutineResponseCardJsonSchema()
+  /* @__PURE__ */ createExerciseRoutineResponseCardJsonSchema()
 export const telegramRichContentResponseCardJsonSchema = {
   type: 'object',
   additionalProperties: false,
@@ -197,7 +199,7 @@ export const telegramRichContentResponseCardJsonSchema = {
   required: ['kind', 'version', 'html'],
 } as const
 export const challengeStandingsResponseCardJsonSchema =
-  createChallengeStandingsResponseCardJsonSchema()
+  /* @__PURE__ */ createChallengeStandingsResponseCardJsonSchema()
 
 export const DAILY_NUTRITION_OPTIONAL_GOALS_INTRO =
   'Here’s your nutrition card. If you’d like, we can set up goals too.'

@@ -1507,6 +1507,12 @@ to apply after cutover.
   not claim decrypt recovery before plaintext and CRC integrity checks pass.
   These logs never contain credentials, resource names, AAD, ciphertext, or
   plaintext.
+- The Web workspace checkpoint route loads the runtime signal owner only inside
+  its existing post-response wake task. Importing the route must not initialize
+  Temporal or KMS solely for an optional recheck. Signal success still precedes
+  acknowledgement, and failed signals leave the durable recheck pending. One
+  value-free log marks the first handler invocation per route module instance,
+  separating startup from callback verification in platform log timelines.
 - Hosted workspace checkpoint session-start and completion failures preserve
   cancellation reasons and extensible `Error` identity while adding allowlisted
   phases for write-fence acquisition, deadline-bound request headers, response
@@ -1518,7 +1524,8 @@ to apply after cutover.
   checkpoint failure record also includes the matching phase and measured
   session-start or completion elapsed milliseconds; a phase timeout is recorded
   only for a deadline-bound request/decode phase. These diagnostics do not
-  increase the handoff deadline or add another checkpoint retry owner.
+  add another checkpoint retry owner. Session start and completion use the
+  configured commit deadline; no snapshot heartbeat controls that deadline.
 - Successful authorized Web device-sync runtime snapshot responses serialize
   once and carry the optional `x-murph-device-sync-snapshot-bytes` diagnostic:
   the UTF-8 byte count of that serialized JSON, before transport encoding. The
@@ -2429,7 +2436,7 @@ to apply after cutover.
   are never copied into these fields.
 - Per-message typing alerts independently measure the Web route's receipt instant
   through the earliest accepted typing indicator: strictly over 3 seconds for a
-  warm workspace and over 10 seconds for a cold workspace. Mailbox acceptance
+  warm workspace and over 8 seconds for a cold workspace. Mailbox acceptance
   remains its existing timestamp; it never substitutes for webhook receipt.
   For unanswered Linq inputs, the latest accepted message in the same chat
   resets the silence start between receipt and the first typing acceptance
@@ -2452,7 +2459,7 @@ to apply after cutover.
   or delivery operation waits for this diagnostic persistence.
   A restore completed before the message arrived, or an explicit reused restore,
   identifies warmth. This includes later messages within an invocation that
-  originally started cold. Missing warmth evidence uses the 10-second cutoff and
+  originally started cold. Missing warmth evidence uses the 8-second cutoff and
   is labeled unconfirmed; deployment version, rollout convergence, canary identity,
   access changes, other incidents, and quiet hours do not suppress these alerts.
   An exact member-bound mailbox item with recorded `ai_usage_denied_at` is
@@ -2543,8 +2550,19 @@ to apply after cutover.
   item retention/expiry semantics and clean-handling lane high-water to catch
   error-code-independent stalls. Conversation rows with a non-null
   `consumed_at` are terminal and are excluded before both head selection and the
-  lane's `COUNT(*) OVER()`; system-lane selection remains unchanged. A system
-  head ages from its accepted mailbox creation time.
+  lane's `COUNT(*) OVER()`; system-lane selection remains unchanged. An exact
+  conversation head with accepted delivery or committed terminal reply/no-reply
+  evidence may wait through its recorded checkpoint-publication deadline. The
+  completion must be at or after admission (or usage-resume origin) and no later
+  than now; absent, malformed, or expired evidence retains the original age.
+  The existing signed latency callback records successful outbox delivery against
+  at most 64 exact answered mailbox IDs per request, scoped to member, channel,
+  and runtime lease. Email staging now uses the same trace owner as Linq and
+  Telegram. Delivery telemetry is detached, uses the original sent timestamp,
+  and shares the finite three-attempt diagnostic retry budget. Idle deadline
+  updates cover all three channels and preserve stale-lease rejection. These
+  facts never acknowledge mailbox consumption; the checkpoint retains ownership.
+  A system head ages from its accepted mailbox creation time.
   Lane high-water reads select only sequence and update time; they never fetch
   inline or externalized mailbox ciphertext.
   Import and unrelated
@@ -2606,9 +2624,13 @@ to apply after cutover.
   continuation availability; running jobs and missing/invalid availability remain
   runnable. Only a completed/yielded pass with a complete queue sample and zero
   runnable jobs in both sources can prove deferral. The notice applies the same
-  matching-checkpoint and continuity rules to this runnable signal. Stall and
-  cycling detection retain all pending retry obligations, including scheduled
-  jobs, so an overdue wake still exposes a stalled import. Failed, missing,
+  matching-checkpoint and continuity rules to this runnable signal. Cycling
+  detection uses that same runnable summary: a matching accepted checkpoint
+  proving deferral ends the cycling window, so subsequent webhook starts cannot
+  accumulate against future-scheduled jobs. Local deferral without that checkpoint
+  cannot clear an existing runnable window. Stall detection retains all pending
+  retry obligations, including scheduled jobs, so an overdue wake still exposes
+  a stalled import. Failed, missing,
   malformed, truncated, or legacy runnable evidence falls back to the existing
   pending signal. This additive reader deploys before the runner; remove its
   legacy fallback only after old producers and the two-hour observation window
@@ -2637,10 +2659,20 @@ to apply after cutover.
   when its canonical device wake is at least 15 minutes overdue; planned idle
   time does not consume that allowance. Recent observations bypass that wake
   grace for stall detection only while the latest connection pass lacks its
-  own accepted checkpoint. An unchanged checkpoint does not count as import
-  progress; once accepted, the canonical wake controls stall eligibility.
-  Cycling detection uses pending observations and backlog detection uses runnable
-  observations within the same 15-minute continuity window independently of the
+  own accepted checkpoint. Proven unsaved continuation progress receives a
+  15-minute publication allowance from the earliest outstanding productive pass
+  since saved progress. Further passes and restarts cannot refresh that allowance;
+  unrelated connections and unkeyed attempts cannot grant it. An unchanged
+  checkpoint does not count as import progress; once accepted, the canonical wake
+  controls stall eligibility.
+  A latest owned pass proving that no retained jobs are runnable also receives
+  publication time when the canonical device wake is not overdue. Its allowance
+  expires 15 minutes after the oldest outstanding pass for that connection,
+  across attempts; repeated deferrals and restarts cannot extend it. Only the
+  matching accepted checkpoint removes an outstanding pass. Runnable or unknown
+  queue evidence and overdue wakes retain conservative stall detection. Deferred
+  publication never counts as saved progress. Cycling and backlog detection use
+  runnable observations within the same 15-minute continuity window independently of the
   wake, so eligibility cannot
   lapse before the evidence itself resets and a continuing incident reminds
   instead of re-alerting after the next pass. The backlog notice also requires
@@ -3493,6 +3525,18 @@ to apply after cutover.
   not block snapshot capture and retry only while the source evidence remains
   retained.
 - Observability writes (logs, latency traces, diagnostics, metrics) must never block user-facing latency: queue or fire-and-forget them off the reply hot path and flush at invocation end, per the `Foreground Reply Critical Path` invariants in `docs/contracts/00-invariants.md`. Only warn/error crash-tail writes may block, bounded by the process exit backstop.
+- Already-available assistant latency milestones share a bounded callback (at most
+  eight events within the existing 32 KiB body limit). There is no coalescing
+  timer or invocation-end buffer. Web validates every event's exact attempt fence
+  before writing and processes events serially through the existing store, so
+  each batch uses at most one active persistence operation. Positional outcomes
+  retain each event's existing three-attempt retry budget, timestamps and typing
+  alert scheduling; successful events do not retry with failed siblings. Detached
+  staging may still arrive later, so unmatched events retain their bounded retry.
+  Singleton producers and ports remain supported. The existing Web protocol
+  admission requires the batch parser before new Worker activation; deploy Web
+  first and retain its reader until batch-producing runners drain.
+
 - The best-effort ingress-latency checkpoint-publication milestone updates at
   most 250 of the newest currently staged, unconsumed traces for the
   authenticated member and source in one set-based statement. A 251st locked

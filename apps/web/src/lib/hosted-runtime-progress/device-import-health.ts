@@ -30,6 +30,12 @@ export type DeviceImportObservation = {
   cancelled: boolean;
 };
 
+type PendingSnapshot = {
+  pending: boolean | null;
+  runnable: boolean | null;
+  firstObservedAt: number;
+};
+
 export function summarizeDeviceImportHealth(input: {
   now: Date;
   observations: readonly DeviceImportObservation[];
@@ -70,25 +76,28 @@ function summarizeRuntime(rows: DeviceImportObservation[], now: number, due: boo
   for (const connectionRows of groupConnectionObservations(rows).values()) {
     const evidence = summarizeConnection(connectionRows, now, due, restartTimes, row => row.pending);
     if (!evidence) continue;
-    // Reuse the same checkpoint and continuity rules without discarding the
-    // scheduled retry obligations used by stall and cycling detection.
-    const backlog = summarizeConnection(connectionRows, now, false, restartTimes,
+    // Saved deferral ends active cycling/backlog evidence. Keep all pending
+    // retry obligations in the separate stall summary for overdue wakes.
+    const runnable = summarizeConnection(connectionRows, now, false, restartTimes,
       row => row.runnable ?? row.pending);
-    const { backlogAge, lastProgress, restarts, cancellations, savedPasses } = evidence;
     const conditions: DeviceImportCondition[] = [];
-    if ((due || evidence.latestPassUncheckpointed) && now - lastProgress >= DEVICE_IMPORT_STALL_MS) {
+    if ((due || evidence.latestPassUncheckpointed)
+      && !evidence.awaitingProgressCheckpoint
+      && !evidence.awaitingDeferredCheckpoint
+      && now - evidence.lastProgress >= DEVICE_IMPORT_STALL_MS) {
       conditions.push("stalled");
     }
-    if (Math.max(restarts, cancellations) >= DEVICE_IMPORT_CYCLE_LIMIT && savedPasses < 2) {
+    if (runnable && Math.max(runnable.restarts, runnable.cancellations) >= DEVICE_IMPORT_CYCLE_LIMIT
+      && runnable.savedPasses < 2) {
       conditions.push("cycling");
     }
-    if (backlog && backlog.backlogAge >= DEVICE_IMPORT_BACKLOG_MS && backlog.evidenceCurrent) conditions.push("backlog");
+    if (runnable && runnable.backlogAge >= DEVICE_IMPORT_BACKLOG_MS && runnable.evidenceCurrent) conditions.push("backlog");
     for (const condition of conditions) {
+      const { backlogAge, restarts, cancellations, savedPasses } = condition === "stalled" ? evidence : runnable!;
       const health = result[condition];
       health.anomalous = true;
       health.affectedRuntimeCount = 1;
-      health.oldestBacklogMs = Math.max(health.oldestBacklogMs,
-        condition === "backlog" ? backlog!.backlogAge : backlogAge);
+      health.oldestBacklogMs = Math.max(health.oldestBacklogMs, backlogAge);
       health.restartCount = Math.max(health.restartCount, restarts);
       health.cancellationCount += cancellations;
       health.savedProgressPassCount += savedPasses;
@@ -134,7 +143,7 @@ function summarizeConnection(
   let lastPendingAt = 0;
   let lastProgress = 0;
   const pendingProgress = new Map<string, number[]>();
-  const pendingSnapshots = new Map<string | null, boolean | null>();
+  const pendingSnapshots = new Map<string | null, PendingSnapshot>();
   let latestPassAttemptId: string | null = null;
   const savedAt: number[] = [];
   const cancellationsAt: number[] = [];
@@ -151,7 +160,7 @@ function summarizeConnection(
     }
     if (row.eventCode === "device-sync.pass_finished") {
       latestPassAttemptId = row.attemptId;
-      pendingSnapshots.set(row.attemptId, pending);
+      recordPendingSnapshot(pendingSnapshots, row, pending);
       if (row.progressed && row.attemptId) {
         const passes = pendingProgress.get(row.attemptId) ?? [];
         passes.push(at);
@@ -166,7 +175,7 @@ function summarizeConnection(
         pendingProgress.delete(row.attemptId);
       }
       // Local queue drain is not durable recovery until Web accepts it.
-      if (pendingSnapshots.get(row.attemptId) === false) {
+      if (pendingSnapshots.get(row.attemptId)?.pending === false) {
         pendingSince = null;
         pendingProgress.clear();
       }
@@ -185,12 +194,56 @@ function summarizeConnection(
   const countRecent = (times: number[]) => times.filter(at => at >= recentAfter).length;
   return {
     evidenceCurrent,
+    awaitingProgressCheckpoint: isAwaitingProgressCheckpoint(pendingProgress, lastProgress, now),
+    awaitingDeferredCheckpoint: isAwaitingDeferredCheckpoint(pendingSnapshots, latestPassAttemptId, due, now),
     latestPassUncheckpointed: pendingSnapshots.has(latestPassAttemptId),
     backlogAge: now - pendingSince,
     lastProgress: Math.max(pendingSince, lastProgress),
     restarts: countAtOrAfter(restartTimes, recentAfter), cancellations: countRecent(cancellationsAt),
     savedPasses: countRecent(savedAt),
   };
+}
+
+function recordPendingSnapshot(
+  snapshots: Map<string | null, PendingSnapshot>,
+  row: DeviceImportObservation,
+  pending: boolean | null,
+) {
+  snapshots.set(row.attemptId, {
+    pending,
+    runnable: row.runnable,
+    firstObservedAt: snapshots.get(row.attemptId)?.firstObservedAt ?? row.at.getTime(),
+  });
+}
+
+function isAwaitingDeferredCheckpoint(
+  snapshots: ReadonlyMap<string | null, PendingSnapshot>,
+  latestAttemptId: string | null, due: boolean, now: number,
+): boolean {
+  // Deferral is not progress and cannot excuse an already-overdue device wake.
+  if (due || latestAttemptId === null || snapshots.get(latestAttemptId)?.runnable !== false) return false;
+  // Bound the idle publication wait by the oldest unsaved pass across attempts.
+  let firstUnsavedPassAt = Infinity;
+  for (const snapshot of snapshots.values()) {
+    firstUnsavedPassAt = Math.min(firstUnsavedPassAt, snapshot.firstObservedAt);
+  }
+  return now - firstUnsavedPassAt < DEVICE_IMPORT_STALL_MS;
+}
+
+function isAwaitingProgressCheckpoint(
+  pendingProgress: ReadonlyMap<string, readonly number[]>, lastProgress: number, now: number,
+): boolean {
+  // A productive local pass needs time to publish its idle checkpoint. Anchor
+  // that allowance to the first unsaved progress, not the newest pass/restart;
+  // only accepted progress can start a new allowance for this connection.
+  let firstUnsavedProgressAt = Infinity;
+  for (const passes of pendingProgress.values()) {
+    for (const at of passes) {
+      if (at >= lastProgress) firstUnsavedProgressAt = Math.min(firstUnsavedProgressAt, at);
+    }
+  }
+  return Number.isFinite(firstUnsavedProgressAt)
+    && now - firstUnsavedProgressAt < DEVICE_IMPORT_STALL_MS;
 }
 
 function countAtOrAfter(times: readonly number[], cutoff: number) {

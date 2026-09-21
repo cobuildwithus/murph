@@ -90,19 +90,25 @@ and must be excluded from the measured cohort rather than treated as zeros.
 
 ### Ensure-processing summaries
 
-`runner.processing_finished` is one best-effort summary per completed
-`HostedUserRunner.ensureRuntimeProcessingForUser` call, including denied,
-queued-out, uncertain, accepted, and thrown outcomes. It is not a poll trace,
-mailbox admission, runtime health proof, or recovery signal. Only the existing
-`runner.accepted_attempt_failed` event requests failure recovery through this
-callback. No schema migration or new durable state is required.
+`runner.processing_finished` is a best-effort summary from the Postgres
+`ensure-processing` route owner in
+`apps/cloudflare/src/worker/route-handlers/runtime-control.ts`. A successful warm
+wake (`runtime_processing_accepted` with action `woken`) neither constructs a
+summary nor schedules a standalone signed log callback. Fresh starts (action
+`started`, consumed by the device-import cycling monitor), other accepted
+actions, every `retry_later` result, and thrown outcomes retain their summaries.
+The summary is not a poll trace, mailbox admission, runtime health proof, or
+recovery signal. The independent `runner.accepted_attempt_failed` event still
+requests failure recovery through this callback. Runtime log batching and
+foreground latency milestones are unchanged. No schema migration or new durable
+state is required.
 
-The existing invocation log owner sends the signed callback in a caught,
-detached promise. `HostedUserRunner` passes that promise to its existing
-`state.waitUntil` owner; neither the request nor its response cancellation is
-awaited by processing control. Response cancellation is initiated with owned
-rejection handling but is not awaited by the telemetry task either. A rejected
-HTTP log write emits only `runtimeLogWriteStatus` in the existing Workers logger,
+The route owner sends retained summaries through the existing log transport in a
+caught, detached promise, passed to its existing `executionCtx.waitUntil` owner;
+neither the request nor its response cancellation is awaited by processing
+control. Response cancellation is initiated with owned rejection handling but is
+not awaited by the telemetry task either. A rejected HTTP log write emits only
+`runtimeLogWriteStatus` in the existing Workers logger,
 never response content. Transport failures, rejections, and scheduling failures
 cannot replace the control result. Delivery remains best-effort.
 
@@ -694,8 +700,9 @@ Every append runs in one short transaction:
 
 The encrypted account-deletion cleanup receipt owns the exact runtime-member id
 set after primary deletion commits. Its `runtime_logs_completed_at` completion
-field is recorded only after the isolated delete succeeds; zero matching rows
-is idempotent success. Every immediate or hourly cleanup attempt enters one
+field is recorded only after the isolated delete succeeds for ordinary account
+deletion; zero matching rows is idempotent success. Every ordinary immediate or
+hourly cleanup attempt enters one
 runtime-log database transaction:
 
 1. Take every subject advisory lock in deterministic signed-lock-key order.
@@ -717,6 +724,28 @@ is never re-gated on a later database outage:
 No isolated tombstone remains after account deletion. A warm runner or late
 network drain cannot recreate diagnostics because append checks primary member
 authority only after acquiring the same isolated advisory lock used by cleanup.
+
+The authenticated production Linq canary reset is the sole retention exception.
+Its dedicated account-deletion entrypoint checks the configured canary identity
+and settles the runtime-log target as a no-op in the same durable cleanup receipt.
+Immediate and retried vendor cleanup therefore preserve existing canary runtime
+logs until their normal retention deadline. The member, mailbox payloads, and
+runtime state are still removed; late appends remain fenced by missing primary
+authority. Ordinary account deletion has no diagnostic-retention option, even
+when called on the canary account.
+
+Primary ingress traces also retain their logical user/mailbox correlation across
+canary reset. They have no mailbox cascade after the post-promotion contract migration
+`20260920180000_canary_diagnostic_retention`; ordinary account deletion explicitly
+removes them, and their existing seven-day retention remains unchanged. Deploy
+the guarded trace writers and let the existing post-promotion contract runner
+verify the production alias and drain old Web instances before applying that
+migration; canary trace retention becomes effective once both are present. Each
+trace-creation statement takes a shared row lock on an unsuspended member,
+serializing with the existing account-deletion suspension fence. Writers that
+win commit before deletion; writers that lose cannot recreate deleted traces.
+Preserving a trace
+does not preserve the deleted mailbox or member facts it used to join against.
 
 ## Wearable import timing
 

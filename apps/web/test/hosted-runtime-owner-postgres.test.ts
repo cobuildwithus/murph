@@ -1,11 +1,16 @@
+import { runWithPrismaOperationTimings, type PrismaOperationTiming } from "@/src/lib/prisma-operation-timing";
 import { reconcileHostedRuntimeUploads } from "@/src/lib/hosted-execution/runtime-upload-recovery";
 const uploadRecovery = vi.hoisted(() => ({ purge: vi.fn() }));
+const completionNotification = vi.hoisted(() => ({ notify: vi.fn() }));
 vi.mock("@/src/lib/hosted-execution/control", () => ({
   readHostedExecutionControlClientIfConfigured: () => ({ purgeRuntimeResource: uploadRecovery.purge }),
 }));
+vi.mock("@/src/lib/hosted-orchestration/runtime-owner-release", () => ({
+  notifyHostedRuntimeOwnerCompletion: completionNotification.notify,
+}));
 import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
-import type { HostedRuntimeOwner, PrismaClient } from "@prisma/client";
+import { Prisma, type HostedRuntimeOwner, type PrismaClient } from "@prisma/client";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import {
@@ -25,13 +30,14 @@ import {
 } from "@/src/lib/hosted-execution/runtime-owner";
 import { executeHostedRuntimeOwnerCommand } from "@/src/lib/hosted-execution/runtime-owner-control";
 import { executeHostedRuntimeReplicaPutCommand } from "@/src/lib/hosted-execution/runtime-replica-puts";
-import { hostedWorkspaceSnapshotObjectKey, hostedBrowserVaultReplicaUserPrefix } from "@murphai/hosted-execution/storage-paths";
+import { hostedWorkspaceSnapshotObjectKey, hostedBrowserVaultReplicaUserPrefix, listHostedBrowserVaultReplicaSiblingObjectKeys } from "@murphai/hosted-execution/storage-paths";
 import { lockHostedMemberRow } from "@/src/lib/hosted-onboarding/shared";
 import { HOSTED_HEALTH_DATA_CONSENT_SCOPE, revokeHostedConsentScope } from "@/src/lib/legal/consent";
 import { createPrismaClient } from "@/src/lib/prisma";
 import { checkpointHostedRuntimeWorkspace } from "@/src/lib/hosted-workspace/runtime-publication";
 import { claimHostedRuntimeResourceCleanup, acknowledgeHostedRuntimeOrphanPurge, runHostedRuntimeResourceCleanup } from "@/src/lib/hosted-execution/runtime-resource-cleanup";
 import { recordRuntimeOrphansTx, snapshotOrphanCandidates } from "@/src/lib/hosted-execution/runtime-orphans";
+import { HOSTED_RUNTIME_SNAPSHOT_RECOVERY_RETENTION_MS } from "@murphai/hosted-execution/runtime-resources";
 import { executeHostedRuntimeMediaCommand, lockHostedRuntimeMediaTx } from "@/src/lib/hosted-execution/runtime-media";
 import { executeHostedRuntimeSnapshotCommand } from "@/src/lib/hosted-execution/runtime-snapshots";
 import { parseHostedWorkspaceSnapshotUploadSession } from "@murphai/hosted-execution/workspace-snapshot-store";
@@ -90,6 +96,35 @@ describe.skipIf(!enabled)("Postgres runtime ownership", () => {
     if (result.status === "blocked") throw new Error(`Unexpected admission rejection: ${result.reason}`);
     return result;
   }
+
+  it("reads callback authority in the three lock queries without fetching either row twice", async () => {
+    const userId = await member();
+    const claimed = (await claim(userId)).owner;
+    const expected = await observer.hostedRuntimeOwner.update({ where: { userId }, data: {
+      generation: 9007199254740993n,
+      runnerContainerName: "synthetic-locked-owner",
+      workspaceVersion: 9007199254740995n,
+      providerEgressTokenHash: "synthetic-provider-hash",
+      customInferenceEnvelope: "synthetic-envelope",
+      platformAiUsageAllowed: true,
+      failureCount: 2,
+      lastErrorCode: "SYNTHETIC_FAILURE",
+    } });
+    expect(expected.attemptId).toBe(claimed.attemptId);
+    await first.$transaction(async (tx) => {
+      const raw = vi.spyOn(tx, "$queryRaw");
+      const ownerRead = vi.spyOn(tx.hostedRuntimeOwner, "findUnique");
+      const memberRead = vi.spyOn(tx.hostedMember, "findUnique");
+      try {
+        expect(await requireHostedRuntimeOwnerTx(tx, identity(expected))).toEqual(expected);
+        expect(raw.mock.calls.length + ownerRead.mock.calls.length + memberRead.mock.calls.length).toBe(3);
+      } finally {
+        raw.mockRestore();
+        ownerRead.mockRestore();
+        memberRead.mockRestore();
+      }
+    });
+  });
 
   it("drains 200 eligible snapshot/replica candidates within the configured cron hour", async () => {
     const config = JSON.parse(await readFile(new URL("../vercel.json", import.meta.url), "utf8")) as {
@@ -246,6 +281,107 @@ describe.skipIf(!enabled)("Postgres runtime ownership", () => {
     expect(await retireHostedRuntime({ prisma: first, identity: original, completed: true })).toBe(false);
     expect(await releaseHostedRuntimeAfterCompletion({ prisma: first, identity: original, runnerContainerName: "synthetic-warm-slot" })).toBe(false);
     await expect(first.$transaction((tx) => requireHostedRuntimeOwnerTx(tx, original))).rejects.toMatchObject({ code: "HOSTED_RUNTIME_OWNER_STALE" });
+  });
+
+  it("records early completion without releasing the live invocation or retaining effect authority", async () => {
+    const userId = await member();
+    const runtime = identity((await claim(userId)).owner);
+    const runnerContainerName = "synthetic-early-completion-slot";
+    const providerEgressTokenHash = "e".repeat(64);
+    await prepareHostedRuntimeLaunch({ prisma: first, identity: runtime, runnerContainerName,
+      workspaceVersion: "0", customInferenceEnvelope: null,
+      platformAiUsageAllowed: true, providerEgressTokenHash });
+    await recordHostedRuntimeAccepted({ prisma: first, identity: runtime });
+    const notifiedOwners: HostedRuntimeOwner[] = [];
+    completionNotification.notify.mockReset().mockImplementationOnce(async () => {
+      notifiedOwners.push(await observer.hostedRuntimeOwner.findUniqueOrThrow({ where: { userId } }));
+    });
+
+    expect(await executeHostedRuntimeOwnerCommand({ prisma: first, userId, command: {
+      operation: "complete", ...runtime, settledRunnerContainerName: null, immediateRecheckRequested: false,
+    } })).toMatchObject({ cutover: "postgres", status: "updated" });
+    expect(await observer.hostedRuntimeOwner.findUniqueOrThrow({ where: { userId } })).toMatchObject({
+      phase: "retiring", attemptId: runtime.attemptId, generation: BigInt(runtime.generation),
+      runnerContainerName, completedAt: expect.any(Date), platformAiUsageAllowed: false,
+    });
+    expect(notifiedOwners).toMatchObject([{ phase: "retiring", completedAt: expect.any(Date) }]);
+    expect(completionNotification.notify).toHaveBeenCalledWith({
+      userId, runtimeAttemptId: runtime.attemptId, immediateRecheckRequested: false,
+    });
+    expect((await claim(userId, second)).status).toBe("existing");
+    expect(await authorizeHostedRuntimeProvider({ prisma: second, userId, runnerContainerName: null,
+      providerEgressTokenHash, providerKind: "openai" })).toBeNull();
+    await expect(second.$transaction(tx => requireHostedRuntimeOwnerTx(tx, runtime)))
+      .rejects.toMatchObject({ code: "HOSTED_RUNTIME_OWNER_STALE" });
+
+    await executeHostedRuntimeOwnerCommand({ prisma: first, userId, command: {
+      operation: "complete", ...runtime, settledRunnerContainerName: "synthetic-wrong-slot", immediateRecheckRequested: false,
+    } });
+    expect(await observer.hostedRuntimeOwner.findUniqueOrThrow({ where: { userId } })).toMatchObject({
+      phase: "retiring", attemptId: runtime.attemptId, runnerContainerName,
+    });
+    expect(completionNotification.notify).toHaveBeenCalledTimes(1);
+  });
+
+  it("settles completion once while retaining the warm assignment and uncertain upload obligations", async () => {
+    const userId = await member();
+    const originalOwner = (await claim(userId)).owner;
+    const runtime = identity(originalOwner);
+    const runnerContainerName = "synthetic-completed-warm-slot";
+    await prepareHostedRuntimeLaunch({ prisma: first, identity: runtime, runnerContainerName,
+      workspaceVersion: "0", customInferenceEnvelope: "synthetic-inference-envelope",
+      platformAiUsageAllowed: true, providerEgressTokenHash: "f".repeat(64) });
+    const prefix = await hostedBrowserVaultReplicaUserPrefix({ userId });
+    await executeHostedRuntimeReplicaPutCommand({ prisma: first, userId, command: {
+      operation: "admit", ...runtime, writeId: "synthetic-completion-single", objectKey: `${prefix}single.json`,
+    } });
+    await executeHostedRuntimeReplicaPutCommand({ prisma: first, userId, command: {
+      operation: "admit", ...runtime, writeId: "synthetic-completion-multipart", objectKey: `${prefix}multipart.json`,
+      multipart: { objectKey: `${prefix}multipart.json`, uploadId: "synthetic-completion-upload" },
+    } });
+    const command = { operation: "complete" as const, ...runtime, settledRunnerContainerName: runnerContainerName,
+      immediateRecheckRequested: true };
+    const notifiedOwners: HostedRuntimeOwner[] = [];
+    completionNotification.notify.mockReset().mockImplementationOnce(async () => {
+      notifiedOwners.push(await observer.hostedRuntimeOwner.findUniqueOrThrow({ where: { userId } }));
+    });
+
+    expect(await executeHostedRuntimeOwnerCommand({ prisma: first, userId, command }))
+      .toMatchObject({ cutover: "postgres", status: "updated" });
+    const completedOwner = await observer.hostedRuntimeOwner.findUniqueOrThrow({ where: { userId } });
+    expect(completedOwner).toMatchObject({
+      phase: "idle", attemptId: null, allocationId: originalOwner.allocationId, runnerContainerName,
+      processingMode: null, workspaceVersion: null, customInferenceEnvelope: null,
+      providerEgressTokenHash: null, platformAiUsageAllowed: false, completedAt: expect.any(Date),
+    });
+    expect(notifiedOwners).toEqual([completedOwner]);
+    expect(completionNotification.notify).toHaveBeenCalledWith({
+      userId, runtimeAttemptId: runtime.attemptId, immediateRecheckRequested: true,
+    });
+    const drains = await observer.hostedRuntimePutDrain.findMany({ where: { userId }, orderBy: { writeId: "asc" } });
+    expect(drains).toHaveLength(2);
+    expect(drains[0]).toMatchObject({ writeId: "replica:synthetic-completion-multipart",
+      completedAt: null, drainUntil: null, uploadId: "synthetic-completion-upload" });
+    expect(drains[1]).toMatchObject({ writeId: "replica:synthetic-completion-single",
+      completedAt: null, drainUntil: expect.any(Date) });
+
+    // A lost response can replay the command without renewing drains or restoring authority.
+    expect(await executeHostedRuntimeOwnerCommand({ prisma: second, userId, command }))
+      .toMatchObject({ status: "stale" });
+    expect(await observer.hostedRuntimeOwner.findUniqueOrThrow({ where: { userId } })).toEqual(completedOwner);
+    expect(await observer.hostedRuntimePutDrain.findMany({ where: { userId }, orderBy: { writeId: "asc" } })).toEqual(drains);
+
+    const successor = (await claim(userId, second)).owner;
+    expect(successor).toMatchObject({
+      generation: originalOwner.generation + 1n, runnerContainerName, allocationId: originalOwner.allocationId,
+    });
+    expect(await executeHostedRuntimeOwnerCommand({ prisma: first, userId, command }))
+      .toMatchObject({ status: "stale" });
+    expect(await executeHostedRuntimeOwnerCommand({ prisma: first, userId, command: {
+      ...command, settledRunnerContainerName: null,
+    } })).toMatchObject({ status: "stale" });
+    expect(await observer.hostedRuntimeOwner.findUniqueOrThrow({ where: { userId } })).toEqual(successor);
+    expect(completionNotification.notify).toHaveBeenCalledTimes(1);
   });
 
   it("keeps an upload capability drain and orphan obligation after session and member deletion", async () => {
@@ -623,6 +759,113 @@ describe.skipIf(!enabled)("Postgres runtime ownership", () => {
     expect((await claimHostedRuntimeResourceCleanup({ prisma: second, now })).orphans.some(row => row.userId === userId)).toBe(false);
   });
 
+  it.each([
+    { legacyHeartbeat: false, upload: "pending" },
+    { legacyHeartbeat: true, upload: "pending" },
+    { legacyHeartbeat: false, upload: "settled" },
+    { legacyHeartbeat: true, upload: "settled" },
+    { legacyHeartbeat: false, upload: "published" },
+    { legacyHeartbeat: true, upload: "published" },
+  ] as const)("protects snapshots through exact writes and canonical refs, not heartbeat state: %j", async ({ legacyHeartbeat, upload }) => {
+    const userId = await member();
+    const runtime = identity((await claim(userId)).owner);
+    const now = new Date();
+    const admittedAt = new Date(now.getTime() - 2 * 3_600_000);
+    const session = { ...await snapshotSession(runtime), createdAt: admittedAt.toISOString(),
+      expiresAt: new Date(admittedAt.getTime() + 3_600_000).toISOString() };
+    await executeHostedRuntimeSnapshotCommand({ prisma: first, userId, now: admittedAt,
+      command: { operation: "snapshot_create", session } });
+    const admitted = await executeHostedRuntimeSnapshotCommand({ prisma: first, userId, now: admittedAt,
+      command: { operation: "snapshot_managed_admit", expectedSession: session,
+        uploadId: "synthetic-cleanup-upload", encryptedByteSize: 128, encryptedSha256: "a".repeat(64) } });
+    const read = await executeHostedRuntimeSnapshotCommand({ prisma: first, userId,
+      command: { operation: "snapshot_managed_read", ...runtime, snapshotId: session.snapshotId } });
+    expect(read.session?.snapshotId).toBe(session.snapshotId);
+    expect(read.managedUpload).toEqual(admitted.managedUpload);
+    if (legacyHeartbeat) {
+      expect((await executeHostedRuntimeSnapshotCommand({ prisma: first, userId, now,
+        command: { operation: "snapshot_heartbeat", ...runtime, snapshotId: session.snapshotId } })).applied).toBe(true);
+    }
+    if (upload !== "pending") {
+      await executeHostedRuntimeSnapshotCommand({ prisma: first, userId,
+        command: { operation: "snapshot_managed_settled", ...runtime, snapshotId: session.snapshotId,
+          uploadId: "synthetic-cleanup-upload", verified: true } });
+    }
+    const ref = {
+      schema: HOSTED_WORKSPACE_SNAPSHOT_REF_SCHEMA, userId, snapshotId: session.snapshotId,
+      objectKey: session.objectKey, createdAt: session.createdAt,
+      encryption: { ...session.encryption, ivBase64: Buffer.alloc(12).toString("base64url") },
+      upload: "direct-r2-presigned-put" as const,
+      archive: { compression: "zstd" as const, format: "tar" as const,
+        encryptedByteSize: 128, encryptedObjectSha256: "a".repeat(64),
+        plaintextArchiveSha256: "b".repeat(64), fileCount: 1, totalPlainBytes: 256 },
+    };
+    await observer.hostedWorkspace.create({ data: { userId } });
+    if (upload === "published") {
+      await checkpointHostedRuntimeWorkspace({ prisma: first, userId,
+        runtimeAuthority: { ...runtime, workspaceVersion: "0" }, expectedVersion: "0",
+        reason: "idle_shutdown", snapshotRef: ref });
+      // A current archive stays protected even when its cleanup grace has passed.
+      await observer.hostedRuntimeOrphan.updateMany({ where: { userId }, data: { cleanupAt: now } });
+    }
+    const claimed = (await claimHostedRuntimeResourceCleanup({ prisma: second, now })).orphans
+      .filter(row => row.userId === userId);
+    expect(claimed).toHaveLength(upload === "settled" ? 1 : 0);
+    if (upload === "settled") {
+      await expect(checkpointHostedRuntimeWorkspace({ prisma: first, userId,
+        runtimeAuthority: { ...runtime, workspaceVersion: "0" }, expectedVersion: "0",
+        reason: "idle_shutdown", snapshotRef: ref }))
+        .rejects.toMatchObject({ code: "HOSTED_RUNTIME_RESOURCE_RETIRED" });
+      expect((await observer.hostedRuntimePutDrain.findFirstOrThrow({ where: { userId } })).completedAt).not.toBeNull();
+    }
+  });
+
+  it.each(["none", "soon", "unknown"] as const)("retains a replaced v2 snapshot without extending %s content expiry", async (expiry) => {
+    const userId = await member();
+    const runtime = identity((await claim(userId)).owner);
+    const session = await snapshotSession(runtime);
+    const ref = {
+      schema: HOSTED_WORKSPACE_SNAPSHOT_REF_SCHEMA,
+      userId, snapshotId: session.snapshotId, objectKey: session.objectKey,
+      createdAt: session.createdAt, encryption: { ...session.encryption, ivBase64: Buffer.alloc(12).toString("base64url") },
+      upload: "direct-r2-presigned-put" as const,
+      archive: { compression: "zstd" as const, format: "tar" as const,
+        encryptedByteSize: 128, encryptedObjectSha256: "a".repeat(64),
+        plaintextArchiveSha256: "b".repeat(64), fileCount: 5, totalPlainBytes: 256 },
+    };
+    const contentExpiry = new Date(Date.now() + 30 * 60_000);
+    await observer.hostedWorkspace.create({ data: { userId } });
+    await checkpointHostedRuntimeWorkspace({ prisma: first, userId, runtimeAuthority: { ...runtime, workspaceVersion: "0" }, expectedVersion: "0", reason: "idle_shutdown", snapshotRef: ref,
+      ...(expiry === "unknown" ? {} : { inboxMediaRetentionWakeAt: expiry === "none" ? null : contentExpiry }),
+    });
+    const retained = await observer.hostedRuntimeOrphan.findFirstOrThrow({ where: { userId, kind: "snapshot" } });
+    expect(retained.snapshotRef).toEqual(ref);
+    if (expiry === "none") expect(retained.cleanupAt.getTime()).toBe(Date.parse(ref.createdAt) + HOSTED_RUNTIME_SNAPSHOT_RECOVERY_RETENTION_MS);
+    if (expiry === "soon") expect(retained.cleanupAt).toEqual(contentExpiry);
+    if (expiry === "unknown") expect(retained.cleanupAt.getTime() - retained.createdAt.getTime()).toBe(65 * 60_000);
+    // A current snapshot stays protected, but moving its cleanup retry must
+    // not extend the archive's fixed recovery deadline when it is replaced.
+    expect((await claimHostedRuntimeResourceCleanup({ prisma: second, now: retained.cleanupAt })).orphans.some(row => row.userId === userId)).toBe(false);
+    const deferred = await observer.hostedRuntimeOrphan.findFirstOrThrow({ where: { userId, kind: "snapshot" } });
+    expect(deferred.cleanupAt.getTime()).toBeGreaterThan(retained.cleanupAt.getTime());
+    expect(deferred.recoveryUntil).toEqual(retained.cleanupAt);
+    await checkpointHostedRuntimeWorkspace({ prisma: first, userId, runtimeAuthority: { ...runtime, workspaceVersion: "1" }, expectedVersion: "1", reason: "canonical_runtime_commit", snapshotRef: null });
+    const lateAt = new Date();
+    await first.$transaction(async tx => {
+      await requireHostedRuntimeOwnerTx(tx, runtime);
+      await recordRuntimeOrphansTx(tx, userId, [{ kind: "snapshot", resourceId: ref.snapshotId,
+        objectKey: ref.objectKey, snapshotRef: Prisma.DbNull }], lateAt);
+    });
+    const afterLateRecord = await observer.hostedRuntimeOrphan.findFirstOrThrow({ where: { userId, kind: "snapshot" } });
+    expect(afterLateRecord.snapshotRef).toEqual(ref);
+    expect(afterLateRecord.cleanupAt).toEqual(retained.cleanupAt);
+    expect((await claimHostedRuntimeResourceCleanup({ prisma: second, now: new Date(afterLateRecord.cleanupAt.getTime() - 1) })).orphans.some(row => row.userId === userId)).toBe(false);
+    const retired = (await claimHostedRuntimeResourceCleanup({ prisma: second, now: afterLateRecord.cleanupAt })).orphans.find(row => row.userId === userId);
+    expect(retired).toBeDefined();
+    expect(retired?.snapshotRef).toEqual(ref);
+    expect(retired?.retiredAt).not.toBeNull();
+  });
+
   it.each([14, 30, 90])("registers successful media with its %i-day retention instead of the orphan deadline", async days => {
     const userId = await member();
     const runtime = identity((await claim(userId)).owner);
@@ -776,6 +1019,64 @@ describe.skipIf(!enabled)("Postgres runtime ownership", () => {
     expect(await observer.hostedRuntimeOwner.findUniqueOrThrow({ where: { userId } })).toMatchObject({
       attemptId: successor.attemptId, lastErrorCode: null, failureCount: 1,
     });
+  });
+
+  it("admits 36 replica receipts atomically and retains unknown uploads through deletion", async () => {
+    const userId = await member();
+    const runtime = identity((await claim(userId)).owner);
+    const objectKey = `${await hostedBrowserVaultReplicaUserPrefix({ userId })}synthetic-batch.json`;
+    const keys = [objectKey, ...listHostedBrowserVaultReplicaSiblingObjectKeys(objectKey)];
+    const uploads = keys.map((objectKey, index) => ({ objectKey, writeId: `batch-${index}`, uploadId: `upload-${index}` }));
+    const command = { operation: "admit_batch" as const, ...runtime, objectKey, uploads };
+    const operations: PrismaOperationTiming[] = [];
+    expect(await runWithPrismaOperationTimings(operations, () => executeHostedRuntimeReplicaPutCommand({ prisma: first, userId, command }))).toEqual({ applied: true });
+    expect(operations.map(operation => operation.key).filter(key => key.startsWith("HostedRuntimePutDrain.")))
+      .toEqual(["HostedRuntimePutDrain.findFirst", "HostedRuntimePutDrain.createMany"]);
+    // Bound includes every raw authority lock and orphan operation, independent
+    // of the 36-upload cardinality; one short transaction owns all of them.
+    expect(operations).toHaveLength(9);
+    const rows = () => observer.hostedRuntimePutDrain.findMany({ where: { userId }, orderBy: { writeId: "asc" } });
+    expect(await rows()).toHaveLength(36);
+    expect((await rows()).every(row => row.uploadId && row.completedAt === null && row.drainUntil === null)).toBe(true);
+    expect(await executeHostedRuntimeReplicaPutCommand({ prisma: second, userId, command })).toEqual({ applied: false });
+    // A partially reused batch must not admit its otherwise-new identity.
+    expect(await executeHostedRuntimeReplicaPutCommand({ prisma: second, userId,
+      command: { ...command, uploads: [uploads[0]!, { ...uploads[1]!, writeId: "new-write" }] } })).toEqual({ applied: false });
+    expect(await rows()).toHaveLength(36);
+    const settled = uploads.slice(1).map(upload => upload.writeId);
+    const release = () => executeHostedRuntimeReplicaPutCommand({ prisma: second, userId,
+      command: { operation: "release_batch", writeIds: settled } });
+    await retireHostedRuntime({ prisma: first, identity: runtime });
+    await expect(executeHostedRuntimeReplicaPutCommand({ prisma: first, userId, command: { ...command,
+      uploads: uploads.map(upload => ({ ...upload, writeId: `late-${upload.writeId}` })) } }))
+      .rejects.toMatchObject({ code: "HOSTED_RUNTIME_OWNER_STALE" });
+    await observer.hostedMember.delete({ where: { id: userId } });
+    expect(await release()).toEqual({ applied: true });
+    expect(await release()).toEqual({ applied: false });
+    const pending = (await rows()).filter(row => row.completedAt === null);
+    expect(pending).toMatchObject([{ writeId: "replica:batch-0", objectKey, uploadId: "upload-0", drainUntil: null }]);
+    expect(await isHostedRuntimeDeletionReady({ prisma: observer, userId })).toBe(false);
+    uploadRecovery.purge.mockResolvedValue(undefined);
+    await reconcileHostedRuntimeUploads({ prisma: observer, now: new Date(Date.now() + 70 * 60_000), deadlineAtMs: Date.now() + 5_000 });
+    expect(uploadRecovery.purge).toHaveBeenCalledWith(expect.objectContaining({ userId,
+      resource: { kind: "multipart", objectKey, uploadId: "upload-0" } }));
+    expect((await rows()).every(row => row.completedAt !== null)).toBe(true);
+  });
+
+  it("rejects foreign or retired replica families without partial batch admission", async () => {
+    const userId = await member();
+    const runtime = identity((await claim(userId)).owner);
+    const objectKey = `${await hostedBrowserVaultReplicaUserPrefix({ userId })}synthetic-retired.json`;
+    const command = { operation: "admit_batch" as const, ...runtime, objectKey,
+      uploads: [{ objectKey, writeId: "first", uploadId: "first-upload" },
+        { objectKey: `${objectKey}/foreign`, writeId: "second", uploadId: "second-upload" }] };
+    await expect(executeHostedRuntimeReplicaPutCommand({ prisma: first, userId, command })).rejects.toThrow("outside its root");
+    await first.$transaction(tx => recordRuntimeOrphansTx(tx, userId, [{ kind: "replica", resourceId: objectKey,
+      objectKey, snapshotRef: Prisma.DbNull }], new Date(0)));
+    await observer.hostedRuntimeOrphan.updateMany({ where: { userId, kind: "replica", resourceId: objectKey }, data: { retiredAt: new Date() } });
+    await expect(executeHostedRuntimeReplicaPutCommand({ prisma: first, userId,
+      command: { ...command, uploads: [command.uploads[0]!] } })).rejects.toMatchObject({ code: "HOSTED_RUNTIME_RESOURCE_RETIRED" });
+    expect(await observer.hostedRuntimePutDrain.count({ where: { userId } })).toBe(0);
   });
 
   it("keeps concurrent replica PUTs independent through revocation and account deletion", async () => {

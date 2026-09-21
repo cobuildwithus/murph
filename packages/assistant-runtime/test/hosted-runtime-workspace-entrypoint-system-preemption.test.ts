@@ -364,7 +364,7 @@ describe("hosted workspace runtime entrypoint", () => {test("fresh foreground in
           < requireEventIndex(events, "device.snapshot"),
       );
       assert.equal(deviceSyncPort.fetchSnapshotCalls, 1);
-      assert.equal(deviceSyncPort.applyUpdatesCalls, 1);
+      assert.equal(deviceSyncPort.applyUpdatesCalls, 0);
       assert.notEqual(result.status, "failed");
     } finally {
       await removeTempRoot(vaultRoot);
@@ -1181,6 +1181,7 @@ describe("hosted workspace runtime entrypoint", () => {test("fresh foreground in
     });
     const deviceSyncPort = createSnapshotDeviceSyncPort({
       connectionId: "device_sync_connection_preempt_during",
+      connectionStatus: "disconnected",
       nextReconcileAt: "2026-04-27T00:05:00.000Z",
       onApplyUpdates: () => {
         mailboxItems.push(foregroundItem);
@@ -1347,7 +1348,9 @@ describe("hosted workspace runtime entrypoint", () => {test("fresh foreground in
           platform: createPlatform({
             artifactBytesByHash: new Map([[restored.hash, restored.bytes]]),
             deviceSyncPort: createSnapshotDeviceSyncPort({
-              connectionId: "synthetic-upgrade-connection", nextReconcileAt: "2099-01-01T00:00:00.000Z",
+              connectionId: "synthetic-upgrade-connection",
+              connectionStatus: "disconnected",
+              nextReconcileAt: "2099-01-01T00:00:00.000Z",
               onApplyUpdates() {
                 if (arrival === "device completion") sendForeground();
               },
@@ -1419,6 +1422,7 @@ describe("hosted workspace runtime entrypoint", () => {test("fresh foreground in
     });
     const deviceSyncPort = createSnapshotDeviceSyncPort({
       connectionId: "device_sync_connection_host_abort_after_apply",
+      connectionStatus: "disconnected",
       nextReconcileAt: "2026-04-27T00:05:00.000Z",
       onApplyUpdates: async () => {
         await runCanonicalWrite({
@@ -4275,17 +4279,17 @@ describe("hosted workspace runtime entrypoint", () => {test("fresh foreground in
     const wakeTimers: ReturnType<typeof setTimeout>[] = [];
     let wakeTimersStarted = false;
     let checkpointExpectationCountAtWakeStart = 0;
-    const countCheckpointExpectations = () =>
-      latencyTraceRequests.filter((request) =>
-        request.event.type === "runtime_milestone"
-        && request.event.milestone === "checkpoint_publication_expected_by"
-      ).length;
+    const readCheckpointExpectations = () =>
+      latencyTraceRequests.map(({ event }) => event).filter((event) =>
+        event.type === "runtime_milestone"
+        && event.milestone === "checkpoint_publication_expected_by"
+      );
     const startNoProgressWakes = () => {
       if (wakeTimersStarted) {
         return;
       }
       wakeTimersStarted = true;
-      checkpointExpectationCountAtWakeStart = countCheckpointExpectations();
+      checkpointExpectationCountAtWakeStart = readCheckpointExpectations().length;
       for (const delayMs of [2, 8, 14, 20]) {
         wakeTimers.push(setTimeout(() => runtimeWakeSignal.notify(), delayMs));
       }
@@ -4347,11 +4351,14 @@ describe("hosted workspace runtime entrypoint", () => {test("fresh foreground in
         },
       );
 
-      assert.equal(
-        countCheckpointExpectations() - checkpointExpectationCountAtWakeStart,
-        1,
-        "dirty import publishes one deadline and empty wake probes publish none",
+      const checkpointExpectations = readCheckpointExpectations()
+        .slice(checkpointExpectationCountAtWakeStart);
+      assert.deepEqual(
+        checkpointExpectations.map((event) => event.source).sort(),
+        ["email", "linq", "telegram"],
+        "dirty import publishes once per channel and empty wake probes publish none",
       );
+      assert.equal(new Set(checkpointExpectations.map((event) => event.at)).size, 1);
       assert.ok(fetchRequests.length > 1);
       assert.deepEqual(events.filter((event) => event.startsWith("mailbox.importItem:")), [
         "mailbox.importItem:mailbox_item_entrypoint_no_progress_wake_001",

@@ -25,7 +25,12 @@ prove complete stored records, not complete capture of the member's day.
 
 `packages/query/src/meal-nutrition*.ts` remains the canonical read owner. Before
 attachment use one successful selected-date `meal totals --resolve-goals` read,
-rerunning after any meal or Goal mutation. Do not recalculate around canonical
+or `dailyTotals.data` from a successful same-date `meal add/import-json
+--with-daily-totals` with status `available`. The combined command reads after
+saving; it needs no separate confirmation. Rerun after any later meal or Goal
+mutation. If that optional read fails, the meal remains saved; retry only the
+read. Neither composition nor a successful read establishes numeric suitability
+or complete coverage. Do not recalculate around canonical
 records, use another date, reinterpret raw bounds, or invent targets.
 
 | Canonical goal context | Fresh authoring / behavior |

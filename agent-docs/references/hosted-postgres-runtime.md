@@ -47,6 +47,22 @@ retired legacy alarm and run-until-idle HTTP controls are unavailable.
 
 ## Claim, launch, completion, and recovery
 
+The ensure-processing request accepts an optional canonical Postgres admission
+response (`claimed` or `existing`). Only authenticated Web OIDC callers can
+supply it; the Worker validates its member binding before container work. Web
+can run its existing claim command locally and carry the result to the Worker,
+removing the initial Worker-to-Web callback. Requests without admission still
+claim through Web, including the separately deployed Temporal caller. Completion
+recovery still claims successors through Web; supplied snapshots never replace
+conditional database mutations or native attempt/generation checks.
+
+Deploy the accepting Worker before enabling Web to send admission. Old Web and
+Temporal callers remain supported by the new Worker. New Web is incompatible
+with an older strict Worker parser. Roll back Web and let it converge before
+rolling Worker below this reader floor. Publish reader and producer in separate
+PRs because Web deploys independently on merge. No protocol flag or cached
+admission is needed. Web must obtain a fresh snapshot for each direct retry.
+
 Existing compatible owners are woken immediately after Postgres admission. The
 native wake validates the exact attempt and generation; an accepted wake needs
 no separate invocation receipt read. Unaccepted wakes still reconcile completed
@@ -82,11 +98,24 @@ warm target. Failed or ambiguous retirement requires exact native stop proof
 before clearing its assignment. Bound slots never return to shared inventory.
 
 The runtime completion callback and outer invocation result share the same
-native receipt and Web retirement operation. An early callback cannot release
-the still-running outer invocation. The settled outer result releases ownership
-before sending the advisory Temporal hint; its failure leaves durable completion
-for the normal recheck. Bounded phase-only failure metadata is recorded before
-native stop, without granting or releasing authority.
+native receipt and Web `complete` command. Each stage uses one HTTP request for
+conditional retirement, optional exact native-settlement release, and the
+advisory Temporal hint. The early callback still reads the owner to route its
+native receipt, and cannot release the still-running outer invocation. The
+settled outer result releases ownership before signaling outside the database
+transactions. The hint has a two-second best-effort budget; failure leaves
+durable completion for the normal recheck. Lost responses replay the same exact
+identity and cannot retire or release a successor. Pending upload drains remain
+owned by the existing release transaction.
+
+Deploy the additive Web completion consumer before the Worker producer. The
+existing live Web protocol admission includes both early and settled command
+witnesses parsed by the same reader as the ownership endpoint, and rejects
+readers without that evidence before Worker activation. Legacy retirement,
+release and owner-released requests remain supported during rollout. Warm
+containers use the unchanged completion callback. Roll back the Worker before
+removing the Web completion reader. Bounded phase-only failure metadata is
+recorded before native stop, without granting or releasing authority.
 
 ## Transactions and effects
 
@@ -115,6 +144,12 @@ resource rows. Transactions contain bounded database work only, with five-second
 transaction/admission limits. External allocation, container operations, provider
 calls, and R2 writes run outside transactions.
 
+Owner locks return the current row, and callback/provider admission reads member
+existence from the member lock itself. These paths use three ordered lock queries
+in the completed Postgres phase, without separate owner/member rereads. Returned
+generations and workspace versions retain native bigint precision. Deleted
+members remain unauthorized even when cleanup retains their owner row.
+
 The native usage-settlement receipt is a negative latch: pending or denied
 settlement blocks managed provider access. Only an explicit allowance response
 clears that report's pending latch. Eviction or an unknown response cannot grant
@@ -128,12 +163,77 @@ foreign key so account deletion cannot erase physical cleanup requirements.
 Snapshot sessions retain existing presign admission and capability-drain policy;
 fresh final admission precedes returning a presigned capability.
 
+Current snapshot producers do not send handoff heartbeats or completion markers.
+A session expires after sixty minutes; unaccepted resources first become cleanup
+candidates after sixty-five. Independent pending upload receipts protect writes,
+current workspace refs protect committed archives, and publication rejects a
+retired ref under the same owner locks as cleanup. Expired completion can only
+acknowledge a matching already-current checkpoint, never publish new bytes.
+Session replacement does not use heartbeat or completion state. The legacy
+heartbeat/completion commands and fields remain accepted until older Workers and
+warm containers drain; their timestamps are compatibility data, not cleanup or
+execution authority. No schema migration or coordinated rollout is required.
+
+Managed completion reads both its session and immutable upload receipt through
+the existing `snapshot_managed_read` command. It validates their exact identity
+and admitted bytes locally, completes/verifies the existing R2 upload, and settles
+that exact receipt even after revocation. The final checkpoint transaction owns
+fresh attempt/generation admission, workspace CAS and resource-retirement checks;
+normal completion has no additional standalone owner-read RPCs. Exceptional
+cleanup retains its exact-session checks. Snapshot start shares the configured
+commit deadline across request and response decoding, without a separate
+heartbeat-derived six-second cap.
+
+Accepted v2 workspace snapshots retain their encrypted R2 object and complete
+authenticated snapshot reference, including the wrapped data key, for up to seven
+days from archive creation. The archive's explicit inbox/media retention wake
+caps this window so backup retention cannot extend expiring content. Missing
+retention evidence grants only the existing orphan grace. The first complete
+reference fixes that archive's `recovery_until` deadline; repeated refs and
+key-only records cannot renew it. `cleanup_at` remains the retry schedule, so
+deferring deletion of a current snapshot cannot renew its recovery deadline
+after replacement. The existing orphan row owns this recovery history;
+no additional scheduler or plaintext backup is created. Key-only session and
+adapter cleanup records preserve that reference and cannot shorten its deadline.
+Unaccepted uploads and ordinary replica orphans retain the 65-minute grace.
+The existing bounded cleanup sweep retires expired, non-current snapshots under
+the same owner/publication locks. Account deletion still drains writes and
+deletes the entire member snapshot namespace without waiting seven days.
+
+The runner rejects a replacement archive plan without a nonempty regular
+canonical `vault.json` file before building or uploading it. Enumeration and
+archive validation independently reject included files disappearing during the
+scan or archive write. First bootstrap without an earlier snapshot remains
+supported. These guards do not assert that every historical record is present;
+the retained encrypted checkpoints provide the recovery window for other
+integrity failures. Recovery must validate canonical coverage, preserve its
+sources, and fence the workspace update; a Browser Vault projection alone is
+not a complete canonical backup.
+
 Worker-owned media, private images, and each replica shard use recoverable R2
 multipart uploads. An empty upload is created first; its exact object key and
 upload ID are admitted in Postgres before sending encrypted bytes. Each physical
 write has a separate receipt. Completion or confirmed abort releases that
 receipt. An unknown completion followed by an unknown abort leaves it pending.
 Stopping a runtime never converts a multipart receipt into a timed drain.
+
+Browser Vault replica refreshes allocate their fixed 36 empty uploads with at
+most four R2 operations in flight, then admit all exact upload IDs in one Web
+callback before sending bytes. One root orphan row still owns the family, and
+one receipt per physical upload survives independently. Admission uses one
+transaction with nine database operations in the Postgres phase (at most 15
+while the existing rolling cutover locks apply), including one set-based receipt
+insert; settlement uses one set-based update under the existing cutover gate. No R2 or crypto work occurs inside either transaction. The outer
+non-multipart receipt and preliminary ownership callback are unnecessary because
+batch admission performs the same live owner and resource-retirement checks.
+The Worker drains every started upload before one bounded settlement callback;
+only completed or confirmed-aborted identities enter it. Unknown completion or
+abort remains pending, and an uncertain admission response sends no bytes.
+A previously used identity rejects the entire admission batch. The deployed
+single-object commands remain accepted during Web-first rollout. The existing
+live Web protocol admission probe exercises both full-size batch parsers before
+a new Worker deploy; the rollback floor keeps that Web consumer until all batch
+producers have been reverted and converged.
 
 The existing external-retention cron runs at minutes 2, 7, …, 57 of each hour
 (`2-59/5 * * * *`). Its runtime-resource phase retains a 50-orphan selection

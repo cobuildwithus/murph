@@ -36,8 +36,7 @@ export async function claimHostedRuntime(input: {
     if (!await runtimeAdmissionAllowedTx(tx, input.userId, input.processingMode)) {
       return { status: "blocked", reason: "admission" };
     }
-    await lockHostedRuntimeOwnerRowTx(tx, input.userId);
-    const existing = await tx.hostedRuntimeOwner.findUnique({ where: { userId: input.userId } });
+    const existing = await lockHostedRuntimeOwnerRowTx(tx, input.userId);
     if (existing && existing.phase !== "idle") {
       return { status: "existing", owner: existing };
     }
@@ -173,12 +172,12 @@ async function requireOwnerAfterCutoverLockTx(
   tx: OwnerTransaction,
   identity: HostedRuntimeIdentity,
 ): Promise<HostedRuntimeOwner> {
-  await lockHostedMemberRow(tx, identity.userId);
-  await lockHostedRuntimeOwnerRowTx(tx, identity.userId);
-  const owner = await tx.hostedRuntimeOwner.findUnique({ where: { userId: identity.userId } });
+  const members = await tx.$queryRaw<Array<{ id: string }>>`
+    SELECT id FROM hosted_member WHERE id = ${identity.userId} FOR UPDATE
+  `;
+  const owner = await lockHostedRuntimeOwnerRowTx(tx, identity.userId);
   // Cleanup retains the owner row after account deletion; it is no longer authority.
-  const member = await tx.hostedMember.findUnique({ where: { id: identity.userId }, select: { id: true } });
-  if (!member || !owner || owner.attemptId !== identity.attemptId
+  if (!members[0] || !owner || owner.attemptId !== identity.attemptId
     || owner.generation.toString() !== identity.generation
     || (owner.phase !== "starting" && owner.phase !== "active")) {
     throw staleRuntimeError();
@@ -292,8 +291,20 @@ async function runtimeAdmissionAllowedTx(
     || await readActiveHostedMemberAccess({ prisma: tx, memberId: userId });
 }
 
-export async function lockHostedRuntimeOwnerRowTx(tx: OwnerTransaction, userId: string): Promise<void> {
-  await tx.$queryRaw`SELECT user_id FROM hosted_runtime_owner WHERE user_id = ${userId} FOR UPDATE`;
+export async function lockHostedRuntimeOwnerRowTx(tx: OwnerTransaction, userId: string): Promise<HostedRuntimeOwner | null> {
+  const owners = await tx.$queryRaw<HostedRuntimeOwner[]>`
+    SELECT user_id AS "userId", migration_phase AS "migrationPhase",
+      migration_id AS "migrationId", generation, attempt_id AS "attemptId", phase,
+      processing_mode AS "processingMode", allocation_id AS "allocationId",
+      runner_container_name AS "runnerContainerName", workspace_version AS "workspaceVersion",
+      provider_egress_token_hash AS "providerEgressTokenHash",
+      custom_inference_envelope AS "customInferenceEnvelope",
+      platform_ai_usage_allowed AS "platformAiUsageAllowed", started_at AS "startedAt",
+      accepted_at AS "acceptedAt", completed_at AS "completedAt",
+      failure_count AS "failureCount", last_error_code AS "lastErrorCode", updated_at AS "updatedAt"
+    FROM hosted_runtime_owner WHERE user_id = ${userId} FOR UPDATE
+  `;
+  return owners[0] ?? null;
 }
 
 function identityWhere(identity: HostedRuntimeIdentity) {
@@ -312,11 +323,11 @@ export async function authorizeHostedRuntimeProvider(input: {
 }): Promise<HostedRuntimeOwner | null> {
   return input.prisma.$transaction(async tx => {
     if (await lockHostedRuntimeMemberCutoverTx(tx, input.userId) !== "postgres") return null;
-    await lockHostedMemberRow(tx, input.userId);
-    await lockHostedRuntimeOwnerRowTx(tx, input.userId);
-    const current = await tx.hostedRuntimeOwner.findUnique({ where: { userId: input.userId } });
-    const member = await tx.hostedMember.findUnique({ where: { id: input.userId }, select: { id: true } });
-    if (!member || !current || !current.attemptId || !current.runnerContainerName || current.workspaceVersion === null
+    const members = await tx.$queryRaw<Array<{ id: string }>>`
+      SELECT id FROM hosted_member WHERE id = ${input.userId} FOR UPDATE
+    `;
+    const current = await lockHostedRuntimeOwnerRowTx(tx, input.userId);
+    if (!members[0] || !current || !current.attemptId || !current.runnerContainerName || current.workspaceVersion === null
       || (current.phase !== "starting" && current.phase !== "active")) return null;
     if (input.runnerContainerName !== null) {
       if (current.runnerContainerName !== input.runnerContainerName || !["exa", "mapbox", "murph_data_api", "openai", "venice", "workers_ai_transcribe"].includes(input.providerKind)) return null;
@@ -330,8 +341,7 @@ export async function authorizeHostedRuntimeProvider(input: {
 export async function recordHostedRuntimeTargetRetired(input: { prisma: PrismaClient; userId: string; runnerContainerName: string }): Promise<boolean> {
   return input.prisma.$transaction(async tx => {
     if (await lockHostedRuntimeMemberCutoverTx(tx, input.userId) !== "postgres") return false;
-    await lockHostedRuntimeOwnerRowTx(tx, input.userId);
-    const current = await tx.hostedRuntimeOwner.findUnique({ where: { userId: input.userId } });
+    const current = await lockHostedRuntimeOwnerRowTx(tx, input.userId);
     if (!current || current.runnerContainerName !== input.runnerContainerName) return false;
     await tx.hostedRuntimeOwner.update({ where: { userId: input.userId }, data: {
       phase: "idle", attemptId: null, allocationId: null, runnerContainerName: null, processingMode: null,
@@ -350,10 +360,11 @@ export async function recordHostedRuntimeTargetRetired(input: { prisma: PrismaCl
 export async function isHostedRuntimeDeletionReady(input: { prisma: PrismaClient; userId: string }): Promise<boolean> {
   return input.prisma.$transaction(async tx => {
     if (await lockHostedRuntimeMemberCutoverTx(tx, input.userId) !== "postgres") return false;
-    await lockHostedMemberRow(tx, input.userId);
-    if (await tx.hostedMember.findUnique({ where: { id: input.userId }, select: { id: true } })) return false;
-    await lockHostedRuntimeOwnerRowTx(tx, input.userId);
-    const owner = await tx.hostedRuntimeOwner.findUnique({ where: { userId: input.userId } });
+    const members = await tx.$queryRaw<Array<{ id: string }>>`
+      SELECT id FROM hosted_member WHERE id = ${input.userId} FOR UPDATE
+    `;
+    if (members[0]) return false;
+    const owner = await lockHostedRuntimeOwnerRowTx(tx, input.userId);
     if (owner && (owner.phase !== "idle" || owner.runnerContainerName !== null)) return false;
     return await tx.hostedRuntimePutDrain.findFirst({ where: { userId: input.userId, completedAt: null,
       OR: [{ drainUntil: null }, { drainUntil: { gt: new Date() } }],

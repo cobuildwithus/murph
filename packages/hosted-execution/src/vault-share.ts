@@ -1,5 +1,8 @@
 import {
   activityKindAliasGroups,
+  sleepSessionTypeSchema,
+  sleepSessionStateSchema,
+  type SleepSessionEventRecord,
   isStrictIsoDate,
   normalizeIanaTimeZone,
   isStrictIsoDateTime,
@@ -94,6 +97,7 @@ export const HOSTED_VAULT_SHARE_DEFERRED_WORK_CAPABILITY_VERSION = "v1";
 export const HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE =
   "first-materialization";
 export const HOSTED_VAULT_SHARE_PROJECTION_MODE_PARAM = "projectionMode";
+export const HOSTED_VAULT_SHARE_SOURCE_WORKSPACE_VERSION_PARAM = "sourceWorkspaceVersion";
 
 export type HostedVaultShareProjectionMode =
   typeof HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE;
@@ -540,6 +544,8 @@ export const HOSTED_VAULT_SHARE_WORKOUT_KIND_MAX_LENGTH = 80;
 export const HOSTED_VAULT_SHARE_WORKOUT_GENERIC_KIND = "workout";
 
 export interface HostedVaultShareDailyMetricData {
+  sleepType?: SleepSessionEventRecord["sleepType"];
+  sleepState?: SleepSessionEventRecord["sleepState"];
   date: string;
   metricKey: string;
   metricSemantics?: typeof HOSTED_VAULT_SHARE_BROAD_ACTIVITY_MINUTES_SEMANTICS;
@@ -1659,6 +1665,8 @@ function parseHostedVaultShareDailyMetricData(
         "provisional",
         "sources",
         "sourcesDisagree",
+        "sleepType",
+        "sleepState",
         "unit",
         "value",
       ],
@@ -1709,9 +1717,27 @@ function parseHostedVaultShareDailyMetricData(
     metricKey,
     ...(metricSemantics === undefined ? {} : { metricSemantics }),
     ...(sourceTaggedSleepStage ? { recordedAt } : {}),
+    ...parseHostedVaultShareSleepClassification(data, spec.metricKey),
     ...sourceAwareData,
     unit,
     value: valueNumber,
+  };
+}
+
+/** Selected-session qualifiers share the canonical enums and only accompany sleep metrics. */
+export function parseHostedVaultShareSleepClassification(
+  context: Record<string, unknown> | undefined,
+  metricKey: string,
+): Pick<HostedVaultShareDailyMetricData, "sleepType" | "sleepState"> {
+  const sleepType = sleepSessionTypeSchema.optional().parse(context?.sleepType);
+  const sleepState = sleepSessionStateSchema.optional().parse(context?.sleepState);
+  const sleepMetric = ["total-sleep-minutes", "deep-sleep-minutes", "rem-sleep-minutes"].includes(metricKey);
+  if (!sleepMetric && (sleepType !== undefined || sleepState !== undefined)) {
+    throw new TypeError(`Vault share ${metricKey} does not accept sleep classification.`);
+  }
+  return {
+    ...(sleepType === undefined ? {} : { sleepType }),
+    ...(sleepState === undefined ? {} : { sleepState }),
   };
 }
 
@@ -2466,7 +2492,7 @@ function assertHostedVaultSharePublicSourceCapacity(parsedRecords: readonly Host
   }
 }
 
-function requireHostedVaultShareSourceWorkspaceVersion(value: unknown): string {
+export function requireHostedVaultShareSourceWorkspaceVersion(value: unknown): string {
   const sourceWorkspaceVersion = requireString(
     value,
     "Vault share deliver request sourceWorkspaceVersion",

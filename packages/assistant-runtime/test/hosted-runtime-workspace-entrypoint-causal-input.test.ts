@@ -227,12 +227,12 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps idle-window t
           };
         },
         async importItem() {
-          throw new Error("Queued wake without foreground work should not import mailbox items.");
+          return { status: "imported" };
         },
         platform: createPlatform({
           mailboxPort: createMailboxPort({
             events: [],
-            items: [],
+            items: [createMailboxItem()],
           }),
           workspacePort: createWorkspacePort({
             checkpointRequests,
@@ -345,7 +345,7 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps idle-window t
     const consoleInfo = vi.spyOn(console, "info").mockImplementation(() => undefined);
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const dirtyWaitStarted = createDeferred<void>();
-    const mailboxItems: HostedMailboxItem[] = [];
+    const mailboxItems: HostedMailboxItem[] = [createMailboxItem()];
     let assistantPhaseFinished = false;
     let assistantPhaseCount = 0;
     let activeDirtyWake: ((notification: { notifiedAtEpochMs: number }) => void) | null = null;
@@ -491,7 +491,7 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps idle-window t
         assert.ok(wakeMailboxFetchCount > 0);
         assert.equal(providerReadCount, 0);
         assert.equal(assistantPhaseCount, 1);
-        assert.equal(importedItemCount, 0);
+        assert.equal(importedItemCount, 1);
         assert.equal(snapshotCount, 0);
         assert.equal(checkpointRequests.length, 0);
         return;
@@ -516,7 +516,7 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps idle-window t
       assert.equal(snapshotCount, 1);
       assert.equal(providerReadCount, 0);
       assert.ok(wakeMailboxFetchCount > 0);
-      assert.equal(importedItemCount, 0);
+      assert.equal(importedItemCount, 1);
       assert.equal(assistantPhaseCount, 1);
       if (expectImmediateRecheck) {
         assert.ok(elapsedAfterWakeMs < expectedElapsedBoundaryMs);

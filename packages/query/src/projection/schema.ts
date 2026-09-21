@@ -26,7 +26,8 @@ export const QUERY_PROJECTION_SCHEMA_ID = "murph.query-projection";
 // 26: Rebuild wearable provider rows after public query slug canonicalization.
 // 27: Rebuild goal targets through the canonical target schema.
 // 28: Independently certify wearable rows; older full rebuilders must reset them.
-export const QUERY_PROJECTION_SQLITE_VERSION = 28;
+// 29: Rebuild sleep summaries and metrics with session classification and provider state.
+export const QUERY_PROJECTION_SQLITE_VERSION = 29;
 
 export interface QueryProjectionLocation {
   absolutePath: string;

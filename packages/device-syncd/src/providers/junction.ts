@@ -2736,19 +2736,34 @@ export function createJunctionDeviceSyncProvider(
       listedSourceProviders = sourceProviders;
       return sourceProviders;
     };
-    const loadAndProjectSourceProviders = async (): Promise<readonly JunctionProviderConnection[]> => {
+    const loadAndProjectSourceProviders = async (
+      admissionSources?: readonly JunctionImportAdmissionSource[],
+    ): Promise<readonly JunctionProviderConnection[]> => {
       if (projectedSourceProviders) {
         return projectedSourceProviders;
       }
       const sourceProviders = await loadSourceProviders();
-      await projectJunctionSources(context, sourceProviders);
+      await projectJunctionSources(context, sourceProviders, {
+        admissionSources: context.listConnectionSources ? admissionSources : undefined,
+      });
       projectedSourceProviders = sourceProviders;
       if (inventoryKey) {
         passInventories?.set(inventoryKey, sourceProviders);
       }
       return sourceProviders;
     };
-    return { loadSourceProviders, loadAndProjectSourceProviders };
+    const loadImportAdmission = async () => {
+      const sourceProviders = await loadSourceProviders();
+      // Hosted projection cannot change Web authority. Local projection can
+      // disconnect SQLite sources, so local admission must read after projection.
+      const hostedSources = context.connectionSourceAdmissionMode === "listed_only"
+        ? await readJunctionImportSources(context)
+        : undefined;
+      await loadAndProjectSourceProviders(hostedSources);
+      const currentSources = hostedSources ?? await readJunctionImportSources(context);
+      return { sourceProviders, currentSources };
+    };
+    return { loadSourceProviders, loadAndProjectSourceProviders, loadImportAdmission };
   }
 
   async function executeResourceJob(
@@ -2910,11 +2925,13 @@ export function createJunctionDeviceSyncProvider(
       );
     }
 
-    const sourceProviders = await inventory.loadAndProjectSourceProviders();
-    const preparedImport = await prepareJunctionImportSnapshot(
-      context,
+    const { sourceProviders, currentSources } = await inventory.loadImportAdmission();
+    const preparedImport = prepareJunctionImportSnapshotForSources(
       summaries,
       sourceProviders,
+      currentSources,
+      {},
+      { allowUnlistedSources: context.connectionSourceAdmissionMode !== "listed_only" },
     );
     await commitPreparedJunctionCanonicalImport(
       context,

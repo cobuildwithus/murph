@@ -2689,14 +2689,8 @@ describe("hosted device-sync runtime", () => {
       });
       const localAccountId = firstState.hostedToLocalAccountIds.get(hostedConnectionId);
       assert.ok(localAccountId);
-      const fitbitSourceInstanceKey = buildJunctionProviderSourceInstanceKey({
-        connectionId: localAccountId,
-        sourceProviderSlug: "fitbit",
-      });
-      const googleSourceInstanceKey = buildJunctionProviderSourceInstanceKey({
-        connectionId: localAccountId,
-        sourceProviderSlug: "google_health",
-      });
+      const fitbitSourceInstanceKey = hostedFitbitSourceInstanceKey;
+      const googleSourceInstanceKey = hostedGoogleSourceInstanceKey;
       assert.ok(fitbitSourceInstanceKey);
       assert.ok(googleSourceInstanceKey);
       const firstSources = getStore(service).listConnectionSources({
@@ -3604,7 +3598,7 @@ describe("hosted device-sync runtime", () => {
           finalSources.find((source) => source.sourceProviderSlug === "garmin")
             ?.sourceInstanceKey,
           buildJunctionProviderSourceInstanceKey({
-            connectionId: localAccountId,
+            connectionId: hostedConnectionId,
             sourceProviderSlug: "garmin",
           }),
         );
@@ -3955,12 +3949,7 @@ describe("hosted device-sync runtime", () => {
         state: disconnectedState,
       });
 
-      assert.deepEqual(appliedRequests, [
-        {
-          occurredAt: "2026-04-06T09:17:00.000Z",
-          updates: [],
-        },
-      ]);
+      assert.equal(appliedRequests.length, 0);
     } finally {
       closeHostedRuntimeDeviceSyncService(service);
       await cleanup();
@@ -4830,10 +4819,7 @@ describe("hosted device-sync runtime", () => {
         state,
       });
 
-      assert.deepEqual(requireApplyUpdatesRequest(appliedRequest), {
-        occurredAt: "2026-04-06T09:20:00.000Z",
-        updates: [],
-      });
+      assert.equal(appliedRequest, null);
     } finally {
       closeHostedRuntimeDeviceSyncService(service);
       await cleanup();
@@ -4927,12 +4913,7 @@ describe("hosted device-sync runtime", () => {
         state,
       });
 
-      assert.equal(
-        requireApplyUpdatesRequest(appliedRequest).updates.some((update) =>
-          Object.prototype.hasOwnProperty.call(update, "credential")
-        ),
-        false,
-      );
+      assert.equal(appliedRequest, null);
     } finally {
       closeHostedRuntimeDeviceSyncService(service);
       await cleanup();
@@ -8310,7 +8291,7 @@ describe("hosted device-sync runtime", () => {
           state,
         });
 
-        assert.deepEqual(requireApplyUpdatesRequest(appliedRequest).updates, []);
+        assert.equal(appliedRequest, null);
       } finally {
         closeHostedRuntimeDeviceSyncService(service);
         await cleanup();
@@ -10514,7 +10495,7 @@ describe("hosted device-sync runtime", () => {
         state,
       });
 
-      assert.deepEqual(requireApplyUpdatesRequest(appliedRequest).updates, []);
+      assert.equal(appliedRequest, null);
     } finally {
       closeHostedRuntimeDeviceSyncService(service);
       await cleanup();
@@ -13393,12 +13374,7 @@ describe("hosted device-sync runtime", () => {
         state: firstState,
         wake,
       });
-      assert.equal(
-        appliedRequests.at(-1)?.updates.some(
-          (update) => update.localState?.nextReconcileAt !== undefined,
-        ),
-        false,
-      );
+      assert.equal(appliedRequests.length, 0);
 
       const restoredState = await syncHostedDeviceSyncControlPlaneState({
         deviceSyncPort: createPort(),
@@ -14745,7 +14721,7 @@ describe("hosted device-sync runtime", () => {
         state: hydratedState,
       });
 
-      assert.deepEqual(requireApplyUpdatesRequest(appliedRequest).updates, []);
+      assert.equal(appliedRequest, null);
     } finally {
       closeHostedRuntimeDeviceSyncService(service);
       await cleanup();
@@ -14865,10 +14841,7 @@ describe("hosted device-sync runtime", () => {
         },
       });
 
-      assert.deepEqual(requireApplyUpdatesRequest(appliedRequest), {
-        occurredAt: "2026-04-06T10:10:00.000Z",
-        updates: [],
-      });
+      assert.equal(appliedRequest, null);
     } finally {
       closeHostedRuntimeDeviceSyncService(service);
       await cleanup();
@@ -15039,10 +15012,7 @@ describe("hosted device-sync runtime", () => {
         service,
         state,
       });
-      assert.deepEqual(appliedRequests, [{
-        occurredAt: "2026-04-06T09:36:00.000Z",
-        updates: [],
-      }]);
+      assert.equal(appliedRequests.length, 0);
 
       getStore(service).patchAccount(localAccountId, {
         displayName: null,
@@ -15067,7 +15037,6 @@ describe("hosted device-sync runtime", () => {
       });
 
       assert.deepEqual(appliedRequests, [
-        { occurredAt: "2026-04-06T09:36:00.000Z", updates: [] },
         {
           occurredAt: "2026-04-06T10:10:00.000Z",
           updates: [{
@@ -15547,10 +15516,7 @@ describe("hosted device-sync runtime", () => {
         state,
       });
 
-      assert.deepEqual(requireApplyUpdatesRequest(appliedRequest), {
-        occurredAt: "2026-04-06T10:10:00.000Z",
-        updates: [],
-      });
+      assert.equal(appliedRequest, null);
     } finally {
       closeHostedRuntimeDeviceSyncService(service);
       await cleanup();
@@ -15609,18 +15575,15 @@ describe("hosted device-sync runtime", () => {
         service,
       });
 
-      await reconcileHostedDeviceSyncControlPlaneState({
+      assert.equal(await reconcileHostedDeviceSyncControlPlaneState({
         deviceSyncPort,
         wake: buildCronWake("2026-04-06T10:10:00.000Z"),
         secret: DEVICE_SYNC_SECRET,
         service,
         state,
-      });
+      }), true);
 
-      assert.deepEqual(requireApplyUpdatesRequest(appliedRequest), {
-        occurredAt: "2026-04-06T10:10:00.000Z",
-        updates: [],
-      });
+      assert.equal(appliedRequest, null);
     } finally {
       closeHostedRuntimeDeviceSyncService(service);
       await cleanup();

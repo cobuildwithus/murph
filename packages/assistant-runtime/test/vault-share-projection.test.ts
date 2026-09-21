@@ -120,6 +120,7 @@ async function offerHostedVaultShareProjectionBestEffort(input: {
   }
   const scopeResolution = await resolveHostedVaultShareProjectionScopesBestEffort({
     ...(input.projectionMode ? { projectionMode: input.projectionMode } : {}),
+    sourceWorkspaceVersion: TEST_SOURCE_WORKSPACE_VERSION,
     vaultSharePort: input.vaultSharePort,
   });
   if (scopeResolution.outcome !== "active-scopes") {
@@ -891,15 +892,19 @@ describe("offerHostedVaultShareProjectionBestEffort", () => {
 
   it("does not read or deliver payloads when the control plane reports no active kinds", async () => {
     const deliver = vi.fn();
+    const listActiveProjectionScopes = vi.fn(async () => activeProjectionResponse());
     const result = await offerHostedVaultShareProjectionBestEffort({
       vaultRoot: "/nonexistent",
       vaultSharePort: {
         deliver,
-        listActiveProjectionScopes: async () => activeProjectionResponse(),
+        listActiveProjectionScopes,
       },
     });
 
     expect(result.outcome).toBe("no-active-share");
+    expect(listActiveProjectionScopes).toHaveBeenCalledWith({
+      sourceWorkspaceVersion: TEST_SOURCE_WORKSPACE_VERSION,
+    });
     expect(deliver).not.toHaveBeenCalled();
   });
 
@@ -1275,6 +1280,7 @@ describe("selectProjectableDailyMetricDays", () => {
           data: {
             date: ACTIVITY_DAY.date,
             metricKey,
+            sleepType: "unknown",
             recordedAt: metricKey === "deep-sleep-minutes"
               ? "2026-07-03T07:01:00.000Z"
               : "2026-07-03T07:02:00.000Z",

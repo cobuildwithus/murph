@@ -10,11 +10,11 @@ import { isHostedWorkspaceSnapshotV2Ref, readHostedExecutionSnapshotBaseRef, rea
 import { HOSTED_RUNTIME_ORPHAN_GRACE_MS } from "@murphai/hosted-execution/runtime-resources";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 
-type Candidate = { kind: "snapshot" | "legacy_snapshot" | "replica"; resourceId: string; objectKey: string | null; snapshotRef: Prisma.InputJsonValue | typeof Prisma.DbNull };
+type Candidate = { kind: "snapshot" | "legacy_snapshot" | "replica"; resourceId: string; objectKey: string | null; snapshotRef: Prisma.InputJsonValue | typeof Prisma.DbNull; recoveryUntil?: Date };
 
 export function snapshotOrphanCandidates(ref: HostedExecutionSnapshotRef): Candidate[] {
   if (!ref) return [];
-  if (isHostedWorkspaceSnapshotV2Ref(ref)) return [{ kind: "snapshot", resourceId: ref.snapshotId, objectKey: ref.objectKey, snapshotRef: Prisma.DbNull }];
+  if (isHostedWorkspaceSnapshotV2Ref(ref)) return [{ kind: "snapshot", resourceId: ref.snapshotId, objectKey: ref.objectKey, snapshotRef: JSON.parse(JSON.stringify(ref)) as Prisma.InputJsonObject }];
   const refs = [readHostedExecutionSnapshotBaseRef(ref), readHostedExecutionSnapshotHotRef(ref), readHostedExecutionSnapshotDeltaRef(ref)].filter(value => value !== null);
   const candidates = new Map<string, Candidate>();
   for (const bundle of refs) {
@@ -35,9 +35,20 @@ export async function recordRuntimeOrphansTx(tx: Prisma.TransactionClient, userI
     const where = { userId_kind_resourceId: { userId, kind: candidate.kind, resourceId: candidate.resourceId } };
     const existing = await tx.hostedRuntimeOrphan.findUnique({ where });
     if (existing && existing.objectKey !== candidate.objectKey) throw new TypeError("Runtime resource identity changed object key.");
+    // Session retirement can later repeat a key-only orphan record. It must
+    // neither erase the wrapped data key nor shorten an accepted snapshot's
+    // recovery window. Raw encrypted bytes alone cannot be restored.
+    const recoveryRef = candidate.kind === "snapshot" && candidate.snapshotRef !== Prisma.DbNull
+      ? candidate.snapshotRef : undefined;
+    // The first complete reference fixes the deadline from that archive's
+    // content-expiry evidence. Later records cannot extend expired content.
+    const recoveryUntil = existing?.recoveryUntil ?? (recoveryRef === undefined ? null
+      : candidate.recoveryUntil ?? new Date(now.getTime() + HOSTED_RUNTIME_ORPHAN_GRACE_MS));
+    const cleanupAt = recoveryUntil ?? new Date(now.getTime() + HOSTED_RUNTIME_ORPHAN_GRACE_MS);
+    const { recoveryUntil: _recoveryUntil, ...resource } = candidate;
     await tx.hostedRuntimeOrphan.upsert({ where,
-      create: { userId, ...candidate, createdAt: now, cleanupAt: new Date(now.getTime() + HOSTED_RUNTIME_ORPHAN_GRACE_MS) },
-      update: { cleanupAt: new Date(now.getTime() + HOSTED_RUNTIME_ORPHAN_GRACE_MS), purgedAt: null, revision: { increment: 1 } },
+      create: { userId, ...resource, createdAt: now, cleanupAt, recoveryUntil },
+      update: { cleanupAt, recoveryUntil, ...(recoveryRef === undefined ? {} : { snapshotRef: recoveryRef }), purgedAt: null, revision: { increment: 1 } },
     });
   }
 }

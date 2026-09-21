@@ -80,6 +80,13 @@ native renewal. Issuance pause and legacy-admission disable have separate tests.
 These local proofs do not qualify actual KMS, provider deliverability, app-store
 upgrades or dormant devices.
 
+OTP send admission allows two attempts per contact in a sixty-second window,
+including one immediate resend. The short-window check precedes the five-attempt
+per-contact ten-minute budget, so rejected rapid resends do not spend that longer
+budget. The independent twenty-request per-IP ten-minute guard still counts
+rejected requests. Verification budgets and provider fraud protection are unchanged.
+These send limits do not define code expiry.
+
 ## SMS verification owner
 
 Use a dedicated [Twilio Verify service](https://www.twilio.com/docs/verify/api/service)
@@ -447,3 +454,33 @@ rereads it. This is a user-facing compatibility control, not a security fence.
 Older installed binaries without the reader cannot show the new screen and
 still require an ordinary App Store update. Keep legacy auth until its separate
 retirement gates pass; publishing a new app does not prove adoption.
+
+## Operator disposition of unused legacy signups
+
+During retirement preparation, an explicitly authorized unused signup can be
+removed through `POST /api/ops/auth-migration/unused-signup`. This temporary
+endpoint requires the existing active Ops allowlist and same-origin checks,
+one exact `memberId`, its ISO `createdAt`, and the confirmation
+`DELETE UNUSED SIGNUP`. There is no discovery, batch delete, impersonated session
+or contact-based target selection. Keep private target values in the authenticated
+request only; do not record them in rollout documents or command logs.
+
+Before any external operation, the normal deletion locks protect a fresh check
+that the target is the specified never-onboarded legacy signup, with no
+first-party authentication, verified/contact routing, wallet, approval protection,
+billing, workspace, messaging, group, device or other admitted product use.
+Any unrevoked, unexpired legacy session rejects cleanup. Legacy cookie reads do
+not advance `lastSeenAt`, so signup-only timestamps cannot prove absence of
+return visits. Recorded session activity outside the first ten minutes also
+rejects cleanup. Eligibility means no durable product use and no live legacy
+authority; it is not a claim that the person never revisited the site.
+The same transaction establishes the ordinary suspension fence. A changed target
+returns `UNUSED_SIGNUP_CHANGED`; missing or conflicting data never becomes
+permission to delete a retained member.
+
+The existing deletion service then owns revocation, canonical deletion and the
+encrypted provider/runtime cleanup receipt. Partial failure retains suspension
+and the existing retry owners. An HTTP success with `cleanupPending: true` is
+not provider convergence. Verify canonical absence and receipt outcomes before
+clearing the retirement inventory. Remove this endpoint and its unused-signup
+check with the importer after authorized cleanup converges.

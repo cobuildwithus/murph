@@ -1391,11 +1391,22 @@ const bodyMeasurementEventFieldsShape = {
   media: z.array(storedMediaSchema).max(10).optional(),
 } satisfies z.ZodRawShape;
 
+export const sleepSessionTypeSchema = z.enum(["main_sleep", "short_sleep", "nap", "unknown"]);
+export const sleepSessionStateSchema = z.enum(["tentative", "confirmed"]);
+
+/** Short or tentative sessions are partial sleep evidence, not a confirmed complete night. */
+export function isShortOrTentativeSleepSession(
+  session: Pick<SleepSessionEventRecord, "sleepType" | "sleepState">,
+): boolean {
+  return session.sleepType === "short_sleep" || session.sleepState === "tentative";
+}
+
 const sleepSessionEventFieldsShape = {
   startAt: isoDateTimeString(),
   endAt: isoDateTimeString(),
   durationMinutes: integerSchema(1),
-  sleepType: z.enum(["main_sleep", "nap"]).optional(),
+  sleepType: sleepSessionTypeSchema.optional(),
+  sleepState: sleepSessionStateSchema.optional(),
 } satisfies z.ZodRawShape;
 
 const interventionSessionEventFieldsShape = {

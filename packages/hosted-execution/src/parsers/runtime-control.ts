@@ -42,6 +42,7 @@ import {
   HOSTED_STANDBY_ALLOCATION_OUTCOMES,
   HOSTED_STANDBY_ALLOCATION_REASONS,
   HOSTED_RUNTIME_LATENCY_TRACE_ASSISTANT_INPUT_MAX_IDS,
+  HOSTED_RUNTIME_LATENCY_TRACE_BATCH_MAX_EVENTS,
   HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_KEYS,
   HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS,
   inspectHostedRuntimeAutomationLaneTimingSubdivision,
@@ -96,6 +97,8 @@ import {
   type HostedRuntimeLatencyTraceMilestone,
   type HostedRuntimeLatencyTraceMilestoneEvent,
   type HostedRuntimeLatencyTraceProviderStartedEvent,
+  type HostedRuntimeLatencyTraceBatchRequest,
+  type HostedRuntimeLatencyTraceBatchResponse,
   type HostedRuntimeLatencyTraceRequest,
   type HostedRuntimeLatencyTraceResponse,
   type HostedStandbyAllocationOutcome,
@@ -6609,6 +6612,22 @@ export function parseHostedRuntimeLatencyTraceEvent(
   );
 
   switch (type) {
+    case "delivery_committed": {
+      assertAllowedObjectKeys(record, new Set([
+        "type", "source", "at", "runtimeAttemptId", "mailboxItemIds", "checkpointPublicationExpectedBy",
+      ]), "Hosted runtime delivery committed event");
+      const mailboxItemIds = requireArray(record.mailboxItemIds, "Hosted runtime delivery mailboxItemIds")
+        .map((id) => requireString(id, "Hosted runtime delivery mailbox item id"));
+      if (mailboxItemIds.length === 0 || mailboxItemIds.length > HOSTED_RUNTIME_LATENCY_TRACE_ASSISTANT_INPUT_MAX_IDS) {
+        throw new TypeError("Hosted runtime delivery mailbox item count is invalid.");
+      }
+      return {
+        type, mailboxItemIds, source: parseHostedIngressLatencySource(record.source),
+        at: requireString(record.at, "Hosted runtime delivery at"),
+        runtimeAttemptId: requireString(record.runtimeAttemptId, "Hosted runtime delivery attempt"),
+        checkpointPublicationExpectedBy: requireString(record.checkpointPublicationExpectedBy, "Hosted runtime delivery checkpoint deadline"),
+      };
+    }
     case "assistant_input_staged":
       return parseHostedRuntimeLatencyTraceAssistantInputStagedEvent(record);
     case "assistant_milestone":
@@ -6637,6 +6656,36 @@ export function parseHostedRuntimeLatencyTraceRequest(
   return {
     event: parseHostedRuntimeLatencyTraceEvent(record.event),
   };
+}
+
+export function parseHostedRuntimeLatencyTraceBatchRequest(
+  value: unknown,
+): HostedRuntimeLatencyTraceBatchRequest {
+  const record = requireObject(value, "Hosted runtime latency batch request");
+  assertAllowedObjectKeys(record, new Set(["events"]), "Hosted runtime latency batch request");
+  const events = requireArray(record.events, "Hosted runtime latency batch events");
+  if (events.length === 0 || events.length > HOSTED_RUNTIME_LATENCY_TRACE_BATCH_MAX_EVENTS) {
+    throw new TypeError("Hosted runtime latency batch event count is invalid.");
+  }
+  return { events: events.map((value) => {
+    const event = parseHostedRuntimeLatencyTraceEvent(value);
+    if (event.type !== "assistant_milestone") {
+      throw new TypeError("Hosted runtime latency batches require assistant milestones.");
+    }
+    return event;
+  }) };
+}
+
+export function parseHostedRuntimeLatencyTraceBatchResponse(
+  value: unknown,
+): HostedRuntimeLatencyTraceBatchResponse {
+  const record = requireObject(value, "Hosted runtime latency batch response");
+  const results = requireArray(record.results, "Hosted runtime latency batch results");
+  if (results.length === 0 || results.length > HOSTED_RUNTIME_LATENCY_TRACE_BATCH_MAX_EVENTS) {
+    throw new TypeError("Hosted runtime latency batch result count is invalid.");
+  }
+  return { results: results.map((result) => result === null
+    ? null : parseHostedRuntimeLatencyTraceResponse(result)) };
 }
 
 export function parseHostedRuntimeLatencyTraceResponse(
@@ -7684,6 +7733,11 @@ function parseHostedRuntimeLatencyPhaseBreakdown(
       ),
       ...requireOptionalNonNegativeInteger(
         assistant,
+        "terminalReplyCommittedAtEpochMs",
+        assistantLabel,
+      ),
+      ...requireOptionalNonNegativeInteger(
+        assistant,
         "terminalNonReplyCommittedAtEpochMs",
         assistantLabel,
       ),
@@ -8020,10 +8074,10 @@ function parseHostedRuntimeLatencyTraceAssistantMilestoneEvent(
   if (
     checkpointPublicationExpectedBy !== undefined &&
     checkpointPublicationExpectedBy !== null &&
-    milestone !== "terminal_non_reply_committed"
+    milestone !== "terminal_non_reply_committed" && milestone !== "terminal_reply_committed"
   ) {
     throw new TypeError(
-      "Hosted runtime latency trace checkpointPublicationExpectedBy requires terminal_non_reply_committed.",
+      "Hosted runtime latency trace checkpointPublicationExpectedBy requires a terminal completion milestone.",
     );
   }
 

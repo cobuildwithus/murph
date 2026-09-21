@@ -1818,14 +1818,16 @@ function buildSleepWindowCandidate(
     sourceFamily: "event",
     sourceKind: "sleep_session",
     sleepType,
+    sleepState: entity.attributes.sleepState === "tentative" || entity.attributes.sleepState === "confirmed"
+      ? entity.attributes.sleepState : undefined,
     startAt: normalizeNullableString(entity.attributes.startAt) ?? entity.occurredAt ?? null,
     timeZone: normalizeNullableString(entity.attributes.timeZone),
     title,
   };
 }
 
-function resolveSleepSessionType(value: unknown): "main_sleep" | "nap" | "unknown" {
-  return value === "main_sleep" || value === "nap" ? value : "unknown";
+function resolveSleepSessionType(value: unknown): WearableSleepWindowCandidate["sleepType"] {
+  return value === "main_sleep" || value === "short_sleep" || value === "nap" ? value : "unknown";
 }
 
 function buildSleepStageCandidate(

@@ -1082,9 +1082,13 @@ to apply after cutover.
 - Personal Starter image generation and editing require subscription access
   from the canonical usage gate. A saved payment card alone grants no access.
   The signed, runtime-member-bound Web callback is enforced before Cloudflare
-  Images API egress and native image tools in Responses HTTP/WebSocket frames.
-  Each image rechecks access; ordinary text adds no callback. Missing or
-  unavailable authority fails closed. Normal Pulse or eligible Group signup
+  Images API egress and native image tools in Responses HTTP requests.
+  Opaque Responses WebSockets require image access at handshake; denied or
+  unavailable access returns HTTP 426 for native Codex HTTPS fallback. HTTP
+  images recheck access per request; an admitted socket retains its image
+  eligibility until it closes. Existing container destruction owns consent
+  revocation, and every new handshake revalidates runtime authority. Normal
+  Pulse or eligible Group signup
   owns recovery; existing paid, Family, and group allowances remain authoritative.
   See the [Starter usage owner](product-specs/starter-usage.md#text-entry-and-image-access)
   for billing authority, abuse email signals, and deployment ordering.
@@ -1444,6 +1448,46 @@ Any approved path is a new trust-boundary change and follows normal security,
 verification, deployment, and review requirements without making the secret
 locally readable.
 
+The separately authorized checkpoint recovery assessment entrypoint is
+`apps/cloudflare/scripts/checkpoint-recovery-assessment.ts`, executed by the
+private repository's protected production job. It reads one member's artifact
+namespace after checking the expected canonical workspace version, obtains
+signed runtime root envelopes through the existing Web callback boundary, and
+returns only bounded aggregate counts. The member selector is sealed to the
+automation public key and expires within one hour. Production private keys stay
+inside the hosted process and plaintext stays in the protected hosted environment; no recovery files or raw errors are
+uploaded. The census performs no restoration, checkpoint publication, mailbox
+mutation, or retention extension. Authenticated uploaded receipts are candidates
+until accepted history, deletion ordering, and content expiry are separately
+proven. A complete scan does not prove complete recovery.
+Artifact GETs reuse the deployed R2 S3 presigner, while REST only lists up to
+1,000 object metadata entries per page. Signed URLs stay inside the hosted
+process and expire after one minute. The canonical account and bucket determine
+both endpoints; caller-controlled endpoint overrides are not accepted.
+Artifact reads run in waves of at most eight, sharing one streamed 512 MiB
+budget; each object remains limited to 32 MiB. Every wave settles before exit,
+and downloaded buffers are cleared even when its consumer stops early. The
+50,000-object and forty-five-minute limits bound the census. Progress every 100 processed
+objects and on scan failure contains only aggregate read/authentication/root
+counts, an incomplete marker, and a closed failure class or HTTP status. It
+never includes object names, member identifiers, root identifiers, or caught
+error text. Partial progress cannot authorize restoration or certify coverage.
+
+Its optional `validate` mode retains at most 256 MiB of authenticated artifact
+bytes and replays at most 200,000 actions with 512 MiB of referenced write bytes
+inside a private temporary directory on the protected hosted runner. It reuses
+canonical receipt parsing/replay, vault validation, and the Browser Vault source
+hash owner. The signed current replica supplies both the comparison fingerprint
+and receipt cutoff; it must predate the sealed incident cutoff. Compaction
+receipts are excluded because they duplicate originals. Timestamp order is only
+a candidate ordering, never acceptance evidence. Missing/corrupt content,
+conflicts, cancellation, and resource limits cannot certify a candidate. Scratch
+is removed in `finally`; retained buffers are cleared on every exit. Only counts,
+closed failure classes, and validation booleans leave the job. Even a matching
+source hash leaves accepted history and complete recovery unproven because some
+canonical files and media fall outside that hash. This mode publishes no
+checkpoint, exports no plaintext, and changes no production runtime state.
+
 - GitHub production credentials must be environment-scoped, with the production environment restricted to protected branches. Do not retain duplicate repository-scoped copies: a write-capable workflow author can explicitly reference repository secrets from another workflow/ref without using the production environment. Every production job must attach the production environment before referencing its credentials. Prefer required reviewers when a second trusted operator is available; branch policy alone does not defend against an account that can administratively bypass or change the repository rules.
 - The trusted `Pull Request Head Draft Reset` controller uses the existing Frog
   GitHub App credential only through the protected `frog-reconciliation`
@@ -1757,3 +1801,16 @@ flag. Web validates the task against the callback-bound member and recorded
 occurrence window before excluding its cost from allowance. The original
 credential source and token evidence remain intact. Ordinary usage retains its
 existing accounting and provider access checks.
+
+### Temporary unused-signup retirement operation
+
+`POST /api/ops/auth-migration/unused-signup` requires active Ops allowlist and
+same-origin admission, an exact member/creation-time pair and explicit deletion
+confirmation. The canonical deletion suspension transaction checks unused legacy
+signup eligibility under member locks before any external operation. It cannot
+admit first-party/protected, onboarded, contact-bound, billed or product-active
+accounts or a target with a live legacy browser session. Legacy session timestamps
+are not return-visit telemetry. Targets and private metadata are not logged; output contains only
+canonical-deletion and pending-cleanup booleans. The existing encrypted receipt
+retains every vendor/runtime target through retry. Remove this temporary operation
+with auth import after retirement cleanup, without weakening self-service deletion.

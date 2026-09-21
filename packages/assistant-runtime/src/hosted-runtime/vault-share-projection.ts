@@ -7,6 +7,7 @@ import {
   deviceDataOriginSchema,
   formatTimeZoneDateTimeParts,
   hasMemoryDisplayNameEvidence,
+  isShortOrTentativeSleepSession,
   isStrictIsoDate,
   isStrictIsoDateTime,
   memoryDisplayNameSchema,
@@ -22,6 +23,7 @@ import {
   HOSTED_VAULT_SHARE_DEFAULT_HISTORY_DAYS,
   isHostedVaultShareRecentDateProjectionKind,
   parseHostedVaultShareDeliverRequest,
+  parseHostedVaultShareSleepClassification,
   getHostedVaultShareProjectionMaxRecords,
   HOSTED_VAULT_SHARE_SERIALIZED_PROJECTION_MAX_BYTES,
   getHostedVaultShareActivityDistanceProjectionSpec,
@@ -245,10 +247,12 @@ export type HostedVaultShareProjectionCaptureResult =
 export async function resolveHostedVaultShareProjectionScopesBestEffort(input: {
   projectionMode?: HostedVaultShareProjectionMode;
   signal?: AbortSignal | null;
+  sourceWorkspaceVersion: string;
   vaultSharePort: HostedRuntimeVaultSharePort;
 }): Promise<HostedVaultShareProjectionScopeResolution> {
   try {
     const activeProjections = await input.vaultSharePort.listActiveProjectionScopes({
+      sourceWorkspaceVersion: input.sourceWorkspaceVersion,
       ...(input.projectionMode ? { projectionMode: input.projectionMode } : {}),
       ...(input.signal ? { signal: input.signal } : {}),
     });
@@ -1202,7 +1206,7 @@ export async function readProjectableHeartRateZoneDays(
 export function selectProjectableSleepNights(
   summaries: readonly (
     Pick<ProjectedWearableSleepSummary, "date" | "sleepEndAt" | "sleepStartAt">
-    & Partial<Pick<ProjectedWearableSleepSummary, "sleepType">>
+    & Partial<Pick<ProjectedWearableSleepSummary, "sleepType" | "sleepState">>
   )[],
   currentDate: string,
   source?: HostedVaultShareDataSource,
@@ -1212,6 +1216,7 @@ export function selectProjectableSleepNights(
   for (const summary of summaries) {
     if (
       summary.sleepType === "nap"
+      || isShortOrTentativeSleepSession(summary)
       || typeof summary.sleepStartAt !== "string"
       || typeof summary.sleepEndAt !== "string"
     ) {
@@ -1312,6 +1317,7 @@ export function selectProjectableDailyMetricDays(
               sourcesDisagree: sleepMetricSourcesDisagree(sources),
             }
           : {}),
+        ...parseHostedVaultShareSleepClassification(point.context, spec.metricKey),
         ...(point.provisional ? { provisional: true } : {}),
         ...(sourceTaggedSleepStage
           ? { recordedAt: point.recordedAt ?? null }

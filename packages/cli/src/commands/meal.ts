@@ -410,6 +410,21 @@ const mealNutritionTotalsResultSchema = z.object({
   days: z.array(mealNutritionDaySchema),
 })
 
+const mealAddWithDailyTotalsResultSchema = mealAddResultSchema.extend({
+  dailyTotals: z.discriminatedUnion('status', [
+    z.object({
+      status: z.literal('available'),
+      data: mealNutritionTotalsResultSchema,
+    }),
+    z.object({
+      status: z.literal('unavailable'),
+      localDate: localDateSchema,
+      code: z.string(),
+      hint: z.string(),
+    }),
+  ]).optional(),
+})
+
 const mealNutrientSchema = z.object({
   key: z.enum(['waterGrams', ...MEAL_MICRONUTRIENT_KEYS]),
   label: z.string().min(1),
@@ -437,6 +452,9 @@ const mealNutrientTotalsResultSchema = z.object({
 })
 
 const mealAddTypedOptionShape = {
+  withDailyTotals: z.boolean().optional().describe(
+    'After saving, return fresh totals and goal context for the saved meal local date. Replaces a separate meal totals --resolve-goals read; does not attach a card or approve numeric suitability. If the read fails the meal is still saved: retry only meal totals, never meal add.',
+  ),
   photo: pathSchema
     .optional()
     .describe('Optional meal photo path.'),
@@ -499,6 +517,8 @@ const mealAddTypedOptionShape = {
 
 async function runMealAdd(
   options: Record<string, unknown> & { vault: string },
+  services: VaultServices,
+  requestId: string | null,
   inputFile?: string,
 ) {
   const payload = inputFile ? await loadStructuredMealPayload(inputFile) : undefined
@@ -549,9 +569,9 @@ async function runMealAdd(
     ...(photoPath ? { photoPath } : {}),
     ...(audioPath ? { audioPath } : {}),
     ...(note ? { note } : {}),
-    ...(source ? { source } : {}),
-    ...(ingredients ? { ingredients } : {}),
-    ...(nutrition ? { nutrition } : {}),
+    source,
+    ingredients,
+    nutrition,
     ...(occurredAtInput
       ? {
           occurredAt: await normalizeOccurredAtOption({
@@ -563,7 +583,7 @@ async function runMealAdd(
   }
   const result = await importers.addMeal(mealInput)
 
-  return {
+  const saved = {
     vault: vaultRoot,
     mealId: result.mealId,
     eventId: result.event.id,
@@ -576,6 +596,35 @@ async function runMealAdd(
     source: result.event.source ?? null,
     ingredients: result.event.ingredients ?? null,
     nutrition: result.event.nutrition ?? null,
+  }
+  if (options.withDailyTotals !== true) return saved
+
+  // The canonical day key, rather than the CLI process clock or UTC date,
+  // must select the same meal window as an ordinary totals read.
+  const localDate = result.event.dayKey
+  try {
+    const data = mealNutritionTotalsResultSchema.parse(
+      await services.query.showMealNutritionTotals({
+        vault: vaultRoot,
+        requestId,
+        from: localDate,
+        to: localDate,
+        resolveGoals: true,
+      }),
+    )
+    return { ...saved, dailyTotals: { status: 'available' as const, data } }
+  } catch (error) {
+    // The write already succeeded. A read failure must not turn it into a
+    // retryable mutation and cause a duplicate meal.
+    return {
+      ...saved,
+      dailyTotals: {
+        status: 'unavailable' as const,
+        localDate,
+        code: error instanceof VaultCliError ? error.code : 'meal_daily_totals_unavailable',
+        hint: `Meal saved. Retry only meal totals --from ${localDate} --to ${localDate} --resolve-goals; do not repeat meal add.`,
+      },
+    }
   }
 }
 
@@ -613,12 +662,12 @@ export function registerMealCommands(cli: Cli.Cli, services: VaultServices) {
         },
       ],
       hint:
-        'Keep using typed flags for ordinary single-meal logs. Use meal import-json --input @meal.json or meal import-json --input - when importing a structured payload; explicit flags override payload fields.',
+        'Use typed flags for ordinary meal logs; add --with-daily-totals when preparing a daily nutrition card to save and read fresh totals/goal context in one call. The save result is authoritative. Reuse dailyTotals.data when available; if unavailable, retry only meal totals, never the save. Use meal import-json --input @meal.json or meal import-json --input - for a structured payload; explicit flags override payload fields.',
       args: z.object({}),
       options: mealAddTypedOptionShape,
-      output: mealAddResultSchema,
-      async run({ options }) {
-        return runMealAdd(options)
+      output: mealAddWithDailyTotalsResultSchema,
+      async run({ options, requestId }) {
+        return runMealAdd(options, services, typeof requestId === 'string' ? requestId : null)
       },
     },
     show: {
@@ -703,10 +752,12 @@ export function registerMealCommands(cli: Cli.Cli, services: VaultServices) {
           ),
           ...mealAddTypedOptionShape,
         },
-        output: mealAddResultSchema,
-        async run({ options }) {
+        output: mealAddWithDailyTotalsResultSchema,
+        async run({ options, requestId }) {
           return runMealAdd(
             options,
+            services,
+            typeof requestId === 'string' ? requestId : null,
             typeof options.input === 'string' ? options.input : undefined,
           )
         },

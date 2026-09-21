@@ -1,3 +1,4 @@
+import { isShortOrTentativeSleepSession } from "@murphai/contracts";
 import { resolveMetricInputKey } from "@murphai/health-metrics";
 
 import type { VaultReadModel } from "../read-model.ts";
@@ -124,6 +125,7 @@ function buildWearableMetricProjectionEvidenceFromBundle(
 type WearableSummaryBase = {
   date: string;
   sleepType?: WearableSleepSummary["sleepType"];
+  sleepState?: WearableSleepSummary["sleepState"];
   summaryConfidence: {
     level: WearableConfidenceLevel;
   };
@@ -210,17 +212,21 @@ function summaryMetricEvidence<TField extends string>(
   summary: WearableSummaryBase & Record<TField, WearableResolvedMetric>,
   entries: readonly SummaryMetricEvidenceEntry<TField>[],
 ): WearableMetricEvidenceResult[] {
-  return entries.map((entry) =>
-    metricEvidence(
+  return entries.map((entry) => {
+    const resolved = summary[entry.summaryField];
+    const confidence = isShortOrTentativeSleepSession(summary) || resolved.confidence.level === "none"
+      ? summary.summaryConfidence.level : resolved.confidence.level;
+    return metricEvidence(
       summary.date,
       entry.metricKey,
-      summary[entry.summaryField],
-      summary.summaryConfidence.level,
+      resolved,
+      confidence,
       entry.sourceKind,
       summary.timeZone,
       summary.sleepType,
-    )
-  );
+      summary.sleepState,
+    );
+  });
 }
 
 function heartRateZoneMetricEvidence(summary: WearableActivitySummary): WearableMetricEvidenceResult[] {
@@ -463,6 +469,7 @@ function metricEvidence(
   sourceKind: MetricRowEvidence["sourceKind"],
   timeZone: string | null | undefined,
   sleepType?: WearableSleepSummary["sleepType"],
+  sleepState?: WearableSleepSummary["sleepState"],
 ): WearableMetricEvidenceResult {
   const selection = resolved.selection;
   const sourceCandidate = selectWearableSourceCandidate(resolved);
@@ -494,7 +501,7 @@ function metricEvidence(
 
   return {
     row: {
-      confidence: resolved.confidence.level === "none" ? confidence : resolved.confidence.level,
+      confidence,
       context: {
         candidateCount: resolved.confidence.candidateCount,
         conflictingProviders: resolved.confidence.conflictingProviders,
@@ -502,6 +509,7 @@ function metricEvidence(
         exactDuplicateCount: resolved.confidence.exactDuplicateCount,
         recordedAt: selection.recordedAt,
         sleepType,
+        sleepState,
         sourceFamily: selection.sourceFamily ?? sourceCandidate?.sourceFamily ?? null,
         sourceKind: selection.sourceKind ?? sourceCandidate?.sourceKind ?? null,
         syntheticRecordId,

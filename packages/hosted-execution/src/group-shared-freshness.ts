@@ -1,3 +1,5 @@
+import { isShortOrTentativeSleepSession } from "@murphai/contracts";
+
 import type {
   HostedRuntimeGroupSharedFreshnessRequirement,
   HostedRuntimeGroupSharedMember,
@@ -90,9 +92,10 @@ export function getHostedGroupWearableReportingGaps(
   }
   const sourceScopes = sources.size ? [...sources.values()] : [undefined];
   return sourceScopes.flatMap((source) => {
-    const records = source
-      ? projection.records.filter((record) => record.source?.source === source.source)
-      : projection.records;
+    const records = projection.records.filter((record) =>
+      (!source || record.source?.source === source.source)
+      && !(("sleepType" in record.data || "sleepState" in record.data) && isShortOrTentativeSleepSession(record.data))
+    );
     return requirements.filter((requirement) =>
       requirement.projectionScopeKey === projection.projectionScopeKey
         && !records.some((record) => "date" in record.data && record.data.date === requirement.date)

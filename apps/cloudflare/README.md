@@ -49,6 +49,42 @@ filename reaches only the final Containers helper command, while the Node
 workspace still runs in full. Use the direct invocation above for focused
 workspace proof.
 
+## Worker startup profiling
+
+Use the pinned Wrangler's `check startup` to profile the Worker, separately from
+container startup. Its nested deployment dry run also builds configured container
+images, so a fresh checkout needs a profiling-only scratch config:
+
+1. Copy `apps/cloudflare/wrangler.jsonc` to the ignored
+   `apps/cloudflare/.tmp/startup/wrangler.jsonc`.
+2. Remove `containers` and set `main` to `../../src/index.ts`. Preserve the
+   compatibility date, compatibility flags, and bundling options. Do not add a
+   `tsconfig` override; resolution follows the source entrypoint.
+3. From the repository root, run:
+
+```bash
+WRANGLER_WRITE_LOGS=false WRANGLER_SEND_METRICS=false \
+  pnpm --dir apps/cloudflare exec wrangler check startup \
+  --args="--config .tmp/startup/wrangler.jsonc" \
+  --outfile=.tmp/startup/worker.cpuprofile
+```
+
+Pass the scratch config through `--args`: the outer `--config` alone does not
+configure the nested build in the pinned Wrangler. This command stays local and
+does not require production credentials or a container image.
+
+Compare alternating runs of the baseline and candidate on the same machine,
+excluding idle samples from CPU totals. `--worker=<multipart-bundle>` can reuse
+an existing Wrangler upload bundle for repeated measurements. Keep raw profiles,
+bundles, and source maps local; they may contain filesystem paths. Local timings
+identify initialization costs but do not predict production latency.
+
+The resource client's media, orphan, and replica contracts already belong to
+the Worker's eager graph. Keep those imports static: dynamic imports preserve
+unused exports from their shared dependencies and increase startup work.
+Response-card authoring schema builders are also marked pure at their owner, so
+runtime consumers omit their unused JSON Schema conversion work.
+
 ## Route Surface
 
 Public routes:
@@ -507,7 +543,9 @@ Defaulted worker vars:
 
 - `HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS=3`
 - `HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS=600000` (also the shared code default)
-  for the runtime quiet window and conversation warmth. Container warmth ends
+  for the foreground runtime quiet window and conversation warmth. Background-only
+  assistant work checkpoints when settled and reaches the existing cleanup path
+  without this additional wait. Container warmth ends
   ten minutes after the latest accepted inbound message's original server receipt,
   never ten minutes after invocation completion. Active work remains protected.
 - `HOSTED_EXECUTION_RUNNER_LIFECYCLE_REEVALUATION_MS=60000` (also the code
@@ -562,21 +600,30 @@ Cloudflare keeps only the wake-payload decryption lane plus the worker-owned cal
 
 ## Private Operational Telemetry
 
-Responses WebSocket observations retain completion, close-side, close-code and
-diagnostic scheduling fields through the structured logger's bounded 64-key
-objects. The relay keeps at most four ordinary diagnostic writes and one
-reserved terminal write in flight. It uses request-scoped `waitUntil` when the
-Containers outbound context does not supply it; persistence remains best-effort
-and never delays forwarding or changes accounting. Missing log rows remain
-missing evidence, not successful transport. Upstream and client frame inspection
-share a six-megacharacter bound; larger frames remain uninspected and are
-forwarded under the existing relay admission rules. First-frame classification
-reuses the response observation parser.
-Abnormal closes during an attributable, inspected single-request generation
-with no terminal response are warnings even after response frames arrive.
-The diagnostic outcome remains `closed`; it does not assert that Codex recovery
-failed. Completed, normal, prewarm and ambiguous closes keep their existing
-classification. Frame-send counts record relay calls, not client receipt proof.
+OpenAI Responses upgrades return the upstream `Response` and unaccepted
+`webSocket` unchanged. Cloudflare forwards the connection; native Codex owns
+continuation, idle reuse, and reconnect/fallback. The Worker owns handshake
+runtime authorization and API-key injection, with no frame relay or socket
+registry. HTTP response diagnostics and native Codex transport diagnostics remain.
+
+An opaque socket is admitted only after the existing image-access callback
+allows the runtime member. Otherwise HTTP 426 activates native Codex HTTPS
+fallback, preserving ordinary text and per-request image authorization. Image
+eligibility is a handshake admission decision for the lifetime of that socket;
+subscription changes take effect on its next connection. Existing runtime
+termination and consent-withdrawal container destruction remain the revocation
+owners. No per-frame authority lookup or immediate subscription-revocation
+promise is made. Codex-native memory remains disabled in hosted configuration;
+its unused egress accounting and relay diagnostics have been removed.
+
+`codex-websocket-passthrough.test.ts` runs the pinned binary through a real local
+workerd fetch boundary across a 35-second idle gap, then exercises explicit
+close recovery and HTTP 426 fallback. The Workers test proves exact upgrade
+identity, bidirectional traffic, and denied/revoked admission. This local proof
+does not reproduce the managed Containers outbound proxy or establish
+production latency. After rollout, compare native `transport-fallback` /
+`websocket-read` events and first-provider-receipt latency, and verify that the
+removed relay no longer creates Worker invocation failures.
 
 Postgres processing logs the failed operation, elapsed time, remaining command
 budget and timeout classification. Command-budget and execution transport

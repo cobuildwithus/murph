@@ -1,6 +1,6 @@
 # Device Sync Ingestion Invariants
 
-Last verified: 2026-09-16
+Last verified: 2026-09-20
 
 ## Purpose
 
@@ -20,6 +20,12 @@ These are durable behavioral invariants. The current owning code lives in
 implementation and the only push-primary provider today), with the generic
 drain/batch service seam in `packages/device-syncd/src/service.ts`.
 
+## Runtime control callbacks
+
+Hosted connection reconciliation sends apply callbacks only when it has a
+connection, credential, source, or local-state delta. An unchanged hydrated
+snapshot is already reconciled; it does not need an empty Web callback.
+
 ## Invariants
 
 1. **Pull is a floor, not a fallback.** The scheduled `reconcile`/`backfill`
@@ -36,8 +42,13 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
    durable summary or timeseries import and remove records for disconnected
    sources. While any source is pending admission, unresolved source-reference
    identities fail closed. Outside hosted Web, a provider with no source row
-   remains admitted for legacy accounts. Hosted Web instead defers an
-   authenticated, source-attributed Junction event to the existing source
+   remains admitted for legacy accounts. A hosted summary resource operation
+   with listed-only admission may share its fresh post-provider Web source read
+   between local inventory projection and canonical import admission. Local
+   discovery must read SQLite source authority after projection, because that
+   projection can disconnect sources. Pass inventory reuse retains provider
+   metadata only; later imports still read current source authority. Hosted Web instead
+   defers an authenticated, source-attributed Junction event to the existing source
    owner, which may create only a disconnected candidate before live provider
    proof and final locked admission.
 

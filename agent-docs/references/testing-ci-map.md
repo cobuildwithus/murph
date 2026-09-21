@@ -29,6 +29,22 @@ tests reject a missing, conditionally skipped, or allowed-to-fail gate.
 
 ## Current Repo Checks
 
+Background-only checkpoint timing is covered by
+`hosted-runtime-background-checkpoint-timing.test.ts`: settled background
+assistant work reaches a durable checkpoint without a conversation quiet window,
+active work is not cut off after 60 seconds, and foreground input retains its
+configured delay. The promoted-foreground-priority matrix above covers subsequent
+conversation arrivals, shutdown, and provider changes.
+`hosted-runtime-background-ask-lifetime.test.ts` exercises a joined-group Ask
+without conversation input through slow preparation and execution, exactly-once
+completion before prompt checkpointing, and expiry/shutdown/handoff requeue.
+
+Personal Patterns cross-automation repetition is covered by managed recipe and
+reconciliation assertions in `managed-automations.test.ts` and the focused
+`Personal Pattern cross-automation history` real-Codex journeys. These prove
+silent first/later digests for already-covered findings, preservation of reviewed
+identities without invented delivery dates, and delivery of a distinct finding.
+
 Shared wearable freshness proof spans `group-shared-freshness.test.ts` in
 hosted-execution, `hosted-group-shared-freshness.test.ts` in Web, and
 `hosted-runtime-group-freshness.test.ts` in assistant-runtime. These cover
@@ -839,11 +855,14 @@ MURPH_RUN_CODEX_STALL_REPRO=1 MURPH_VITEST_MAX_WORKERS=1 \
   --no-coverage test/assistant-codex-websocket-stall.test.ts
 ```
 
-The Cloudflare Node and Workers
-`runner-egress-codex-memory-websocket.test.ts` suites prove content-free relay
-milestones, actual runtime-log parser/persistence routing, bounded outstanding
-writes, and forwarding despite failed diagnostics. These fixtures require no
-provider credentials; they do not prove production model health.
+The Cloudflare `codex-websocket-passthrough.test.ts` runs the pinned binary
+through production interception and real local workerd fetch coupling. It proves
+one connection across a 35-second gap, native recovery after an upstream close,
+and HTTPS text fallback when image access denies an opaque socket. The Workers
+`runner-egress-websocket-passthrough.test.ts` proves unchanged upgrade identity,
+bidirectional traffic, and fail-closed handshake admission. These synthetic
+fixtures require no provider credentials; they do not reproduce the managed
+Containers outbound proxy or prove production model health.
 
 The planner characterization retains its pre-adapter identity projection only
 for the existing broad snapshot; it separately asserts the new fingerprint
@@ -1210,6 +1229,10 @@ limits, and local proof distinctions are owned by
   `apps/cloudflare/test/runtime-processing-postgres.test.ts` and
   `apps/cloudflare/test/runtime-owner-completion.test.ts` cover current runtime
   admission, exact completion, and owner-release behavior.
+  `apps/web/test/hosted-runtime-owner-postgres.test.ts` composes the completion
+  command with real owner transitions, successor fencing, and pending PUT drains.
+  `apps/web/test/hosted-runtime-owner-release.test.ts` proves advisory failures
+  and the two-second hint deadline cannot invalidate durable completion.
   These focused tests do not establish deployed Temporal timing.
 - The hosted-local active-turn latency scenario proves same-chat late-input folding, forces a 20-second provider-cleanup stall and requires the second reply to preempt it, and checks that a projected wake does not trigger immediate full idle-shutdown work under the 180-second floor.
 - The dedicated `foreground-reply-priority` hosted-local scenario keeps the

@@ -130,6 +130,7 @@ export function classifyHostedSystemMailboxExecutionClass(input: {
 }
 
 export interface HostedRuntimeEnsureProcessingRequest {
+  admission?: import("./runtime-owner.ts").HostedRuntimeOwnerResponse;
   assistantExecutionBlocked?: true;
   conversationWorkPending?: true;
   orchestrationAttemptId: string;

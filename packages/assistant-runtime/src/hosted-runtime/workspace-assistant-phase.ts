@@ -6435,6 +6435,12 @@ async function drainHostedPostCheckpointDelivery(input: {
   let backgroundDeliveryDrainYieldedCount = 0;
   const outcomes = input.assistantDeliveryEffects.length > 0
     ? await drainHostedPreparedAssistantDeliveries({
+        deliveryTraceContext: {
+          latencyTracePort: input.input.runtime.platform.latencyTracePort,
+          runtimeAttemptId: input.input.request.attemptId,
+          runnerIdleTtlMs: input.input.request.runnerIdleTtlMs,
+          commitTimeoutMs: input.input.runtime.commitTimeoutMs,
+        },
         actionApprovalPort: input.input.runtime.platform.actionApprovalPort ?? null,
         allowPreparedSending: true,
         assistantDeliveryEffects: input.assistantDeliveryEffects,

@@ -59,10 +59,11 @@ function isProcessingTimeout(error: unknown): boolean {
 
 async function ensureRuntimeProcessing(context: ReturnType<typeof createProcessingContext>): Promise<HostedRuntimeEnsureProcessingResponse> {
   const { diagnostics } = context;
-  let claim = await context.command({ operation: "claim", processingMode: context.mode });
+  let claim = context.input.admission ?? await context.command({ operation: "claim", processingMode: context.mode });
   if (claim.cutover !== "postgres") return retryProcessing(context, "cutover_blocked");
   if (!context.namespace) return retryProcessing(context, "missing_container_binding");
   if (!claim.owner) return retryProcessing(context, "claim_blocked");
+  if (claim.owner.userId !== context.input.userId) throw new TypeError("Runtime admission belongs to a different member.");
   if (claim.owner.attemptId && claim.owner.processingMode) observeRuntimeProcessingFence(diagnostics, {
     attemptId: claim.owner.attemptId, generation: claim.owner.generation, processingMode: claim.owner.processingMode,
   });

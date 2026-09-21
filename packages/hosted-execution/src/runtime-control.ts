@@ -2320,6 +2320,7 @@ export interface HostedRuntimeIssueExportResponse {
 }
 
 export const HOSTED_INGRESS_LATENCY_SOURCES = [
+  "email",
   "linq",
   "telegram",
 ] as const;
@@ -2340,6 +2341,7 @@ export function readHostedIngressLatencySource(
 
 export const HOSTED_RUNTIME_LATENCY_TRACE_ASSISTANT_INPUT_MAX_IDS = 64;
 export const HOSTED_RUNTIME_LATENCY_TRACE_BODY_LIMIT_BYTES = 32 * 1024;
+export const HOSTED_RUNTIME_LATENCY_TRACE_BATCH_MAX_EVENTS = 8;
 export const HOSTED_RUNTIME_LATENCY_TRACE_MILESTONES = [
   "runner_job_accepted",
   "runtime_phase_started",
@@ -2360,6 +2362,7 @@ export const HOSTED_RUNTIME_ASSISTANT_MILESTONES = [
   "first_codex_output_observed",
   "first_codex_text_observed",
   "terminal_non_reply_committed",
+  "terminal_reply_committed",
 ] as const;
 
 export type HostedRuntimeAssistantMilestone =
@@ -2622,6 +2625,7 @@ export interface HostedRuntimeLatencyPhaseBreakdown {
     firstCodexOutputObservedAtEpochMs?: number;
     firstCodexTextObservedAtEpochMs?: number;
     terminalNonReplyCommittedAtEpochMs?: number;
+    terminalReplyCommittedAtEpochMs?: number;
     checkpointPublicationExpectedByEpochMs?: number;
     runtimeLeaseGeneration?: string;
   };
@@ -3015,6 +3019,7 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS: Record<
     "firstCodexOutputObservedAtEpochMs",
     "firstCodexTextObservedAtEpochMs",
     "terminalNonReplyCommittedAtEpochMs",
+    "terminalReplyCommittedAtEpochMs",
     "checkpointPublicationExpectedByEpochMs",
     "runtimeLeaseGeneration",
   ],
@@ -3544,7 +3549,17 @@ export interface HostedRuntimeLatencyTraceMilestoneEvent {
   type: "runtime_milestone";
 }
 
+export interface HostedRuntimeLatencyTraceDeliveryCommittedEvent {
+  mailboxItemIds: string[];
+  at: string;
+  checkpointPublicationExpectedBy: string;
+  runtimeAttemptId: string;
+  source: HostedIngressLatencySource;
+  type: "delivery_committed";
+}
+
 export type HostedRuntimeLatencyTraceEvent =
+  | HostedRuntimeLatencyTraceDeliveryCommittedEvent
   | HostedRuntimeLatencyTraceAssistantInputStagedEvent
   | HostedRuntimeLatencyTraceAssistantMilestoneEvent
   | HostedRuntimeLatencyTraceProviderStartedEvent
@@ -3552,6 +3567,15 @@ export type HostedRuntimeLatencyTraceEvent =
 
 export interface HostedRuntimeLatencyTraceRequest {
   event: HostedRuntimeLatencyTraceEvent;
+}
+
+export interface HostedRuntimeLatencyTraceBatchRequest {
+  events: HostedRuntimeLatencyTraceAssistantMilestoneEvent[];
+}
+
+export interface HostedRuntimeLatencyTraceBatchResponse {
+  // Positional results retain each event's retry ownership. Null means persistence failed.
+  results: Array<HostedRuntimeLatencyTraceResponse | null>;
 }
 
 export interface HostedRuntimeLatencyTraceResponse {
@@ -3672,8 +3696,11 @@ export interface HostedRuntimeWebProtocolAdmission {
   kind: typeof HOSTED_RUNTIME_WEB_PROTOCOL_ADMISSION_KIND;
   schemaVersion: typeof HOSTED_RUNTIME_WEB_PROTOCOL_ADMISSION_VERSION;
   nonce: string;
+  latencyMilestoneBatchMaxEvents: number;
   runtimeLogEventCodes: readonly string[];
   threadRouteAuthority: { direct: unknown; group: unknown };
+  runtimeReplicaBatch: { admission: unknown; settlement: unknown };
+  runtimeOwnerCompletion: { early: unknown; settled: unknown };
 }
 
 // A synthetic wire message, not a log write. Exercise every producer enum value

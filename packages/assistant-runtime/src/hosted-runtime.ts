@@ -12,6 +12,8 @@ import {
 
 import {
   HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_PHASE_KEYS,
+  HOSTED_INGRESS_LATENCY_SOURCES,
+  type HostedIngressLatencySource,
   type HostedRuntimeAssistantConfigurationSnapshot,
   type HostedRuntimeLatencyPhaseBreakdown,
   type HostedRuntimeLatencyTraceMilestone,
@@ -123,6 +125,7 @@ import {
 } from "./hosted-runtime/turn-input.ts";
 import {
   recordHostedAssistantMilestonesBestEffort,
+  guardHostedRuntimeLatencyTracePort,
 } from "./hosted-runtime/assistant-latency-trace.ts";
 import {
   readHostedAssistantExecutionDefaultTarget,
@@ -323,6 +326,7 @@ import type {
 } from "./hosted-runtime/runtime-wake.ts";
 export {
   createHostedBrowserVaultReplicaRefreshFromWorkspace,
+  hashHostedBrowserVaultReplicaSources,
   createHostedBrowserVaultReplicaForSourceState,
   clearHostedBrowserVaultWarmSourceStateHash,
   readHostedBrowserVaultWarmSourceStateHash,
@@ -330,6 +334,7 @@ export {
   summarizeHostedBrowserVaultReplicaContent,
   writeHostedBrowserVaultWarmSourceStateHashBestEffort,
 } from "./hosted-runtime/browser-vault-replica.ts";
+export { parseHostedCanonicalWriteReceiptArtifact } from "./hosted-runtime/canonical-write-receipt.ts";
 export type {
   HostedBrowserVaultReplicaContentSummary,
   HostedBrowserVaultReplicaRefreshResult,
@@ -1403,20 +1408,26 @@ function recordHostedRuntimeLatencyMilestoneBestEffort(input: {
     return;
   }
 
-  try {
-    void input.latencyTracePort.record({
-      event: {
-        at: input.at,
-        milestone: input.milestone,
-        runtimeAttemptId: input.runtimeAttemptId,
-        source: "linq",
-        type: "runtime_milestone",
-      },
-    }).catch(() => {
+  const sources: readonly HostedIngressLatencySource[] =
+    input.milestone === "checkpoint_publication_expected_by"
+      ? HOSTED_INGRESS_LATENCY_SOURCES
+      : ["linq"];
+  for (const source of sources) {
+    try {
+      void input.latencyTracePort.record({
+        event: {
+          at: input.at,
+          milestone: input.milestone,
+          runtimeAttemptId: input.runtimeAttemptId,
+          source,
+          type: "runtime_milestone",
+        },
+      }).catch(() => {
+        // Latency traces are diagnostic-only and must not affect runtime progress.
+      });
+    } catch {
       // Latency traces are diagnostic-only and must not affect runtime progress.
-    });
-  } catch {
-    // Latency traces are diagnostic-only and must not affect runtime progress.
+    }
   }
 }
 
@@ -2928,7 +2939,9 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       if (runtimeOwnerHandoffRequested) {
         setIdleCheckpointStartBy(Date.now());
       } else {
-        ensureIdleCheckpointStartBy(Date.now() + runnerIdleTtlMs);
+        // Background work does not create conversation warmth. Preserve an
+        // existing foreground window, otherwise checkpoint when work settles.
+        ensureIdleCheckpointStartBy(Date.now());
       }
     };
     const updateIdleCheckpointTimerAfterWorkspacePass = (
@@ -2942,14 +2955,8 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           setIdleCheckpointStartBy(
             Date.now() + (runtimeOwnerHandoffRequested ? 0 : runnerIdleTtlMs),
           );
-        } else if (passResult.assistantPhaseResult?.progressed === false
-          && passResult.assistantPhaseResult.runtimeProjectionCheckpointRequested === true) {
-          // Schedule correction alone can publish immediately, but cannot
-          // shorten an existing foreground window.
-          ensureIdleCheckpointStartBy(Date.now());
         } else {
-          // Batch the first dirty work as before. Maintenance/cleanup cannot
-          // move an existing (including already-spent) window.
+          // Background progress cannot move an existing foreground window.
           ensureIdleCheckpointTimerAfterDirtyWork();
         }
       }
@@ -2977,7 +2984,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       onCompleted(completion, notify) {
         clinicalEnrichmentController?.kick();
         runtimeStateDirty = true;
-        ensureIdleCheckpointStartBy(Date.now() + runnerIdleTtlMs);
+        ensureIdleCheckpointTimerAfterDirtyWork();
         if (completion.afterDurableCheckpoint) {
           pendingDurableCheckpointEffects.push(...(typeof completion.afterDurableCheckpoint === "function"
             ? [completion.afterDurableCheckpoint] : completion.afterDurableCheckpoint));
@@ -2992,7 +2999,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       },
       onFailure(error, notify) {
         runtimeStateDirty = true;
-        ensureIdleCheckpointStartBy(Date.now() + runnerIdleTtlMs);
+        ensureIdleCheckpointTimerAfterDirtyWork();
         emitPhaseLog({ error, input, requestId, stage: "runtime", status: "fail" });
         if (notify && (!systemMailboxProcessingMode || hostedCodexRuntime !== null)) options.runtimeWakeSignal?.notify();
       },
@@ -3216,6 +3223,8 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           resolveHostedVaultShareProjectionScopesBestEffort({
             ...(projectionMode ? { projectionMode } : {}),
             signal,
+            sourceWorkspaceVersion:
+              activeWorkspace?.version ?? input.request.workspaceVersion,
             vaultSharePort,
           });
         const scopeResolutionResult = await waitForOwnedProjectionStage(
@@ -3883,6 +3892,12 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
               },
               write: async () => {
                 await drainHostedPreparedAssistantDeliveries({
+                  deliveryTraceContext: {
+                    latencyTracePort: foregroundRuntime.platform.latencyTracePort,
+                    runtimeAttemptId: input.request.attemptId,
+                    runnerIdleTtlMs,
+                    commitTimeoutMs: foregroundRuntime.commitTimeoutMs,
+                  },
                   actionApprovalPort:
                     foregroundRuntime.platform.actionApprovalPort ?? null,
                   allowPreparedSending: true,
@@ -5454,6 +5469,8 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       const scopeResolutionStage = await waitForOwnedProjectionStage(
         (signal) => resolveHostedVaultShareProjectionScopesBestEffort({
           signal,
+          sourceWorkspaceVersion:
+            committedWorkspace?.version ?? invocationWorkspaceVersion,
           vaultSharePort,
         }),
       );
@@ -6678,9 +6695,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         runtimeStateDirty ||=
           runtimeDirtyAfterForeground || committedInboxMediaRetentionWakeDue;
         if (runtimeDirtyAfterForeground) {
-          ensureIdleCheckpointStartBy(
-            Date.now() + (runtimeOwnerHandoffRequested ? 0 : runnerIdleTtlMs),
-          );
+          ensureIdleCheckpointTimerAfterDirtyWork();
         } else if (committedInboxMediaRetentionWakeDue) {
           setIdleCheckpointStartBy(Date.now());
         }
@@ -6730,8 +6745,8 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       let pendingCheckpointWakeLatencySeed: HostedRuntimeWakeLatencySeed | null = null;
       const readBackgroundCheckpointWaitDeadline = (): number | null => {
         if (options.shutdownSignal?.aborted) return null;
-        const diagnosticDeadline = resolveHostedBackgroundReadCheckpointDeadline({
-          diagnosticDeadline: detachedAssistantAskController?.activeDiagnosticDeadline() ?? null,
+        const backgroundReadDeadline = resolveHostedBackgroundReadCheckpointDeadline({
+          assistantAskDeadline: detachedAssistantAskController?.activeDeadline() ?? null,
           clinicalDeadline: clinicalEnrichmentController?.activeDeadline() ?? null,
           canonicalReceiptCount: pendingCanonicalReceiptCount,
           durableEffectCount: pendingDurableCheckpointEffects.length + readyDurableCheckpointEffects.length,
@@ -6739,9 +6754,9 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         });
         let workDeadline = !runtimeOwnerHandoffRequested
           && !runtimeAbortController.signal.aborted
-          && diagnosticDeadline !== null
-          && diagnosticDeadline > Date.now()
-            ? diagnosticDeadline
+          && backgroundReadDeadline !== null
+          && backgroundReadDeadline > Date.now()
+            ? backgroundReadDeadline
             : null;
         if (imageGenerationController?.hasCompleted()) return Date.now();
         if (
@@ -9087,9 +9102,7 @@ function createAbortGuardedHostedRuntimePlatform(
       : {}),
     ...(platform.latencyTracePort
       ? {
-          latencyTracePort: {
-            record: (request) => guard(() => platform.latencyTracePort!.record(request)),
-          },
+          latencyTracePort: guardHostedRuntimeLatencyTracePort(platform.latencyTracePort, guard),
         }
       : {}),
     ...(platform.publicInternetFetch
