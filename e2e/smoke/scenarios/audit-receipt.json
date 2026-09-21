@@ -1,0 +1,13 @@
+{
+  "id": "audit-receipt",
+  "command": "vault-cli audit receipt <xfm_id> --vault <path> [--request-id <id>]",
+  "vaultFixture": "fixtures/minimal-vault",
+  "inputs": [
+    "fixtures/minimal-vault/CORE.md"
+  ],
+  "goldenOutput": "fixtures/golden-outputs/show",
+  "purpose": "Maps the explicit integration receipt lookup; the minimal vault returns a null receipt.",
+  "coverageNotes": [
+    "packages/cli/test/cli-expansion-samples-audit.test.ts executes an archived automatic publication lookup and verifies its receipt identity, evidence parts and publication counts."
+  ]
+}

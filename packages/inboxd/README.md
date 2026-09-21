@@ -54,3 +54,10 @@ These methods mutate only inbox-local projection state such as `.runtime/project
 When combined with `@murphai/parsers`, runtime consumers can drain those queues without mixing parser state into canonical health records.
 
 `@murphai/inboxd` also owns the optional inbox-plus-parser composition helpers `createParsedInboxPipeline(...)` and `runInboxDaemonWithParsers(...)`, so the parser package stays focused on parser contracts, registry/toolchain discovery, and parse execution rather than on inbox runtime orchestration.
+
+Expired capture retention also drops a legacy v1 ledger row when an equivalent
+expired v2 row remains in the same shard. Equivalence preserves every identity,
+link, source field and attachment; only the schema, obsolete envelope path and
+retirement timestamp differ. Unknown, unmatched, unpaired and unexpired records
+remain untouched. Cleanup shares the retention capture budget, canonical lock and
+atomic shard rewrite; it introduces no format migration or deduplication store.

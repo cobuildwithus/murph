@@ -604,6 +604,9 @@ Query projection storage reduction is tracked in
 [`workspace storage`](exec-plans/completed/2026-09-21-workspace-size.md);
 `packages/query/README.md` owns the storage and restore contract.
 
+Active ingest compression is tracked in
+[`active journal storage`](exec-plans/completed/2026-09-21-active-ingest-compression.md).
+
 Query page packing and unused date-index removal are tracked in
 [`query page packing`](exec-plans/completed/2026-09-21-workspace-page-packing.md).
 
@@ -613,5 +616,11 @@ Query metric payload deduplication and transaction/restore proof are tracked in
 System checkpoint cancellation and mailbox timing implementation are recorded in
 [`typing checkpoint latency`](exec-plans/completed/2026-09-21-typing-checkpoint-latency.md).
 
+Expired inbox capture compaction is tracked in
+[`capture compaction`](exec-plans/completed/2026-09-21-compact-inbox-records.md).
+
 Legacy oxygen analytics retirement is tracked in
 [`oxygen analytics`](exec-plans/completed/2026-09-21-retire-oxygen-v1.md).
+
+Single device publication receipts are tracked in
+[`device receipts`](exec-plans/completed/2026-09-21-single-import-receipt.md).

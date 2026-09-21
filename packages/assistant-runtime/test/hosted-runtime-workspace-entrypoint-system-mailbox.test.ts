@@ -4756,9 +4756,13 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       assert.equal(forcedRefreshCalls, 0);
       assert.equal(foreground.status, "scheduled");
       assert.equal(foreground.immediateRecheckRequested, true);
-      assert.equal(foreground.nextWakeReason, "assistant");
+      // Fresh cron projection preserves the pending mailbox owner's wake;
+      // it must not replace that handoff with an assistant-only wake.
+      assert.equal(foreground.nextWakeReason, "mailbox");
       const foregroundRecheckAt = foreground.nextWakeAt;
       assert.ok(foregroundRecheckAt);
+      assert.equal(currentWorkspace.nextWakeAt, foregroundRecheckAt);
+      assert.equal(currentWorkspace.nextWakeReason, "mailbox");
       assert.ok(importedForegroundAssistantInputId);
       assert.deepEqual(foregroundAssistantInputIds, [importedForegroundAssistantInputId]);
       const importedRefreshRecord = importedRefreshRecords[0];
