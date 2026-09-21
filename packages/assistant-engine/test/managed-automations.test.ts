@@ -1963,7 +1963,7 @@ describe('applyMurphManagedAutomations', () => {
     expect(updated).toMatchObject({ status: 'active', schedule })
     expect(updated?.instructions).toContain('Capture explicit procedural preferences')
     expect(updated?.instructions).toContain('faithful shortening')
-    expect(updated?.instructions).toContain('unambiguous finite window')
+    expect(updated?.instructions).toContain('never automatically forget or remove a fact because its date passed')
     expect((await applyMurphManagedAutomations(input)).updated).toBe(0)
   })
 

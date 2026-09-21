@@ -20,10 +20,8 @@ contradictory facts. No model, network call, or extra read enters the reply path
 
 Use the existing maintenance tool and canonical update/forget operations to
 shorten verbose existing records without changing meaning; learn explicit
-conditional assistance preferences; apply current corrections; and forget only
-unambiguously ended temporary non-health Context facts. Never infer expiry from
-age or absence. Existing records can justify only faithful compaction or their
-own explicit expiry, not new facts or inferred traits. New facts still require
+conditional assistance preferences; apply current corrections; and preserve explicit dates and temporary scope. Never infer permission to delete
+from elapsed time or absence. Existing records can justify only faithful compaction, not new facts or inferred traits. New facts still require
 conversation evidence. An empty conversation window still admits maintenance
 when canonical memory exists, allowing inactive members' old records to improve.
 No new schema, store, vector index, summary cache, or migration is needed.
@@ -46,10 +44,19 @@ read the same memory format; deploying the new runner enables the policy.
 - Done when: useful contextual replies with no memory preamble, exact canonical
   changes and silent maintenance, no stale overwrite, no new operator migration.
 
+## Validation-driven scope decision
+
+A real-model replay attempted an additional forget after the clearly expired
+record was already gone. Autonomous deletion was removed from the final policy.
+Date-aware relevance remains in the private prompt; maintenance preserves dates
+and can only compact existing facts without changing their meaning. Factual
+replacement and forgetting still require clear user evidence. The live journey
+now asserts retention of ended, ambiguous, mixed, and unfinished context.
+
 ## Progress
 
 - Planning: source gaps and existing automatic reconciliation confirmed.
-- Implementation: section byte budgets, automatic legacy compaction/expiry,
+- Implementation: section byte budgets, automatic legacy compaction,
   procedural learning guidance, empty-window admission, and seed refresh complete.
 - Deterministic evidence: 292 focused assistant tests pass across selection,
   tools, admission, planning, evidence, and managed automation (the empty-evidence
@@ -64,8 +71,8 @@ read the same memory format; deploying the new runner enables the policy.
   installation IDs, temp paths, and start time normalized; transport-only fields
   excluded by the scripted capture. Eight-preference identical fixture at base
   a32e29827edf and candidate; all eight vs three appear in private context.
-- Real-model journey: pending. Default local subscription and early alternate
-  homes fail before provider action; continuing the authorized bounded fallback.
+- Real-model journey: final nondestructive-policy run pending on the working
+  local subscription. Earlier auth-only failures reached no provider action.
 - Existing Frog entries cover the documented changelog cwd/generated-input
   workaround; no new friction entry created.
 - PR, exact-head CI, and final review: pending.

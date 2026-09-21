@@ -1947,6 +1947,6 @@ covers empty conversation admission with missing, populated, and malformed
 memory. `maintenance-evidence.test.ts` distinguishes empty evidence from failed
 collection. The focused real-Codex `memory profile improvement e2e` journey uses
 production maintenance instructions and tools, verifies canonical compaction,
-expiry, procedural learning, replay stability, and a fresh personalized reply.
+dated-context retention, procedural learning, replay stability, and a fresh personalized reply.
 The opt-in scripted `memory profile complete provider input` capture measures
 complete private/group requests without a live provider.

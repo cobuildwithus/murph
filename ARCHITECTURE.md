@@ -258,7 +258,7 @@ additional memory owner, and the host suppresses their effects in this lane.
 The evidence owner distinguishes a successfully empty bounded conversation
 window from collection failures. An empty member-memory window skips before provider admission only when
 canonical memory also has no records. Existing memory remains eligible for
-faithful compaction and explicit temporary-context expiry; failed reads retain
+faithful compaction; failed reads retain
 the ordinary maintenance tool path. Failed conversation collection explicitly
 forbids memory mutations because newer corrections may be missing. An empty group window skips only when its room-model page
 is also genuinely missing; existing pages remain eligible for cleanup, and
@@ -282,11 +282,11 @@ record in place without changing meaning; explicit conditions, exceptions,
 negation, dates, and uncertainty remain intact. New facts and changed preferences
 need conversation evidence. Explicit ongoing ways of helping belong in
 Instructions, without inferring permanent preferences from one-off requests.
-Only a wholly temporary non-health Context record with an unambiguous ended
-window and no supplied extension is eligible for automatic expiry. Mixed durable
-facts, unanchored relative dates, unfinished-goal deadlines, silence, and age
-never justify deletion. Overlapping evidence must not resurrect retired facts.
-Every shown record receives at most one version-checked mutation per pass;
+Explicit dates and temporary scope remain intact: elapsed time affects relevance,
+not permission to erase memory. Only clear user evidence can initiate factual
+replacement or forgetting. Mixed durable facts, unanchored dates, goal deadlines,
+silence, and age never justify deletion. Overlapping evidence must not resurrect
+withdrawn facts. Every shown record receives at most one version-checked mutation per pass;
 already concise records remain unchanged. This policy uses the existing memory
 format and tool, with no schema migration or second profile store.
 

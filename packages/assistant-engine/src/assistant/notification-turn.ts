@@ -1864,7 +1864,7 @@ async function resolveEmptyAssistantMaintenanceSummary(input: {
   ) {
     return null
   }
-  // Existing memory can need faithful compaction or explicit expiry even
+  // Existing memory can need faithful compaction even
   // without new conversation. Failed reads retain the ordinary tool path.
   if (policy.maintenanceProfile === 'member-memory') {
     try {

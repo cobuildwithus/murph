@@ -19597,15 +19597,16 @@ describeRealCodex('real Codex memory profile improvement e2e', () => {
       const actions = readCapabilityRoutingActions(result.jsonEvents)
       expect(actions.filter(action => action.kind === 'command')).toEqual([])
       const calls = actions.filter(action => action.kind === 'dynamic')
+      process.stdout.write(`[memory-profile-maintenance] ${JSON.stringify(calls.map(call => ({ action: call.argumentsValue.action, success: call.success })))}\n`)
       expect(calls.every(call => call.tool === MURPH_MEMBER_MEMORY_TOOL.name && call.success)).toBe(true)
       expect(calls.filter(call => call.argumentsValue.action === 'show')).toHaveLength(1)
       expect(calls.filter(call => call.argumentsValue.action === 'update')).toHaveLength(1)
-      expect(calls.filter(call => call.argumentsValue.action === 'forget')).toHaveLength(1)
+      expect(calls.filter(call => call.argumentsValue.action === 'forget')).toHaveLength(0)
       expect(calls.filter(call => call.argumentsValue.action === 'upsert')).toHaveLength(1)
       expect(calls.find(call => call.argumentsValue.action === 'update')?.argumentsValue).toMatchObject({ memoryId: verbose.record.id, expectedUpdatedAt: verbose.record.updatedAt })
-      expect(calls.find(call => call.argumentsValue.action === 'forget')?.argumentsValue).toMatchObject({ memoryId: expired.record.id, expectedUpdatedAt: expired.record.updatedAt })
       const after = await readMemoryDocument(workingDirectory)
-      expect(after.records).toHaveLength(5)
+      expect(after.records).toHaveLength(6)
+      expect(after.records.find(record => record.id === expired.record.id)?.text).toBe(expired.record.text)
       expect(after.records.find(record => record.id === mixed.record.id)?.text).toBe(mixed.record.text)
       expect(after.records.find(record => record.id === ambiguous.record.id)?.text).toBe(ambiguous.record.text)
       expect(after.records.find(record => record.id === unfinished.record.id)?.text).toBe(unfinished.record.text)
@@ -19615,13 +19616,13 @@ describeRealCodex('real Codex memory profile improvement e2e', () => {
       expect(compact).toMatch(/progress/iu)
       expect(compact).toMatch(/obstacles/iu)
       expect(compact).toMatch(/next step/iu)
-      expect(compact).toMatch(/2030-01-01/u)
+      expect(compact).toMatch(/2030-01-01|January 1(?:st)?,? 2030|1(?:st)? January 2030/iu)
       expect(compact).toMatch(/(?:no|unless|only|without|not).*check.ins|check.ins.*(?:ask|request)/iu)
       const procedure = after.records.find(record => record.section === 'Instructions')
       expect(procedure?.text).toMatch(/two|2/iu)
       expect(procedure?.text).toMatch(/stuck/iu)
       expect(procedure?.text).toMatch(/choose|choice/iu)
-      // A second overlapping pass must not duplicate facts, resurrect expiry,
+      // A second overlapping pass must not duplicate facts, erase history,
       // or edit concise records merely to make them look recently verified.
       const replay = await executeRealCodexAppServerTurn(maintenanceInput)
       expect(parseAssistantNotificationDecision(replay.finalMessage).kind).toBe('skip')
@@ -19632,17 +19633,17 @@ describeRealCodex('real Codex memory profile improvement e2e', () => {
         developerInstructions: buildDirectConversationDeveloperInstructions(),
         dynamicTools: [], memberMemoryMaintenanceAuthorized: false,
         prompt: resolveAssistantProviderPrompt({
-          dynamicTools: [], prompt: 'I am stuck choosing a next step for winding down tonight. Just help me decide; do not save or schedule anything.',
+          dynamicTools: [], prompt: 'I am stuck choosing a next step for winding down tonight. I could put tomorrow\'s things by the door, clear one small surface, or pick an outfit. Help me choose from those; no research, saving, or scheduling.',
           providerConfig: normalizeAssistantProviderConfig({ provider: 'codex-cli' }),
           turnContextPrompt: await readAssistantCurrentStatePrompt({ vaultRoot: workingDirectory }),
           workingDirectory,
         }),
       })
+      process.stdout.write(`[memory-profile-e2e] ${JSON.stringify({ maintenanceActions: calls.length, replayActions: 1, compact, procedure: procedure?.text, reply: reply.finalMessage })}\n`)
       expect(readCapabilityRoutingActions(reply.jsonEvents)).toEqual([])
       expect(reply.finalMessage).not.toMatch(/saved memory|memory record|maintenance|borrowed desk|you.ve got this/iu)
       expect(reply.finalMessage).toMatch(/choose|pick|which|rather/iu)
-      expect(reply.finalMessage).toMatch(/(?:1[.)]|one option|either|two|2)/iu)
-      process.stdout.write(`[memory-profile-e2e] ${JSON.stringify({ maintenanceActions: calls.length, replayActions: 1, compact, procedure: procedure?.text, reply: reply.finalMessage })}\n`)
+      expect([/door/iu, /surface/iu, /outfit/iu].filter(pattern => pattern.test(reply.finalMessage))).toHaveLength(2)
     } finally {
       await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
     }

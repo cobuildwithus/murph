@@ -79,7 +79,7 @@ const GROUP_ROOM_MODEL_EVIDENCE_LIMITS: AssistantMaintenanceEvidenceLimits = {
 }
 
 const ASSISTANT_MAINTENANCE_EVIDENCE_EMPTY_BODY =
-  'No committed user or assistant conversation messages were found in this window. Do not add facts; only maintain existing records under the authorized compaction and explicit-expiry rules.'
+  'No committed user or assistant conversation messages were found in this window. Do not add facts; only maintain existing records under the authorized faithful-compaction rules.'
 const ASSISTANT_GROUP_ROOM_MODEL_EVIDENCE_EMPTY_BODY =
   'No committed group conversation or reaction entries were found in this window. Do not create or update the group room model this run.'
 const ASSISTANT_GROUP_REACTION_TARGET_TEXT_MAX_CODE_POINTS = 1_000
