@@ -1,9 +1,10 @@
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { safeParseContract, VAULT_FAMILY_DESCRIPTORS, VAULT_LAYOUT, vaultMetadataSchema } from "@murphai/contracts";
 import {
   applyHostedCanonicalWriteReceipt, REQUIRED_DIRECTORIES, validateVault,
-  type HostedCanonicalWriteReceipt,
+  type HostedCanonicalWriteReceipt, type HostedCanonicalWriteReceiptAction,
 } from "@murphai/core";
 import {
   hashHostedBrowserVaultReplicaSources, parseHostedCanonicalWriteReceiptArtifact,
@@ -20,10 +21,11 @@ export interface RecoveryCandidate {
   retainedBytes: number;
   replayBytes: number;
   actions: number;
+  metadataPayloadCandidates: number;
 }
 
 export function createRecoveryCandidate(): RecoveryCandidate {
-  return { payloads: new Map(), receipts: [], retainedBytes: 0, replayBytes: 0, actions: 0 };
+  return { payloads: new Map(), receipts: [], retainedBytes: 0, replayBytes: 0, actions: 0, metadataPayloadCandidates: 0 };
 }
 
 // Only the authenticated census may supply these bytes. No receipt, path,
@@ -41,6 +43,7 @@ export function retainRecoveryCandidateArtifact(
   let value: unknown;
   const serialized = new TextDecoder().decode(plaintext);
   try { value = JSON.parse(serialized); } catch { return; }
+  if (safeParseContract(vaultMetadataSchema, value).success) candidate.metadataPayloadCandidates++;
   if (value === null || typeof value !== "object" || !("schema" in value) || value.schema !== RECEIPT_SCHEMA) return;
   const receipt = parseHostedCanonicalWriteReceiptArtifact(serialized);
   if (!receipt || !Number.isFinite(Date.parse(receipt.committedAt))) throw new Error("recovery_candidate_invalid_receipt");
@@ -62,6 +65,46 @@ export function clearRecoveryCandidate(candidate: RecoveryCandidate): void {
   candidate.retainedBytes = 0;
   candidate.replayBytes = 0;
   candidate.actions = 0;
+  candidate.metadataPayloadCandidates = 0;
+}
+
+function recoveryTargetFamily(relativePath: string) {
+  return VAULT_FAMILY_DESCRIPTORS.find((family) => family.storageKind === "singleton-file"
+    ? relativePath === family.relativePath : relativePath.startsWith(`${family.directory}/`))?.id ?? "other";
+}
+
+function summarizeRecoveryHistory(candidate: RecoveryCandidate, ordered: RecoveryCandidate["receipts"]) {
+  const paths = new Set<string>();
+  const pathsByFamily: Record<string, number> = {};
+  let metadataWriteActions = 0;
+  let coreWriteActions = 0;
+  let firstAppendNeedsBasePaths = 0;
+  let firstAppendBasePayloadsPresent = 0;
+  for (const { receipt } of ordered) for (const action of receipt.actions) {
+    if (action.kind === "text_upsert") {
+      if (action.targetRelativePath === VAULT_LAYOUT.metadata) metadataWriteActions++;
+      if (action.targetRelativePath === VAULT_LAYOUT.coreDocument) coreWriteActions++;
+    }
+    if (paths.has(action.targetRelativePath)) continue;
+    paths.add(action.targetRelativePath);
+    const family = recoveryTargetFamily(action.targetRelativePath);
+    pathsByFamily[family] = (pathsByFamily[family] ?? 0) + 1;
+    if (action.kind === "jsonl_append" && action.baseByteLength > 0) {
+      firstAppendNeedsBasePaths++;
+      if (candidate.payloads.get(action.baseSha256)?.byteLength === action.baseByteLength) firstAppendBasePayloadsPresent++;
+    }
+  }
+  return { receiptCount: ordered.length, paths: paths.size, pathsByFamily, metadataWriteActions, coreWriteActions,
+    metadataPayloadCandidates: candidate.metadataPayloadCandidates, firstAppendNeedsBasePaths, firstAppendBasePayloadsPresent };
+}
+
+function recoveryActionDiagnostics(candidate: RecoveryCandidate, action: HostedCanonicalWriteReceiptAction | undefined) {
+  if (!action) return undefined;
+  return { kind: action.kind, family: recoveryTargetFamily(action.targetRelativePath),
+    ...(action.kind === "jsonl_append" ? {
+      expectedBaseBytes: action.baseByteLength,
+      fullBaseArtifactPresent: candidate.payloads.get(action.baseSha256)?.byteLength === action.baseByteLength,
+    } : {}) };
 }
 
 export async function validateRecoveryCandidate(input: {
@@ -71,6 +114,8 @@ export async function validateRecoveryCandidate(input: {
   let replayedReceipts = 0;
   let mediaActionsWithoutPayload = 0;
   let stage: "replay" | "vault_validation" | "source_comparison" = "replay";
+  let activeAction: HostedCanonicalWriteReceiptAction | undefined;
+  let history: ReturnType<typeof summarizeRecoveryHistory> | undefined;
   try {
     input.signal.throwIfAborted();
     scratch = await mkdtemp(path.join(tmpdir(), "murph-recovery-candidate-"));
@@ -80,15 +125,18 @@ export async function validateRecoveryCandidate(input: {
     for (const relative of REQUIRED_DIRECTORIES) await mkdir(path.join(vaultRoot, relative), { recursive: true });
     const ordered = [...input.candidate.receipts].sort((a, b) =>
       Date.parse(a.receipt.committedAt) - Date.parse(b.receipt.committedAt) || a.sha256.localeCompare(b.sha256));
+    history = summarizeRecoveryHistory(input.candidate, ordered);
     for (const { receipt } of ordered) {
       for (const action of receipt.actions) {
         input.signal.throwIfAborted();
+        activeAction = action;
         if (action.kind === "raw_upsert" && action.mediaRef && !action.contentRef) mediaActionsWithoutPayload++;
         await applyHostedCanonicalWriteReceipt({ vaultRoot, receipt: { ...receipt, actions: [action] }, readPayload: async (ref) => {
           input.signal.throwIfAborted();
           const bytes = input.candidate.payloads.get(ref.sha256);
           return bytes?.byteLength === ref.byteSize ? bytes : null;
         } });
+        activeAction = undefined;
       }
       replayedReceipts++;
     }
@@ -98,7 +146,7 @@ export async function validateRecoveryCandidate(input: {
     stage = "source_comparison";
     const sources = await hashHostedBrowserVaultReplicaSources(vaultRoot, input.signal);
     return {
-      complete: true, replayedReceipts, mediaActionsWithoutPayload, validVault: vault.valid,
+      complete: true, replayedReceipts, mediaActionsWithoutPayload, validVault: vault.valid, history,
       validationIssueCount: vault.issues.length, sourceFiles: sources.fileCount,
       sourceBytes: sources.totalBytes, sourceHashMatches: sources.hash === input.expectedSourceHash,
       // Ordering by timestamp and matching a projection's source hash do not
@@ -106,7 +154,8 @@ export async function validateRecoveryCandidate(input: {
       acceptedHistoryProven: false, restorationPerformed: false,
     };
   } catch (error) {
-    return { complete: false, replayedReceipts, failureStage: stage,
+    return { complete: false, replayedReceipts, failureStage: stage, history,
+      failureAction: recoveryActionDiagnostics(input.candidate, activeAction),
       failure: input.signal.aborted ? "cancelled" : candidateFailure(error),
       acceptedHistoryProven: false, restorationPerformed: false };
   } finally {
