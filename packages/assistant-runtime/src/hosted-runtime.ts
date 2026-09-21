@@ -3818,7 +3818,20 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
             await checkpointSystemMailboxMode(
               `${inputItem.stagePrefix}.checkpoint.prepare`,
               preparationWake ? [preparationWake] : [],
-            );
+            ).catch(async (error: unknown) => {
+              if (error instanceof HostedRuntimeCheckpointInterruptedByWakeError) {
+                // No provider call has started. Restore the exact dispatch state
+                // before handing the dirty workspace to foreground execution.
+                await resetHostedPreparedAssistantDeliveryEffects({
+                  effects: exactDeliveryEffects,
+                  preparedDispatches:
+                    exactDeliveryPreparation?.preparedDispatches ?? null,
+                  vaultRoot: restored.vaultRoot,
+                });
+                runtimeStateDirty = true;
+              }
+              throw error;
+            });
           }
           const pendingWakeBeforeExactDelivery =
             consumePendingRuntimeWakeUnlessShuttingDown({

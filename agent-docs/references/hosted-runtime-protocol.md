@@ -1107,7 +1107,10 @@ non-system hint aborts construction before mailbox qualification; a qualified
 batch enters the same warm foreground owner, while an empty hint retries the
 dirty save. System-only hints do not interrupt it, and shutdown disables wake
 cancellation so dirty progress can publish. Interrupted construction retains
-dirty state and durability-gated effects. Once snapshot publication is sent,
+dirty state and durability-gated effects. At exact notification preparation,
+interruption restores the token-matched pre-dispatch state before foreground
+admission, because no provider send has begun; the normal later checkpoint
+persists that reset. Once snapshot publication is sent,
 the existing acknowledgement boundary remains authoritative: adopt its result
 before servicing the wake rather than abandoning a possibly committed version.
 `assistantExecutionBlocked` remains a hard boundary: that invocation retains
