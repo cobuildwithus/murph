@@ -340,6 +340,7 @@ export async function runHostedIdleCheckpointMaintenance(input: {
       if (!archiveSignal.aborted) {
         try {
           const archiveResult = await archiveClosedIntegrationIngestShards({
+            archiveCurrentMonth: true,
             signal: archiveSignal,
             vaultRoot: input.vaultRoot,
           });

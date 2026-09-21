@@ -575,6 +575,12 @@ Clinical Journal date provenance and native record presentation cleanup:
 Fresh clinical date validation and partial-import proof:
 [`2026-09-21-clinical-date-validation.md`](exec-plans/completed/2026-09-21-clinical-date-validation.md).
 
+Clinical extraction date recovery: [`2026-09-21-clinical-date-recovery.md`](exec-plans/completed/2026-09-21-clinical-date-recovery.md).
+
+Clinical date review remediation: [`2026-09-21-clinical-date-review-remediation.md`](exec-plans/completed/2026-09-21-clinical-date-review-remediation.md).
+
+Clinical correction cleanup budget: [`2026-09-21-clinical-correction-cleanup-budget.md`](exec-plans/completed/2026-09-21-clinical-correction-cleanup-budget.md).
+
 Zero-valued SpO2 sample handling is tracked in
 [`2026-09-18-spo2-zero-samples.md`](exec-plans/completed/2026-09-18-spo2-zero-samples.md).
 
@@ -607,17 +613,20 @@ Query projection storage reduction is tracked in
 [`workspace storage`](exec-plans/completed/2026-09-21-workspace-size.md);
 `packages/query/README.md` owns the storage and restore contract.
 
+Active ingest compression is tracked in
+[`active journal storage`](exec-plans/completed/2026-09-21-active-ingest-compression.md).
+
 Query page packing and unused date-index removal are tracked in
 [`query page packing`](exec-plans/completed/2026-09-21-workspace-page-packing.md).
 
 Query metric payload deduplication and transaction/restore proof are tracked in
 [`metric payload storage`](exec-plans/completed/2026-09-21-workspace-metric-dedup.md).
 
-Clinical extraction date recovery: [`2026-09-21-clinical-date-recovery.md`](exec-plans/completed/2026-09-21-clinical-date-recovery.md).
-
-Clinical date review remediation: [`2026-09-21-clinical-date-review-remediation.md`](exec-plans/completed/2026-09-21-clinical-date-review-remediation.md).
-
-Clinical correction cleanup budget: [`2026-09-21-clinical-correction-cleanup-budget.md`](exec-plans/completed/2026-09-21-clinical-correction-cleanup-budget.md).
+Expired inbox capture compaction is tracked in
+[`capture compaction`](exec-plans/completed/2026-09-21-compact-inbox-records.md).
 
 Legacy oxygen analytics retirement is tracked in
 [`oxygen analytics`](exec-plans/completed/2026-09-21-retire-oxygen-v1.md).
+
+Single device publication receipts are tracked in
+[`device receipts`](exec-plans/completed/2026-09-21-single-import-receipt.md).

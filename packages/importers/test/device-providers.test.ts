@@ -2545,7 +2545,7 @@ test("Junction daily aggregate alias repair composes with a preceding-day aggreg
     );
     assert.equal(repaired.applied, true);
     assert.ok(repaired.ingestId);
-    assert.ok(repaired.auditPath);
+    assert.equal(repaired.auditPath, null);
     assert.ok(repaired.persistedEvidencePartCount > 0);
     assert.equal(
       repaired.events.some((event) =>
@@ -2713,7 +2713,7 @@ test("Junction daily aggregate alias repair converges after the primary provider
     );
     assert.equal(repaired.applied, true);
     assert.ok(repaired.ingestId);
-    assert.ok(repaired.auditPath);
+    assert.equal(repaired.auditPath, null);
     assert.ok(repaired.persistedEvidencePartCount > 0);
     assert.equal(
       repaired.events.some((event) =>

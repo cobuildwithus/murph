@@ -30,6 +30,7 @@ vault-cli vault repair-inbox-envelopes --vault <path> [--dry-run] [--apply] [--m
 vault-cli vault compact-inbox-parser-attempts --vault <path> [--dry-run] [--apply] [--max-attempts <count>] [--request-id <id>]
 vault-cli vault repair-junction-hr-zones --vault <path> [--dry-run] [--apply] [--request-id <id>]
 vault-cli vault update --vault <path> [--title <title>] [--timezone <tz>] [--request-id <id>]
+vault-cli audit receipt <xfm_id> --vault <path> [--request-id <id>]
 vault-cli audit show <id> --vault <path> [--request-id <id>]
 vault-cli audit list --vault <path> [--action <action>] [--actor <actor>] [--status <status>] [--from <date>] [--to <date>] [--sort asc|desc] [--limit <n>] [--request-id <id>]
 vault-cli audit tail --vault <path> [--limit <n>] [--request-id <id>]

@@ -2301,12 +2301,10 @@ export async function runHostedWorkspaceAssistantPhase(
       if (!foregroundAssistantResult.afterCheckpoint) {
         writeForegroundAssistantFinishedTiming();
       }
-      const foregroundResult = mergeContinuingSystemMailboxResult(
-        withFreshHostedManagedAutomationsAfterCheckpoint({
-          input,
-          result: timedForegroundAssistantResult,
-        }),
-      );
+      const foregroundResult = withFreshHostedManagedAutomationsAfterCheckpoint({
+        input,
+        result: mergeContinuingSystemMailboxResult(timedForegroundAssistantResult),
+      });
       const result = withPostForegroundMemberMaintenanceAfterCheckpoint({
         executionContext,
         input,
@@ -3113,6 +3111,10 @@ function withFreshHostedManagedAutomationsAfterCheckpoint(input: {
         input.result.afterCheckpoint,
         async () => await applyFreshHostedManagedAutomationsAfterCheckpoint({
           input: input.input,
+          phaseWake: createHostedRuntimeWakeCandidate(
+            input.result.nextWakeAt ?? null,
+            input.result.nextWakeReason ?? null,
+          ),
         }),
       ],
     }),
@@ -3202,27 +3204,42 @@ async function maintainHostedAutoReplyRouteState(
 
 async function applyFreshHostedManagedAutomationsAfterCheckpoint(input: {
   input: HostedWorkspaceRuntimeAssistantPhaseInput;
+  phaseWake: HostedRuntimeWakeCandidate | null;
 }): Promise<HostedWorkspaceRunnerAssistantPhasePostCheckpoint | null> {
   if (input.input.shouldYieldBackgroundMaintenance?.() === true) {
-    return null;
+    const nextWake = selectHostedRuntimeWakeCandidate([
+      input.phaseWake,
+      createHostedRuntimeWakeCandidate(
+        new Date(
+          resolveHostedAssistantPhaseNowMs(input.input)
+            + HOSTED_ASSISTANT_CRON_STATUS_RETRY_DELAY_MS,
+        ).toISOString(),
+        HOSTED_ASSISTANT_WAKE_REASON,
+      ),
+    ]);
+    return {
+      checkpointReason: "assistant_runtime_commit",
+      nextWakeAt: nextWake.at,
+      nextWakeReason: nextWake.reason,
+    };
   }
 
   const defaultRoute = await resolveHostedManagedAutomationDefaultRouteBestEffort({
     input: input.input,
   });
-  if (!defaultRoute) {
+  const managedResult = defaultRoute
+    ? await applyHostedManagedAutomationsBestEffort({
+        defaultRoute,
+        input: input.input,
+        retryStableKeyFailure: true,
+      })
+    : null;
+  if (managedResult && managedResult.progressed !== true) {
     return null;
   }
 
-  const result = await applyHostedManagedAutomationsBestEffort({
-    defaultRoute,
-    input: input.input,
-    retryStableKeyFailure: true,
-  });
-  if (!result || result.progressed !== true) {
-    return null;
-  }
-
+  // A reply can complete onboarding without changing automation records.
+  // Refresh derived eligibility after delivery even when seeding is unchanged.
   const assistantCronWake =
     await resolveHostedAssistantCronWakeStateBestEffort(input.input, {
       interruptOnBackgroundYield: true,
@@ -3233,14 +3250,21 @@ async function applyFreshHostedManagedAutomationsAfterCheckpoint(input: {
         resolveHostedAssistantPhaseNowMs(input.input)
           + HOSTED_ASSISTANT_CRON_STATUS_RETRY_DELAY_MS,
       ).toISOString();
+  if (!managedResult && cronNextWakeAt === null) {
+    return null;
+  }
+  const result: HostedWorkspaceRunnerAssistantPhasePostCheckpoint = managedResult
+    ?? { checkpointReason: "assistant_runtime_commit" };
   const hasManagedNextWakeAt = Object.hasOwn(result, "nextWakeAt");
   const nextWake = selectHostedRuntimeWakeCandidate([
+    // Reprojection must not replace earlier work owned by the phase.
+    input.phaseWake,
     createHostedRuntimeWakeCandidate(
       cronNextWakeAt,
       assistantCronWake.wake?.reason ?? HOSTED_ASSISTANT_WAKE_REASON,
     ),
     createHostedRuntimeWakeCandidate(
-      hasManagedNextWakeAt ? result.nextWakeAt ?? null : null,
+      result.nextWakeAt ?? null,
       result.nextWakeReason ?? HOSTED_ASSISTANT_WAKE_REASON,
     ),
     // When this post-checkpoint result owns a wake it replaces the phase
