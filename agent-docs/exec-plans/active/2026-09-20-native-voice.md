@@ -73,6 +73,14 @@ Updated: 2026-09-21
 
 ## Verification
 
+- Linux run `35593710568` built the patched image in about 34 minutes, then
+  failed two raw native fixtures because SDP arrived before their WebSocket
+  attachment. The resident-process media/ordinary-turn case passed. The fixtures
+  now await their actual sideband connection before sending synthetic input.
+  Local packaged Codex passes all three cases; stock Codex passes both applicable
+  cases with the patched-only case skipped. Engine typecheck passes. Linux
+  provider-route and sandbox steps did not run after this fixture failure; a
+  new current-head run remains required.
 - Source review now documents the voice Web-admission retry/query bounds in
   `ARCHITECTURE.md`: at most two HTTP attempts sharing the commit deadline, two
   serial root-preparation attempts per request, 55 conservative database

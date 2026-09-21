@@ -179,12 +179,13 @@ it.each(['native', 'host'] as const)('native V3 voice creates successive tool-ba
     })
     await vi.waitFor(() => expect(events('thread/realtime/sdp')).toHaveLength(1))
     expect(events('thread/realtime/sdp')[0]?.params).toMatchObject({ sdp: 'v=0\r\ns=synthetic-answer\r\n' })
+    // SDP comes from session creation; the sideband upgrade completes separately.
+    await vi.waitFor(() => expect(sideband).toBeDefined())
     for (let index = 1; index <= 2; index += 1) {
       stub.queue(
         { functionCall: { name: 'read_probe', arguments: {} } },
         { text: 'Synthetic lookup complete.', requestIncludes: ['Synthetic record verified.'] },
       )
-      expect(sideband).toBeDefined()
       if (publicLive) sideband!.send(JSON.stringify({
         type: 'session.input_transcript.delta', delta: 'Read the synthetic record.',
         start_ms: index * 100, end_ms: index * 100 + 50,
