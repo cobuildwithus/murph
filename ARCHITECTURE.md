@@ -2514,7 +2514,16 @@ stops accepting calls, quiesces its existing background owners, and checks for n
 dirty state. Checkpoint preparation preserves media; invocation cleanup joins
 closure and usage before release. Native voice and ordinary work share one Codex
 configuration preparation promise. Authenticated Web call-control and durable
-input admission still need to supply this invocation handle in the hosted path.
+input callbacks still need to supply this invocation handle in the hosted path.
+
+Normalized input admission uses the existing signed Web callback and encrypted
+mailbox. Its narrow request contains only the call id, native input id, original
+timestamp, and bounded text. Web derives the member from authentication and checks
+the exact active runtime attempt/generation inside the append transaction,
+together with foreground platform usage authority, member access, and consent.
+Crypto preparation precedes that transaction. The stable call/input event identity
+deduplicates an exact retry and rejects changed content. The existing mailbox wake
+runs after commit, including on replay; no call table or new work queue is added.
 
 Normalized voice inputs use the existing `conversation.message` mailbox shape
 with a call and input identity. The ordinary text admission path persists and

@@ -51,6 +51,19 @@ Updated: 2026-09-21
 
 ## Verification
 
+- Signed normalized-input admission now reaches the existing encrypted Web mailbox.
+  The request cannot select a member; the callback supplies the identity and signed
+  attempt/generation, which Web rechecks inside publication with active access,
+  consent, foreground mode, and platform usage authority. Crypto preparation stays
+  outside the transaction. Stable call/input identity and timestamp preserve exact
+  replay; conflicting content returns 409, and successful duplicates repeat the
+  post-commit wake. The existing Worker mailbox port owns one transport replay.
+  Fifteen route/owner-composition cases, fourteen prepared-append regressions, and
+  ten Worker mailbox-port cases pass. Shared, runtime, Web, and Cloudflare typechecks
+  pass; complexity adds no debt. These use synthetic ports: the native callback
+  and authenticated browser call-control are still unwired, and the complete
+  browser-to-hosted-mailbox journey remains required.
+
 - The existing hosted invocation now consumes the voice handle: an empty reserved call remains alive, dirty work checkpoints and drains selected delivery while the call stays open, and call close or graceful shutdown releases the invocation. New reservations are fenced synchronously before returning, and pending background writes are quiesced before the clean/dirty decision. Checkpoint preparation keeps media attached; final cleanup joins closure and accounting. The speech port reaches the real assistant-phase runtime platform. Native voice and ordinary work share one configuration-preparation promise. The composed empty-invocation proof initially observed a foreground waiter rather than sustained invocation lifetime; it now checks the outcome and fails when the new clean-call wait is removed. The checkpoint case caught premature media closure in the initial shared-cleanup implementation; that ownership boundary is corrected. Focused invocation, shutdown, scheduling, checkpoint, system-preemption, and lifecycle cases pass. Web/Worker/container call-control wiring, signed input admission, scheduled notification routing, and the complete browser journey remain unfinished.
 
 - The hosted engine voice facade now derives the same process launch as ordinary turns, retaining the backing provider while selecting OpenAI only for the tool-free media thread. Parameterized launch-identity proof covers OpenAI, Venice, and custom inference. The ephemeral call handle bounds an unattached reservation, serializes mailbox admission, restricts selected speech to accepted inputs on the exact call, fences late input, and joins admission plus trusted final usage on close. The existing hosted outbox now supplies that speech port behind its runtime liveness checks; progress delivery has no voice port. Focused lifecycle, accounting, callback, and wrapper tests plus package typechecks pass; complexity adds no debt. This is component evidence: no authenticated call-control endpoint, runtime reservation/keepalive loop, or Web mailbox writer is connected yet. Next, connect the handle at the existing invocation boundary before clean return, preserve post-checkpoint delivery while a call remains open, and bind Web admission to the current runtime attempt/generation. Future scheduled notifications still need the existing durable member route.

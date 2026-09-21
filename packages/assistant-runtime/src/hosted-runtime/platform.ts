@@ -729,6 +729,9 @@ export interface HostedRuntimePhysicalNotePort {
 }
 
 export interface HostedRuntimeMailboxPort {
+  admitVoiceInput?(
+    request: import("@murphai/hosted-execution").HostedVoiceInputRequest,
+  ): Promise<{ mailboxItemId: string }>;
   fetch(
     request: HostedMailboxFetchRequest,
     context?: { signal?: AbortSignal | null },

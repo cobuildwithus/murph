@@ -54,6 +54,7 @@ import {
   HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH,
   HOSTED_RUNTIME_LOG_PATH,
   HOSTED_RUNTIME_MAILBOX_FETCH_PATH,
+  HOSTED_RUNTIME_VOICE_INPUT_PATH,
   HOSTED_RUNTIME_MAILBOX_PAYLOAD_FETCH_PATH,
   HOSTED_RUNTIME_MEMBER_ACTION_OUTCOME_PATH,
   HOSTED_RUNTIME_OUTBOUND_MESSAGE_VOLUME_RECEIPT_PATH,
@@ -248,6 +249,10 @@ export const HOSTED_RUNNER_WEB_CONTROL_ROUTES = {
   mailboxFetch: defineHostedRunnerWebControlPostRoute(
     "mailbox_fetch",
     HOSTED_RUNTIME_MAILBOX_FETCH_PATH,
+  ),
+  voiceInput: defineHostedRunnerWebControlPostRoute(
+    "voice_input",
+    HOSTED_RUNTIME_VOICE_INPUT_PATH,
   ),
   mailboxPayloadFetch: defineHostedRunnerWebControlPostRoute(
     "mailbox_payload_fetch",

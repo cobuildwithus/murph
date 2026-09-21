@@ -56,6 +56,7 @@ export * from "./computer-use.ts";
 export * from "./phone-calls.ts";
 export * from "./physical-notes.ts";
 export * from "./email-ingress.ts";
+export * from "./voice-input.ts";
 export * from "./env.ts";
 export * from "./group-reactions.ts";
 export * from "./hosted-email.ts";
