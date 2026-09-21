@@ -2,6 +2,15 @@
 
 All notable changes to `@murphai/murph` will be documented in this file.
 
+## [1.3.4] - 2026-09-21
+
+### Fixed
+- Reuse startup mailbox prefetches when authenticated wake coverage proves they contain the pending work; preserve fresh fetching for newer or unknown work.
+
+### Changed
+- Publish the shared runtime contract with optional mailbox wake coverage for orchestration consumers.
+- Includes the intervening main-branch changes since v1.3.3; see the [complete comparison](https://github.com/cobuildwithus/murph/compare/v1.3.3...v1.3.4).
+
 ## [1.3.3] - 2026-09-06
 
 ### Added

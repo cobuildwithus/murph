@@ -857,6 +857,32 @@ export interface HostedMailboxLaneHighWater {
   maxUpdatedAt?: string | null;
 }
 
+/** Complete mailbox-only wake provenance; absent means freshness is unknown. */
+export type HostedMailboxWakeHighWater = Record<HostedMailboxLane, string>;
+
+export function readHostedMailboxWakeHighWater(value: unknown): HostedMailboxWakeHighWater | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  if (Object.keys(record).length !== HOSTED_MAILBOX_LANES.length) return null;
+  const { conversation, system } = record;
+  if (typeof conversation !== "string" || typeof system !== "string"
+      || !/^(?:0|[1-9][0-9]*)$/u.test(conversation)
+      || !/^(?:0|[1-9][0-9]*)$/u.test(system)) return null;
+  return { conversation, system };
+}
+
+/** Unknown work in either wake must not be hidden by a later known mailbox wake. */
+export function mergeHostedMailboxWakeHighWater(
+  left: HostedMailboxWakeHighWater | null | undefined,
+  right: HostedMailboxWakeHighWater | null | undefined,
+): HostedMailboxWakeHighWater | null {
+  if (!left || !right) return null;
+  return {
+    conversation: BigInt(left.conversation) >= BigInt(right.conversation) ? left.conversation : right.conversation,
+    system: BigInt(left.system) >= BigInt(right.system) ? left.system : right.system,
+  };
+}
+
 export interface HostedMailboxLaneConsumed {
   consumedSeq: string;
   lane: HostedMailboxLane;
