@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-09-20
-Updated: 2026-09-20
+Updated: 2026-09-21
 
 ## Goal
 
@@ -14,6 +14,7 @@ Updated: 2026-09-20
 - Reuse Codex conversation, tools, steering, and result routing; prefer native transcript/delegation handling when supported and remove redundant host assumptions where proof supports deletion.
 - Preserve authenticated member scope, accepted-work durability, canonical writes, cancellation, and usage settlement.
 - Verify microphone-to-speaker behavior, successive turns, correction, tool calls, disconnect, and runtime shutdown. Report provider or deployment gaps honestly.
+- Ship the patched CLI through the existing runner base-image workflow. Pin the public upstream revision and patch, preserve the matching sandbox resources, and include all build inputs in the image fingerprint. Local hosted development and deployment must consume the same package; no manual binary replacement or second release service.
 
 ## Scope
 
@@ -43,7 +44,7 @@ Updated: 2026-09-20
 
 ## Decisions
 
-- Initial compatibility proof used Codex 0.153.4 with explicit V3 and audio. The reduced native patch starts from upstream `05f39d7346` with only the tested shutdown fixes; Murph's dependency pin remains unchanged until adoption is verified.
+- Keep the existing Codex 0.153.4 release (`3d2ee51ca2d5db578f328aa75e20aa22c0197c9a`) and matching bundled helpers. The main-based prototype proved public compatibility; its patch is backported to the release to avoid adopting unrelated upstream changes. Build only the patched CLI in the existing runner base image. The Dockerfile and native patch jointly identify the cache input.
 - Earlier ReviewGPT advice led to local upstream experiments. Published-only reassessment withdrew the claim that a custom native admission handshake is necessary. Local native patches remain research, not a product dependency. The subsequent tradeoff discussion selected a minimal native public-API compatibility patch; implementation has resumed with the two tested shutdown fixes and without the admission experiment.
 - No implementation is justified solely by a feature flag existing; compatibility and host ownership are the first proof gates.
 
@@ -74,15 +75,20 @@ Updated: 2026-09-20
 
 - Establish the public API-key path through the selected minimal native Codex patch. Development public API access and local subscription-backed native voice are proven separately. Neither proves the composed hosted path. Published 0.155.1 is available; its release source still uses the same multipart Live endpoint, so an upgrade alone does not resolve that observed mismatch.
 - Native admission experiments are set aside as research, not a shipping prerequisite. The local candidate passed 20 focused checks, then 547 native/protocol checks (one initially lacked the CLI binary and passed after building it), 163 TUI/request checks, the CLI build, scoped Clippy, and formatting. Stable/experimental schema generation passed using Python 3.12 after the installed generator rejected Python 3.14. These proofs establish the candidate behavior, not the necessity of changing Codex or a completed Murph integration.
-- Reassess shutdown and trusted usage using supported stock controls. The verified local cleanup candidate is research only. Do not introduce a second sideband or billing authority to work around missing upstream support.
+- Adopt shutdown and trusted cumulative usage only with the verified public compatibility patch. Its provider receipt is host evidence; website usage settlement still needs the existing billing owner. Do not introduce a second sideband or billing authority.
 - ReviewGPT's source-grounded assessments are captured and verified against their accepted prompts and GPT-6 Pro responses. Its revised recommendation is a bounded public Live proof within existing owners, using published Codex unchanged; no custom native admission requirement is established. The returned owner reduction is applied: RPC response resolution has one process owner, synchronous response observers preserve same-batch ordering, and stored running occupancy is removed. Reservation remains necessary until callbacks exist. Website integration and final PR review remain incomplete.
-- Website integration and deployment have not been performed. ReviewGPT is preparing the reduced native compatibility patch against upstream `05f39d7346` plus the two tested shutdown fixes. Native compilation, public-key audio/tool proof, reproducible packaging, hosted authorization/recovery integration, and final PR review remain incomplete.
+- Public native compatibility is proven on the prototype: two successive synthetic spoken requests each produced a distinct native turn, a successful read-only dynamic tool, the matching spoken answer, received audio, and provider-confirmed closure with trusted final cumulative seconds. Host-managed speech also passed. The initial tool failure was a missing matching Code Mode helper in the standalone build; packaging the existing helper fixed it. The direct API proof uses no host `turn/start` or second sideband.
+- The release backport passes all 215 selected native realtime tests across API, core, and app-server after correcting the public fixture to explicitly enable the release voice feature. Three initialization-timeout cases needed the existing retry; no failing selected case remains. Scoped Clippy and formatting pass. The complete CLI builds with pinned Rust 1.95.0. Both native and host-managed synthetic browser speech pass against that packaged release: two backing turns and read-only tools, matching audible answers, provider-confirmed closure, and trusted final cumulative usage. The first direct native run timed out after one successful tool; its rerun passed, so this is compatibility evidence, not a reliability-rate claim.
+- The existing runner base-image recipe now compiles the checksum-pinned release plus checked-in patch and preserves that release's npm-distributed helpers/resources. Patch changes invalidate the source fingerprint. Docker configuration validation, the real Linux npm-helper packaging stage, 21 packaging tests, 11 provider conformance tests, the stock native compatibility test, and Cloudflare/engine typechecks pass. Source verification checks the upstream release commit/tree and applies the exact native patch. Complexity debt remains reduced by eight. Native Linux CLI compilation, exact-image compatibility/sandbox proof, and deployment remain pending.
+- Authenticated website integration, accepted-work durability, hosted usage settlement, and final PR review remain incomplete. The draft PR is not a deploy-ready feature.
+- Deployment audit found that the protected Murph Cloud workflow forces a source build in separate fresh-runner smoke and deploy jobs, without persistent Docker caching. The native patch must not turn each deploy into a cold Rust build. Complete trusted BuildKit caching in that existing workflow and prove cold/warm behavior before claiming easy deployment. Do not replace its source-build authority with an unverified image-label check.
+- [Deployment companion PR #166](https://github.com/cobuildwithus/murph-cloud/pull/166) adds the pinned Blacksmith Docker builder to those two protected jobs with one shared cache key. Forced source builds remain authoritative, and cache misses rebuild normally. Its 131 deployment-controller tests, production build, and 10 built-worker tests pass; an initial replay-suite failure passed its six-test focused retry. Exact-head CI and both required private review gates are running. No deployment or cache timing proof has occurred.
 
 ## Published-only investigation outcome
 
 - [OpenAI's official integration example](https://openai.com/index/introducing-gpt-live-1-in-the-api/) connects public Live client delegation to published Codex. It omits connection and delegation handling. Adapting this pattern to Murph's existing app-server path is a candidate, not completed integration proof.
 - The smallest candidate keeps browser media separate from the existing runtime's trusted Live attachment, admits requests through the existing durable mailbox, and returns selected results through the existing presentation owner. Client delegation requires bounded transcript context and delegation correlation; it does not supply a complete task prompt.
 - Concrete work remains: authenticated admission, scoped provider WebSocket transport, voice lifetime between turns, cumulative voice usage accounting, and result targeting. Multiple steered callers can share one final result, so independently speaking each resolved promise would duplicate or misroute output.
-- ReviewGPT recommends proving those boundaries on the actual hosted runner before committing to a full adapter. Waiting for native support could remove transcript/delegation glue, but would still require website auth, runtime lifetime, and billing integration. Neither path justifies a fork or another task/recovery owner.
+- ReviewGPT recommends proving those boundaries on the actual hosted runner before committing to a full adapter. Waiting for native support could remove transcript/delegation glue, but would still require website auth, runtime lifetime, and billing integration. This historical assessment preceded the user's choice of the minimal native compatibility patch; it does not authorize another task/recovery owner.
 
 - Selected direction after discussion: native compatibility patch. The public adapter remains a comparison, not the implementation plan. Prove the patch and its distribution before changing Murph's dependency or admitting website voice work.

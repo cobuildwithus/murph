@@ -17,6 +17,7 @@ export const PINNED_CODEX_OPENAI_EGRESS_INVENTORY = {
     "images/edits",
     "images/generations",
     "live",
+    "live/sessions",
     "memories/trace_summarize",
     "models",
     "realtime",
@@ -37,6 +38,26 @@ export const PINNED_CODEX_OPENAI_EGRESS_INVENTORY = {
     "codex-rs/codex-api/src/files.rs",
   ],
   routes: [
+    {
+      disposition: "blocked",
+      feature: "public Live session setup (native patch)",
+      method: "POST",
+      owner: "codex",
+      pathname: "/v1/live/sessions",
+      proof: "reviewed_source",
+      source: "codex-rs/codex-api/src/endpoint/realtime_call.rs",
+      transport: "http",
+    },
+    {
+      disposition: "blocked",
+      feature: "public Live attachment (native patch)",
+      method: "GET",
+      owner: "codex",
+      pathname: "/v1/live/sessions/synthetic-session/attach",
+      proof: "reviewed_source",
+      source: "codex-rs/codex-api/src/endpoint/realtime_websocket/methods.rs",
+      transport: "websocket",
+    },
     {
       disposition: "allowed",
       feature: "model responses",
@@ -195,6 +216,42 @@ export const PINNED_CODEX_OPENAI_EGRESS_INVENTORY = {
     },
   ],
   nonProviderBinaryCandidates: [
+    {
+      candidate: "/v1/analytics/codex/turn-costsopenai-organizationopenai-project",
+      disposition: "binary_false_positive",
+      owner: "codex-analytics",
+      reason: "This exact rebuilt-binary token joins the reviewed turn-cost route to its adjacent header allowlist in backend-client/src/client/turn_usage.rs; it is not another endpoint.",
+    },
+    {
+      candidate: "/v1/livequicksilvera",
+      disposition: "binary_false_positive",
+      owner: "codex",
+      reason: "This exact rebuilt-binary token joins the reviewed /v1/live route to the adjacent legacy intent value and formatting text; realtime_websocket/methods.rs constructs only the reviewed route.",
+    },
+    {
+      candidate: "/v1/realtime/live",
+      disposition: "binary_false_positive",
+      owner: "codex",
+      reason: "This exact rebuilt-binary token concatenates adjacent /v1/realtime and /live path-normalization literals in realtime_websocket/methods.rs; the function replaces the realtime suffix rather than appending live to it.",
+    },
+    {
+      candidate: "/v1/tokenformatting",
+      disposition: "binary_false_positive",
+      owner: "codex-auth",
+      reason: "This exact rebuilt-binary token joins the reviewed authentication token endpoint to adjacent formatting text; it is not a model-provider route.",
+    },
+    {
+      candidate: "/v1/user-auth-credential/whoamistruct",
+      disposition: "binary_false_positive",
+      owner: "codex-auth",
+      reason: "This exact rebuilt-binary token joins the WHOAMI_PATH constant in login/src/auth/personal_access_token.rs to serialized type text; the request uses only the reviewed whoami route.",
+    },
+    {
+      candidate: "/v1/x-session-idevent",
+      disposition: "binary_false_positive",
+      owner: "codex",
+      reason: "This exact rebuilt-binary token joins the /v1/ path literal to a session header and tracing label in realtime_websocket/methods.rs; the header is not a route.",
+    },
     {
       candidate: "/v1/agent",
       disposition: "different_origin",

@@ -21,6 +21,11 @@ import {
 import { prepareScriptedTurnScenario, readRecord, startScriptedResponsesStub } from './support/codex-scripted-provider.ts'
 
 const temporaryPaths: string[] = []
+// CI supplies the CLI extracted from the actual runner image. The published
+// development package still uses the private wire contract until upstream lands it.
+const publicLive = Boolean(process.env.MURPH_TEST_CODEX_COMMAND?.trim())
+const createPath = publicLive ? '/v1/live/sessions' : '/v1/live'
+const attachPath = publicLive ? '/v1/live/sessions/rtc_synthetic/attach' : '/v1/live/rtc_synthetic'
 afterEach(async () => {
   await Promise.all(temporaryPaths.splice(0).map((target) => rm(target, { recursive: true, force: true })))
 })
@@ -40,8 +45,17 @@ it.each(['native', 'host'] as const)('native V3 voice creates successive tool-ba
       multipart: request.headers['content-type']?.startsWith('multipart/form-data') === true,
       nativeModel: body.includes('gpt-live-1-codex'),
     })
-    if (request.method !== 'POST' || request.url !== '/v1/live') {
+    if (request.method !== 'POST' || request.url !== createPath) {
       response.writeHead(404).end()
+      return
+    }
+    if (publicLive) {
+      expect(JSON.parse(body)).toMatchObject({
+        session: { model: 'gpt-live-1' }, transport: { type: 'webrtc', sdp: 'v=0\r\ns=synthetic-offer\r\n' },
+      })
+      response.writeHead(201, { 'content-type': 'application/json' }).end(JSON.stringify({
+        session: { id: 'rtc_synthetic' }, transport: { type: 'webrtc', sdp: 'v=0\r\ns=synthetic-answer\r\n' },
+      }))
       return
     }
     response.writeHead(201, {
@@ -58,6 +72,12 @@ it.each(['native', 'host'] as const)('native V3 voice creates successive tool-ba
     socket.on('message', (data) => {
       const event = readRecord(JSON.parse(String(data)))
       if (event) forwarded.push(event)
+      if (publicLive && event?.type === 'session.close') {
+        socket.send(JSON.stringify({
+          type: 'session.closed', reason: 'close_requested',
+          session: { id: 'rtc_synthetic' }, usage: { seconds: 12 },
+        }))
+      }
     })
   })
   server.listen(0, '127.0.0.1')
@@ -152,7 +172,14 @@ it.each(['native', 'host'] as const)('native V3 voice creates successive tool-ba
         { text: 'Synthetic lookup complete.', requestIncludes: ['Synthetic record verified.'] },
       )
       expect(sideband).toBeDefined()
-      sideband!.send(JSON.stringify({
+      if (publicLive) sideband!.send(JSON.stringify({
+        type: 'session.input_transcript.delta', delta: 'Read the synthetic record.',
+        start_ms: index * 100, end_ms: index * 100 + 50,
+      }))
+      sideband!.send(JSON.stringify(publicLive ? {
+        type: 'session.delegation.created', offset_ms: index * 100 + 50,
+        delegation: { id: `delegation_${index}`, type: 'delegation', target: 'client' },
+      } : {
         type: 'delegation.created',
         item: {
           id: `delegation_${index}`,
@@ -166,16 +193,25 @@ it.each(['native', 'host'] as const)('native V3 voice creates successive tool-ba
         threadId, turn: { status: 'completed' },
       })
       if (outputOwner === 'host') {
-        await request('thread/realtime/appendText', {
+        await request(publicLive ? 'thread/realtime/appendSpeech' : 'thread/realtime/appendText', {
           threadId,
-          role: 'assistant',
+          ...(publicLive ? {} : { role: 'assistant' }),
           text: 'Verified synthetic lookup complete.',
         })
       }
     }
-    const outputMethod = outputOwner === 'host' ? 'session.context.append' : 'delegation.context.append'
+    const outputMethod = publicLive ? 'session.commentary.append'
+      : outputOwner === 'host' ? 'session.context.append' : 'delegation.context.append'
     await vi.waitFor(() => expect(forwarded.filter((event) => event.type === outputMethod)).toHaveLength(2))
-    if (outputOwner === 'host') {
+    if (publicLive) {
+      expect(forwarded.filter((event) => event.type === outputMethod)).toEqual(
+        [1, 2].map((index) => expect.objectContaining({
+          type: outputMethod,
+          content: outputOwner === 'host' ? 'Verified synthetic lookup complete.' : 'Synthetic lookup complete.',
+          ...(outputOwner === 'native' ? { delegation_id: `delegation_${index}` } : {}),
+        })),
+      )
+    } else if (outputOwner === 'host') {
       expect(forwarded.filter((event) => event.type === 'delegation.context.append')).toEqual([])
       expect(forwarded.filter((event) => event.type === outputMethod)).toEqual([
         { type: outputMethod, content: [{ type: 'input_text', text: 'Verified synthetic lookup complete.' }] },
@@ -200,11 +236,19 @@ it.each(['native', 'host'] as const)('native V3 voice creates successive tool-ba
     expect(new Set(tools.map((call) => call.turnId)).size).toBe(2)
     expect(methods).not.toContain('turn/start')
     expect(stub.requestCountSinceBaseline()).toBe(4)
-    expect(requests).toEqual([{ path: '/v1/live', multipart: true, nativeModel: true }])
-    expect(sidebandPaths).toEqual(['/v1/live/rtc_synthetic'])
+    expect(requests).toEqual([{ path: createPath, multipart: !publicLive, nativeModel: !publicLive }])
+    expect(sidebandPaths).toEqual([attachPath])
     expect(events('thread/realtime/error')).toHaveLength(0)
     await request('thread/realtime/stop', { threadId })
     await vi.waitFor(() => expect(events('thread/realtime/closed')).toHaveLength(1))
+    if (publicLive) {
+      expect(events('thread/realtime/itemAdded').map((event) => readRecord(event.params)?.item)).toContainEqual({
+        type: 'session.closed', reason: 'close_requested',
+        session: { id: 'rtc_synthetic' }, usage: { seconds: 12 },
+      })
+      expect(forwarded.filter((event) => event.type === 'session.close')).toHaveLength(1)
+      expect(events('thread/realtime/error')).toHaveLength(0)
+    }
   } finally {
     await stopCodexAppServerChild({ child, closeStdin: () => { child.stdin.end(); return null } })
     lines.close()

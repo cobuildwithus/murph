@@ -1,0 +1,2574 @@
+diff --git a/codex-rs/app-server/tests/suite/v2/realtime_conversation.rs b/codex-rs/app-server/tests/suite/v2/realtime_conversation.rs
+index c9e0d18..67a7265 100644
+--- a/codex-rs/app-server/tests/suite/v2/realtime_conversation.rs
++++ b/codex-rs/app-server/tests/suite/v2/realtime_conversation.rs
+@@ -103,6 +103,9 @@ const V2_HANDOFF_COMPLETE_ACKNOWLEDGEMENT: &str =
+ const RESPONSE_ITEM_PREFIX: &str =
+     "Use the following context to inform future responses, but do not speak it to the user.";
+ 
++#[path = "realtime_public_live_tests.rs"]
++mod public_live_tests;
++
+ #[derive(Debug, Clone, Copy)]
+ enum StartupContextConfig<'a> {
+     Generated,
+@@ -301,6 +304,16 @@ impl RealtimeE2eHarness {
+             .mount(&main_loop_responses_server)
+             .await;
+ 
++        Mock::given(method("POST"))
++            .and(path("/v1/live/sessions"))
++            .and(call_capture.clone())
++            .respond_with(ResponseTemplate::new(201).set_body_json(json!({
++                "session": {"id": "live_session_public"},
++                "transport": {"type": "webrtc", "sdp": "v=answer\r\n"},
++            })))
++            .mount(&main_loop_responses_server)
++            .await;
++
+         let realtime_server =
+             start_websocket_server_with_headers(realtime_sideband.connections).await;
+         let codex_home = TempDir::new()?;
+@@ -2139,8 +2152,8 @@ async fn webrtc_v1_start_posts_offer_returns_sdp_and_joins_sideband() -> Result<
+     Some(RealtimeConversationVersion::V3),
+     Some("sess_client_owned"),
+     RealtimeConversationVersion::V3,
+-    "/v1/live/rtc_existing";
+-    "supports v3"
++    "/v1/live/sessions/rtc_existing/attach";
++    "supports public v3"
+ )]
+ #[test_case(
+     Some(RealtimeConversationVersion::V2),
+@@ -2234,6 +2247,22 @@ async fn existing_call_attaches_without_reinitializing_the_client_session(
+         "an existing call must not issue a second call-create request"
+     );
+ 
++    let stop_request_id = harness
++        .mcp
++        .send_thread_realtime_stop_request(ThreadRealtimeStopParams {
++            thread_id: harness.thread_id.clone(),
++        })
++        .await?;
++    let _: ThreadRealtimeStopResponse =
++        timeout(DEFAULT_TIMEOUT, harness.mcp.read_response(stop_request_id)).await??;
++    harness
++        .read_notification::<ThreadRealtimeClosedNotification>("thread/realtime/closed")
++        .await?;
++    assert!(
++        harness.realtime_server.single_connection().is_empty(),
++        "detaching must not close a client-owned session"
++    );
++
+     harness.shutdown().await;
+     Ok(())
+ }
+@@ -2314,13 +2343,15 @@ async fn existing_call_rejects_client_owned_session_configuration(option: &str)
+ }
+ 
+ #[tokio::test]
+-async fn webrtc_v3_start_posts_live_session_and_joins_without_session_update() -> Result<()> {
++async fn webrtc_v3_start_and_stop_own_the_live_session() -> Result<()> {
+     skip_if_no_network!(Ok(()));
+ 
+     let mut harness = RealtimeE2eHarness::new(
+         RealtimeTestVersion::V1,
+         no_main_loop_responses(),
+-        realtime_sideband(vec![open_realtime_sideband_connection(vec![vec![]])]),
++        realtime_sideband(vec![open_realtime_sideband_connection(vec![vec![
++            public_live_tests::public_closed(15.75, "close_requested"),
++        ]])]),
+     )
+     .await?;
+ 
+@@ -2330,7 +2361,7 @@ async fn webrtc_v3_start_posts_live_session_and_joins_without_session_update() -
+             /*client_managed_handoffs*/ None,
+             /*codex_responses_as_items*/ None,
+             /*codex_response_handoff_mode*/ None,
+-            /*delegation_ack_filler*/ Some(false),
++            /*delegation_ack_filler*/ None,
+             RealtimeConversationVersion::V3,
+         )
+         .await?;
+@@ -2349,22 +2380,31 @@ async fn webrtc_v3_start_posts_live_session_and_joins_without_session_update() -
+         }
+     );
+ 
+-    assert_call_create_multipart(
+-        harness.call_capture.single_request(),
+-        "v=offer\r\n",
+-        r#"{"audio":{"output":{"voice":"cove"}},"delegation":{"ack_filler":false,"type":"client"},"instructions":"backend prompt\n\nstartup context","model":"gpt-live-1-codex"}"#,
+-        "/v1/live",
+-    )?;
++    let request = harness.call_capture.single_request();
++    assert_eq!(request.url.path(), "/v1/live/sessions");
++    assert_eq!(request.headers["content-type"], "application/json");
++    assert_eq!(
++        request.body_json::<Value>()?,
++        json!({
++            "session": {
++                "audio": {"output": {"voice": "marin"}},
++                "delegation": {"type": "client"},
++                "instructions": "backend prompt\n\nstartup context",
++                "model": "gpt-live-1",
++            },
++            "transport": {"type": "webrtc", "sdp": "v=offer\r\n"},
++        })
++    );
+     assert!(
+         harness
+             .realtime_server
+             .wait_for_handshakes(/*expected*/ 1, DEFAULT_TIMEOUT)
+             .await,
+-        "Frameless sideband should connect"
++        "public Live sideband should connect"
+     );
+     assert_eq!(
+         harness.realtime_server.single_handshake().uri(),
+-        "/v1/live/rtc_e2e"
++        "/v1/live/sessions/live_session_public/attach"
+     );
+     assert_eq!(
+         harness
+@@ -2372,13 +2412,112 @@ async fn webrtc_v3_start_posts_live_session_and_joins_without_session_update() -
+             .single_handshake()
+             .header("openai-alpha")
+             .as_deref(),
+-        Some("quicksilver=v2")
++        None
+     );
+     assert!(
+         harness.realtime_server.single_connection().is_empty(),
+-        "Frameless WebRTC sideband must not send a second session.update"
++        "public Live attach must not reinitialize or wait for client input"
+     );
+ 
++    let stop_request_id = harness
++        .mcp
++        .send_thread_realtime_stop_request(ThreadRealtimeStopParams {
++            thread_id: harness.thread_id.clone(),
++        })
++        .await?;
++    let _: ThreadRealtimeStopResponse =
++        timeout(DEFAULT_TIMEOUT, harness.mcp.read_response(stop_request_id)).await??;
++    let final_record =
++        public_live_tests::read_public_item(&mut harness.mcp, "session.closed").await?;
++    assert_eq!(
++        final_record,
++        public_live_tests::public_closed(15.75, "close_requested")
++    );
++    harness
++        .read_notification::<ThreadRealtimeClosedNotification>("thread/realtime/closed")
++        .await?;
++    assert_eq!(
++        harness.sideband_outbound_request(/*request_index*/ 0).await,
++        json!({"type": "session.close"})
++    );
++
++    harness.shutdown().await;
++    Ok(())
++}
++
++#[test_case(Duration::from_secs(2), None; "finishes the join and closes")]
++#[test_case(
++    Duration::from_secs(30),
++    Some("Live session live_session_public closure and final usage are unconfirmed: connecting shutdown did not finish");
++    "reports unconfirmed shutdown when the join times out"
++)]
++#[tokio::test]
++async fn webrtc_v3_stop_before_sideband_handshake(
++    handshake_delay: Duration,
++    shutdown_error: Option<&str>,
++) -> Result<()> {
++    skip_if_no_network!(Ok(()));
++
++    let mut connection =
++        open_realtime_sideband_connection(vec![vec![public_live_tests::public_closed(
++            15.75,
++            "close_requested",
++        )]]);
++    connection.accept_delay = Some(handshake_delay);
++    let mut harness = RealtimeE2eHarness::new(
++        RealtimeTestVersion::V1,
++        no_main_loop_responses(),
++        realtime_sideband(vec![connection]),
++    )
++    .await?;
++    harness
++        .start_webrtc_realtime_with_codex_response_routing(
++            "v=offer\r\n",
++            /*client_managed_handoffs*/ None,
++            /*codex_responses_as_items*/ None,
++            /*codex_response_handoff_mode*/ None,
++            /*delegation_ack_filler*/ None,
++            RealtimeConversationVersion::V3,
++        )
++        .await?;
++    assert!(
++        harness.realtime_server.handshakes().is_empty(),
++        "stop must race an unfinished sideband handshake"
++    );
++
++    let stop_request_id = harness
++        .mcp
++        .send_thread_realtime_stop_request(ThreadRealtimeStopParams {
++            thread_id: harness.thread_id.clone(),
++        })
++        .await?;
++    let _: ThreadRealtimeStopResponse =
++        timeout(DEFAULT_TIMEOUT, harness.mcp.read_response(stop_request_id)).await??;
++    if let Some(message) = shutdown_error {
++        let error = harness
++            .read_notification::<ThreadRealtimeErrorNotification>("thread/realtime/error")
++            .await?;
++        assert_eq!(error.message, message);
++        assert!(harness.realtime_server.handshakes().is_empty());
++    }
++    if shutdown_error.is_none() {
++        let final_record =
++            public_live_tests::read_public_item(&mut harness.mcp, "session.closed").await?;
++        assert_eq!(
++            final_record,
++            public_live_tests::public_closed(15.75, "close_requested")
++        );
++    }
++    harness
++        .read_notification::<ThreadRealtimeClosedNotification>("thread/realtime/closed")
++        .await?;
++    if shutdown_error.is_none() {
++        assert_eq!(
++            harness.sideband_outbound_request(/*request_index*/ 0).await,
++            json!({"type": "session.close"})
++        );
++    }
++
+     harness.shutdown().await;
+     Ok(())
+ }
+diff --git a/codex-rs/codex-api/src/endpoint/realtime_call.rs b/codex-rs/codex-api/src/endpoint/realtime_call.rs
+index b43e02d..40b10d0 100644
+--- a/codex-rs/codex-api/src/endpoint/realtime_call.rs
++++ b/codex-rs/codex-api/src/endpoint/realtime_call.rs
+@@ -32,8 +32,8 @@ pub struct RealtimeCallClient<T: HttpTransport> {
+ 
+ /// Answer from creating a WebRTC Realtime call.
+ ///
+-/// `sdp` configures the peer connection. `call_id` is parsed from the response `Location` header
+-/// and is later used by the server-side sideband WebSocket to join this exact call.
++/// `sdp` configures the peer connection. `call_id` comes from the public `session.id`
++/// or the private/legacy `Location` header and joins the exact same call on the sideband.
+ #[derive(Debug, Clone, PartialEq, Eq)]
+ pub struct RealtimeCallResponse {
+     pub sdp: String,
+@@ -64,11 +64,15 @@ impl<T: HttpTransport> RealtimeCallClient<T> {
+     }
+ 
+     fn path_for_session(&self, event_parser: RealtimeEventParser) -> &'static str {
++        if event_parser == RealtimeEventParser::PublicLive {
++            return "live/sessions";
++        }
+         if self.uses_backend_request_shape() {
+             return Self::path();
+         }
+ 
+         match event_parser {
++            RealtimeEventParser::PublicLive => "live/sessions",
+             RealtimeEventParser::FramelessBidi => "live",
+             RealtimeEventParser::V1 | RealtimeEventParser::RealtimeV2 => Self::path(),
+         }
+@@ -138,11 +142,46 @@ impl<T: HttpTransport> RealtimeCallClient<T> {
+         // after joining; Frameless sidebands attach to the session that is already running.
+         validate_avas_session_config(&session_config)?;
+         let event_parser = session_config.event_parser;
++        if event_parser == RealtimeEventParser::PublicLive
++            && session_config.delegation_ack_filler.is_some()
++        {
++            return Err(ApiError::InvalidRequest {
++                message: "public Live does not support delegation_ack_filler".to_string(),
++            });
++        }
+         let path = self.path_for_session(event_parser);
+         let mut session = realtime_session_json(session_config)?;
+         if let Some(session) = session.as_object_mut() {
+             session.remove("id");
+         }
++        if event_parser == RealtimeEventParser::PublicLive {
++            let response = self
++                .session
++                .execute_once(
++                    Method::POST,
++                    path,
++                    extra_headers,
++                    serde_json::json!({
++                        "session": session,
++                        "transport": {"type": "webrtc", "sdp": sdp},
++                    }),
++                )
++                .await?;
++            let response: Value = serde_json::from_slice(&response.body).map_err(|err| {
++                ApiError::Stream(format!("public Live creation outcome unconfirmed: invalid JSON: {err}; do not retry creation"))
++            })?;
++            let call_id = response["session"]["id"]
++                .as_str()
++                .filter(|id| !id.is_empty() && !matches!(*id, "." | ".."));
++            let sdp = response["transport"]["sdp"]
++                .as_str()
++                .filter(|sdp| !sdp.trim().is_empty());
++            return match (call_id, sdp) {
++                (Some(call_id), Some(sdp)) => Ok(RealtimeCallResponse {sdp: sdp.to_string(), call_id: call_id.to_string()}),
++                _ => Err(ApiError::Stream("public Live creation outcome unconfirmed: missing session.id or transport.sdp; do not retry creation".to_string())),
++            };
++        }
++
+         // TODO(aibrahim): Align the SIWC route with the API multipart shape and remove this branch.
+         if self.uses_backend_request_shape() {
+             let body = to_value(BackendRealtimeCallRequest {
+@@ -357,7 +396,7 @@ mod tests {
+     }
+ 
+     #[derive(Clone, Default)]
+-    struct DummyAuth;
++    pub(super) struct DummyAuth;
+ 
+     impl AuthProvider for DummyAuth {
+         fn add_auth_headers(&self, headers: &mut HeaderMap) {
+@@ -368,7 +407,7 @@ mod tests {
+         }
+     }
+ 
+-    fn provider(base_url: &str) -> Provider {
++    pub(super) fn provider(base_url: &str) -> Provider {
+         Provider {
+             name: "test".to_string(),
+             base_url: base_url.to_string(),
+@@ -385,7 +424,7 @@ mod tests {
+         }
+     }
+ 
+-    fn realtime_session_config(session_id: &str) -> RealtimeSessionConfig {
++    pub(super) fn realtime_session_config(session_id: &str) -> RealtimeSessionConfig {
+         RealtimeSessionConfig {
+             instructions: "hi".to_string(),
+             initial_items: Vec::new(),
+@@ -794,3 +833,7 @@ mod tests {
+         assert_eq!(call_id, "019eb97d-8e9a-7ff3-94b0-ea019babd5d7");
+     }
+ }
++
++#[cfg(test)]
++#[path = "realtime_call_public_live_tests.rs"]
++mod public_live_tests;
+diff --git a/codex-rs/codex-api/src/endpoint/realtime_websocket/methods.rs b/codex-rs/codex-api/src/endpoint/realtime_websocket/methods.rs
+index 293305e..6a9dfa4 100644
+--- a/codex-rs/codex-api/src/endpoint/realtime_websocket/methods.rs
++++ b/codex-rs/codex-api/src/endpoint/realtime_websocket/methods.rs
+@@ -318,6 +318,11 @@ impl RealtimeWebsocketWriter {
+             RealtimeEventParser::V1 | RealtimeEventParser::RealtimeV2 => {
+                 RealtimeOutboundMessage::InputAudioBufferAppend { audio: frame.data }
+             }
++            RealtimeEventParser::PublicLive => {
++                return Err(ApiError::InvalidRequest {
++                    message: "public Live sideband audio is carried by WebRTC".to_string(),
++                });
++            }
+             RealtimeEventParser::FramelessBidi => {
+                 RealtimeOutboundMessage::InputAudioAppend { audio: frame.data }
+             }
+@@ -395,6 +400,12 @@ impl RealtimeWebsocketWriter {
+         voice: RealtimeVoice,
+         delegation_ack_filler: Option<bool>,
+     ) -> Result<(), ApiError> {
++        if self.event_parser == RealtimeEventParser::PublicLive {
++            return Err(ApiError::InvalidRequest {
++                message: "public Live is initialized by HTTP creation, not session.update"
++                    .to_string(),
++            });
++        }
+         let session_mode = normalized_session_mode(self.event_parser, session_mode);
+         let message = session_update_message(
+             self.event_parser,
+@@ -438,6 +449,23 @@ impl RealtimeWebsocketWriter {
+ 
+     async fn send_json(&self, message: &RealtimeOutboundMessage) -> Result<(), ApiError> {
+         match message {
++            RealtimeOutboundMessage::PublicAppend {
++                event_type,
++                delegation_id,
++                content,
++            } => {
++                // The existing 500-byte UTF-8 chunks are a conservative bound for the
++                // public 500-token limit. Never replay ambiguous appends on reconnect.
++                for chunk in context_append_chunks(content) {
++                    self.send_json_frame(&RealtimeOutboundMessage::PublicAppend {
++                        event_type,
++                        delegation_id: delegation_id.clone(),
++                        content: chunk,
++                    })
++                    .await?;
++                }
++                return Ok(());
++            }
+             RealtimeOutboundMessage::DelegationContextAppend {
+                 delegation_item_id,
+                 channel,
+@@ -540,6 +568,20 @@ impl RealtimeWebsocketEvents {
+                     trace!(target: REALTIME_WIRE_LOG_TARGET, "realtime websocket event: {text}");
+                     if let Some(mut event) = parse_realtime_event(&text, self.event_parser) {
+                         self.update_active_transcript(&mut event).await;
++                        if self.event_parser == RealtimeEventParser::PublicLive
++                            && matches!(
++                                event,
++                                RealtimeEvent::InputTranscriptDelta(_)
++                                    | RealtimeEvent::OutputTranscriptDelta(_)
++                                    | RealtimeEvent::HandoffRequested(_)
++                            )
++                            && let Ok(raw) = serde_json::from_str(&text)
++                        {
++                            self.pending_events
++                                .lock()
++                                .await
++                                .push_back(RealtimeEvent::ConversationItemAdded(raw));
++                        }
+                         debug!(?event, "realtime websocket parsed event");
+                         return Ok(Some(event));
+                     }
+@@ -767,7 +809,7 @@ fn contains_transcript_entry(entries: &[RealtimeTranscriptEntry], role: &str, te
+ 
+ pub struct RealtimeWebsocketClient {
+     provider: Provider,
+-    webrtc_sideband_base_url: String,
++    webrtc_sideband_base_url: Option<String>,
+ }
+ 
+ #[derive(Clone, Copy)]
+@@ -781,13 +823,13 @@ impl RealtimeWebsocketClient {
+     pub fn new(provider: Provider) -> Self {
+         Self {
+             provider,
+-            webrtc_sideband_base_url: OPENAI_REALTIME_API_BASE_URL.to_string(),
++            webrtc_sideband_base_url: None,
+         }
+     }
+ 
+     /// Overrides the direct WebRTC sideband URL for local development and tests.
+     pub fn with_webrtc_sideband_base_url(mut self, base_url: String) -> Self {
+-        self.webrtc_sideband_base_url = base_url;
++        self.webrtc_sideband_base_url = Some(base_url);
+         self
+     }
+ 
+@@ -797,6 +839,11 @@ impl RealtimeWebsocketClient {
+         extra_headers: HeaderMap,
+         default_headers: HeaderMap,
+     ) -> Result<RealtimeWebsocketConnection, ApiError> {
++        if config.event_parser == RealtimeEventParser::PublicLive {
++            return Err(ApiError::InvalidRequest {
++                message: "public Live requires WebRTC or an existing call".to_string(),
++            });
++        }
+         let ws_url = websocket_url_from_api_url(
+             self.provider.base_url.as_str(),
+             self.provider.query_params.as_ref(),
+@@ -928,8 +975,40 @@ impl RealtimeWebsocketClient {
+         session_mode: RealtimeSessionMode,
+         call_id: &str,
+     ) -> Result<Url, ApiError> {
++        if event_parser == RealtimeEventParser::PublicLive {
++            if matches!(call_id, "" | "." | "..") {
++                return Err(ApiError::InvalidRequest {
++                    message: "invalid public Live session id".to_string(),
++                });
++            }
++            let mut provider = self.provider.clone();
++            if let Some(base_url) = &self.webrtc_sideband_base_url {
++                let mut base = Url::parse(base_url).map_err(|err| ApiError::InvalidRequest {
++                    message: format!("invalid public Live sideband URL: {err}"),
++                })?;
++                if base.path() == "/" {
++                    base.set_path("/v1");
++                }
++                provider.base_url = base.to_string();
++            }
++            let mut url = provider
++                .websocket_url_for_path("live/sessions")
++                .map_err(|err| {
++                    ApiError::Stream(format!("invalid public Live sideband URL: {err}"))
++                })?;
++            url.path_segments_mut()
++                .map_err(|()| ApiError::InvalidRequest {
++                    message: "public Live sideband URL cannot contain path segments".to_string(),
++                })?
++                .pop_if_empty()
++                .push(call_id)
++                .push("attach");
++            return Ok(url);
++        }
+         websocket_url_from_api_url_for_call(
+-            self.webrtc_sideband_base_url.as_str(),
++            self.webrtc_sideband_base_url
++                .as_deref()
++                .unwrap_or(OPENAI_REALTIME_API_BASE_URL),
+             /*query_params*/ None,
+             event_parser,
+             session_mode,
+@@ -988,9 +1067,10 @@ impl RealtimeWebsocketClient {
+         );
+         let initialize_session = match session_initialization {
+             RealtimeSessionInitialization::NewSession => true,
+-            RealtimeSessionInitialization::LegacyWebrtcSideband => {
+-                config.event_parser != RealtimeEventParser::FramelessBidi
+-            }
++            RealtimeSessionInitialization::LegacyWebrtcSideband => !matches!(
++                config.event_parser,
++                RealtimeEventParser::FramelessBidi | RealtimeEventParser::PublicLive
++            ),
+             RealtimeSessionInitialization::ExistingCall => false,
+         };
+         if initialize_session {
+@@ -1141,6 +1221,9 @@ fn websocket_url_from_api_url_for_call(
+         session_mode,
+     )?;
+     match event_parser {
++        RealtimeEventParser::PublicLive => {
++            unreachable!("public Live uses the provider sessions/attach URL")
++        }
+         RealtimeEventParser::FramelessBidi => {
+             if matches!(call_id, "." | "..") {
+                 return Err(ApiError::InvalidRequest {
+@@ -3078,3 +3161,7 @@ mod tests {
+         server.await.expect("server task");
+     }
+ }
++
++#[cfg(test)]
++#[path = "public_live_tests.rs"]
++mod public_live_tests;
+diff --git a/codex-rs/codex-api/src/endpoint/realtime_websocket/methods_common.rs b/codex-rs/codex-api/src/endpoint/realtime_websocket/methods_common.rs
+index e5482e0..7b4d7b2 100644
+--- a/codex-rs/codex-api/src/endpoint/realtime_websocket/methods_common.rs
++++ b/codex-rs/codex-api/src/endpoint/realtime_websocket/methods_common.rs
+@@ -31,9 +31,9 @@ pub(super) fn normalized_session_mode(
+     session_mode: RealtimeSessionMode,
+ ) -> RealtimeSessionMode {
+     match wire_adapter {
+-        RealtimeWireAdapter::V1 | RealtimeWireAdapter::FramelessBidi => {
+-            RealtimeSessionMode::Conversational
+-        }
++        RealtimeWireAdapter::V1
++        | RealtimeWireAdapter::FramelessBidi
++        | RealtimeWireAdapter::PublicLive => RealtimeSessionMode::Conversational,
+         RealtimeWireAdapter::RealtimeV2 => session_mode,
+     }
+ }
+@@ -45,6 +45,11 @@ pub(super) fn conversation_item_create_message(
+     context_append_channel: Option<RealtimeContextAppendChannel>,
+ ) -> RealtimeOutboundMessage {
+     match wire_adapter {
++        RealtimeWireAdapter::PublicLive => super::public_live::context_append(
++            /*delegation_id*/ None,
++            text,
++            context_append_channel,
++        ),
+         RealtimeWireAdapter::V1 => v1_conversation_item_create_message(text, role),
+         RealtimeWireAdapter::FramelessBidi => {
+             frameless_session_context_append_message(text, context_append_channel)
+@@ -60,6 +65,11 @@ pub(super) fn conversation_handoff_append_message(
+     context_append_channel: Option<RealtimeContextAppendChannel>,
+ ) -> RealtimeOutboundMessage {
+     match wire_adapter {
++        RealtimeWireAdapter::PublicLive => super::public_live::context_append(
++            Some(handoff_id),
++            output_text,
++            context_append_channel,
++        ),
+         RealtimeWireAdapter::V1 => v1_conversation_handoff_append_message(handoff_id, output_text),
+         RealtimeWireAdapter::FramelessBidi => frameless_delegation_context_append_message(
+             handoff_id,
+@@ -79,6 +89,11 @@ pub(super) fn standalone_handoff_message(
+     context_append_channel: Option<RealtimeContextAppendChannel>,
+ ) -> RealtimeOutboundMessage {
+     match wire_adapter {
++        RealtimeWireAdapter::PublicLive => super::public_live::context_append(
++            /*delegation_id*/ None,
++            output_text,
++            context_append_channel,
++        ),
+         RealtimeWireAdapter::V1 => v1_conversation_handoff_append_message(handoff_id, output_text),
+         RealtimeWireAdapter::FramelessBidi => {
+             frameless_session_context_append_message(output_text, context_append_channel)
+@@ -96,6 +111,9 @@ pub(super) fn conversation_function_call_output_message(
+     context_append_channel: Option<RealtimeContextAppendChannel>,
+ ) -> RealtimeOutboundMessage {
+     match wire_adapter {
++        RealtimeWireAdapter::PublicLive => {
++            super::public_live::context_append(Some(call_id), output_text, context_append_channel)
++        }
+         RealtimeWireAdapter::V1 => v1_conversation_handoff_append_message(
+             call_id,
+             format!("{AGENT_FINAL_MESSAGE_PREFIX}{output_text}"),
+@@ -122,6 +140,9 @@ pub(super) fn session_update_message(
+ ) -> RealtimeOutboundMessage {
+     let session_mode = normalized_session_mode(wire_adapter, session_mode);
+     match wire_adapter {
++        RealtimeWireAdapter::PublicLive => {
++            unreachable!("public Live is initialized by HTTP creation")
++        }
+         RealtimeWireAdapter::V1 => RealtimeOutboundMessage::SessionUpdate {
+             session: v1_session_update_session(instructions, voice),
+         },
+@@ -150,12 +171,30 @@ pub fn session_update_session_json(config: RealtimeSessionConfig) -> JsonResult<
+                     config.output_modality,
+                     config.voice,
+                 ),
+-                RealtimeWireAdapter::FramelessBidi => unreachable!(),
++                RealtimeWireAdapter::FramelessBidi | RealtimeWireAdapter::PublicLive => {
++                    unreachable!()
++                }
+             };
+             session.id = config.session_id;
+             session.model = config.model;
+             to_value(session)
+         }
++        RealtimeWireAdapter::PublicLive => {
++            let mut session = frameless_session_json(
++                config.model,
++                config.instructions,
++                config.initial_items,
++                config.voice,
++                /*delegation_ack_filler*/ None,
++            );
++            if let Some(items) = session
++                .as_object_mut()
++                .and_then(|session| session.remove("initial_items"))
++            {
++                session["input"] = items;
++            }
++            Ok(session)
++        }
+         RealtimeWireAdapter::FramelessBidi => Ok(frameless_session_json(
+             config.model,
+             config.instructions,
+@@ -169,7 +208,7 @@ pub fn session_update_session_json(config: RealtimeSessionConfig) -> JsonResult<
+ pub(super) fn websocket_intent(wire_adapter: RealtimeWireAdapter) -> Option<&'static str> {
+     match wire_adapter {
+         RealtimeWireAdapter::V1 => v1_websocket_intent(),
+-        RealtimeWireAdapter::FramelessBidi => None,
++        RealtimeWireAdapter::FramelessBidi | RealtimeWireAdapter::PublicLive => None,
+         RealtimeWireAdapter::RealtimeV2 => v2_websocket_intent(),
+     }
+ }
+diff --git a/codex-rs/codex-api/src/endpoint/realtime_websocket/methods_common_tests.rs b/codex-rs/codex-api/src/endpoint/realtime_websocket/methods_common_tests.rs
+index f23b24d..f72b3f6 100644
+--- a/codex-rs/codex-api/src/endpoint/realtime_websocket/methods_common_tests.rs
++++ b/codex-rs/codex-api/src/endpoint/realtime_websocket/methods_common_tests.rs
+@@ -126,14 +126,14 @@ fn completed_handoff_only_prefixes_v1_payload_text() {
+         let text = match wire_adapter {
+             RealtimeWireAdapter::V1 => &encoded["output_text"],
+             RealtimeWireAdapter::FramelessBidi => &encoded["content"][0]["text"],
+-            RealtimeWireAdapter::RealtimeV2 => unreachable!(),
++            RealtimeWireAdapter::RealtimeV2 | RealtimeWireAdapter::PublicLive => unreachable!(),
+         };
+         assert_eq!(
+             text,
+             &Value::String(match wire_adapter {
+                 RealtimeWireAdapter::V1 => "\"Agent Final Message\":\n\nDone".to_string(),
+                 RealtimeWireAdapter::FramelessBidi => "Done".to_string(),
+-                RealtimeWireAdapter::RealtimeV2 => unreachable!(),
++                RealtimeWireAdapter::RealtimeV2 | RealtimeWireAdapter::PublicLive => unreachable!(),
+             })
+         );
+         assert_eq!(
+@@ -143,7 +143,7 @@ fn completed_handoff_only_prefixes_v1_payload_text() {
+                 RealtimeWireAdapter::FramelessBidi => {
+                     Some(Value::String("speakable".to_string()))
+                 }
+-                RealtimeWireAdapter::RealtimeV2 => unreachable!(),
++                RealtimeWireAdapter::RealtimeV2 | RealtimeWireAdapter::PublicLive => unreachable!(),
+             }
+         );
+     }
+diff --git a/codex-rs/codex-api/src/endpoint/realtime_websocket/mod.rs b/codex-rs/codex-api/src/endpoint/realtime_websocket/mod.rs
+index e954e48..bde158a 100644
+--- a/codex-rs/codex-api/src/endpoint/realtime_websocket/mod.rs
++++ b/codex-rs/codex-api/src/endpoint/realtime_websocket/mod.rs
+@@ -8,6 +8,7 @@ mod protocol_common;
+ mod protocol_frameless_bidi;
+ mod protocol_v1;
+ mod protocol_v2;
++mod public_live;
+ 
+ pub use methods::RealtimeTranscriptState;
+ pub use methods::RealtimeWebsocketClient;
+diff --git a/codex-rs/codex-api/src/endpoint/realtime_websocket/protocol.rs b/codex-rs/codex-api/src/endpoint/realtime_websocket/protocol.rs
+index b7fc073..0434aec 100644
+--- a/codex-rs/codex-api/src/endpoint/realtime_websocket/protocol.rs
++++ b/codex-rs/codex-api/src/endpoint/realtime_websocket/protocol.rs
+@@ -15,6 +15,8 @@ use serde_json::Value;
+ pub enum RealtimeEventParser {
+     V1,
+     FramelessBidi,
++    /// Public V3 WebRTC wire contract, selected by the provider auth transport.
++    PublicLive,
+     RealtimeV2,
+ }
+ 
+@@ -82,6 +84,14 @@ pub(super) enum RealtimeOutboundMessage {
+     FramelessSessionUpdate { session: Value },
+     #[serde(rename = "conversation.item.create")]
+     ConversationItemCreate { item: ConversationItemPayload },
++    // The type is selected by the public codec; content is a string, not private V3 parts.
++    #[serde(untagged)]
++    PublicAppend {
++        #[serde(rename = "type")]
++        event_type: &'static str,
++        delegation_id: Option<String>,
++        content: String,
++    },
+ }
+ 
+ #[derive(Debug, Clone, Serialize)]
+@@ -267,6 +277,7 @@ pub(super) fn parse_realtime_event(
+     match event_parser {
+         RealtimeEventParser::V1 => parse_realtime_event_v1(payload),
+         RealtimeEventParser::FramelessBidi => parse_frameless_bidi_event(payload),
++        RealtimeEventParser::PublicLive => super::public_live::parse_event(payload),
+         RealtimeEventParser::RealtimeV2 => parse_realtime_event_v2(payload),
+     }
+ }
+diff --git a/codex-rs/codex-api/src/endpoint/session.rs b/codex-rs/codex-api/src/endpoint/session.rs
+index 7849225..5aeed08 100644
+--- a/codex-rs/codex-api/src/endpoint/session.rs
++++ b/codex-rs/codex-api/src/endpoint/session.rs
+@@ -85,6 +85,42 @@ impl<T: HttpTransport> EndpointSession<T> {
+         body: Option<Value>,
+         configure: C,
+     ) -> Result<Response, ApiError>
++    where
++        C: Fn(&mut Request),
++    {
++        self.execute_with_policy(
++            method,
++            path,
++            extra_headers,
++            body,
++            configure,
++            self.provider.retry.to_policy(),
++        )
++        .await
++    }
++
++    pub(crate) async fn execute_once(
++        &self,
++        method: Method,
++        path: &str,
++        extra_headers: HeaderMap,
++        body: Value,
++    ) -> Result<Response, ApiError> {
++        let mut policy = self.provider.retry.to_policy();
++        policy.max_attempts = 0;
++        self.execute_with_policy(method, path, extra_headers, Some(body), |_| {}, policy)
++            .await
++    }
++
++    async fn execute_with_policy<C>(
++        &self,
++        method: Method,
++        path: &str,
++        extra_headers: HeaderMap,
++        body: Option<Value>,
++        configure: C,
++        policy: codex_client::RetryPolicy,
++    ) -> Result<Response, ApiError>
+     where
+         C: Fn(&mut Request),
+     {
+@@ -96,7 +132,7 @@ impl<T: HttpTransport> EndpointSession<T> {
+         };
+ 
+         let response = run_with_request_telemetry(
+-            self.provider.retry.to_policy(),
++            policy,
+             self.request_telemetry.clone(),
+             make_request,
+             |req| {
+diff --git a/codex-rs/core/src/client.rs b/codex-rs/core/src/client.rs
+index 9f03c93..43f171d 100644
+--- a/codex-rs/core/src/client.rs
++++ b/codex-rs/core/src/client.rs
+@@ -723,6 +723,15 @@ impl ModelClient {
+         result
+     }
+ 
++    pub(crate) async fn realtime_v3_wire_adapter(&self) -> Result<codex_api::RealtimeEventParser> {
++        let setup = self.current_client_setup().await?;
++        Ok(if self.uses_codex_backend(setup.auth.as_ref()) {
++            codex_api::RealtimeEventParser::FramelessBidi
++        } else {
++            codex_api::RealtimeEventParser::PublicLive
++        })
++    }
++
+     pub(crate) async fn create_realtime_call_with_headers(
+         &self,
+         sdp: String,
+@@ -733,6 +742,17 @@ impl ModelClient {
+         // Create the media call over HTTP first, then retain matching auth so realtime can attach
+         // the server-side control WebSocket to the call id from that HTTP response.
+         let client_setup = self.current_client_setup().await?;
++        if matches!(
++            session_config.event_parser,
++            codex_api::RealtimeEventParser::FramelessBidi
++                | codex_api::RealtimeEventParser::PublicLive
++        ) && (session_config.event_parser == codex_api::RealtimeEventParser::FramelessBidi)
++            != self.uses_codex_backend(client_setup.auth.as_ref())
++        {
++            return Err(CodexErr::InvalidRequest(
++                "realtime authentication changed during start; restart explicitly".to_string(),
++            ));
++        }
+         if let Some(header_value) = self.generate_attestation_header_for().await {
+             extra_headers.insert(X_OAI_ATTESTATION_HEADER, header_value);
+         }
+diff --git a/codex-rs/core/src/client_tests.rs b/codex-rs/core/src/client_tests.rs
+index 6eda1c8..fac24ed 100644
+--- a/codex-rs/core/src/client_tests.rs
++++ b/codex-rs/core/src/client_tests.rs
+@@ -1349,3 +1349,24 @@ async fn non_chatgpt_codex_endpoints_omit_attestation_generation() {
+     );
+     assert_eq!(attestation_calls.load(Ordering::Relaxed), 0);
+ }
++
++#[tokio::test]
++async fn realtime_v3_selects_the_existing_provider_auth_transport() {
++    let (mut client, _) = model_client_with_counting_attestation(/*include_attestation*/ true);
++    assert_eq!(
++        client.realtime_v3_wire_adapter().await.unwrap(),
++        codex_api::RealtimeEventParser::FramelessBidi
++    );
++    Arc::get_mut(&mut client.state).unwrap().provider = create_model_provider(
++        ModelProviderInfo::create_openai_provider(Some(
++            "https://gateway.example/prefix/v1".to_string(),
++        )),
++        Some(AuthManager::from_auth_for_testing(CodexAuth::from_api_key(
++            "test-api-key",
++        ))),
++    );
++    assert_eq!(
++        client.realtime_v3_wire_adapter().await.unwrap(),
++        codex_api::RealtimeEventParser::PublicLive
++    );
++}
+diff --git a/codex-rs/core/src/context/realtime_delegation.rs b/codex-rs/core/src/context/realtime_delegation.rs
+index eba3ee7..a87d0d6 100644
+--- a/codex-rs/core/src/context/realtime_delegation.rs
++++ b/codex-rs/core/src/context/realtime_delegation.rs
+@@ -58,6 +58,11 @@ impl ContextualUserFragment for RealtimeDelegation<'_> {
+         };
+         if let Some(transcript_delta) = self.transcript_delta.filter(|text| !text.is_empty()) {
+             let transcript_delta = escape_xml_text_bounded(transcript_delta, Retain::End);
++            if self.input.is_empty() {
++                return format!(
++                    "\n{source}  <transcript_delta>{transcript_delta}</transcript_delta>\n"
++                );
++            }
+             return format!(
+                 "\n{source}  <input>{input}</input>\n  <transcript_delta>{transcript_delta}</transcript_delta>\n"
+             );
+@@ -103,3 +108,7 @@ fn escape_xml_text(input: &str) -> String {
+         .replace('<', "&lt;")
+         .replace('>', "&gt;")
+ }
++
++#[cfg(test)]
++#[path = "realtime_delegation_tests.rs"]
++mod tests;
+diff --git a/codex-rs/core/src/realtime_conversation.rs b/codex-rs/core/src/realtime_conversation.rs
+index a810a48..7344a27 100644
+--- a/codex-rs/core/src/realtime_conversation.rs
++++ b/codex-rs/core/src/realtime_conversation.rs
+@@ -447,14 +447,18 @@ struct RealtimeInputChannels {
+ 
+ impl RealtimeHandoffState {
+     fn streams_handoff_append(&self) -> bool {
+-        self.event_parser == RealtimeEventParser::FramelessBidi
+-            && !self.client_managed_handoffs
++        matches!(
++            self.event_parser,
++            RealtimeEventParser::FramelessBidi | RealtimeEventParser::PublicLive
++        ) && !self.client_managed_handoffs
+             && !self.codex_responses_as_items
+     }
+ 
+     fn routes_handoff_by_bem(&self) -> bool {
+-        self.event_parser == RealtimeEventParser::FramelessBidi
+-            && self.codex_response_handoff_mode == CodexResponseHandoffMode::BemTags
++        matches!(
++            self.event_parser,
++            RealtimeEventParser::FramelessBidi | RealtimeEventParser::PublicLive
++        ) && self.codex_response_handoff_mode == CodexResponseHandoffMode::BemTags
+     }
+ }
+ 
+@@ -566,7 +570,9 @@ impl RealtimeConversationManager {
+         } = start;
+         let event_parser = session_config.event_parser;
+         let session_kind = match event_parser {
+-            RealtimeEventParser::V1 | RealtimeEventParser::FramelessBidi => RealtimeSessionKind::V1,
++            RealtimeEventParser::V1
++            | RealtimeEventParser::FramelessBidi
++            | RealtimeEventParser::PublicLive => RealtimeSessionKind::V1,
+             RealtimeEventParser::RealtimeV2 => RealtimeSessionKind::V2,
+         };
+ 
+@@ -1254,6 +1260,13 @@ async fn prepare_realtime_start(
+     if matches!(&transport, ConversationStartTransport::ExistingCall { .. }) {
+         session_config.session_id = params.realtime_session_id.clone();
+     }
++    let realtime_sideband_base_url =
++        if session_config.event_parser == RealtimeEventParser::PublicLive {
++            realtime_sideband_base_url
++                .or_else(|| config.experimental_realtime_webrtc_call_base_url.clone())
++        } else {
++            realtime_sideband_base_url
++        };
+     let requested_realtime_session_id = session_config.session_id.clone();
+     let event_parser = session_config.event_parser;
+     let originator = sess.originator().await;
+@@ -1400,6 +1413,30 @@ pub(crate) async fn build_realtime_session_config(
+             "initial realtime items must not exceed {REALTIME_INITIAL_ITEMS_MAX_TOKENS} estimated tokens in total"
+         )));
+     }
++    let event_parser = match version {
++        RealtimeWsVersion::V1 => RealtimeEventParser::V1,
++        RealtimeWsVersion::V2 => RealtimeEventParser::RealtimeV2,
++        RealtimeWsVersion::V3 => match params.transport.as_ref() {
++            Some(
++                ConversationStartTransport::Webrtc { .. }
++                | ConversationStartTransport::ExistingCall { .. },
++            ) => {
++                sess.services
++                    .model_client
++                    .realtime_v3_wire_adapter()
++                    .await?
++            }
++            // Keep the existing native microphone/legacy WebSocket path unchanged.
++            Some(ConversationStartTransport::Websocket) | None => {
++                RealtimeEventParser::FramelessBidi
++            }
++        },
++    };
++    if event_parser == RealtimeEventParser::PublicLive && params.delegation_ack_filler.is_some() {
++        return Err(CodexErr::InvalidRequest(
++            "public Live does not support delegation_ack_filler".to_string(),
++        ));
++    }
+     let model = Some(
+         params
+             .model
+@@ -1407,14 +1444,12 @@ pub(crate) async fn build_realtime_session_config(
+             .or_else(|| config.experimental_realtime_ws_model.clone())
+             .unwrap_or_else(|| match version {
+                 RealtimeWsVersion::V1 | RealtimeWsVersion::V2 => DEFAULT_REALTIME_MODEL.to_string(),
++                RealtimeWsVersion::V3 if event_parser == RealtimeEventParser::PublicLive => {
++                    "gpt-live-1".to_string()
++                }
+                 RealtimeWsVersion::V3 => DEFAULT_FRAMELESS_REALTIME_MODEL.to_string(),
+             }),
+     );
+-    let event_parser = match version {
+-        RealtimeWsVersion::V1 => RealtimeEventParser::V1,
+-        RealtimeWsVersion::V2 => RealtimeEventParser::RealtimeV2,
+-        RealtimeWsVersion::V3 => RealtimeEventParser::FramelessBidi,
+-    };
+     if version != RealtimeWsVersion::V2
+         && matches!(params.output_modality, RealtimeOutputModality::Text)
+     {
+@@ -1430,11 +1465,16 @@ pub(crate) async fn build_realtime_session_config(
+         ConfiguredRealtimeVoice::Use => config.realtime.voice,
+         ConfiguredRealtimeVoice::Ignore => None,
+     };
+-    let voice = params
+-        .voice
+-        .or(config_voice)
+-        .unwrap_or_else(|| default_realtime_voice(version));
+-    validate_realtime_voice(version, voice)?;
++    let voice = params.voice.or(config_voice).unwrap_or_else(|| {
++        if event_parser == RealtimeEventParser::PublicLive {
++            RealtimeVoice::Marin
++        } else {
++            default_realtime_voice(version)
++        }
++    });
++    if event_parser != RealtimeEventParser::PublicLive {
++        validate_realtime_voice(version, voice)?;
++    }
+     Ok(RealtimeSessionConfig {
+         instructions: prompt,
+         initial_items: params.initial_items.clone(),
+@@ -1530,6 +1570,7 @@ async fn handle_start_inner(
+         session_config,
+         transport,
+     } = prepared_start;
++    let event_parser = session_config.event_parser;
+     info!("starting realtime conversation");
+     let (sdp, existing_call_id) = match transport {
+         ConversationStartTransport::Websocket => (None, None),
+@@ -1607,6 +1648,19 @@ async fn handle_start_inner(
+                 end = RealtimeConversationEnd::Error;
+             }
+             let maybe_routed_text = match &event {
++                RealtimeEvent::HandoffRequested(handoff)
++                    if event_parser == RealtimeEventParser::PublicLive =>
++                {
++                    realtime_transcript_delta_from_handoff(handoff).map(|transcript| {
++                        // No task was supplied by Live. Preserve all collected speaker
++                        // context, including corrections, without fabricating an <input>.
++                        wrap_realtime_delegation_input(
++                            "",
++                            Some(&transcript),
++                            RealtimeDelegationSource::Handoff,
++                        )
++                    })
++                }
+                 RealtimeEvent::HandoffRequested(handoff) => {
+                     realtime_delegation_from_handoff(handoff)
+                 }
+@@ -1742,7 +1796,7 @@ fn realtime_request_headers(
+         RealtimeEventParser::FramelessBidi => {
+             headers.insert("openai-alpha", HeaderValue::from_static("quicksilver=v2"));
+         }
+-        RealtimeEventParser::RealtimeV2 => {}
++        RealtimeEventParser::RealtimeV2 | RealtimeEventParser::PublicLive => {}
+     }
+ 
+     if let Some(realtime_session_id) = realtime_session_id
+@@ -1819,6 +1873,7 @@ fn spawn_realtime_input_task(
+ 
+ enum RealtimeInputTaskExit {
+     Terminal,
++    ProviderClosed,
+     TransportLost {
+         err: ApiError,
+         pending_outbound: Option<Box<RealtimePendingOutbound>>,
+@@ -1893,6 +1948,12 @@ async fn run_realtime_input_task(
+             realtime_event = events.next_event() => {
+                 match realtime_event {
+                     Ok(Some(event)) => {
++                        if event_parser == RealtimeEventParser::PublicLive
++                            && matches!(&event, RealtimeEvent::ConversationItemAdded(item) if item["type"] == "session.closed")
++                        {
++                            let _ = events_tx.send(event).await;
++                            return RealtimeInputTaskExit::ProviderClosed;
++                        }
+                         handle_realtime_server_event(
+                             event,
+                             &writer,
+@@ -2154,73 +2215,75 @@ async fn handle_handoff_output(
+             }
+             RealtimeOutbound::HandoffCompleteAck { .. } => Ok(()),
+         },
+-        RealtimeEventParser::FramelessBidi => match handoff_output {
+-            RealtimeOutbound::StandaloneHandoff { text, phase } => {
+-                v3_output_writer(
+-                    writer,
+-                    phase.as_ref(),
+-                    handoff_state.codex_response_handoff_mode,
+-                )
+-                .send_standalone_handoff(STANDALONE_HANDOFF_ID.to_string(), text)
+-                .await
+-            }
+-            RealtimeOutbound::StandaloneSpeech { text } => {
+-                writer
+-                    .clone()
+-                    .with_context_append_channel(RealtimeContextAppendChannel::Speakable)
++        RealtimeEventParser::FramelessBidi | RealtimeEventParser::PublicLive => {
++            match handoff_output {
++                RealtimeOutbound::StandaloneHandoff { text, phase } => {
++                    v3_output_writer(
++                        writer,
++                        phase.as_ref(),
++                        handoff_state.codex_response_handoff_mode,
++                    )
+                     .send_standalone_handoff(STANDALONE_HANDOFF_ID.to_string(), text)
+                     .await
++                }
++                RealtimeOutbound::StandaloneSpeech { text } => {
++                    writer
++                        .clone()
++                        .with_context_append_channel(RealtimeContextAppendChannel::Speakable)
++                        .send_standalone_handoff(STANDALONE_HANDOFF_ID.to_string(), text)
++                        .await
++                }
++                RealtimeOutbound::HandoffUpdate {
++                    handoff_id,
++                    text,
++                    phase,
++                } => {
++                    v3_output_writer(
++                        writer,
++                        phase.as_ref(),
++                        handoff_state.codex_response_handoff_mode,
++                    )
++                    .send_conversation_function_call_output(handoff_id, text)
++                    .await
++                }
++                RealtimeOutbound::HandoffAppend {
++                    handoff_id,
++                    text,
++                    phase,
++                } => {
++                    v3_output_writer(
++                        writer,
++                        phase.as_ref(),
++                        handoff_state.codex_response_handoff_mode,
++                    )
++                    .send_conversation_handoff_append(handoff_id, text)
++                    .await
++                }
++                RealtimeOutbound::CompletedHandoff {
++                    handoff_id,
++                    text,
++                    phase,
++                } => {
++                    v3_output_writer(
++                        writer,
++                        phase.as_ref(),
++                        handoff_state.codex_response_handoff_mode,
++                    )
++                    .send_conversation_function_call_output(handoff_id, text)
++                    .await
++                }
++                RealtimeOutbound::ConversationItem { text, phase } => {
++                    v3_output_writer(
++                        writer,
++                        phase.as_ref(),
++                        handoff_state.codex_response_handoff_mode,
++                    )
++                    .send_conversation_item_create(text, ConversationTextRole::Developer)
++                    .await
++                }
++                RealtimeOutbound::HandoffCompleteAck { .. } => Ok(()),
+             }
+-            RealtimeOutbound::HandoffUpdate {
+-                handoff_id,
+-                text,
+-                phase,
+-            } => {
+-                v3_output_writer(
+-                    writer,
+-                    phase.as_ref(),
+-                    handoff_state.codex_response_handoff_mode,
+-                )
+-                .send_conversation_function_call_output(handoff_id, text)
+-                .await
+-            }
+-            RealtimeOutbound::HandoffAppend {
+-                handoff_id,
+-                text,
+-                phase,
+-            } => {
+-                v3_output_writer(
+-                    writer,
+-                    phase.as_ref(),
+-                    handoff_state.codex_response_handoff_mode,
+-                )
+-                .send_conversation_handoff_append(handoff_id, text)
+-                .await
+-            }
+-            RealtimeOutbound::CompletedHandoff {
+-                handoff_id,
+-                text,
+-                phase,
+-            } => {
+-                v3_output_writer(
+-                    writer,
+-                    phase.as_ref(),
+-                    handoff_state.codex_response_handoff_mode,
+-                )
+-                .send_conversation_function_call_output(handoff_id, text)
+-                .await
+-            }
+-            RealtimeOutbound::ConversationItem { text, phase } => {
+-                v3_output_writer(
+-                    writer,
+-                    phase.as_ref(),
+-                    handoff_state.codex_response_handoff_mode,
+-                )
+-                .send_conversation_item_create(text, ConversationTextRole::Developer)
+-                .await
+-            }
+-            RealtimeOutbound::HandoffCompleteAck { .. } => Ok(()),
+-        },
++        }
+         RealtimeEventParser::RealtimeV2 => match handoff_output {
+             RealtimeOutbound::StandaloneHandoff { text, phase: _ } => {
+                 if let Err(err) = writer
+diff --git a/codex-rs/core/src/realtime_conversation/sideband.rs b/codex-rs/core/src/realtime_conversation/sideband.rs
+index 08d2aeb..e54c0d6 100644
+--- a/codex-rs/core/src/realtime_conversation/sideband.rs
++++ b/codex-rs/core/src/realtime_conversation/sideband.rs
+@@ -5,10 +5,12 @@ use super::RealtimeWebrtcSidebandInputTask;
+ use super::flush_realtime_transcript_tail;
+ use super::report_realtime_transport_loss;
+ use super::run_realtime_input_task;
++use async_channel::Sender;
+ use codex_api::ApiError;
+ use codex_api::RealtimeEvent;
+ use codex_api::RealtimeEventParser;
+ use codex_api::RealtimeTranscriptState;
++use codex_api::RealtimeWebsocketConnection;
+ use codex_api::map_api_error;
+ use codex_login::default_client::default_headers;
+ use http::StatusCode;
+@@ -17,11 +19,13 @@ use std::time::Duration;
+ use tokio::task::JoinHandle;
+ use tokio::time::Instant;
+ use tokio::time::sleep;
++use tokio::time::timeout;
+ use tracing::info;
+ use tracing::warn;
+ 
+ const RECONNECT_BASE_DELAY: Duration = Duration::from_millis(200);
+ const RECONNECT_MAX_DELAY: Duration = Duration::from_secs(5);
++const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
+ const STABLE_CONNECTION_DURATION: Duration = Duration::from_secs(30);
+ 
+ pub(super) fn spawn_webrtc_sideband_input_task(
+@@ -56,38 +60,83 @@ pub(super) fn spawn_webrtc_sideband_input_task(
+                 initial_connection: None,
+             } => RealtimeTranscriptState::default(),
+         };
+-        while realtime_active.load(Ordering::Relaxed) {
+-            let connection = match tokio::select! {
+-                biased;
+-                _ = stop_token.cancelled() => break,
+-                connection = async {
++        let owns_live_session = matches!(
++            event_parser,
++            RealtimeEventParser::FramelessBidi | RealtimeEventParser::PublicLive
++        ) && matches!(
++            session_initialization,
++            RealtimeSidebandSessionInitialization::CoreCreated
++        );
++        loop {
++            if !realtime_active.load(Ordering::Relaxed) && !owns_live_session {
++                break;
++            }
++            let connection_result = {
++                let connecting = async {
+                     match &mut session_initialization {
+                         RealtimeSidebandSessionInitialization::CoreCreated => {
+-                            client.connect_webrtc_sideband(
+-                                session_config.clone(),
+-                                &call_id,
+-                                sideband_headers.clone(),
+-                                default_headers(),
+-                                transcript_state.clone(),
+-                            ).await
+-                        }
+-                        RealtimeSidebandSessionInitialization::ExistingCall { initial_connection } => {
+-                            match initial_connection.take() {
+-                                Some(connection) => Ok(connection),
+-                                None => client.connect_existing_call_sideband(
++                            client
++                                .connect_webrtc_sideband(
+                                     session_config.clone(),
+                                     &call_id,
+                                     sideband_headers.clone(),
+                                     default_headers(),
+                                     transcript_state.clone(),
+-                                ).await,
+-                            }
++                                )
++                                .await
+                         }
++                        RealtimeSidebandSessionInitialization::ExistingCall {
++                            initial_connection,
++                        } => match initial_connection.take() {
++                            Some(connection) => Ok(connection),
++                            None => {
++                                client
++                                    .connect_existing_call_sideband(
++                                        session_config.clone(),
++                                        &call_id,
++                                        sideband_headers.clone(),
++                                        default_headers(),
++                                        transcript_state.clone(),
++                                    )
++                                    .await
++                            }
++                        },
+                     }
+-                } => connection,
+-            } {
++                };
++                tokio::pin!(connecting);
++                tokio::select! {
++                    biased;
++                    _ = stop_token.cancelled() => {
++                        // An owned Live call already exists even before its sideband
++                        // connects. Finish that join only to send its close request.
++                        if owns_live_session {
++                            let shutdown = timeout(SHUTDOWN_TIMEOUT, async {
++                                let connection = connecting.await?;
++                                close_owned_session(&connection, event_parser, &events_tx).await
++                            }).await;
++                            if !matches!(shutdown, Ok(Ok(()))) {
++                                let message = if event_parser == RealtimeEventParser::PublicLive {
++                                    format!("Live session {call_id} closure and final usage are unconfirmed: connecting shutdown did not finish")
++                                } else {
++                                    "Live session shutdown is unconfirmed: could not send the close request".to_string()
++                                };
++                                let _ = events_tx.send(RealtimeEvent::Error(message)).await;
++                            }
++                        }
++                        break;
++                    },
++                    connection = &mut connecting => connection,
++                }
++            };
++            let connection = match connection_result {
+                 Ok(connection) => connection,
+                 Err(err) => {
++                    if owns_live_session && event_parser == RealtimeEventParser::PublicLive {
++                        let _ = events_tx.send(RealtimeEvent::Error(format!(
++                            "Live session {call_id} closure and final usage are unconfirmed: attach failed: {err}"
++                        ))).await;
++                        break;
++                    }
+                     if !realtime_active.load(Ordering::Relaxed) || stop_token.is_cancelled() {
+                         break;
+                     }
+@@ -110,37 +159,80 @@ pub(super) fn spawn_webrtc_sideband_input_task(
+                 }
+             };
+ 
+-            if !realtime_active.load(Ordering::Relaxed) || stop_token.is_cancelled() {
+-                break;
+-            }
+-
+             let connected_at = Instant::now();
+-            let exit = run_realtime_input_task(
+-                RealtimeInputTask {
+-                    writer: connection.writer(),
+-                    events: connection.events(),
+-                    text_rx: input_channels.text_rx.clone(),
+-                    handoff_output_rx: input_channels.handoff_output_rx.clone(),
+-                    audio_rx: input_channels.audio_rx.clone(),
+-                    events_tx: events_tx.clone(),
+-                    handoff_state: handoff_state.clone(),
+-                    session_kind,
+-                    event_parser,
+-                    stop_token: stop_token.clone(),
+-                },
+-                pending_outbound.take(),
+-            )
+-            .await;
++            let exit = if !realtime_active.load(Ordering::Relaxed) || stop_token.is_cancelled() {
++                RealtimeInputTaskExit::Terminal
++            } else {
++                run_realtime_input_task(
++                    RealtimeInputTask {
++                        writer: connection.writer(),
++                        events: connection.events(),
++                        text_rx: input_channels.text_rx.clone(),
++                        handoff_output_rx: input_channels.handoff_output_rx.clone(),
++                        audio_rx: input_channels.audio_rx.clone(),
++                        events_tx: events_tx.clone(),
++                        handoff_state: handoff_state.clone(),
++                        session_kind,
++                        event_parser,
++                        stop_token: stop_token.clone(),
++                    },
++                    pending_outbound.take(),
++                )
++                .await
++            };
+ 
++            if matches!(exit, RealtimeInputTaskExit::ProviderClosed) {
++                // Final usage was forwarded. Drop the transport without allowing a
++                // later socket-close failure or timeout to undo that confirmation.
++                break;
++            }
+             let RealtimeInputTaskExit::TransportLost {
+                 err,
+                 pending_outbound: failed_outbound,
+             } = exit
+             else {
++                // Dropping a sideband leaves its WebRTC session running. End sessions
++                // created here, while preserving the owner of an existing call.
++                if owns_live_session && event_parser == RealtimeEventParser::PublicLive {
++                    let shutdown = timeout(
++                        SHUTDOWN_TIMEOUT,
++                        close_owned_session(&connection, event_parser, &events_tx),
++                    )
++                    .await;
++                    if !matches!(shutdown, Ok(Ok(()))) {
++                        let _ = events_tx.send(RealtimeEvent::Error(format!(
++                            "Live session {call_id} closure and final usage are unconfirmed: shutdown did not finish"
++                        ))).await;
++                    }
++                } else if matches!(
++                    session_initialization,
++                    RealtimeSidebandSessionInitialization::CoreCreated
++                ) && let Err(err) = connection.close().await
++                {
++                    warn!("failed to close realtime session: {err}");
++                }
++                // Existing-call detach only drops the socket; it never sends session.close.
+                 break;
+             };
++            if event_parser == RealtimeEventParser::PublicLive {
++                // Never replay a possibly accepted append or create a replacement paid
++                // session. The last cumulative usage remains observable, but is not final.
++                if owns_live_session {
++                    let _ = events_tx
++                        .send(RealtimeEvent::Error(format!(
++                            "Live session {call_id} closure and final usage are unconfirmed: {err}"
++                        )))
++                        .await;
++                } else {
++                    report_realtime_transport_loss(&events_tx, err).await;
++                }
++                break;
++            }
+             pending_outbound = failed_outbound;
+             if !realtime_active.load(Ordering::Relaxed) || stop_token.is_cancelled() {
++                if owns_live_session {
++                    continue;
++                }
+                 break;
+             }
+             if event_parser != RealtimeEventParser::FramelessBidi {
+@@ -160,7 +252,11 @@ pub(super) fn spawn_webrtc_sideband_input_task(
+             reconnecting = true;
+             tokio::select! {
+                 biased;
+-                _ = stop_token.cancelled() => break,
++                _ = stop_token.cancelled() => {
++                    if !owns_live_session {
++                        break;
++                    }
++                },
+                 _ = sleep(delay) => {}
+             }
+         }
+@@ -170,6 +266,41 @@ pub(super) fn spawn_webrtc_sideband_input_task(
+     })
+ }
+ 
++// Both normal stop and connecting-stop use this same lifetime owner. Do not close
++// the public socket before draining the provider's terminal record.
++async fn close_owned_session(
++    connection: &RealtimeWebsocketConnection,
++    event_parser: RealtimeEventParser,
++    events_tx: &Sender<RealtimeEvent>,
++) -> Result<(), ApiError> {
++    if event_parser != RealtimeEventParser::PublicLive {
++        return connection.close().await;
++    }
++    connection
++        .writer()
++        .send_payload(serde_json::json!({"type": "session.close"}).to_string())
++        .await?;
++    while let Some(event) = connection.next_event().await? {
++        let closed = matches!(
++            &event,
++            RealtimeEvent::ConversationItemAdded(item) if item["type"] == "session.closed"
++        );
++        // Stop is not a new native turn. Preserve late transcripts/usage but do not
++        // admit pending delegations while draining finalization.
++        if !matches!(event, RealtimeEvent::HandoffRequested(_)) {
++            let _ = events_tx.send(event).await;
++        }
++        if closed {
++            // The caller drops this connection. Do not put the socket-close
++            // handshake inside the finalization timeout after confirmation.
++            return Ok(());
++        }
++    }
++    Err(ApiError::Stream(
++        "public Live socket ended before session.closed".to_string(),
++    ))
++}
++
+ fn webrtc_sideband_session_ended(err: &ApiError) -> bool {
+     matches!(
+         err,
+diff --git a/codex-rs/core/tests/suite/realtime_conversation.rs b/codex-rs/core/tests/suite/realtime_conversation.rs
+index b891fcf..df5313c 100644
+--- a/codex-rs/core/tests/suite/realtime_conversation.rs
++++ b/codex-rs/core/tests/suite/realtime_conversation.rs
+@@ -677,11 +677,18 @@ async fn conversation_websocket_transports_send_codex_headers_without_creating_a
+     })]]])
+     .await;
+     let realtime_ws_base_url = realtime_server.uri().to_string();
+-    let mut builder = test_codex().with_config(move |config| {
+-        config.experimental_realtime_ws_backend_prompt = Some("backend prompt".to_string());
+-        config.experimental_realtime_ws_base_url = Some(realtime_ws_base_url);
+-        config.realtime.session_type = RealtimeWsMode::Transcription;
+-    });
++    let uses_subscription = matches!(transport, ConversationStartTransport::ExistingCall { .. });
++    let mut builder = test_codex()
++        .with_auth(if uses_subscription {
++            CodexAuth::create_dummy_chatgpt_auth_for_testing()
++        } else {
++            CodexAuth::from_api_key("dummy")
++        })
++        .with_config(move |config| {
++            config.experimental_realtime_ws_backend_prompt = Some("backend prompt".to_string());
++            config.experimental_realtime_ws_base_url = Some(realtime_ws_base_url);
++            config.realtime.session_type = RealtimeWsMode::Transcription;
++        });
+     let test = builder.build_with_auto_env(&server).await?;
+     let conversation = test
+         .thread_manager
+@@ -744,7 +751,11 @@ async fn conversation_websocket_transports_send_codex_headers_without_creating_a
+     assert_eq!(handshake.uri(), expected_uri);
+     assert_eq!(
+         handshake.header("authorization").as_deref(),
+-        Some("Bearer dummy")
++        Some(if uses_subscription {
++            "Bearer Access Token"
++        } else {
++            "Bearer dummy"
++        })
+     );
+     assert_eq!(
+         handshake.header("x-session-id"),
+@@ -1379,13 +1390,15 @@ async fn conversation_webrtc_live_reconnects_sideband_after_unclean_disconnect(
+         Ok::<(), anyhow::Error>(())
+     });
+ 
+-    let mut builder = test_codex().with_config(move |config| {
+-        config.experimental_realtime_ws_backend_prompt = Some("backend prompt".to_string());
+-        config.experimental_realtime_ws_model = Some("realtime-test-model".to_string());
+-        config.experimental_realtime_ws_startup_context = Some(String::new());
+-        config.experimental_realtime_ws_base_url = Some(configured_base_url);
+-        config.realtime.version = RealtimeWsVersion::V3;
+-    });
++    let mut builder = test_codex()
++        .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
++        .with_config(move |config| {
++            config.experimental_realtime_ws_backend_prompt = Some("backend prompt".to_string());
++            config.experimental_realtime_ws_model = Some("realtime-test-model".to_string());
++            config.experimental_realtime_ws_startup_context = Some(String::new());
++            config.experimental_realtime_ws_base_url = Some(configured_base_url);
++            config.realtime.version = RealtimeWsVersion::V3;
++        });
+     let test = builder.build_with_auto_env(&server).await?;
+ 
+     test.codex
+diff --git a/codex-rs/app-server/tests/suite/v2/realtime_public_live_tests.rs b/codex-rs/app-server/tests/suite/v2/realtime_public_live_tests.rs
+new file mode 100644
+index 0000000..a1294d3
+--- /dev/null
++++ b/codex-rs/app-server/tests/suite/v2/realtime_public_live_tests.rs
+@@ -0,0 +1,426 @@
++//! Real sideband sockets drive native turns; the host only starts/stops voice.
++use super::*;
++use futures::SinkExt;
++use futures::StreamExt;
++use pretty_assertions::assert_eq;
++use test_case::test_case;
++use tokio::net::TcpListener;
++use tokio::sync::mpsc as async_mpsc;
++use tokio::task::JoinHandle;
++use tokio_tungstenite::accept_hdr_async;
++use tokio_tungstenite::tungstenite::Message;
++use tokio_tungstenite::tungstenite::handshake::server::Request;
++use tokio_tungstenite::tungstenite::handshake::server::Response;
++
++pub(super) fn public_closed(seconds: f64, reason: &str) -> Value {
++    json!({
++        "type": "session.closed",
++        "reason": reason,
++        "usage": {"seconds": seconds},
++        "session": {"id": "live_session_public", "model": "gpt-live-1"},
++    })
++}
++
++pub(super) async fn read_public_item(mcp: &mut TestAppServer, event_type: &str) -> Result<Value> {
++    loop {
++        let event: ThreadRealtimeItemAddedNotification =
++            read_notification(mcp, "thread/realtime/itemAdded").await?;
++        if event.item["type"] == event_type {
++            return Ok(event.item);
++        }
++    }
++}
++
++// Unlike the older request/response socket fixture, public Live can delegate
++// immediately after attach. No dummy append or admission handshake unlocks this server.
++struct PublicSideband {
++    uri: String,
++    send: async_mpsc::UnboundedSender<Option<Value>>,
++    received: async_mpsc::UnboundedReceiver<Value>,
++    task: JoinHandle<()>,
++}
++
++impl PublicSideband {
++    async fn start() -> Result<Self> {
++        let listener = TcpListener::bind("127.0.0.1:0").await?;
++        let uri = format!("ws://{}", listener.local_addr()?);
++        let (send, mut send_rx) = async_mpsc::unbounded_channel::<Option<Value>>();
++        let (received_tx, received) = async_mpsc::unbounded_channel();
++        let task = tokio::spawn(async move {
++            let (stream, _) = listener.accept().await.expect("accept public sideband");
++            let mut socket = accept_hdr_async(stream, |request: &Request, response: Response| {
++                assert_eq!(
++                    request.uri().to_string(),
++                    "/v1/live/sessions/live_session_public/attach"
++                );
++                assert_eq!(request.headers()["authorization"], "Bearer sk-test-key");
++                assert!(request.headers().get("openai-alpha").is_none());
++                Ok(response)
++            })
++            .await
++            .expect("complete public sideband handshake");
++            loop {
++                tokio::select! {
++                    event = send_rx.recv() => match event {
++                        Some(Some(value)) => {
++                            let closed = value["type"] == "session.closed";
++                            socket.send(Message::Text(value.to_string().into())).await.expect("send public event");
++                            if closed { break; }
++                        }
++                        // Deliberate transport loss, without a provider close record.
++                        Some(None) | None => break,
++                    },
++                    event = socket.next() => match event {
++                        Some(Ok(Message::Text(text))) => {
++                            received_tx.send(serde_json::from_str(&text).expect("decode public request")).expect("record public request");
++                        }
++                        Some(Ok(Message::Close(_))) | None => break,
++                        Some(Err(error)) => panic!("unexpected client socket failure: {error}"),
++                        Some(Ok(_)) => {}
++                    }
++                }
++            }
++        });
++        Ok(Self {
++            uri,
++            send,
++            received,
++            task,
++        })
++    }
++
++    async fn next_request(&mut self) -> Result<Value> {
++        timeout(DELEGATED_SHELL_TURN_TIMEOUT, self.received.recv())
++            .await?
++            .context("public sideband ended before the expected request")
++    }
++}
++
++struct PublicHarness {
++    mcp: TestAppServer,
++    _home: TempDir,
++    responses: MockServer,
++    socket: PublicSideband,
++    thread_id: String,
++    call_capture: RealtimeCallRequestCapture,
++}
++
++impl PublicHarness {
++    async fn start(responses: Vec<String>, client_managed: bool) -> Result<Self> {
++        let responses = create_mock_responses_server_sequence_unchecked(responses).await;
++        let call_capture = RealtimeCallRequestCapture::new();
++        Mock::given(method("POST"))
++            .and(path("/v1/live/sessions"))
++            .and(call_capture.clone())
++            .respond_with(ResponseTemplate::new(201).set_body_json(json!({
++                "session": {"id": "live_session_public"},
++                "transport": {"type": "webrtc", "sdp": "v=answer\r\n"},
++            })))
++            .mount(&responses)
++            .await;
++        let socket = PublicSideband::start().await?;
++        let home = TempDir::new()?;
++        MockResponsesConfig::new(&responses.uri())
++            .with_sandbox_mode("danger-full-access")
++            .with_provider_config("requires_openai_auth = true")
++            .with_root_config(&format!(
++                "experimental_realtime_ws_base_url = {:?}\nexperimental_realtime_ws_startup_context = \"startup context\"",
++                socket.uri,
++            ))
++            .with_extra_config("[features]\nrealtime_conversation = true\n[realtime]\nversion = \"v3\"\ntype = \"conversational\"")
++            .write(home.path())?;
++        let mut mcp = TestAppServer::builder()
++            .with_codex_home(home.path())
++            .build_initialized_with_timeout(DEFAULT_TIMEOUT)
++            .await?;
++        login_with_api_key(&mut mcp, "sk-test-key").await?;
++        let request = mcp
++            .send_thread_start_request_with_auto_env(ThreadStartParams::default())
++            .await?;
++        let thread: ThreadStartResponse =
++            timeout(DEFAULT_TIMEOUT, mcp.read_response(request)).await??;
++        let thread_id = thread.thread.id;
++        let request = mcp
++            .send_thread_realtime_start_request(ThreadRealtimeStartParams {
++                thread_id: thread_id.clone(),
++                client_managed_handoffs: Some(client_managed),
++                delegation_ack_filler: None,
++                flush_transcript_tail_on_session_end: None,
++                codex_response_item_prefix: None,
++                codex_response_handoff_mode: Some(CodexResponseHandoffMode::BemTags),
++                codex_response_handoff_channel_prefixes: None,
++                codex_responses_as_items: None,
++                model: None,
++                output_modality: RealtimeOutputModality::Audio,
++                include_startup_context: None,
++                initial_items: None,
++                realtime_start_instructions: None,
++                realtime_end_instructions: None,
++                prompt: Some(Some("backend prompt".to_string())),
++                realtime_session_id: None,
++                transport: Some(ThreadRealtimeStartTransport::Webrtc {
++                    sdp: "v=offer\r\n".to_string(),
++                }),
++                version: Some(RealtimeConversationVersion::V3),
++                voice: None,
++            })
++            .await?;
++        let _: ThreadRealtimeStartResponse =
++            timeout(DEFAULT_TIMEOUT, mcp.read_response(request)).await??;
++        let _: ThreadRealtimeStartedNotification =
++            read_notification(&mut mcp, "thread/realtime/started").await?;
++        let sdp: ThreadRealtimeSdpNotification =
++            read_notification(&mut mcp, "thread/realtime/sdp").await?;
++        assert_eq!(sdp.sdp, "v=answer\r\n");
++        Ok(Self {
++            mcp,
++            _home: home,
++            responses,
++            socket,
++            thread_id,
++            call_capture,
++        })
++    }
++
++    fn delegate(&self, id: &str, fragments: &[(&str, &str)]) -> Result<()> {
++        for (index, (speaker, delta)) in fragments.iter().enumerate() {
++            self.socket.send.send(Some(json!({
++                "type": format!("session.{speaker}_transcript.delta"),
++                "delta": delta, "start_ms": index * 100, "end_ms": (index + 1) * 100,
++            })))?;
++        }
++        self.socket.send.send(Some(json!({
++            "type": "session.delegation.created", "offset_ms": fragments.len() * 100,
++            "delegation": {"id": id, "type": "delegation", "target": "client"},
++        })))?;
++        Ok(())
++    }
++
++    async fn stop(&mut self) -> Result<()> {
++        let request = self
++            .mcp
++            .send_thread_realtime_stop_request(ThreadRealtimeStopParams {
++                thread_id: self.thread_id.clone(),
++            })
++            .await?;
++        // Stop waits for the owner to drain; acknowledge through the provider first.
++        assert_eq!(
++            self.socket.next_request().await?,
++            json!({"type": "session.close"})
++        );
++        self.socket
++            .send
++            .send(Some(public_closed(15.75, "close_requested")))?;
++        let _: ThreadRealtimeStopResponse =
++            timeout(DEFAULT_TIMEOUT, self.mcp.read_response(request)).await??;
++        assert_eq!(
++            read_public_item(&mut self.mcp, "session.closed").await?,
++            public_closed(15.75, "close_requested")
++        );
++        let _: ThreadRealtimeClosedNotification =
++            read_notification(&mut self.mcp, "thread/realtime/closed").await?;
++        Ok(())
++    }
++
++    async fn shutdown(mut self) -> Result<()> {
++        self.call_capture.single_request(); // No replacement paid session or fallback endpoint.
++        self.mcp.shutdown_gracefully().await?;
++        timeout(DEFAULT_TIMEOUT, self.socket.task).await??;
++        Ok(())
++    }
++}
++
++#[test_case(false; "native result forwarding")]
++#[test_case(true; "client managed results still run native tools")]
++#[tokio::test]
++async fn public_live_two_tool_backed_turns_without_host_turn_start(
++    client_managed: bool,
++) -> Result<()> {
++    skip_if_remote!(
++        Ok(()),
++        "delegated shell command cwd is only materialized on the host"
++    );
++    skip_if_no_network!(Ok(()));
++    let mut harness = PublicHarness::start(
++        vec![
++            create_command_execution_sse_response(
++                realtime_tool_ok_command(),
++                /*workdir*/ None,
++                Some(DELEGATED_SHELL_TOOL_TIMEOUT_MS),
++                "public_shell_1",
++            )?,
++            create_final_assistant_message_sse_response("first check finished")?,
++            create_command_execution_sse_response(
++                realtime_tool_ok_command(),
++                /*workdir*/ None,
++                Some(DELEGATED_SHELL_TOOL_TIMEOUT_MS),
++                "public_shell_2",
++            )?,
++            create_final_assistant_message_sse_response("second check finished")?,
++        ],
++        client_managed,
++    )
++    .await?;
++    let mut turns = Vec::new();
++    for (index, text) in ["first check finished", "second check finished"]
++        .into_iter()
++        .enumerate()
++    {
++        let delegation_id = format!("delegation_{}", index + 1);
++        if index == 0 {
++            harness.delegate(
++                &delegation_id,
++                &[
++                    ("input", "Run the shell check for Friday. "),
++                    ("output", "For Friday? "),
++                    ("input", "Actually Thursday, not Friday."),
++                ],
++            )?;
++        } else {
++            harness.delegate(
++                &delegation_id,
++                &[("input", "Yes, run that same check again.")],
++            )?;
++        }
++        let completed = wait_for_completed_command_execution(&mut harness.mcp).await?;
++        let ThreadItem::CommandExecution {
++            id,
++            status,
++            aggregated_output,
++            ..
++        } = completed.item
++        else {
++            unreachable!("helper returns command execution items");
++        };
++        assert_eq!(
++            (id, status, aggregated_output),
++            (
++                format!("public_shell_{}", index + 1),
++                CommandExecutionStatus::Completed,
++                Some("realtime-tool-ok".to_string()),
++            )
++        );
++        let completed: TurnCompletedNotification = read_notification_with_timeout(
++            &mut harness.mcp,
++            "turn/completed",
++            DELEGATED_SHELL_TURN_TIMEOUT,
++        )
++        .await?;
++        turns.push(completed.turn.id);
++        if !client_managed {
++            let mut spoken = String::new();
++            while spoken.len() < text.len() {
++                let append = harness.socket.next_request().await?;
++                assert_eq!(append["type"], "session.commentary.append");
++                assert_eq!(append["delegation_id"], delegation_id);
++                spoken.push_str(
++                    append["content"]
++                        .as_str()
++                        .context("public append must contain a string")?,
++                );
++            }
++            assert_eq!(spoken, text);
++        }
++    }
++    assert_ne!(
++        turns[0], turns[1],
++        "two distinct native turns, not one host-steered turn"
++    );
++    let requests = responses_requests(&harness.responses).await?;
++    assert_eq!(requests.len(), 4);
++    for request in [&requests[0], &requests[2]] {
++        assert!(response_request_contains_text(
++            request,
++            "Run the shell check for Friday."
++        ));
++        assert!(response_request_contains_text(
++            request,
++            "Actually Thursday, not Friday."
++        ));
++        assert!(response_request_contains_text(
++            request,
++            "<transcript_delta>"
++        ));
++        assert!(
++            !response_request_contains_text(request, "<input>"),
++            "public metadata supplied no task text"
++        );
++    }
++    assert!(response_request_contains_text(
++        &requests[2],
++        "Yes, run that same check again."
++    ));
++    for request in [&requests[1], &requests[3]] {
++        assert!(response_request_contains_text(request, "realtime-tool-ok"));
++    }
++
++    // Explicit speech works even with clientManagedHandoffs. It also acts as an
++    // ordered barrier: no automatic output may precede it in the managed case.
++    let request = harness
++        .mcp
++        .send_thread_realtime_append_speech_request(ThreadRealtimeAppendSpeechParams {
++            thread_id: harness.thread_id.clone(),
++            text: "host-approved result".to_string(),
++        })
++        .await?;
++    let _: ThreadRealtimeAppendSpeechResponse =
++        timeout(DEFAULT_TIMEOUT, harness.mcp.read_response(request)).await??;
++    assert_eq!(
++        harness.socket.next_request().await?,
++        json!({
++            "type": "session.commentary.append", "delegation_id": null, "content": "host-approved result",
++        })
++    );
++    for seconds in [12, 15] {
++        let usage = json!({"type": "session.usage.updated", "usage": {"seconds": seconds}});
++        harness.socket.send.send(Some(usage.clone()))?;
++        assert_eq!(
++            read_public_item(&mut harness.mcp, "session.usage.updated").await?,
++            usage
++        );
++    }
++    harness.stop().await?;
++    harness.shutdown().await
++}
++
++#[test_case(false; "EOF is unconfirmed and retains the last cumulative usage")]
++#[test_case(true; "provider final usage survives subsequent EOF")]
++#[tokio::test]
++async fn public_live_transport_loss_and_final_usage(provider_closed: bool) -> Result<()> {
++    skip_if_no_network!(Ok(()));
++    let mut harness = PublicHarness::start(Vec::new(), /*client_managed*/ false).await?;
++    let usage = json!({"type": "session.usage.updated", "usage": {"seconds": 7.5}});
++    harness.socket.send.send(Some(usage.clone()))?;
++    assert_eq!(
++        read_public_item(&mut harness.mcp, "session.usage.updated").await?,
++        usage
++    );
++    if provider_closed {
++        harness
++            .socket
++            .send
++            .send(Some(public_closed(8.25, "connection_lost")))?;
++        assert_eq!(
++            read_public_item(&mut harness.mcp, "session.closed").await?,
++            public_closed(8.25, "connection_lost")
++        );
++        // The provider record, not the close-handshake outcome, is authoritative.
++    } else {
++        harness.socket.send.send(None)?;
++        let error: ThreadRealtimeErrorNotification =
++            read_notification(&mut harness.mcp, "thread/realtime/error").await?;
++        assert!(error.message.contains("live_session_public"));
++        assert!(
++            error
++                .message
++                .contains("closure and final usage are unconfirmed")
++        );
++    }
++    let _: ThreadRealtimeClosedNotification =
++        read_notification(&mut harness.mcp, "thread/realtime/closed").await?;
++    assert!(
++        harness.socket.received.try_recv().is_err(),
++        "no session.close replay after loss or confirmed closure"
++    );
++    harness.shutdown().await
++}
+diff --git a/codex-rs/codex-api/src/endpoint/realtime_call_public_live_tests.rs b/codex-rs/codex-api/src/endpoint/realtime_call_public_live_tests.rs
+new file mode 100644
+index 0000000..a9b4c89
+--- /dev/null
++++ b/codex-rs/codex-api/src/endpoint/realtime_call_public_live_tests.rs
+@@ -0,0 +1,173 @@
++use super::tests::DummyAuth;
++use super::tests::provider;
++use super::tests::realtime_session_config;
++use super::*;
++use crate::endpoint::realtime_websocket::protocol::RealtimeVoice;
++use codex_client::Response;
++use codex_client::StreamResponse;
++use codex_client::TransportError;
++use codex_protocol::protocol::ConversationTextParams;
++use codex_protocol::protocol::ConversationTextRole;
++use http::StatusCode;
++use pretty_assertions::assert_eq;
++use serde_json::json;
++use std::sync::Mutex;
++
++#[derive(Clone)]
++struct PublicTransport {
++    requests: Arc<Mutex<Vec<Request>>>,
++    result: Result<Value, StatusCode>,
++}
++
++impl HttpTransport for PublicTransport {
++    async fn execute(&self, request: Request) -> Result<Response, TransportError> {
++        self.requests.lock().unwrap().push(request);
++        match &self.result {
++            Ok(body) => Ok(Response {
++                status: StatusCode::CREATED,
++                headers: HeaderMap::new(),
++                body: Bytes::from(serde_json::to_vec(body).unwrap()),
++            }),
++            Err(StatusCode::REQUEST_TIMEOUT) => Err(TransportError::Timeout),
++            Err(status) => Err(TransportError::Http {
++                status: *status,
++                url: None,
++                headers: None,
++                body: None,
++            }),
++        }
++    }
++
++    async fn stream(&self, _request: Request) -> Result<StreamResponse, TransportError> {
++        panic!("call creation is unary");
++    }
++}
++
++fn public_config() -> RealtimeSessionConfig {
++    RealtimeSessionConfig {
++        event_parser: RealtimeEventParser::PublicLive,
++        model: Some("gpt-live-1".to_string()),
++        voice: RealtimeVoice::Marin,
++        initial_items: vec![
++            ConversationTextParams {
++                role: ConversationTextRole::User,
++                text: "Friday".to_string(),
++            },
++            ConversationTextParams {
++                role: ConversationTextRole::Assistant,
++                text: "Which time?".to_string(),
++            },
++        ],
++        ..realtime_session_config("native-thread")
++    }
++}
++
++#[tokio::test]
++async fn public_live_create_uses_json_provider_prefix_and_auth_and_returned_id() {
++    let transport = PublicTransport {
++        requests: Arc::new(Mutex::new(Vec::new())),
++        result: Ok(json!({
++            "session": {"id": "live_session_public"},
++            "transport": {"type": "webrtc", "sdp": "answer"},
++        })),
++    };
++    let mut provider = provider("https://gateway.example/prefix/v1");
++    provider.query_params = Some(std::collections::HashMap::from([(
++        "tenant".to_string(),
++        "test".to_string(),
++    )]));
++    provider
++        .headers
++        .insert("x-project", HeaderValue::from_static("project-test"));
++    let client = RealtimeCallClient::new(transport.clone(), provider, Arc::new(DummyAuth));
++    assert_eq!(
++        client
++            .create_with_session("offer".to_string(), public_config())
++            .await
++            .unwrap(),
++        RealtimeCallResponse {
++            call_id: "live_session_public".to_string(),
++            sdp: "answer".to_string(),
++        }
++    );
++    let requests = transport.requests.lock().unwrap();
++    assert_eq!(requests.len(), 1);
++    let request = &requests[0];
++    assert_eq!(request.method, Method::POST);
++    assert_eq!(
++        request.url,
++        "https://gateway.example/prefix/v1/live/sessions?tenant=test"
++    );
++    assert_eq!(request.headers["authorization"], "Bearer test-token");
++    assert_eq!(request.headers["x-project"], "project-test");
++    assert!(request.headers.get("openai-alpha").is_none());
++    let Some(RequestBody::Json(body)) = &request.body else {
++        panic!("expected JSON, not multipart")
++    };
++    assert_eq!(
++        body,
++        &json!({
++            "session": {
++                "model": "gpt-live-1", "instructions": "hi",
++                "audio": {"output": {"voice": "marin"}}, "delegation": {"type": "client"},
++                "input": [
++                    {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "Friday"}]},
++                    {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "Which time?"}]},
++                ],
++            },
++            "transport": {"type": "webrtc", "sdp": "offer"},
++        })
++    );
++}
++
++#[tokio::test]
++async fn public_live_creation_never_retries_paid_or_rejected_requests() {
++    for status in [
++        StatusCode::REQUEST_TIMEOUT,
++        StatusCode::FORBIDDEN,
++        StatusCode::NOT_FOUND,
++        StatusCode::TOO_MANY_REQUESTS,
++        StatusCode::INTERNAL_SERVER_ERROR,
++    ] {
++        let transport = PublicTransport {
++            requests: Arc::new(Mutex::new(Vec::new())),
++            result: Err(status),
++        };
++        let mut provider = provider("https://gateway.example/v1");
++        provider.retry.max_attempts = 4;
++        provider.retry.retry_429 = true;
++        provider.retry.retry_5xx = true;
++        provider.retry.retry_transport = true;
++        let client = RealtimeCallClient::new(transport.clone(), provider, Arc::new(DummyAuth));
++        assert!(
++            client
++                .create_with_session("offer".to_string(), public_config())
++                .await
++                .is_err()
++        );
++        assert_eq!(
++            transport.requests.lock().unwrap().len(),
++            1,
++            "status {status}"
++        );
++    }
++}
++
++#[tokio::test]
++async fn public_live_invalid_created_response_is_explicitly_ambiguous_and_not_retried() {
++    let transport = PublicTransport {
++        requests: Arc::new(Mutex::new(Vec::new())),
++        result: Ok(json!({"session": {"id": "live_session_public"}})),
++    };
++    let client = RealtimeCallClient::new(
++        transport.clone(),
++        provider("https://gateway.example/v1"),
++        Arc::new(DummyAuth),
++    );
++    let error = client
++        .create_with_session("offer".to_string(), public_config())
++        .await
++        .unwrap_err();
++    assert!(error.to_string().contains("outcome unconfirmed"));
++    assert_eq!(transport.requests.lock().unwrap().len(), 1);
++}
+diff --git a/codex-rs/codex-api/src/endpoint/realtime_websocket/public_live.rs b/codex-rs/codex-api/src/endpoint/realtime_websocket/public_live.rs
+new file mode 100644
+index 0000000..fc61106
+--- /dev/null
++++ b/codex-rs/codex-api/src/endpoint/realtime_websocket/public_live.rs
+@@ -0,0 +1,90 @@
++//! Public GPT-Live codec only. Transcript collection, routing and shutdown remain native owners.
++use super::protocol::RealtimeContextAppendChannel;
++use super::protocol::RealtimeOutboundMessage;
++use super::protocol_common::parse_error_event;
++use super::protocol_common::parse_realtime_payload;
++use super::protocol_common::parse_session_updated_event;
++use codex_protocol::protocol::RealtimeAudioFrame;
++use codex_protocol::protocol::RealtimeEvent;
++use codex_protocol::protocol::RealtimeHandoffRequested;
++use codex_protocol::protocol::RealtimeTranscriptDelta;
++
++pub(super) fn context_append(
++    delegation_id: Option<String>,
++    content: String,
++    channel: Option<RealtimeContextAppendChannel>,
++) -> RealtimeOutboundMessage {
++    RealtimeOutboundMessage::PublicAppend {
++        event_type: match channel {
++            Some(RealtimeContextAppendChannel::Commentary) | None => "session.thinking.append",
++            Some(RealtimeContextAppendChannel::Speakable) => "session.commentary.append",
++        },
++        delegation_id,
++        content,
++    }
++}
++
++pub(super) fn parse_event(payload: &str) -> Option<RealtimeEvent> {
++    let (parsed, event_type) = parse_realtime_payload(payload, "public Live")?;
++    match event_type.as_str() {
++        "session.started" | "session.updated" => parse_session_updated_event(&parsed),
++        "session.input_transcript.delta" | "session.output_transcript.delta" => {
++            // These are fragments, not completed turns. The reader preserves the raw
++            // timing on itemAdded and feeds these deltas to its bounded transcript owner.
++            let delta = RealtimeTranscriptDelta {
++                delta: parsed["delta"].as_str()?.to_string(),
++            };
++            if event_type == "session.input_transcript.delta" {
++                Some(RealtimeEvent::InputTranscriptDelta(delta))
++            } else {
++                Some(RealtimeEvent::OutputTranscriptDelta(delta))
++            }
++        }
++        "session.output_audio.delta" => Some(RealtimeEvent::AudioOut(RealtimeAudioFrame {
++            data: parsed["delta"].as_str()?.to_string(),
++            sample_rate: 24_000,
++            num_channels: 1,
++            samples_per_channel: None,
++            item_id: None,
++        })),
++        "session.delegation.created" => {
++            let delegation = &parsed["delegation"];
++            if delegation["type"].as_str() != Some("delegation")
++                || delegation["target"].as_str() != Some("client")
++            {
++                return None;
++            }
++            let id = delegation["id"].as_str().filter(|id| !id.is_empty())?;
++            Some(RealtimeEvent::HandoffRequested(RealtimeHandoffRequested {
++                handoff_id: id.to_string(),
++                item_id: id.to_string(),
++                // The public event contains NO task text. Never treat metadata as
++                // user instructions; the existing reader supplies the transcript.
++                input_transcript: String::new(),
++                active_transcript: Vec::new(),
++            }))
++        }
++        "session.usage.updated" | "session.closed" => {
++            // Public seconds are cumulative, not private token/audio counters. Preserve
++            // the provider record verbatim on the existing generic notification seam.
++            let valid_usage = parsed["usage"]["seconds"]
++                .as_f64()
++                .is_some_and(|seconds| seconds.is_finite() && seconds >= 0.0);
++            let valid_close = event_type != "session.closed"
++                || (parsed["reason"]
++                    .as_str()
++                    .is_some_and(|reason| !reason.is_empty())
++                    && parsed["session"]["id"]
++                        .as_str()
++                        .is_some_and(|id| !id.is_empty()));
++            if !valid_usage || !valid_close {
++                return Some(RealtimeEvent::Error(format!(
++                    "invalid public Live {event_type}; final usage and closure are unconfirmed"
++                )));
++            }
++            Some(RealtimeEvent::ConversationItemAdded(parsed))
++        }
++        "error" => parse_error_event(&parsed),
++        _ => None,
++    }
++}
+diff --git a/codex-rs/codex-api/src/endpoint/realtime_websocket/public_live_tests.rs b/codex-rs/codex-api/src/endpoint/realtime_websocket/public_live_tests.rs
+new file mode 100644
+index 0000000..cbcffb2
+--- /dev/null
++++ b/codex-rs/codex-api/src/endpoint/realtime_websocket/public_live_tests.rs
+@@ -0,0 +1,273 @@
++use super::*;
++use crate::provider::RetryConfig;
++use codex_protocol::protocol::RealtimeHandoffRequested;
++use pretty_assertions::assert_eq;
++use serde_json::Value;
++use serde_json::json;
++use std::time::Duration;
++use tokio::net::TcpListener;
++use tokio::time::timeout;
++use tokio_tungstenite::accept_hdr_async;
++use tokio_tungstenite::tungstenite::handshake::server::Request;
++use tokio_tungstenite::tungstenite::handshake::server::Response;
++
++const LIMIT: Duration = Duration::from_secs(5);
++
++#[tokio::test]
++async fn public_live_attach_collects_fragments_and_sends_plain_string_results() {
++    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
++    let address = listener.local_addr().unwrap();
++    let output = "é".repeat(650);
++    let expected_output = output.clone();
++    let server = tokio::spawn(async move {
++        let (tcp, _) = listener.accept().await.unwrap();
++        let mut socket = accept_hdr_async(tcp, |request: &Request, response: Response| {
++            assert_eq!(
++                request.uri().to_string(),
++                "/gateway/v1/live/sessions/live_session_a%2Fb/attach?tenant=test"
++            );
++            assert_eq!(request.headers()["authorization"], "Bearer public-test-key");
++            assert_eq!(request.headers()["x-project"], "project-test");
++            Ok(response)
++        })
++        .await
++        .unwrap();
++        for event in [
++            json!({"type":"session.input_transcript.delta", "delta":"Check Friday ", "start_ms":0, "end_ms":100}),
++            json!({"type":"session.output_transcript.delta", "delta":"Which time?", "start_ms":50, "end_ms":150}),
++            json!({"type":"session.input_transcript.delta", "delta":"at two. Actually Thursday, not Friday.", "start_ms":101, "end_ms":300}),
++            json!({"type":"session.delegation.created", "offset_ms":301, "delegation":{"type":"delegation", "target":"client", "id":"item_first"}}),
++        ] {
++            socket
++                .send(Message::Text(event.to_string().into()))
++                .await
++                .unwrap();
++        }
++        // A public attach sends no startup/update/admission message. The first client
++        // frame is real backend progress, followed by the speakable result chunks.
++        let Message::Text(text) = socket.next().await.unwrap().unwrap() else {
++            panic!("expected progress")
++        };
++        assert_eq!(
++            serde_json::from_str::<Value>(&text).unwrap(),
++            json!({
++                "type":"session.thinking.append", "delegation_id":"item_first", "content":"Checking availability",
++            })
++        );
++        let mut received = String::new();
++        while received.len() < expected_output.len() {
++            let Message::Text(text) = socket.next().await.unwrap().unwrap() else {
++                panic!("expected result")
++            };
++            let value: Value = serde_json::from_str(&text).unwrap();
++            let content = value["content"].as_str().unwrap();
++            assert!(content.len() <= 500);
++            assert_eq!(
++                value,
++                json!({"type":"session.commentary.append", "delegation_id":"item_first", "content":content})
++            );
++            received.push_str(content);
++        }
++        assert_eq!(received, expected_output);
++        for event in [
++            json!({"type":"session.input_transcript.delta", "delta":"Yes, same time.", "start_ms":400, "end_ms":500}),
++            json!({"type":"session.delegation.created", "offset_ms":501, "delegation":{"type":"delegation", "target":"client", "id":"item_second"}}),
++            json!({"type":"session.usage.updated", "usage":{"seconds":12}}),
++            json!({"type":"session.usage.updated", "usage":{"seconds":15}}),
++            json!({"type":"session.closed", "reason":"connection_lost", "session":{"id":"live_session_a/b"}, "usage":{"seconds":15.75}}),
++        ] {
++            socket
++                .send(Message::Text(event.to_string().into()))
++                .await
++                .unwrap();
++        }
++        let _ = socket.close(None).await;
++    });
++    let provider = Provider {
++        name: "public test".to_string(),
++        base_url: format!("http://{address}/gateway/v1"),
++        query_params: Some(HashMap::from([("tenant".to_string(), "test".to_string())])),
++        headers: HeaderMap::from_iter([(
++            "x-project".parse().unwrap(),
++            "project-test".parse().unwrap(),
++        )]),
++        retry: RetryConfig {
++            max_attempts: 0,
++            base_delay: Duration::ZERO,
++            retry_429: false,
++            retry_5xx: false,
++            retry_transport: false,
++        },
++        stream_idle_timeout: LIMIT,
++    };
++    let connection = RealtimeWebsocketClient::new(provider)
++        .connect_webrtc_sideband(
++            RealtimeSessionConfig {
++                instructions: "test".to_string(),
++                initial_items: Vec::new(),
++                delegation_ack_filler: None,
++                model: Some("gpt-live-1".to_string()),
++                session_id: None,
++                event_parser: RealtimeEventParser::PublicLive,
++                session_mode: RealtimeSessionMode::Conversational,
++                output_modality: RealtimeOutputModality::Audio,
++                voice: RealtimeVoice::Marin,
++            },
++            "live_session_a/b",
++            HeaderMap::from_iter([(
++                "authorization".parse().unwrap(),
++                "Bearer public-test-key".parse().unwrap(),
++            )]),
++            HeaderMap::new(),
++            RealtimeTranscriptState::default(),
++        )
++        .await
++        .unwrap();
++    let mut raw_timing = Vec::new();
++    let handoff = loop {
++        match timeout(LIMIT, connection.next_event())
++            .await
++            .unwrap()
++            .unwrap()
++            .unwrap()
++        {
++            RealtimeEvent::HandoffRequested(handoff) => break handoff,
++            RealtimeEvent::ConversationItemAdded(item) => raw_timing.push(item),
++            RealtimeEvent::InputTranscriptDone(_) | RealtimeEvent::OutputTranscriptDone(_) => {
++                panic!("fragments must not become completed turns")
++            }
++            _ => {}
++        }
++    };
++    assert_eq!(
++        handoff,
++        RealtimeHandoffRequested {
++            handoff_id: "item_first".to_string(),
++            item_id: "item_first".to_string(),
++            input_transcript: String::new(),
++            active_transcript: vec![
++                RealtimeTranscriptEntry {
++                    role: "user".to_string(),
++                    text: "Check Friday ".to_string()
++                },
++                RealtimeTranscriptEntry {
++                    role: "assistant".to_string(),
++                    text: "Which time?".to_string()
++                },
++                RealtimeTranscriptEntry {
++                    role: "user".to_string(),
++                    text: "at two. Actually Thursday, not Friday.".to_string()
++                },
++            ],
++        }
++    );
++    assert_eq!(raw_timing[2]["end_ms"], 300);
++    connection
++        .writer()
++        .send_conversation_function_call_output(
++            "item_first".to_string(),
++            "Checking availability".to_string(),
++        )
++        .await
++        .unwrap();
++    connection
++        .writer()
++        .with_context_append_channel(RealtimeContextAppendChannel::Speakable)
++        .send_conversation_function_call_output("item_first".to_string(), output)
++        .await
++        .unwrap();
++    let mut usage = Vec::new();
++    let mut second = None;
++    loop {
++        let event = timeout(LIMIT, connection.next_event())
++            .await
++            .unwrap()
++            .unwrap()
++            .unwrap();
++        match event {
++            RealtimeEvent::HandoffRequested(handoff) => second = Some(handoff),
++            RealtimeEvent::ConversationItemAdded(item)
++                if item["type"] == "session.usage.updated" =>
++            {
++                usage.push(item["usage"]["seconds"].clone())
++            }
++            RealtimeEvent::ConversationItemAdded(item) if item["type"] == "session.closed" => {
++                usage.push(item["usage"]["seconds"].clone());
++                break;
++            }
++            _ => {}
++        }
++    }
++    assert_eq!(usage, vec![json!(12), json!(15), json!(15.75)]);
++    assert_eq!(
++        second.unwrap().active_transcript,
++        vec![RealtimeTranscriptEntry {
++            role: "user".to_string(),
++            text: "Yes, same time.".to_string(),
++        }]
++    );
++    timeout(LIMIT, server).await.unwrap().unwrap();
++}
++
++#[tokio::test]
++async fn public_live_transcript_bound_retains_latest_correction() {
++    let state = RealtimeTranscriptState::default();
++    let (_tx, rx) = async_channel::unbounded();
++    let events = RealtimeWebsocketEvents {
++        rx_message: rx,
++        pending_events: Arc::new(Mutex::new(VecDeque::new())),
++        transcript_state: state,
++        event_parser: RealtimeEventParser::PublicLive,
++        is_closed: Arc::new(AtomicBool::new(false)),
++    };
++    let mut delta = RealtimeEvent::InputTranscriptDelta(RealtimeTranscriptDelta {
++        delta: format!("{} Thursday, not Friday.", "é".repeat(10_000)),
++    });
++    events.update_active_transcript(&mut delta).await;
++    let mut handoff = parse_realtime_event(
++        &json!({
++            "type":"session.delegation.created", "offset_ms":100,
++            "delegation":{"type":"delegation", "target":"client", "id":"item_bound"},
++        })
++        .to_string(),
++        RealtimeEventParser::PublicLive,
++    )
++    .unwrap();
++    events.update_active_transcript(&mut handoff).await;
++    let RealtimeEvent::HandoffRequested(handoff) = handoff else {
++        panic!("expected native handoff")
++    };
++    assert!(
++        handoff
++            .active_transcript
++            .iter()
++            .map(|entry| entry.text.len())
++            .sum::<usize>()
++            <= MAX_ACTIVE_TRANSCRIPT_BYTES
++    );
++    assert!(
++        handoff
++            .active_transcript
++            .last()
++            .unwrap()
++            .text
++            .ends_with("Thursday, not Friday.")
++    );
++    assert!(events.take_transcript_tail().await.is_empty());
++}
++
++#[test]
++fn public_live_private_usage_cannot_confirm_closure() {
++    let event = parse_realtime_event(
++        &json!({
++            "type": "session.closed", "reason": "close_requested",
++            "session": {"id": "live_session_public"},
++            "usage": {"input_tokens": 42, "output_tokens": 9},
++        })
++        .to_string(),
++        RealtimeEventParser::PublicLive,
++    );
++    assert!(
++        matches!(event, Some(RealtimeEvent::Error(message)) if message.contains("unconfirmed"))
++    );
++}
+diff --git a/codex-rs/core/src/context/realtime_delegation_tests.rs b/codex-rs/core/src/context/realtime_delegation_tests.rs
+new file mode 100644
+index 0000000..e95c6f2
+--- /dev/null
++++ b/codex-rs/core/src/context/realtime_delegation_tests.rs
+@@ -0,0 +1,21 @@
++use super::*;
++
++#[test]
++fn public_live_delegation_bounds_context_without_inventing_task_text() {
++    let transcript = format!(
++        "{}\nuser: correction: & <Thursday>",
++        "old transcript ".repeat(1000)
++    );
++    let body =
++        RealtimeDelegation::new("", Some(&transcript), RealtimeDelegationSource::Handoff).body();
++    assert!(!body.contains("<input>"));
++    assert!(body.ends_with("user: correction: &amp; &lt;Thursday&gt;</transcript_delta>\n"));
++    let content = body
++        .split_once("<transcript_delta>")
++        .unwrap()
++        .1
++        .split_once("</transcript_delta>")
++        .unwrap()
++        .0;
++    assert!(content.len() <= MAX_REALTIME_DELEGATION_FIELD_BYTES);
++}

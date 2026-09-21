@@ -1,4 +1,4 @@
-ARG HOSTED_RUNNER_BASE_IMAGE=ghcr.io/cobuildwithus/murph-cloudflare-runner-base:node24.14.1-codex0.153.4
+ARG HOSTED_RUNNER_BASE_IMAGE=ghcr.io/cobuildwithus/murph-cloudflare-runner-base:node24.14.1-codex0.153.4-live1
 
 FROM ${HOSTED_RUNNER_BASE_IMAGE} AS runner-app-permissions
 
@@ -20,6 +20,7 @@ USER root
 RUN native_codex="$(readlink -f "$(command -v codex)")" \
   && native_root="$(dirname "$(dirname "${native_codex}")")" \
   && test -x "${native_root}/bin/codex" \
+  && test -x "${native_root}/bin/codex-code-mode-host" \
   && test -x "${native_root}/codex-resources/bwrap" \
   && mkdir -p /opt/murph-codex-hot/usr/local/lib/murph-codex \
     /opt/murph-codex-hot/usr/local/bin \

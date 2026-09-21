@@ -2,6 +2,7 @@ import { createPostgresTestOwner, mockPostgresOwnerCommand, forbiddenLegacyRunti
 import { execFile } from "node:child_process";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { createRequire } from "node:module";
+import { realpathSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -87,6 +88,9 @@ describe("pinned Codex OpenAI egress conformance", () => {
       .toBe(expectedVersion);
     expect(installedPackage.version).toBe(expectedVersion);
     expect(baseDockerfile).toContain(`ARG CODEX_CLI_VERSION=${expectedVersion}`);
+    expect(baseDockerfile).toContain(
+      `ARG CODEX_UPSTREAM_REVISION=${PINNED_CODEX_OPENAI_EGRESS_INVENTORY.upstreamCommit}`,
+    );
     expect(workspace).toContain(`'@openai/codex@${expectedVersion}||`);
     expect(PINNED_CODEX_OPENAI_EGRESS_INVENTORY.upstreamTag)
       .toBe(`rust-v${expectedVersion}`);
@@ -517,10 +521,12 @@ function resolveVitestTempRoot(): string {
 }
 
 function resolveInstalledCodexBinary(): string {
+  const explicitBinary = process.env.MURPH_TEST_CODEX_COMMAND?.trim();
+  if (explicitBinary) return explicitBinary;
   const target = resolveCodexTarget();
   const platformPackage = `@openai/codex-${target.packageSuffix}`;
   const requireFromCodex = createRequire(
-    path.join(repoRoot, "packages/assistant-engine/node_modules/@openai/codex/package.json"),
+    realpathSync(path.join(repoRoot, "packages/assistant-engine/node_modules/@openai/codex/package.json")),
   );
   const platformPackageJson = requireFromCodex.resolve(`${platformPackage}/package.json`);
   return path.join(
@@ -533,7 +539,7 @@ function resolveInstalledCodexBinary(): string {
 }
 
 function resolveCodexCommand(): string {
-  return path.join(
+  return process.env.MURPH_TEST_CODEX_COMMAND?.trim() || path.join(
     repoRoot,
     "packages/assistant-engine/node_modules/.bin",
     process.platform === "win32" ? "codex.cmd" : "codex",

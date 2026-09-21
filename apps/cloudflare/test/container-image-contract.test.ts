@@ -452,7 +452,7 @@ describe("hosted runner container image contract", () => {
       "utf8",
     );
 
-    expect(baseDockerfile).toContain("ARG CODEX_CLI_VERSION=0.153.4");
+    expect(baseDockerfile).toContain("ARG CODEX_UPSTREAM_REVISION=3d2ee51ca2d5db578f328aa75e20aa22c0197c9a");
     expect(baseDockerfile).toContain("ARG NODE_VERSION=24.14.1");
     expect(baseDockerfile).toContain(
       "ARG NODE_IMAGE_DIGEST=sha256:b506e7321f176aae77317f99d67a24b272c1f09f1d10f1761f2773447d8da26c",
@@ -493,21 +493,17 @@ describe("hosted runner container image contract", () => {
     expect(baseDockerfile).not.toContain("worker-secrets.json");
     expect(baseDockerfile).not.toContain("runner-bundle-builder");
     expect(baseDockerfile).not.toContain("pnpm install --frozen-lockfile");
-    expect(baseDockerfile).toContain(
-      'npm install --global --omit=dev --no-audit --no-fund --ignore-scripts "@openai/codex@${CODEX_CLI_VERSION}"',
-    );
-    expect(baseDockerfile).toContain(
-      'native_codex="$(find "$(npm root -g)/@openai" -path \'*/vendor/*/bin/codex\' -type f -perm /111 -print -quit)"',
-    );
-    expect(baseDockerfile).toContain(
-      'native_bwrap="$(find "$(npm root -g)/@openai" -path \'*/vendor/*/codex-resources/bwrap\' -type f -perm /111 -print -quit)"',
-    );
-    expect(baseDockerfile).toContain('test -n "${native_bwrap}"');
-    expect(baseDockerfile).toContain(
-      '"${native_bwrap}" --help | grep -Fq -- \'--argv0\'',
-    );
-    expect(baseDockerfile).toContain('ln -sfn "${native_codex}" /usr/local/bin/codex');
-    expect(baseDockerfile).toContain("npm cache clean --force");
+    expect(baseDockerfile).toContain("COPY patches/codex-public-live.patch");
+    expect(baseDockerfile).toContain("git apply --check /tmp/codex-public-live.patch");
+    expect(baseDockerfile).toContain("export CODEX_BWRAP_SHA256=");
+    expect(baseDockerfile).toContain("ARG CODEX_CLI_VERSION=0.153.4");
+    expect(baseDockerfile).toContain("COPY --from=codex-package /opt/codex/ /opt/codex/");
+    expect(baseDockerfile).toContain("cargo build --locked --release --target x86_64-unknown-linux-gnu --bin codex");
+    expect(baseDockerfile).toContain("sha256sum /opt/codex/codex-resources/bwrap");
+    expect(baseDockerfile).toContain("COPY --from=codex-builder /opt/codex/ /usr/local/lib/murph-codex/");
+    expect(baseDockerfile).toContain("test -x /usr/local/lib/murph-codex/bin/codex-code-mode-host");
+    expect(baseDockerfile).toContain("ln -sfn /usr/local/lib/murph-codex/bin/codex /usr/local/bin/codex");
+    expect(runnerBasePublishWorkflow).toContain('"patches/codex-public-live.patch"');
     expect(baseDockerfile).toContain("PATH=/app/node_modules/.bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin");
     expect(baseDockerfile).not.toContain("/etc/profile.d/murph-runner-path.sh");
     expect(baseDockerfile).not.toContain("export PATH=");

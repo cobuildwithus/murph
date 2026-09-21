@@ -2315,10 +2315,34 @@ pnpm --dir apps/cloudflare runner:docker:base
 ```
 
 That image is prepared in the local Docker cache under the stable GHCR tag
-`ghcr.io/cobuildwithus/murph-cloudflare-runner-base:node24.14.1-codex0.153.4`,
+`ghcr.io/cobuildwithus/murph-cloudflare-runner-base:node24.14.1-codex0.153.4-live1`,
 which is also the final app-layer Dockerfile default. Using the pullable GHCR
 name avoids BuildKit treating the prepared base as a Docker Hub `library/*`
 image during local Wrangler container builds.
+The base Dockerfile builds the CLI from the checksum-pinned Codex 0.153.4 source
+with `patches/codex-public-live.patch`. It keeps the same release's bundled
+Code Mode host and sandbox resources. The patch adds public API-key Live
+compatibility and owned-session shutdown; it does not change the app-server
+schema or require a separate package registry or release workflow.
+Both the Dockerfile and patch enter the source fingerprint, so a patch-only
+change cannot reuse an older published base. The package records its upstream
+revision and patch digest in `/usr/local/lib/murph-codex/murph-source-revision`.
+The permission-sandbox CI lane extracts this package from the built image and
+runs synthetic native voice and existing provider conformance checks against
+that exact binary before its final-image sandbox proof.
+
+To update the patch, retain the pinned release as its base, run the affected
+upstream tests, and run `pnpm --dir apps/cloudflare verify:codex-upstream-source`
+to verify applicability. Update the source revision and archive checksum
+together when upgrading Codex, keep the npm helper version aligned, and rerun
+the exact-image compatibility and sandbox lane. Remove the patch and build
+stage once a verified upstream release provides this behavior. Cold native
+builds take longer. A persistent trusted BuildKit cache lets application-only
+changes reuse the compiled layer while preserving production's source-build
+rule. The protected deployment workflow must provide that cache before this
+patch is considered operationally ready; its current fresh-runner forced
+build would otherwise recompile Codex for each deployment.
+
 Codex CLI 0.153.4 supplies the native Astra entry; the image no longer
 synthesizes Astra from Sol. The existing standard catalog and separately
 authorized Astra catalog retain their model filtering, mixed Code Mode, Flex,
@@ -2343,7 +2367,7 @@ stage, then copied once into a fresh final base stage. Keep that normalized-copy
 boundary instead of applying a recursive permission change after the final
 bundle copy: a post-copy `chmod` creates another application-content layer while
 the runtime still needs only one immutable `/app` tree.
-`runner:docker:base` first reuses a GHCR-published base image when its source-fingerprint label matches the checked-out `Dockerfile.cloudflare-hosted-runner-base`; otherwise it rebuilds locally. Pass `-- --force` to rebuild from the checked-out Dockerfile without adopting a GHCR base image; deploy-capable production paths use that forced path so GHCR stays a CI/local cache instead of production image authority. Pull-request hosted-local E2E does not authenticate to GHCR before running PR-controlled code, so the GHCR runner base package must be public for fast anonymous PR cache pulls. The protected-main `.github/workflows/cloudflare-runner-base-image.yml` workflow publishes the base image with `GITHUB_TOKEN`.
+`runner:docker:base` first reuses a GHCR-published base image when its source-fingerprint label matches the checked-out `Dockerfile.cloudflare-hosted-runner-base` and native patch; otherwise it rebuilds locally. Pass `-- --force` to rebuild from the checked-out Dockerfile without adopting a GHCR base image; deploy-capable production paths use that forced path so GHCR stays a CI/local cache instead of production image authority. Pull-request hosted-local E2E does not authenticate to GHCR before running PR-controlled code, so the GHCR runner base package must be public for fast anonymous PR cache pulls. The protected-main `.github/workflows/cloudflare-runner-base-image.yml` workflow publishes the base image with `GITHUB_TOKEN`.
 The base image build runs `python3 --version`, `python --version`, `jq --version`, `rg --version`, `zstd --version`, `codex --version`, `codex app-server --help`, and `codex doctor --help` under the runner user, and the Docker smoke repeats the Python and ripgrep checks inside the final image before deploy while also proving `file`, `pdfinfo`, `pdftotext`, `pdftoppm`, and `qpdf` against the restored smoke PDF fixture.
 Run `pnpm --dir apps/cloudflare test:e2e:runner-python:local` when you specifically want the actual final hosted-runner app image `PATH` proof for Python. It assembles the runner bundle, builds the same `linux/amd64` app-layer Dockerfile used by the Cloudflare container, starts the image with its normal entrypoint, waits for `/health`, then checks Python as the non-root `runner` user from immutable `/app` with the baked runner env. Run `pnpm --dir apps/cloudflare runner:docker:smoke` when you want the broader final-image native smoke. In addition to the existing command surface, that smoke restores a canonical synthetic memory document and invokes bundled `vault-cli memory show --format json` through Codex App Server from the restored vault working directory under the member-workspace permission profile. The disposable, networkless smoke relaxes the outer Docker seccomp profile so Codex can create its inner user namespace, matching the namespace capability available in Cloudflare's dedicated Linux VM. The nested Codex seccomp proof requires a native `linux/amd64` Docker host; AMD64 emulation on an ARM64 Docker daemon does not support that inner seccomp layer.
 
