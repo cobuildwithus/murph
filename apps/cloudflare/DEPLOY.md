@@ -2322,8 +2322,9 @@ image during local Wrangler container builds.
 The base Dockerfile builds the CLI from the checksum-pinned Codex 0.153.4 source
 with `patches/codex-public-live.patch`. It keeps the same release's bundled
 Code Mode host and sandbox resources. The patch adds public API-key Live
-compatibility and owned-session shutdown; it does not change the app-server
-schema or require a separate package registry or release workflow.
+compatibility, owned-session shutdown, and opt-in app-server input ownership.
+Existing callers retain native routing by default. No separate package registry
+or release workflow is required.
 Both the Dockerfile and patch enter the source fingerprint, so a patch-only
 change cannot reuse an older published base. The package records its upstream
 revision and patch digest in `/usr/local/lib/murph-codex/murph-source-revision`.

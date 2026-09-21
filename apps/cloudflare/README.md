@@ -966,6 +966,10 @@ release archive, Rust builder, and matching npm helper package, applies
 host, shell resources, and sandbox helper remain from the same release. The image
 records the upstream revision and patch SHA-256 in `murph-source-revision`.
 
+Public WebRTC sessions restrict browser commands to mute, unmute, and close.
+Instructions and delegated results stay on the native trusted connection; the
+browser receives only call state, transcripts, usage, and bounded protocol notices.
+
 `runner:docker:base` fingerprints both the Dockerfile and patch. The protected
 deployment workflow still forces a source build; its shared Docker layer cache
 can reuse unchanged compilation inputs. Application-only edits therefore do not
@@ -993,10 +997,9 @@ The native runner image has a default Luna/Terra/Sol catalog and an expanded
 the latter only from Web's explicit Max/OpenAI workspace authorization. Missing
 authority, Edge, group, and Venice runtimes retain the default catalog and its
 existing delegation choices. The
-pinned Linux Codex 0.151.0 catalog omits Astra, so the image adds a compatibility
-entry using Sol's shared Responses capabilities when Astra is absent. Murph
-supplies its own base instructions for each turn. Existing native Astra metadata
-is preserved; remove the compatibility branch when the Linux catalog includes it.
+pinned Codex 0.153.4 release supplies Astra natively; the image validates its
+catalog instead of synthesizing an entry from Sol. Murph supplies its own base
+instructions for each turn.
 The Astra context window remains at most 272,000 tokens, verified while building the
 image. This bound lets allowance accounting price cumulative Codex turn and
 subagent usage without mistaking multiple requests for one long-context request.

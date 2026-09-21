@@ -58,7 +58,12 @@ it.each(['native', 'host'] as const)('native V3 voice creates successive tool-ba
     }
     if (publicLive) {
       expect(JSON.parse(body)).toMatchObject({
-        session: { model: 'gpt-live-1' }, transport: { type: 'webrtc', sdp: 'v=0\r\ns=synthetic-offer\r\n' },
+        session: {
+          model: 'gpt-live-1',
+          client: { data_channel: {
+            allowed_client_events: ['session.input_audio.mute', 'session.input_audio.unmute', 'session.close'],
+          } },
+        }, transport: { type: 'webrtc', sdp: 'v=0\r\ns=synthetic-offer\r\n' },
       })
       response.writeHead(201, { 'content-type': 'application/json' }).end(JSON.stringify({
         session: { id: 'rtc_synthetic' }, transport: { type: 'webrtc', sdp: 'v=0\r\ns=synthetic-answer\r\n' },

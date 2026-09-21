@@ -5130,7 +5130,7 @@ index 0000000..811e8b6
 +    harness.shutdown().await
 +}
 diff --git a/codex-rs/codex-api/src/endpoint/realtime_call.rs b/codex-rs/codex-api/src/endpoint/realtime_call.rs
-index b43e02d..40b10d0 100644
+index b43e02d..a6b7864 100644
 --- a/codex-rs/codex-api/src/endpoint/realtime_call.rs
 +++ b/codex-rs/codex-api/src/endpoint/realtime_call.rs
 @@ -32,8 +32,8 @@ pub struct RealtimeCallClient<T: HttpTransport> {
@@ -5160,7 +5160,7 @@ index b43e02d..40b10d0 100644
              RealtimeEventParser::FramelessBidi => "live",
              RealtimeEventParser::V1 | RealtimeEventParser::RealtimeV2 => Self::path(),
          }
-@@ -138,11 +142,46 @@ impl<T: HttpTransport> RealtimeCallClient<T> {
+@@ -138,11 +142,57 @@ impl<T: HttpTransport> RealtimeCallClient<T> {
          // after joining; Frameless sidebands attach to the session that is already running.
          validate_avas_session_config(&session_config)?;
          let event_parser = session_config.event_parser;
@@ -5177,6 +5177,17 @@ index b43e02d..40b10d0 100644
              session.remove("id");
          }
 +        if event_parser == RealtimeEventParser::PublicLive {
++            // An untrusted browser owns media and call controls. Instructions and
++            // delegated results stay on Codex's trusted sideband connection.
++            session["client"] = serde_json::json!({"data_channel": {
++                "allowed_client_events": ["session.input_audio.mute", "session.input_audio.unmute", "session.close"],
++                "allowed_server_events": [
++                    {"type": "session.started"}, {"type": "session.closed"},
++                    {"type": "session.input_audio.muted"}, {"type": "session.input_audio.unmuted"},
++                    {"type": "session.input_transcript.delta"}, {"type": "session.output_transcript.delta"},
++                    {"type": "session.usage.updated"}, {"type": "error"}, {"type": "info"},
++                ],
++            }});
 +            let response = self
 +                .session
 +                .execute_once(
@@ -5207,7 +5218,7 @@ index b43e02d..40b10d0 100644
          // TODO(aibrahim): Align the SIWC route with the API multipart shape and remove this branch.
          if self.uses_backend_request_shape() {
              let body = to_value(BackendRealtimeCallRequest {
-@@ -357,7 +396,7 @@ mod tests {
+@@ -357,7 +407,7 @@ mod tests {
      }
 
      #[derive(Clone, Default)]
@@ -5216,7 +5227,7 @@ index b43e02d..40b10d0 100644
 
      impl AuthProvider for DummyAuth {
          fn add_auth_headers(&self, headers: &mut HeaderMap) {
-@@ -368,7 +407,7 @@ mod tests {
+@@ -368,7 +418,7 @@ mod tests {
          }
      }
 
@@ -5225,7 +5236,7 @@ index b43e02d..40b10d0 100644
          Provider {
              name: "test".to_string(),
              base_url: base_url.to_string(),
-@@ -385,7 +424,7 @@ mod tests {
+@@ -385,7 +435,7 @@ mod tests {
          }
      }
 
@@ -5234,7 +5245,7 @@ index b43e02d..40b10d0 100644
          RealtimeSessionConfig {
              instructions: "hi".to_string(),
              initial_items: Vec::new(),
-@@ -794,3 +833,7 @@ mod tests {
+@@ -794,3 +844,7 @@ mod tests {
          assert_eq!(call_id, "019eb97d-8e9a-7ff3-94b0-ea019babd5d7");
      }
  }
@@ -5244,10 +5255,10 @@ index b43e02d..40b10d0 100644
 +mod public_live_tests;
 diff --git a/codex-rs/codex-api/src/endpoint/realtime_call_public_live_tests.rs b/codex-rs/codex-api/src/endpoint/realtime_call_public_live_tests.rs
 new file mode 100644
-index 0000000..a9b4c89
+index 0000000..0aa3fb7
 --- /dev/null
 +++ b/codex-rs/codex-api/src/endpoint/realtime_call_public_live_tests.rs
-@@ -0,0 +1,173 @@
+@@ -0,0 +1,182 @@
 +use super::tests::DummyAuth;
 +use super::tests::provider;
 +use super::tests::realtime_session_config;
@@ -5360,6 +5371,15 @@ index 0000000..a9b4c89
 +            "session": {
 +                "model": "gpt-live-1", "instructions": "hi",
 +                "audio": {"output": {"voice": "marin"}}, "delegation": {"type": "client"},
++                "client": {"data_channel": {
++                    "allowed_client_events": ["session.input_audio.mute", "session.input_audio.unmute", "session.close"],
++                    "allowed_server_events": [
++                        {"type": "session.started"}, {"type": "session.closed"},
++                        {"type": "session.input_audio.muted"}, {"type": "session.input_audio.unmuted"},
++                        {"type": "session.input_transcript.delta"}, {"type": "session.output_transcript.delta"},
++                        {"type": "session.usage.updated"}, {"type": "error"}, {"type": "info"},
++                    ],
++                }},
 +                "input": [
 +                    {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "Friday"}]},
 +                    {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "Which time?"}]},
