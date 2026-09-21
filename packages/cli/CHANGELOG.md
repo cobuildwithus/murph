@@ -2,6 +2,11 @@
 
 All notable changes to `@murphai/murph` will be documented in this file.
 
+## [1.3.5] - 2026-09-21
+
+### Fixed
+- Keep orchestration mailbox and processing-mode contracts independent of runtime health schemas so workflow bundles remain small.
+
 ## [1.3.4] - 2026-09-21
 
 ### Fixed
