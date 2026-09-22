@@ -1,6 +1,6 @@
 # Audit and review native checkpoint lifecycle simplification
 
-Status: active
+Status: completed
 Created: 2026-09-22
 Updated: 2026-09-22
 
@@ -49,7 +49,8 @@ No additional scheduler, persistent ledger, compatibility layer or native fork.
 - Passed package typecheck, complexity, privacy and parent candidate diff review.
   Production diff removes 82 net lines; lifecycle checks stay below the threshold.
 - PR #3651 is open. Its complete Assistant Engine CI coverage and both required
-  CLI host checks passed at the initial candidate. Final exact-head CI is pending.
+  CLI host checks passed at the initial candidate. All required CI subsequently
+  passed at `e338bc186a37df035b88b7d2317d981423db0495`.
 - Initial review attempts did not send: one lane could not select the model and
   another kept Send disabled after attachment staging. No substantive review
   exists for the initial candidate; preserve this attempt history when retrying.
@@ -61,7 +62,7 @@ No additional scheduler, persistent ledger, compatibility layer or native fork.
 - A Google font-loader CI failure did not reproduce with any of the three actual
   configured loaders. Leave font behavior intact and rerun on the next candidate.
 - Public-safe Frog entries record the apt and fixture-clock causes. Final
-  ReviewGPT and current-base mergeability are pending.
+  ReviewGPT passed on the same candidate; current-base mergeability passed.
 - No live model call is required: native lifecycle consumption changes; model
   instructions, tools, inference and provider-visible input do not.
 
@@ -81,3 +82,21 @@ the base normally. All 36 route tests and Web typecheck pass after resolution.
 The Assistant Engine implementation remains unchanged. The updated initial
 candidate also encountered a disabled Send button before ReviewGPT submission;
 no substantive review has yet been submitted.
+
+## Final review and handoff
+
+- Round 1 completed with a validated ReviewGPT PASS on
+  `e338bc186a37df035b88b7d2317d981423db0495`. The exact accepted turn, response
+  hash, GPT-6 Pro model and completion marker were verified. No qualifying
+  findings or unresolved accepted findings remain. Earlier browser failures
+  were tooling retries, not substantive rounds.
+- Parent review confirmed the scoped lifecycle change and existing focused
+  proof. The known native queued-follow-up limitation remains documented; no
+  stronger queue-drain or exactly-once guarantee is claimed.
+- The reviewed candidate merges cleanly with the verified current base. This
+  closeout changes only execution-plan evidence; final-head required CI remains
+  the publication gate. No additional substantive review is required for this
+  explanatory documentation-only closeout.
+- No production deployment or merge was performed. Retain the PR worktree until
+  the PR is merged or closed.
+Completed: 2026-09-22
