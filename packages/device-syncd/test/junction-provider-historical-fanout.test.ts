@@ -421,3 +421,45 @@ test("Junction historical foreground yield remains earlier than the owner budget
   assert.equal(continuation.payload?.windowEnd, windowEnd);
   assert.ok(ownerDays.length < HISTORICAL_RESOURCE_JOB_MAX_OWNER_UNITS);
 });
+
+test.each([
+  { resource: "floors_climbed", yieldImmediately: false, dayCount: 16 },
+  { resource: "floors_climbed", yieldImmediately: true, dayCount: 1 },
+  { resource: "mindfulness_minutes", yieldImmediately: false, dayCount: 16 },
+  { resource: "mindfulness_minutes", yieldImmediately: true, dayCount: 0 },
+])("Junction credits only forward empty-history coverage: $resource, yield $yieldImmediately", async ({ resource, yieldImmediately, dayCount }) => {
+  const requestedDays: string[] = [];
+  const provider = createJunctionProvider(async (input) => {
+    const url = new URL(readUrl(input));
+    if (url.pathname === "/v2/user/providers/junction-user-1") {
+      return createJsonResponse({ providers: [createHistoricalProviderConnection(resource)] });
+    }
+    if (url.pathname === `/v2/timeseries/junction-user-1/${resource}/grouped`) {
+      requestedDays.push(requireValue(url.searchParams.get("start_date"), "requested date"));
+      return createJsonResponse({ groups: {} });
+    }
+    throw new Error(`Unexpected request: ${url.pathname}`);
+  }, { summaryResources: [], timeseriesResources: [resource] });
+  const context = createJunctionJobContext({
+    account: createAccount({ sources: [createHistoricalSource(resource)] }),
+    connectionSourceAdmissionMode: "listed_only",
+    now: "2026-04-04T12:00:00.000Z",
+    importSnapshot: async () => { throw new Error("Empty history must not import records"); },
+    shouldYield: () => yieldImmediately,
+  });
+  const job = createJob("resource", {
+    eventType: `historical.data.${resource}.created`,
+    resource,
+    resourceCategory: "timeseries",
+    sourceProviderSlug: "garmin",
+    windowStart: "2026-03-01T00:00:00.000Z",
+    windowEnd: "2026-04-01T00:00:00.000Z",
+  });
+  const result = await executeJunctionJob(provider, context, job);
+  assert.equal(requestedDays.length, dayCount);
+  const continuation = requireValue(readHistoricalContinuation(result, `historical.data.${resource}.created`), "suffix");
+  assert.equal(continuation.payload?.windowStart,
+    new Date(Date.parse("2026-03-01T00:00:00.000Z") + dayCount * DAY_MS).toISOString());
+  assert.equal(continuation.payload?.windowEnd, job.payload.windowEnd);
+  assert.equal(Object.hasOwn(result, "continuationProgress"), dayCount > 0);
+});

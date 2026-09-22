@@ -1,15 +1,19 @@
-import type {
-  HostedRuntimeOrchestrationLatencyDiagnostics,
-  HostedWorkspaceInvocationProcessingMode,
+import {
+  mergeHostedMailboxWakeHighWater,
+  type HostedMailboxWakeHighWater,
+  type HostedRuntimeOrchestrationLatencyDiagnostics,
+  type HostedWorkspaceInvocationProcessingMode,
 } from "@murphai/hosted-execution/runtime-control";
 
 export interface RuntimeWakeNotifyInput {
+  mailboxWakeHighWater?: HostedMailboxWakeHighWater | null;
   notifiedAtEpochMs?: number | null;
   orchestration?: HostedRuntimeOrchestrationLatencyDiagnostics | null;
   requestedProcessingMode?: HostedWorkspaceInvocationProcessingMode | null;
 }
 
 export interface RuntimeWakeNotification {
+  mailboxWakeHighWater?: HostedMailboxWakeHighWater | null;
   latestNotifiedAtEpochMs?: number;
   notifiedAtEpochMs: number;
   orchestration?: HostedRuntimeOrchestrationLatencyDiagnostics | null;
@@ -38,6 +42,7 @@ export function createCoalescingRuntimeWakeSignal(): RuntimeWakeSignal {
   let pendingNotifyAtEpochMs: number | null = null;
   let pendingOrchestration: HostedRuntimeOrchestrationLatencyDiagnostics | null = null;
   let pendingRequestedProcessingMode: HostedWorkspaceInvocationProcessingMode | null = null;
+  let pendingMailboxWakeHighWater: HostedMailboxWakeHighWater | null = null;
   let pending = false;
   let flushScheduled = false;
   const waiters = new Set<(notification: RuntimeWakeNotification) => void>();
@@ -46,6 +51,7 @@ export function createCoalescingRuntimeWakeSignal(): RuntimeWakeSignal {
     const latestNotifiedAtEpochMs =
       latestPendingNotifyAtEpochMs ?? notifiedAtEpochMs;
     const notification = {
+      ...(pendingMailboxWakeHighWater ? { mailboxWakeHighWater: pendingMailboxWakeHighWater } : {}),
       ...(latestNotifiedAtEpochMs !== notifiedAtEpochMs
         ? { latestNotifiedAtEpochMs }
         : {}),
@@ -55,6 +61,7 @@ export function createCoalescingRuntimeWakeSignal(): RuntimeWakeSignal {
         ? { requestedProcessingMode: pendingRequestedProcessingMode }
         : {}),
     };
+    pendingMailboxWakeHighWater = null;
     latestPendingNotifyAtEpochMs = null;
     pendingNotifyAtEpochMs = null;
     pendingOrchestration = null;
@@ -87,11 +94,15 @@ export function createCoalescingRuntimeWakeSignal(): RuntimeWakeSignal {
     notify(input?: number | RuntimeWakeNotifyInput) {
       const notification = normalizeRuntimeWakeNotifyInput(input);
       if (!pending) {
+        pendingMailboxWakeHighWater = notification.mailboxWakeHighWater ?? null;
         latestPendingNotifyAtEpochMs = notification.notifiedAtEpochMs;
         pendingNotifyAtEpochMs = notification.notifiedAtEpochMs;
         pendingOrchestration = notification.orchestration ?? null;
         pendingRequestedProcessingMode = notification.requestedProcessingMode ?? null;
       } else {
+        pendingMailboxWakeHighWater = mergeHostedMailboxWakeHighWater(
+          pendingMailboxWakeHighWater, notification.mailboxWakeHighWater,
+        );
         latestPendingNotifyAtEpochMs = Math.max(
           latestPendingNotifyAtEpochMs
             ?? pendingNotifyAtEpochMs
@@ -157,6 +168,7 @@ function normalizeRuntimeWakeNotifyInput(
   }
 
   return {
+    ...(input?.mailboxWakeHighWater ? { mailboxWakeHighWater: input.mailboxWakeHighWater } : {}),
     ...(input?.orchestration ? { orchestration: input.orchestration } : {}),
     notifiedAtEpochMs: input?.notifiedAtEpochMs ?? Date.now(),
     ...(input?.requestedProcessingMode

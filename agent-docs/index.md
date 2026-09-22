@@ -1,5 +1,12 @@
 # Murph Agent Docs Index
 
+Automation database load, daily scheduling, and Flex retry work:
+[`2026-09-21-automation-query-load.md`](exec-plans/completed/2026-09-21-automation-query-load.md).
+
+Canonical device import preparation reuse is owned by `packages/core/README.md`;
+regression proof and local measurements are tracked in
+[`2026-09-21-device-import-write-cost.md`](exec-plans/completed/2026-09-21-device-import-write-cost.md).
+
 Direct meal execution and official nutrition-source inspection are owned by
 `packages/assistant-engine/skills/food-journal/SKILL.md`; focused proof is tracked in
 [`2026-09-20-meal-tool-efficiency.md`](exec-plans/completed/2026-09-20-meal-tool-efficiency.md).
@@ -37,6 +44,9 @@ implementation and proof are recorded in
 Deferred device webhook transfer and restored duplicate retirement are owned by
 `agent-docs/RELIABILITY.md`; focused mailbox and composed runtime proof are
 indexed in `agent-docs/references/testing-ci-map.md`.
+
+Checkpointed historical scan progress, including empty-date coverage, is owned
+by `agent-docs/RELIABILITY.md` and `packages/device-syncd/README.md`.
 
 Checkpoint-aware operational stall alerts, including bounded publication time
 for deferred device jobs and checkpoint-confirmed runnable cycling windows,
@@ -96,6 +106,16 @@ preflight admission budget are owned by `agent-docs/RELIABILITY.md`; the
 implementation record is
 [`2026-09-15-device-sweep-capacity.md`](exec-plans/completed/2026-09-15-device-sweep-capacity.md).
 
+System-mailbox shutdown handoff is owned by `packages/assistant-runtime/README.md`;
+its checkpoint/restore proof is recorded in
+[`2026-09-21-device-shutdown-handoff.md`](exec-plans/completed/2026-09-21-device-shutdown-handoff.md).
+
+Container CPU profiling implementation and synthetic verification are recorded in
+[`2026-09-21-container-cpu-profiling.md`](exec-plans/completed/2026-09-21-container-cpu-profiling.md).
+
+Experiment closeout query-cost proof is recorded in
+[`2026-09-21-experiment-closeout-query-cost.md`](exec-plans/completed/2026-09-21-experiment-closeout-query-cost.md).
+
 The completed Temporal release fixture corrections and recovery verification are recorded in
 [`2026-09-17-temporal-release-recovery.md`](exec-plans/completed/2026-09-17-temporal-release-recovery.md).
 
@@ -123,6 +143,15 @@ container-owned revocation are documented in `apps/cloudflare/README.md`,
 `agent-docs/SECURITY.md`, and `agent-docs/product-specs/starter-usage.md`.
 Pinned Codex/workerd reuse and fallback proof is indexed in
 `agent-docs/references/testing-ci-map.md`.
+
+Follow-up profile budget correction and maintenance replay verification are tracked
+in `exec-plans/completed/2026-09-20-memory-vault-replay.md`.
+
+Private memory selection and automatic compaction are owned by
+`ARCHITECTURE.md`; focused selection, managed-seed convergence, maintenance
+admission, and real-Codex fresh-conversation proof live in the assistant-engine
+memory and managed-automation tests. Implementation and review evidence is
+recorded in `exec-plans/completed/2026-09-20-memory-current-context.md`.
 
 ## Purpose
 
@@ -322,7 +351,7 @@ is recorded in [`2026-09-18-ios-canary-deployment-continuity.md`](exec-plans/com
 | `docs/hosted-contact-privacy-rotation.md` | Hosted blind-index keyring seam and future rotation constraints. | Hosted contact-privacy rotation seam | Medium | 2026-07-16 |
 | `docs/hosted-linq-db-home-lines-migration.md` | Database-backed Linq home-line assignment, provider inventory freshness, and bounded Serializable snapshot recovery. | Hosted Linq line ownership and rollout | High | 2026-09-11 |
 | `docs/hosted-account-data-deletion-export.md` | Hosted account data export and deletion workflow, store coverage, security checks, retention limits, and the authenticated canary diagnostic-retention exception. | Hosted account privacy workflow | High | 2026-05-13 |
-| `docs/hosted-runtime-log-database.md` | OpenAI 30-second stream-idle policy and local proof limits; dedicated hosted runtime-log Postgres ownership, bounded reply-skip reason codes, whole-pass device import no-op counts, temporary outbound crypto pending-join diagnostics, deletion fence, canary reset diagnostic retention through post-promotion contract cleanup, retention, web-control preflight rejection attribution, shared-CLI usage-profile timing contract (phases, transport bounds, assembled-bundle owner parity, coverage, and consumer-first rollout), foreground-wake summaries with fingerprinted correlation and caller/transport attribution, migration preflight, and rollback floor. | Hosted runtime observability storage and usage-profile diagnostics | High | 2026-09-11 |
+| `docs/hosted-runtime-log-database.md` | OpenAI 30-second stream-idle policy and local proof limits; dedicated hosted runtime-log Postgres ownership, bounded container V8 CPU attribution with process counters and event-loop delay, bounded reply-skip reason codes, whole-pass device import no-op counts, temporary outbound crypto pending-join diagnostics, deletion fence, canary reset diagnostic retention through post-promotion contract cleanup, retention, web-control preflight rejection attribution, shared-CLI usage-profile timing contract (phases, transport bounds, assembled-bundle owner parity, coverage, and consumer-first rollout), foreground-wake summaries with fingerprinted correlation and caller/transport attribution, migration preflight, and rollback floor. | Hosted runtime observability storage and usage-profile diagnostics | High | 2026-09-11 |
 | `docs/legal-consent-implementation.md` | Hosted legal consent document registry, event/grant storage, API routes, and gate helpers. | Hosted legal consent workflow | High | 2026-05-13 |
 | `docs/incident-response.md` | Canonical incident.io-backed runbook for declaring, coordinating, communicating, resolving, and learning from Murph production incidents. | Incident coordination and public status policy | High | 2026-08-05 |
 | `docs/health-data-incident-runbook.md` | Engineering runbook for suspected health-data incidents, consent bypasses, vendor incidents, and tracking disclosures. | Health-data incident response | High | 2026-08-05 |
@@ -412,7 +441,7 @@ is recorded in [`2026-09-18-ios-canary-deployment-continuity.md`](exec-plans/com
 | `packages/vault-usecases/bench/README.md` | Synthetic experiment-progress timing through the composed usecase, semantic parity, and baseline comparison limits. | Experiment progress performance | Medium | 2026-09-11 |
 | `agent-docs/references/health-entity-taxonomy-seam.md` | Shared owner seam for health taxonomy metadata. | Health taxonomy seam | Medium | 2026-04-06 |
 | `agent-docs/references/hosted-postgres-runtime.md` | Postgres execution authority, native wake and completion, uploads, bounded cleanup cadence, heartbeat-free snapshot publication with one managed session/receipt read, seven-day encrypted checkpoint recovery history, replacement vault integrity, user deletion, local controls, completed cutover, and retained migration history. | Hosted runtime ownership | High | 2026-09-20 |
-| `agent-docs/references/hosted-runtime-protocol.md` | Hosted operator provider authentication, mailbox/workspace checkpoints, v2-only live restore, derived artifact availability, inert legacy cache manifests, retained legacy object cleanup and canonical receipt recovery, hot admission and bounded history reads, stale delivery-wake recovery, exact ownership, idle restore publication, and accepted-work monitoring, including independent workspace attempts, shared canonical publication, single-pass device-hint coverage, bounded late system-mailbox import after completion recording with covered-schedule retirement and locked stale-schedule rejection, validated continuation scheduling, provider cadence separated from runtime retry deadlines, independent maintenance, bounded retention failure/blocker retries and stage diagnostics, future retry wakes after cold restore, vault-share deadline revalidation, fenced prior-snapshot reuse, background Browser Vault freshness, retired member shell hints with historical latency reads, deadline-bound operator diagnostic execution and status, exact future-continuation owner release, metadata-only checkpoint timing, committed Browser Vault publication before subsequent ordinary due work with timeout continuation delivery, completion ownership across foreground handoff and reuse, observation-only active-fence liveness without cleanup deferral, and bounded consent-aware group wearable freshness requests with source-specific gaps, independent recent-date recovery, conservative historical absence, and shared-history recovery, honest check times and optional schedule recovery. | Hosted execution architecture and bounded device-sync drain budgets | High | 2026-09-12 |
+| `agent-docs/references/hosted-runtime-protocol.md` | System checkpoint cancellation and numeric mailbox Web/Worker timing; Hosted operator provider authentication, mailbox/workspace checkpoints, v2-only live restore, derived artifact availability, inert legacy cache manifests, retained legacy object cleanup and canonical receipt recovery, hot admission and bounded history reads, stale delivery-wake recovery, exact ownership, idle restore publication, and accepted-work monitoring, including independent workspace attempts, shared canonical publication, single-pass device-hint coverage, bounded late system-mailbox import after completion recording with covered-schedule retirement and locked stale-schedule rejection, validated continuation scheduling, provider cadence separated from runtime retry deadlines, independent maintenance, bounded retention failure/blocker retries and stage diagnostics, future retry wakes after cold restore, vault-share deadline revalidation, fenced prior-snapshot reuse, background Browser Vault freshness, retired member shell hints with historical latency reads, deadline-bound operator diagnostic execution and status, exact future-continuation owner release, metadata-only checkpoint timing, committed Browser Vault publication before subsequent ordinary due work with timeout continuation delivery, completion ownership across foreground handoff and reuse, observation-only active-fence liveness without cleanup deferral, and bounded consent-aware group wearable freshness requests with source-specific gaps, independent recent-date recovery, conservative historical absence, and shared-history recovery, honest check times and optional schedule recovery. | Hosted execution architecture and bounded device-sync drain budgets | High | 2026-09-12 |
 | `agent-docs/references/hosted-temporal-orchestration.md` | Hosted Temporal orchestration, compatible controller-first bootstrap, acknowledged checkpoint rechecks, digest-bound production-core release admission, and explicit Web admission status delivery. | Hosted Temporal orchestration target | High | 2026-09-11 |
 | `agent-docs/references/data-model-seams.md` | Current shared-owner notes for high-leverage data-model seams. | Data-model seam guidance | Medium | 2026-04-07 |
 | `agent-docs/references/giant-file-composability-seams.md` | Paused giant-file cleanup planning guidance and current worth-planning/keep-together notes for oversized multi-responsibility files. | Giant-file composability seam guidance | Medium | 2026-09-10 |
@@ -501,6 +530,9 @@ The broader dashboard latency work is recorded in
 The admission and runtime launch reduction is recorded in
 [`2026-09-17-ingress-admission-simplification.md`](exec-plans/completed/2026-09-17-ingress-admission-simplification.md).
 
+Five-minute ingress cache retention and member isolation proof are tracked in
+[`ingress cache retention`](exec-plans/completed/2026-09-21-ingress-cache-five-minutes.md).
+
 ## Conventions
 
 Local feedback diagnostics are documented in
@@ -540,6 +572,15 @@ The Responses relay queue-pressure observation and implementation proof are reco
 Clinical Journal date provenance and native record presentation cleanup:
 [`2026-09-18-clinical-journal-cleanup.md`](exec-plans/completed/2026-09-18-clinical-journal-cleanup.md).
 
+Fresh clinical date validation and partial-import proof:
+[`2026-09-21-clinical-date-validation.md`](exec-plans/completed/2026-09-21-clinical-date-validation.md).
+
+Clinical extraction date recovery: [`2026-09-21-clinical-date-recovery.md`](exec-plans/completed/2026-09-21-clinical-date-recovery.md).
+
+Clinical date review remediation: [`2026-09-21-clinical-date-review-remediation.md`](exec-plans/completed/2026-09-21-clinical-date-review-remediation.md).
+
+Clinical correction cleanup budget: [`2026-09-21-clinical-correction-cleanup-budget.md`](exec-plans/completed/2026-09-21-clinical-correction-cleanup-budget.md).
+
 Zero-valued SpO2 sample handling is tracked in
 [`2026-09-18-spo2-zero-samples.md`](exec-plans/completed/2026-09-18-spo2-zero-samples.md).
 
@@ -557,3 +598,38 @@ Interactive voice-orb design playground implementation and proof are tracked in
 
 Voice-orb browser and PNG fallback proof is tracked in
 [`2026-09-20-voice-orb-browser-support.md`](exec-plans/completed/2026-09-20-voice-orb-browser-support.md).
+
+Retained-owner device cadence and encoded-empty history convergence proof is tracked in
+[`device wake follow-up`](exec-plans/completed/2026-09-21-device-wake-followup.md).
+
+Covered startup mailbox-prefetch reuse and unknown-wake fallback are owned by
+`references/hosted-runtime-protocol.md`; implementation is tracked in
+`exec-plans/completed/2026-09-21-startup-prefetch-wake.md`.
+
+WhatsApp phone verification across web and native clients is tracked in
+[`2026-09-21-whatsapp-phone-auth.md`](exec-plans/active/2026-09-21-whatsapp-phone-auth.md).
+
+Query projection storage reduction is tracked in
+[`workspace storage`](exec-plans/completed/2026-09-21-workspace-size.md);
+`packages/query/README.md` owns the storage and restore contract.
+
+Active ingest compression is tracked in
+[`active journal storage`](exec-plans/completed/2026-09-21-active-ingest-compression.md).
+
+Query page packing and unused date-index removal are tracked in
+[`query page packing`](exec-plans/completed/2026-09-21-workspace-page-packing.md).
+
+Query metric payload deduplication and transaction/restore proof are tracked in
+[`metric payload storage`](exec-plans/completed/2026-09-21-workspace-metric-dedup.md).
+
+System checkpoint cancellation and mailbox timing implementation are recorded in
+[`typing checkpoint latency`](exec-plans/completed/2026-09-21-typing-checkpoint-latency.md).
+
+Expired inbox capture compaction is tracked in
+[`capture compaction`](exec-plans/completed/2026-09-21-compact-inbox-records.md).
+
+Legacy oxygen analytics retirement is tracked in
+[`oxygen analytics`](exec-plans/completed/2026-09-21-retire-oxygen-v1.md).
+
+Single device publication receipts are tracked in
+[`device receipts`](exec-plans/completed/2026-09-21-single-import-receipt.md).

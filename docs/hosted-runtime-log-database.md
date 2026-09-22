@@ -1960,3 +1960,61 @@ static reasons to bounded codes such as `channel_disabled`, `self_authored`,
 reasons yield only `reply_skip:unclassified`; unrestricted event details and
 provider error text are never copied into this diagnostic. These codes describe
 an existing skip or deferral and do not change retry, reply, or alert decisions.
+
+## Container CPU attribution
+
+The container entrypoint starts two process-lifetime diagnostics before serving
+requests. These events use structured container stdout and Cloudflare logs;
+they are not new `hosted_runtime_log` database records or a runtime-control
+protocol extension. Neither opens an inspector TCP port or writes a raw CPU profile.
+
+- `entrypoint-cpu-watchdog` retains the existing cgroup CPU/throttling counters
+  and top three per-process CPU deltas. Use it to distinguish Node, Codex and
+  other allowlisted executables, including CPU outside the main Node process.
+  Processes that start and exit between scans remain unattributed; cgroup totals
+  still include their work.
+- `entrypoint-cpu-profiler-started` confirms V8 sampling at 10,000 microseconds
+  (100 Hz), with nominal ten-second windows. `entrypoint-cpu-profile` reports a
+  window with at least 500 ms of Node process CPU or 100 ms maximum event-loop
+  delay. A quiet container emits its latest window roughly once per minute
+  while the event loop is running; this is not a cumulative minute profile.
+- `entrypoint-cpu-profiler-unavailable` marks setup or rotation failure. The
+  sampler disconnects its own session and stops; serving continues. A new
+  container process starts a fresh sampler.
+
+Correlate container placement and timestamp, then `pid` and `windowStartedAt`
+with adjacent job/wake/checkpoint logs. Reports include `intervalMs`, actual
+`nodeCpuMs` and `nodeCpuCores` (all threads in this Node process), maximum
+`eventLoopMaxDelayMs`, `eventLoopUtilization`, `heapUsedBytes`, and `rssBytes`.
+High event-loop utilization includes synchronous native waits; it alone does
+not prove CPU consumption. Compare it with the process and cgroup CPU counters.
+
+`topSelfFrames` counts samples executing in a frame; `topInclusiveFrames`
+counts samples with a frame anywhere on the synchronous stack, deduplicating
+recursion. Inclusive counts overlap and must not be summed. Both retain six
+frames. `gcSamples`, `idleSamples`, `activeSamples`, and `samples` show the
+sample population; GC is included in active samples. Counts are statistical
+attribution, **not exact per-function CPU milliseconds**. Source labels retain
+only code under the image's immutable `/app/dist-bundled`, `/app/dist`, and
+`/app/node_modules` roots or Node builtins, with bounded symbol names and
+line/column positions. Other sources and their names become `(redacted)`.
+No prompts, arguments, member-owned file paths, raw profiles, or source text
+are published. Bundle positions refer to the deployed asset, not source maps.
+
+V8 continues sampling while main-thread JavaScript blocks. Publication and
+rotation wait for that thread to yield, so a long stall extends the window;
+`profileDurationMs` and `intervalMs` expose this rather than claiming a fixed
+ten-second interval. Profiling stops briefly while the summary is generated
+and logging runs. `profileCollectionMs` and `profileSummaryMs` expose the
+synchronous diagnostic collection/summary costs as wall time. Processing retains at most 50,000 nodes, 60,000 samples and
+64 frames per stack; `nodesTruncated`, `samplesTruncated`, and `truncatedStacks`
+expose those limits. A permanently stuck or killed process cannot publish its
+last profile. Raw V8 collection remains in memory until rotation.
+
+This sampler identifies main-isolate JavaScript and V8 GC stacks. Native child
+processes, worker threads and off-thread native work contribute CPU totals but
+do not have function stacks here. Concurrent tasks are not assigned exact
+per-request CPU; async ancestry is not reconstructed. Use existing query phase
+spans and maintenance lifecycle events alongside these windows. A profile can
+expose a rebuild or serialization hotspot without proving it caused every
+concurrent task's delay.

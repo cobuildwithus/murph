@@ -66,6 +66,12 @@ export function insertMetricPoints(
   database: DatabaseSync,
   metricPoints: readonly MetricPoint[],
 ): void {
+  // Full publication inserts one generation under the existing transaction.
+  // Share exact codec output without a persistent duplicate-text index.
+  const payloadIds = new Map<string, number | bigint>();
+  const insertPayload = database.prepare(`
+    INSERT INTO query_metric_payloads (metric_point_json) VALUES (?)
+  `);
   const insertMetricPoint = database.prepare(`
     INSERT INTO query_metric_points (
       id,
@@ -90,11 +96,17 @@ export function insertMetricPoints(
       source_result_index,
       source_path,
       confidence,
-      metric_point_json
+      payload_id
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   metricPoints.forEach((point, index) => {
+    const payload = stringifyStoredMetricPointPayload(point);
+    let payloadId = payloadIds.get(payload);
+    if (payloadId === undefined) {
+      payloadId = insertPayload.run(payload).lastInsertRowid;
+      payloadIds.set(payload, payloadId);
+    }
     insertMetricPoint.run(
       point.id,
       index,
@@ -118,7 +130,7 @@ export function insertMetricPoints(
       point.source.resultIndex,
       point.source.path,
       point.confidence,
-      stringifyStoredMetricPointPayload(point),
+      payloadId,
     );
   });
 }
@@ -240,6 +252,7 @@ function queryStoredMetricPoints(
       confidence,
       metric_point_json
     FROM query_metric_points
+    JOIN query_metric_payloads USING (payload_id)
     ${whereSql}
     ORDER BY effective_date DESC, observed_at DESC, id ASC
     ${limitSql}

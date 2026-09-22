@@ -112,9 +112,11 @@ it.each([
   const database = openSqliteRuntimeDatabase(join(root, QUERY_DB_RELATIVE_PATH), { create: false });
   try {
     const update = database.prepare(`
-      UPDATE query_metric_points
+      UPDATE query_metric_payloads
       SET metric_point_json = json_remove(metric_point_json, '$.context.sleepType')
-      WHERE metric_key = 'total-sleep-minutes'
+      WHERE payload_id IN (
+        SELECT payload_id FROM query_metric_points WHERE metric_key = 'total-sleep-minutes'
+      )
     `).run();
     expect(update.changes).toBeGreaterThan(0);
   } finally {

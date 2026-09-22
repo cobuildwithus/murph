@@ -1333,8 +1333,10 @@ describe('applyMurphManagedAutomations', () => {
       'clearly supported by the supplied conversation evidence',
     )
     expect(seed.instructions).toContain(
-      'deduplication and mutation targeting only',
+      'faithful shortening of that same record',
     )
+    expect(seed.instructions).toContain('Complete this cleanup even when you already saved conversation changes')
+    expect(seed.instructions).toContain('When the user clearly withdraws a temporary fact with no useful lasting replacement, use forget')
     expect(seed.instructions).not.toContain('generated memory extraction')
     expect(seed.instructions).toContain(
       '{"kind":"skip","privateSummary":"Overnight memory consolidation maintenance wake completed."}',
@@ -1362,7 +1364,7 @@ describe('applyMurphManagedAutomations', () => {
         model: 'gpt-5.6-luna',
         reasoningEffort: 'high',
       },
-      schedule: { kind: 'cron', expression: '0 13 * * *' },
+      schedule: { kind: 'dailyLocal', localTime: expect.any(String) },
       slug: 'personal-patterns-update',
       status: 'active',
     })
@@ -1941,6 +1943,32 @@ describe('applyMurphManagedAutomations', () => {
     )
   })
 
+  it('refreshes existing memory instructions once after resumption without changing its schedule', async () => {
+    const input = {
+      defaultRoute,
+      now: new Date('2026-09-20T12:00:00.000Z'),
+      runtimeEnv: { [HOSTED_RUNTIME_PROCESS_ENV]: '1', EXA_API_KEY: 'fixture-exa-key' },
+      vaultRoot,
+    }
+    await applyMurphManagedAutomations(input)
+    const existing = managedAutomationMocks.records.get(MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID)
+    if (!existing) throw new Error('Expected managed memory record')
+    existing.instructions = 'Legacy memory maintenance instructions.'
+    existing.status = 'paused'
+    expect((await applyMurphManagedAutomations(input)).updated).toBe(0)
+    expect(existing.instructions).toBe('Legacy memory maintenance instructions.')
+    existing.status = 'active'
+    const schedule = existing.schedule
+    const result = await applyMurphManagedAutomations(input)
+    expect(result.updated).toBe(1)
+    const updated = managedAutomationMocks.records.get(MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID)
+    expect(updated).toMatchObject({ status: 'active', schedule })
+    expect(updated?.instructions).toContain('Capture explicit procedural preferences')
+    expect(updated?.instructions).toContain('faithful shortening')
+    expect(updated?.instructions).toContain('never automatically forget or remove a fact because its date passed')
+    expect((await applyMurphManagedAutomations(input)).updated).toBe(0)
+  })
+
   it('creates only the group-owned room model automation for group chat routes', async () => {
     const result = await applyMurphManagedAutomations({
       defaultRoute: groupChatRoute,
@@ -2514,6 +2542,8 @@ describe('applyMurphManagedAutomations', () => {
       vaultRoot: `${vaultRoot}-moved`,
     })
 
+    expect(managedAutomationMocks.records.get(MURPH_PERSONAL_PATTERNS_UPDATE_AUTOMATION_ID)?.schedule)
+      .toEqual(firstSchedules.get(MURPH_PERSONAL_PATTERNS_UPDATE_AUTOMATION_ID))
     expect(managedAutomationMocks.records.get(MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID)?.schedule)
       .toEqual(firstSchedules.get(MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID))
     expect(managedAutomationMocks.records.get(MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID)?.schedule)
@@ -2522,6 +2552,21 @@ describe('applyMurphManagedAutomations', () => {
       .toEqual(firstSchedules.get(MURPH_MONTHLY_IMPROVEMENT_COACH_AUTOMATION_ID))
     expect(managedAutomationMocks.records.get(MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID)?.schedule)
       .toEqual(firstSchedules.get(MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID))
+  })
+
+  it('distributes sixty Personal Patterns schedules across the daily window', async () => {
+    const seed = MURPH_MANAGED_AUTOMATIONS.find(entry => entry.automationId === MURPH_PERSONAL_PATTERNS_UPDATE_AUTOMATION_ID)!
+    const slots = new Set<string>()
+    for (let index = 0; index < 60; index += 1) {
+      managedAutomationMocks.records.clear()
+      managedAutomationMocks.loadVault.mockResolvedValue({ metadata: { vaultId: `vault_spread_${index}` } })
+      await applyMurphManagedAutomations({ defaultRoute, seeds: [seed], vaultRoot })
+      const schedule = managedAutomationMocks.records.get(seed.automationId)!.schedule
+      if (schedule.kind !== 'dailyLocal') throw new Error('Expected daily local schedule')
+      expect(schedule.localTime >= '09:00' && schedule.localTime < '17:00').toBe(true)
+      slots.add(schedule.localTime)
+    }
+    expect(slots.size).toBeGreaterThan(45)
   })
 
   it('defers spread-managed creation when vault metadata cannot be read', async () => {
@@ -2533,13 +2578,13 @@ describe('applyMurphManagedAutomations', () => {
       now: new Date('2026-06-09T12:00:00.000Z'),
       vaultRoot,
     })).resolves.toEqual({
-      created: 2,
-      skipped: 3,
+      created: 1,
+      skipped: 4,
       stableKeyFailure: metadataError,
       stableKeyRetryNeeded: true,
       updated: 0,
     })
-    expect(managedAutomationMocks.upsertAutomation).toHaveBeenCalledTimes(2)
+    expect(managedAutomationMocks.upsertAutomation).toHaveBeenCalledTimes(1)
     expect(managedAutomationMocks.records.get(MURPH_MONTHLY_IMPROVEMENT_COACH_AUTOMATION_ID)?.schedule)
       .toEqual({
         kind: 'cron',
@@ -2553,8 +2598,8 @@ describe('applyMurphManagedAutomations', () => {
       now: new Date('2026-06-10T12:00:00.000Z'),
       vaultRoot,
     })).resolves.toEqual({
-      created: 3,
-      skipped: 2,
+      created: 4,
+      skipped: 1,
       updated: 0,
     })
 

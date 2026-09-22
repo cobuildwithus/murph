@@ -1236,6 +1236,10 @@ test("more than fifteen stored mailbox payloads use one envelope query with at m
   const prisma = Object.assign(tx.prisma, {
     hostedUserCryptoEnvelope: { findMany: envelopeFindMany },
   });
+  // Model a cold Web crypto owner after fixture sealing warmed ingress roots.
+  // This test still proves the batch provider concurrency bound on cache misses.
+  assert.ok(gcpKmsMock.client);
+  gcpKmsMock.client = { ...gcpKmsMock.client };
   resetLocalKmsDecryptMetrics(decryptMetrics, { yieldBeforeReturn: true });
 
   await expect(decodeHostedMailboxStoredPayloads({

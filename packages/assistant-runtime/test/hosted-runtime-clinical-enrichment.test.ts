@@ -16,6 +16,7 @@ const work = {
   source: { rawRef: "raw/clinical-records/synthetic/source.pdf", sha256: "b".repeat(64), mediaType: "application/pdf" },
   documentPath: "/synthetic-vault/raw/clinical-records/synthetic/source.pdf",
   page: 2,
+  timeZone: "America/Los_Angeles",
 };
 
 function deferred<T>() {
@@ -86,6 +87,7 @@ describe("clinical document background runner", () => {
     expect(cleanup).not.toHaveBeenCalled();
     for (const [request] of executeExtraction.mock.calls) {
       expect(request.source).toEqual(work.source);
+      expect(request.timeZone).toBe(work.timeZone);
       expect(request.renderedPages).toEqual([{ page: 2, path: "/synthetic-scratch/page.png" }]);
     }
     leaves[0]!.resolve(EMPTY);
@@ -202,7 +204,7 @@ describe("clinical document background runner", () => {
     expect(cleanup).toHaveBeenCalledOnce();
   });
 
-  it("accounts each family separately after checkpoint even when their provider ordinals match", async () => {
+  it("accounts each family and its correction separately after checkpoint even when provider ordinals match", async () => {
     const { input, executeExtraction } = setup();
     const effects: HostedWorkspaceDurableCheckpointEffect[] = [];
     const records: AssistantUsageRecord[] = [];
@@ -232,14 +234,15 @@ describe("clinical document background runner", () => {
     executeExtraction.mockImplementation(async (request) => {
       await request.beforeProviderEntry?.();
       request.onProviderUsage?.(event);
+      if (request.family === "history") request.onProviderUsage?.({ ...event, stage: "review" });
       return EMPTY;
     });
     expect(await runOneHostedClinicalEnrichment(input)).toBe("settled");
     expect(records).toEqual([]);
     expect(effects).toHaveLength(1);
     await effects[0]!();
-    expect(records).toHaveLength(3);
-    expect(new Set(records.map((record) => record.usageId)).size).toBe(3);
+    expect(records).toHaveLength(4);
+    expect(new Set(records.map((record) => record.usageId)).size).toBe(4);
     expect(records.every((record) => record.featureKey === "clinical_document_extraction")).toBe(true);
     expect(records.every((record) => record.memberId === "synthetic-member")).toBe(true);
   });

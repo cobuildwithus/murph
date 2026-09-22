@@ -1102,6 +1102,17 @@ checks use the effective default mode rather than the immutable system-mode
 invocation request. Repeated default wakes preserve the conversation quiet
 window and checkpoint interruption. Provider-authority changes and actual
 shutdown still require their existing checkpoint handoff.
+System-owned checkpoint construction also listens for foreground wakes. A
+non-system hint aborts construction before mailbox qualification; a qualified
+batch enters the same warm foreground owner, while an empty hint retries the
+dirty save. System-only hints do not interrupt it, and shutdown disables wake
+cancellation so dirty progress can publish. Interrupted construction retains
+dirty state and durability-gated effects. At exact notification preparation,
+interruption restores the token-matched pre-dispatch state before foreground
+admission, because no provider send has begun; the normal later checkpoint
+persists that reset. Once snapshot publication is sent,
+the existing acknowledgement boundary remains authoritative: adopt its result
+before servicing the wake rather than abandoning a possibly committed version.
 `assistantExecutionBlocked` remains a hard boundary: that invocation retains
 the assistant wake for a later allowed foreground owner instead of promoting
 it.
@@ -3858,8 +3869,17 @@ and cursor matcher without loading the full runtime before restore. No message
 content is added to direct ensure, Temporal, or the launch-job contract.
 
 After restore, reuse requires matching local watermarks, lanes and batch limit.
-Bootstrap, canonical-receipt recovery fallback, and an already-pending startup
-wake discard the candidate. Provider/custom-inference observation runs only on a
+Bootstrap and canonical-receipt recovery fallback discard the candidate. A pending
+startup wake permits reuse only when its authenticated, complete two-lane
+`mailboxWakeHighWater` is covered by the prefetched response high-water marks.
+Temporal supplies this hint only for mailbox-only reconciliation. Newer or unknown
+wakes require a fresh fetch; coalescing takes lane maxima and any unknown wake
+removes coverage for that entire burst, including wakes buffered before runtime
+readiness. Older producers and containers omit the hint and keep the fresh-fetch
+behavior. Ship the consumer before the optional producer. Roll back or disable
+the producer before restoring a Worker with the old strict ensure parser.
+Coverage is intentionally unavailable when reconciliation has due or unknown
+control work; measured savings apply only to eligible mailbox-only wakes. Provider/custom-inference observation runs only on a
 selected response. Fetch failures retain the importer's ordinary retry, while
 cancellation propagates through the existing invocation signal. A match uses the
 same request count with overlapping waits; a discarded or failed speculative
@@ -4690,6 +4710,21 @@ only: no message content, member, phone, chat, mailbox, delivery, or trace
 identifiers. The monitor is observability-only: it does not append mailbox work,
 signal Temporal, wake Cloudflare, alter usage gates, or participate in
 foreground reply ownership.
+Mailbox fetch replies carry optional fixed numeric `Server-Timing` metrics.
+The Worker's existing web-control response log copies the allowlisted values
+into `mailboxWeb*Ms`: auth, parse, transaction start, fence, member, access,
+projection, usage, transaction finish, group presentation, crypto, serialization,
+and total. Transaction start includes connection admission and BEGIN; transaction
+finish includes response projection and commit. Auth includes signature and
+replay checks. These adjacent Web phases approximately sum to the Web total.
+`mailboxWorker*Ms` separates preparation, Web fetch, response-body read, crypto
+context resolution, payload decryption, serialization, and total. Decode success
+and failure counts describe inline items only. Web total nests inside Worker
+Web fetch; do not add the two totals or call their difference pure network time.
+Web initialization before handler entry is outside the Web total. Missing
+headers are valid during rollout. No private header text, payloads, new request,
+or awaited telemetry is added.
+
 Orchestration phase telemetry is interpreted causally: direct-request routing
 ends at the Cloudflare route/auth stamps, Durable Object activation ends at
 `userRunnerEnsureStartedAtEpochMs`, stale-fence recovery is the active-wake and

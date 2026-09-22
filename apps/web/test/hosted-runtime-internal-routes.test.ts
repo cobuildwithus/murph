@@ -592,6 +592,48 @@ describe("hosted runtime internal web routes", () => {
     },
   );
 
+  it("reports mailbox timings without adding reads or putting identifiers in headers", async () => {
+    let elapsed = 0;
+    const clock = vi.spyOn(performance, "now").mockImplementation(() => elapsed);
+    const prisma = createPrismaClientStub();
+    prisma.$transaction = async (run) => {
+      elapsed += 80;
+      const value = await run(prisma);
+      elapsed += 20;
+      return value;
+    };
+    mocks.getPrisma.mockReturnValue(prisma);
+    mocks.requireHostedCloudflareCallbackRequest.mockImplementationOnce(async () => {
+      elapsed += 30;
+      return "member_routes_1";
+    });
+    mocks.requireHostedRuntimeCallbackTx.mockImplementationOnce(async () => { elapsed += 40; });
+    mocks.hostedRuntimeMailboxMemberFindUnique.mockImplementationOnce(async () => {
+      elapsed += 50;
+      return buildRuntimeMailboxAccessRecord();
+    });
+    mocks.fetchHostedRuntimeMailboxProjection.mockImplementationOnce(async () => {
+      elapsed += 400;
+      return { items: [], consumedSeqByLane: [], maxSeqByLane: [] };
+    });
+    try {
+      const response = await mailboxFetchRoute.POST(jsonRequest("/api/internal/hosted-mailbox/fetch", {
+        lanes: [{ importedSeq: "0", lane: "conversation" }], limitPerLane: 10, requestId: "synthetic-timing",
+      }));
+      expect(response.status).toBe(200);
+      const header = response.headers.get("server-timing");
+      for (const metric of ["auth;dur=30", "transaction_start;dur=80", "fence;dur=40",
+        "member;dur=50", "projection;dur=400", "transaction_finish;dur=20", "total;dur=620"]) {
+        expect(header).toContain(`murph_mailbox_${metric}`);
+      }
+      expect(header).not.toContain("member_routes_1");
+      expect(parseHostedMailboxFetchResponse(await response.json()).items).toEqual([]);
+      expect(mocks.hostedRuntimeMailboxMemberFindUnique).toHaveBeenCalledOnce();
+      expect(mocks.fetchHostedRuntimeMailboxProjection).toHaveBeenCalledOnce();
+      expect(mocks.readHostedRuntimeIngressCryptoContextForWorker).not.toHaveBeenCalled();
+    } finally { clock.mockRestore(); }
+  });
+
   it.each([
     { selected: true, revision: 3, expected: 3 },
     { selected: true, revision: 4, expected: 4 },

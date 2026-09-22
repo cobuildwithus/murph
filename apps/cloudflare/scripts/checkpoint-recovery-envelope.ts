@@ -15,6 +15,7 @@ export interface RecoveryAssessmentRequest {
   expectedWorkspaceVersion: string;
   before: string;
   expiresAt: string;
+  partialRecovery?: { timezone: string; completedOnboarding: boolean };
 }
 
 export function recoveryPublicJwk(privateJwkJson: string): JsonWebKey {
@@ -74,7 +75,18 @@ function validateRequest(request: RecoveryAssessmentRequest, now: number): Recov
       || Date.parse(request.expiresAt) <= now || Date.parse(request.expiresAt) > now + 60 * 60_000) {
       throw new Error("invalid_recovery_request");
     }
+    validatePartialRecoveryInstruction(request.partialRecovery);
     return request;
+}
+
+function validatePartialRecoveryInstruction(partial: RecoveryAssessmentRequest["partialRecovery"]): void {
+    if (partial !== undefined) {
+      if (!partial || typeof partial !== "object" || typeof partial.timezone !== "string" || partial.timezone.length > 100
+        || typeof partial.completedOnboarding !== "boolean"
+        || Object.keys(partial).some(key => key !== "timezone" && key !== "completedOnboarding")) throw new Error("invalid_recovery_request");
+      try { new Intl.DateTimeFormat("en", { timeZone: partial.timezone }).format(); }
+      catch { throw new Error("invalid_recovery_request"); }
+    }
 }
 
 // Artifact object names hide the content hash needed for their AAD. Derive a

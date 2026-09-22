@@ -2071,7 +2071,14 @@ describe("record service seams", () => {
         })),
         "../src/query-runtime.ts": mockActualModule("../src/query-runtime.ts", (actual) => ({
           ...actual,
-          loadQueryRuntime: vi.fn(async () => experimentOutcomeQuery),
+          loadQueryRuntime: vi.fn(async () => ({
+            ...experimentOutcomeQuery,
+            resolveCanonicalEntityInFamily: vi.fn(async () => experimentOutcomeQuery.lookupEntityById()),
+            readExperimentQuerySource: vi.fn(async () => ({
+              readModel: await journalQuery.readVault(),
+              listMetricPoints: () => [],
+            })),
+          })),
         })),
       });
 
