@@ -4,6 +4,33 @@ import { buildHostedOpenAiCacheDiagnostic } from "../src/runner-egress-responses
 
 const TEST_TEXT_ENCODER = new TextEncoder();
 
+it("observes Responses Lite tools and cache-affecting settings without logging values", async () => {
+  const build = (tools: unknown, format: unknown, fingerprintSecret: string | null = "synthetic-secret") => buildHostedOpenAiCacheDiagnostic({
+    endpointKind: "responses", method: "POST", fingerprintSecret,
+    requestBytes: TEST_TEXT_ENCODER.encode(JSON.stringify({
+      model: "gpt-5.6-terra",
+      prompt_cache_options: { comparison_response_id: "resp_private_synthetic", mode: "implicit", ttl: "30m" },
+      reasoning: { effort: "low" }, text: { format, verbosity: "medium" },
+      service_tier: "private-invalid-value",
+      input: [{ type: "additional_tools", id: "private-item-id", tools }],
+    })),
+  });
+  const tools = [{ type: "function", name: "private-tool-name", parameters: { type: "object" } }];
+  const first = await build(tools, { type: "json_schema", name: "private-schema-name" });
+  expect(first).toMatchObject({ diagnosticVersion: 4, toolCount: 0, additionalToolsItemCount: 1, additionalToolCount: 1,
+    comparisonResponsePresent: true, cacheModeKind: "implicit", cacheTtlKind: "30m", reasoningEffortKind: "low", verbosityKind: "medium", serviceTierKind: "other",
+    effectiveToolsFingerprintPresent: true, responseFormatFingerprintPresent: true });
+  expect(first.effectiveToolsFingerprint).toBe((await build(tools, null)).effectiveToolsFingerprint);
+  expect(first.effectiveToolsFingerprint).not.toBe((await build([], null)).effectiveToolsFingerprint);
+  expect(first.responseFormatFingerprint).not.toBe((await build(tools, null)).responseFormatFingerprint);
+  expect(JSON.stringify(first)).not.toContain("private-");
+  expect(JSON.stringify(first)).not.toContain("resp_private");
+  const withoutSecret = await build(tools, null, null);
+  expect(withoutSecret.effectiveToolsFingerprintPresent).toBe(false);
+  expect(withoutSecret.effectiveToolsFingerprint).toBeUndefined();
+  parseDiagnosticRuntimeLog(first);
+});
+
 function testByteLength(value: string): number {
   return TEST_TEXT_ENCODER.encode(value).byteLength;
 }
@@ -445,7 +472,7 @@ describe("Responses request diagnostic projection", () => {
     });
 
     expect(diagnostic).toEqual(expect.objectContaining({
-      diagnosticVersion: 3,
+      diagnosticVersion: 4,
     }));
     expect(readDiagnosticInputMetric(
       diagnostic,
