@@ -9,6 +9,6 @@
     "summary": "Sign-in emails carry 40% less logo image data at the same resolution.",
     "details": "The light and dark logos stay embedded in the email. Display timing still depends on your mail app.",
     "relevanceTags": ["sign-in", "performance"],
-    "sourcePullRequests": []
+    "sourcePullRequests": [3648]
   }
 }
