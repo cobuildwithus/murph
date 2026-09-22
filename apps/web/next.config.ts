@@ -504,17 +504,6 @@ export function buildHostedWebNextConfig(
           },
         ],
       },
-      {
-        // Let email image clients reuse this small, public brand asset.
-        // Keep a bounded lifetime because its URL is not content-hashed.
-        source: "/privy-logo.png",
-        headers: [
-          {
-            key: "Cache-Control",
-            value: "public, max-age=86400, stale-while-revalidate=604800",
-          },
-        ],
-      },
     ],
   };
 }

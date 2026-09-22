@@ -1007,7 +1007,7 @@ test("next.config serves global security headers and stricter Murph Safe referre
   const routes = await productionNextConfig.headers?.();
 
   assert.ok(routes);
-  assert.equal(routes.length, 3);
+  assert.equal(routes.length, 2);
   assert.equal(routes[0]?.source, "/(.*)");
   assert.deepEqual(
     routes[0]?.headers.map((header) => header.key),
@@ -1034,13 +1034,6 @@ test("next.config serves global security headers and stricter Murph Safe referre
     {
       key: "Referrer-Policy",
       value: "no-referrer",
-    },
-  ]);
-  assert.equal(routes[2]?.source, "/privy-logo.png");
-  assert.deepEqual(routes[2]?.headers, [
-    {
-      key: "Cache-Control",
-      value: "public, max-age=86400, stale-while-revalidate=604800",
     },
   ]);
 });
