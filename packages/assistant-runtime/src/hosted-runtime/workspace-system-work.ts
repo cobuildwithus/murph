@@ -33,7 +33,7 @@ export function createHostedWorkspaceSystemWork(input: {
   >;
   runnerInput: HostedWorkspaceRunnerInput;
   onCompleted(
-    result: HostedWorkspaceRunnerAssistantPhasePostCheckpoint,
+    result: HostedWorkspaceRunnerAssistantPhasePostCheckpoint & { systemProgressed?: true },
     notify: boolean,
   ): void;
   onFailure(error: unknown, notify: boolean): void;
@@ -50,6 +50,8 @@ export function createHostedWorkspaceSystemWork(input: {
     });
     input.onCompleted({
       checkpointReason: "system_mailbox_receipt",
+      ...(preparation.status === "processed" && preparation.metrics.systemProgressed === true
+        ? { systemProgressed: true as const } : {}),
       nextWakeAt: nextWake.at,
       nextWakeReason: nextWake.reason,
       ...(preparation.status === "processed" || preparation.status === "recording"

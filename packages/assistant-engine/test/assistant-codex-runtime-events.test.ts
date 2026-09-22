@@ -905,6 +905,7 @@ describe('assistant codex event shaping', () => {
       childStatus: 'completed' | 'failed' | 'interrupted',
       expectedOutcome: 'aborted' | 'partial' | 'succeeded',
       childServiceTier: 'default' | 'flex' | null = 'flex',
+      interruptUsageWait = false,
     ): Promise<void> => {
       const workingDirectory = await createTempDir(
         'assistant-codex-subagent-terminal-usage-work-',
@@ -1045,7 +1046,8 @@ describe('assistant codex event shaping', () => {
       expect(result.additionalUsages).toEqual([])
 
       let boundaryFinished = false
-      const boundary = waitForWarmCodexBackgroundWork().then(() => {
+      const controller = new AbortController()
+      let boundary = waitForWarmCodexBackgroundWork({ signal: controller.signal }).then(() => {
         boundaryFinished = true
       })
       await Promise.resolve()
@@ -1099,6 +1101,17 @@ describe('assistant codex event shaping', () => {
       await Promise.resolve()
       expect(boundaryFinished).toBe(false)
 
+      if (interruptUsageWait) {
+        const interruption = new Error('foreground input arrived during usage recording')
+        controller.abort(interruption)
+        await expect(boundary).rejects.toBe(interruption)
+        expect(spawnedChildren[0]?.signalCode).toBeNull()
+        boundary = waitForWarmCodexBackgroundWork().then(() => {
+          boundaryFinished = true
+        })
+        await new Promise((resolve) => setTimeout(resolve, 75))
+        expect(boundaryFinished).toBe(false)
+      }
       releaseUsageRecording.resolve(undefined)
       const child = requireMockChildProcess(spawnedChildren[0] ?? null)
       const parentTerminalScan = await respondToBackgroundTerminals(child, 1)
@@ -1119,6 +1132,10 @@ describe('assistant codex event shaping', () => {
       'holds the workspace boundary for %s child usage reported after the parent reply',
       verifyLateChildUsage,
     )
+
+    it('yields a checkpoint usage wait to foreground input without losing pending usage', async () => {
+      await verifyLateChildUsage('completed', 'succeeded', 'flex', true)
+    })
 
     it.each([null, 'default'] as const)(
       'records standard child usage with serviceTier %s after the parent reply',
@@ -3326,6 +3343,7 @@ describe('assistant codex event shaping', () => {
           'thread-completed-child-parent',
           'turn-completed-child-parent',
         )
+        writeCompletedTurn(child, 'thread-completed-child-child', 'turn-completed-child-child')
         writeSubAgentActivity(
           child,
           'thread-completed-child-parent',
@@ -3437,13 +3455,20 @@ describe('assistant codex event shaping', () => {
         scenario: 'resumed',
         successorThreadId: 'thread-stale-completed-child-parent-a',
       },
+      {
+        name: 'a reused child after checkpointing',
+        resumeSessionId: 'thread-stale-completed-child-parent-a',
+        scenario: 'reused',
+        successorThreadId: 'thread-stale-completed-child-parent-a',
+      },
     ])('ignores a prior child completion while $name is active', async ({
       resumeSessionId,
       scenario,
       successorThreadId,
     }) => {
-      const successorChildThreadId =
-        `thread-stale-completed-child-child-b-${scenario}`
+      const successorChildThreadId = scenario === 'reused'
+        ? 'thread-stale-completed-child-child-a'
+        : `thread-stale-completed-child-child-b-${scenario}`
       const successorChildTurnId =
         `turn-stale-completed-child-child-b-${scenario}`
       const successorTurnId =
@@ -3527,6 +3552,9 @@ describe('assistant codex event shaping', () => {
           successorChildThreadId,
           successorChildTurnId,
         )
+        if (scenario === 'reused') {
+          writeCompletedTurn(child, successorChildThreadId, 'turn-stale-completed-child-child-a')
+        }
 
         writeSubAgentActivity(
           child,
@@ -3596,44 +3624,48 @@ describe('assistant codex event shaping', () => {
     })
 
     it.each([
-      { reason: 'UNTRACKED_COMPLETION', kind: 'completed', sender: 'parent', childId: 'thread-child' },
-      { reason: 'NESTED_CHILD', kind: 'started', sender: 'child', childId: 'thread-grandchild' },
-      { reason: 'MALFORMED_LIFECYCLE', kind: 'started', sender: 'parent', childId: '' },
-    ] as const)('reports $reason and fails the boundary closed', async ({ reason, kind, sender, childId }) => {
-      const workingDirectory = await createTempDir(
-        'assistant-codex-untracked-completed-child-work-',
-      )
-      const codexHome = await createTempDir(
-        'assistant-codex-untracked-completed-child-home-',
-      )
+      { name: 'completion before spawn acknowledgement', kind: 'completed', sender: 'parent', childId: 'thread-child' },
+      { name: 'nested spawn acknowledgement', kind: 'started', sender: 'child', childId: 'thread-child' },
+      { name: 'malformed advisory activity', kind: 'started', sender: 'parent', childId: '' },
+    ] as const)('tracks native work despite $name', async ({ kind, sender, childId }) => {
+      const workingDirectory = await createTempDir('assistant-codex-advisory-activity-work-')
+      const codexHome = await createTempDir('assistant-codex-advisory-activity-home-')
       const spawnedChildren: MockChildProcess[] = []
+      const completeChild = createDeferred<void>()
       mockWarmCodexProcess(spawnedChildren, 31_876, async (child) => {
-        await initializeWarmTurn(
-          child,
-          'thread-untracked-completed-child-parent',
-          'turn-untracked-completed-child-parent',
-        )
-        writeSubAgentActivity(
-          child,
-          `thread-untracked-completed-child-${sender}`,
-          'turn-untracked-completed-child-parent',
-          childId,
-          kind,
-        )
-        writeCompletedTurn(
-          child,
-          'thread-untracked-completed-child-parent',
-          'turn-untracked-completed-child-parent',
-        )
+        await initializeWarmTurn(child, 'thread-parent', 'turn-parent')
+        writeSubAgentActivity(child, 'thread-' + sender, 'turn-parent', childId, kind)
+        writeStartedTurn(child, 'thread-child', 'turn-child')
+        writeSubAgentActivity(child, 'thread-parent', 'turn-parent', 'thread-child')
+        writeCompletedTurn(child, 'thread-parent', 'turn-parent')
+        await completeChild.promise
+        writeCompletedTurn(child, 'thread-child', 'turn-child')
+        await respondToBackgroundTerminals(child, 1)
+        await respondToBackgroundTerminals(child, 2)
       })
+      await executeBackgroundBoundaryTurn(codexHome, workingDirectory, 'finish native child work')
+      const publishCheckpoint = vi.fn()
+      const boundary = waitForWarmCodexBackgroundWork().then(publishCheckpoint)
+      await new Promise((resolve) => setTimeout(resolve, 75))
+      expect(publishCheckpoint).not.toHaveBeenCalled()
+      completeChild.resolve(undefined)
+      await expect(boundary).resolves.toBeUndefined()
+      expect(publishCheckpoint).toHaveBeenCalledOnce()
+      expect(spawnedChildren[0]?.signalCode).toBeNull()
+    })
 
-      await executeBackgroundBoundaryTurn(
-        codexHome,
-        workingDirectory,
-        'attempt to complete an unadmitted child',
-      )
+    it.each(['turn/started', 'turn/completed'])('rejects a native %s without a child turn identity', async (method) => {
+      const workingDirectory = await createTempDir('assistant-codex-malformed-native-work-')
+      const codexHome = await createTempDir('assistant-codex-malformed-native-home-')
+      const spawnedChildren: MockChildProcess[] = []
+      mockWarmCodexProcess(spawnedChildren, 31_878, async (child) => {
+        await initializeWarmTurn(child, 'thread-parent', 'turn-parent')
+        child.stdout.write(jsonLine({ method, params: { threadId: 'thread-child', turn: {} } }))
+        writeCompletedTurn(child, 'thread-parent', 'turn-parent')
+      })
+      await executeBackgroundBoundaryTurn(codexHome, workingDirectory, 'observe an unidentified child turn')
       await expect(waitForWarmCodexBackgroundWork()).rejects.toMatchObject({
-        code: `ASSISTANT_CODEX_BACKGROUND_WORK_${reason}`,
+        code: 'ASSISTANT_CODEX_BACKGROUND_WORK_MALFORMED_LIFECYCLE',
       })
       expect(spawnedChildren[0]?.signalCode).toBe('SIGTERM')
     })
@@ -3732,56 +3764,103 @@ describe('assistant codex event shaping', () => {
       expect(spawnedChildren).toHaveLength(1)
     })
 
-    it.each(['interacted', 'interrupted'] as const)('reports %s and stops the exact warm process', async (kind) => {
+    it.each(['interacted', 'interrupted'] as const)('allows %s while waiting for the native child turn to finish', async (kind) => {
       const workingDirectory = await createTempDir('assistant-codex-child-interaction-work-')
       const codexHome = await createTempDir('assistant-codex-child-interaction-home-')
       const spawnedChildren: MockChildProcess[] = []
+      const completeChild = createDeferred<void>()
       mockWarmCodexProcess(spawnedChildren, 31_880, async (child) => {
-        await initializeWarmTurn(
-          child,
-          'thread-child-interaction-parent',
-          'turn-child-interaction-parent',
-        )
-        writeStartedTurn(
-          child,
-          'thread-child-interaction-child',
-          'turn-child-interaction-child',
-        )
-        // This child-to-root message can arrive before the parent-side
-        // Started item; it still violates the one-shot leaf contract.
-        writeSubAgentActivity(
-          child,
-          'thread-child-interaction-child',
-          'turn-child-interaction-child',
-          'thread-child-interaction-parent',
-          kind,
-        )
-        writeSubAgentActivity(
-          child,
-          'thread-child-interaction-parent',
-          'turn-child-interaction-parent',
-          'thread-child-interaction-child',
-        )
-        child.stdout.write(jsonLine({
-          method: 'item/completed',
-          params: { item: { type: 'subAgentActivity', kind: 'invalid' } },
-        }))
-        writeCompletedTurn(
-          child,
-          'thread-child-interaction-parent',
-          'turn-child-interaction-parent',
-        )
+        await initializeWarmTurn(child, 'thread-parent', 'turn-parent')
+        writeStartedTurn(child, 'thread-child', 'turn-child')
+        // Ordinary communication can precede parent-side admission.
+        writeSubAgentActivity(child, 'thread-child', 'turn-child', 'thread-parent', kind)
+        writeSubAgentActivity(child, 'thread-parent', 'turn-parent', 'thread-child')
+        writeCompletedTurn(child, 'thread-parent', 'turn-parent')
+        await completeChild.promise
+        writeCompletedTurn(child, 'thread-child', 'turn-child')
+        await respondToBackgroundTerminals(child, 1)
+        await respondToBackgroundTerminals(child, 2)
       })
 
-      await executeBackgroundBoundaryTurn(
-        codexHome,
-        workingDirectory,
-        'attempt an unsupported interactive child',
-      )
-      await expect(waitForWarmCodexBackgroundWork()).rejects.toMatchObject({
-        code: `ASSISTANT_CODEX_BACKGROUND_WORK_${kind.toUpperCase()}`,
+      await executeBackgroundBoundaryTurn(codexHome, workingDirectory, 'run a communicating child')
+      const publishCheckpoint = vi.fn()
+      const boundary = waitForWarmCodexBackgroundWork().then(publishCheckpoint)
+      await new Promise((resolve) => setTimeout(resolve, 75))
+      expect(publishCheckpoint).not.toHaveBeenCalled()
+      expect(spawnedChildren[0]?.signalCode).toBeNull()
+      completeChild.resolve(undefined)
+      await expect(boundary).resolves.toBeUndefined()
+      expect(publishCheckpoint).toHaveBeenCalledOnce()
+      expect(spawnedChildren[0]?.signalCode).toBeNull()
+    })
+
+    it.each([false, true])('waits for a follow-up despite stale completions (starts during scan: %s)', async (duringScan) => {
+      const workingDirectory = await createTempDir('assistant-codex-child-followup-work-')
+      const codexHome = await createTempDir('assistant-codex-child-followup-home-')
+      const spawnedChildren: MockChildProcess[] = []
+      const completeFollowup = createDeferred<void>()
+      mockWarmCodexProcess(spawnedChildren, 31_882, async (child) => {
+        await initializeWarmTurn(child, 'thread-parent', 'turn-parent')
+        writeSubAgentActivity(child, 'thread-parent', 'turn-parent', 'thread-child')
+        writeStartedTurn(child, 'thread-child', 'turn-child-first')
+        writeCompletedTurn(child, 'thread-child', 'turn-child-first')
+        let scan: Record<string, unknown> | null = null
+        if (duringScan) {
+          writeCompletedTurn(child, 'thread-parent', 'turn-parent')
+          scan = await waitForRpcMethod(child, 'thread/backgroundTerminals/list')
+        }
+        writeStartedTurn(child, 'thread-child', 'turn-child-followup')
+        writeSubAgentActivity(child, 'thread-parent', 'turn-parent', 'thread-child', 'interacted')
+        writeCompletedTurn(child, 'thread-child', 'turn-child-first')
+        writeSubAgentActivity(child, 'thread-parent', 'turn-parent', 'thread-child', 'completed')
+        if (scan) {
+          child.stdout.write(jsonLine({ id: scan.id, result: { data: [], nextCursor: null } }))
+        } else {
+          writeCompletedTurn(child, 'thread-parent', 'turn-parent')
+        }
+        await completeFollowup.promise
+        writeCompletedTurn(child, 'thread-child', 'turn-child-followup')
+        await respondToBackgroundTerminals(child, duringScan ? 2 : 1)
+        await respondToBackgroundTerminals(child, duringScan ? 3 : 2)
       })
-      expect(spawnedChildren[0]?.signalCode).toBe('SIGTERM')
+
+      await executeBackgroundBoundaryTurn(codexHome, workingDirectory, 'continue work in the same child')
+      const publishCheckpoint = vi.fn()
+      const boundary = waitForWarmCodexBackgroundWork().then(publishCheckpoint)
+      await new Promise((resolve) => setTimeout(resolve, 75))
+      expect(publishCheckpoint).not.toHaveBeenCalled()
+      completeFollowup.resolve(undefined)
+      await expect(boundary).resolves.toBeUndefined()
+      expect(publishCheckpoint).toHaveBeenCalledOnce()
+      expect(spawnedChildren[0]?.signalCode).toBeNull()
+    })
+
+    it('fails the checkpoint when a child never reaches quiescence', async () => {
+      const workingDirectory = await createTempDir('assistant-codex-child-timeout-work-')
+      const codexHome = await createTempDir('assistant-codex-child-timeout-home-')
+      const spawnedChildren: MockChildProcess[] = []
+      mockWarmCodexProcess(spawnedChildren, 31_884, async (child) => {
+        await initializeWarmTurn(child, 'thread-parent', 'turn-parent')
+        writeSubAgentActivity(child, 'thread-parent', 'turn-parent', 'thread-child')
+        writeStartedTurn(child, 'thread-child', 'turn-child')
+        writeSubAgentActivity(child, 'thread-parent', 'turn-parent', 'thread-child', 'interacted')
+        writeCompletedTurn(child, 'thread-parent', 'turn-parent')
+      })
+      await executeBackgroundBoundaryTurn(codexHome, workingDirectory, 'run a child that stays active')
+      vi.useFakeTimers()
+      try {
+        const publishCheckpoint = vi.fn()
+        const boundary = waitForWarmCodexBackgroundWork().then(publishCheckpoint)
+        const rejection = expect(boundary).rejects.toMatchObject({
+          code: 'ASSISTANT_CODEX_BACKGROUND_WORK_TIMEOUT',
+        })
+        await vi.advanceTimersByTimeAsync(120_000)
+        await rejection
+        expect(publishCheckpoint).not.toHaveBeenCalled()
+        expect(spawnedChildren[0]?.signalCode).toBe('SIGTERM')
+      } finally {
+        vi.useRealTimers()
+      }
     })
 
     it('rejects a child background terminal before snapshotting', async () => {

@@ -1,3 +1,5 @@
+import { MURPH_POLL_TOOL } from './dynamic-tools/conversation-polls.js'
+export { MURPH_POLL_TOOL } from './dynamic-tools/conversation-polls.js'
 import { MURPH_CONVERSATION_ATTACHMENTS_TOOL } from './dynamic-tools/conversation-attachments.js'
 export { MURPH_CONVERSATION_ATTACHMENTS_TOOL } from './dynamic-tools/conversation-attachments.js'
 import * as z from '@murphai/contracts/zod-runtime'
@@ -1758,6 +1760,7 @@ const MURPH_BASE_DYNAMIC_TOOLS = [
   MURPH_PERSONALIZATION_TOOL,
   MURPH_FAMILY_PLAN_TOOL,
   MURPH_PLAN_USAGE_TOOL,
+  MURPH_POLL_TOOL,
   MURPH_IMESSAGE_CONTACT_TOOL,
   MURPH_SUBSCRIPTION_TOOL,
   ...MURPH_GROUP_FAMILY_TOOLS,
@@ -1822,6 +1825,7 @@ export interface MurphDynamicToolAvailability {
   familyPlanAvailable?: boolean | null
   labsAvailable?: boolean | null
   planUsageAvailable?: boolean | null
+  pollsAvailable?: boolean | null
   imessageContactAvailable?: boolean | null
   imageGenerationAvailable?: boolean | null
   subscriptionAvailable?: boolean | null
@@ -1887,6 +1891,7 @@ const TOOL_AVAILABILITY: ReadonlyMap<MurphDynamicTool, AvailabilityPredicate> =
     [MURPH_FAMILY_PLAN_TOOL, defaultOff((a) => a.familyPlanAvailable)],
     [MURPH_LABS_TOOL, defaultOff((a) => a.labsAvailable)],
     [MURPH_PLAN_USAGE_TOOL, defaultOff((a) => a.planUsageAvailable)],
+    [MURPH_POLL_TOOL, defaultOff((a) => a.pollsAvailable)],
     [MURPH_IMESSAGE_CONTACT_TOOL, defaultOff((a) => a.imessageContactAvailable)],
     [MURPH_SUBSCRIPTION_TOOL, defaultOff((a) => a.subscriptionAvailable)],
     ...MURPH_GROUP_FAMILY_TOOLS.map(

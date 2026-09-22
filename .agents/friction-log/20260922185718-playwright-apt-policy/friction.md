@@ -22,3 +22,7 @@ Compare the existing exact policy lines case-insensitively and retain checks for
 ## Context
 
 This blocks browser-based CI before product verification runs. Reproduced in an isolated Ubuntu container using synthetic configuration.
+
+## Resolution
+
+The current main branch independently removed the redundant dump validation and placed the policy after the runner defaults. Base reconciliation preserves that shipped implementation and its four passing installer tests.

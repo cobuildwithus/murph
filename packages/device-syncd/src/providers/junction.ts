@@ -5264,10 +5264,12 @@ export function createJunctionDeviceSyncProvider(
   ): Promise<ProviderJobResult> {
     const startedAt = Date.now();
     let emptySourceFence: JunctionSourceLifecycleFence | null = null;
-    const deferEmptySourceCheck = job.kind === "reconcile"
-      && !normalizeProviderSlug(job.payload.sourceProviderSlug)
-      ? (fence: JunctionSourceLifecycleFence) => { emptySourceFence ??= fence; }
-      : undefined;
+    const deferEmptySourceCheck = (fence: JunctionSourceLifecycleFence) => {
+      emptySourceFence ??= fence;
+    };
+    // Inventory is descriptive; reuse it only within this bounded job. Each
+    // canonical import still reads live source authority after its fetch.
+    const inventory: { providers: readonly JunctionProviderConnection[] | null } = { providers: null };
     let currentJob = job;
     for (let units = 1; ; units += 1) {
       const result = await executeFullJobTimeseriesContinuationUnit(
@@ -5275,6 +5277,7 @@ export function createJunctionDeviceSyncProvider(
         currentJob,
         skippedOptionalResources,
         completedWorkoutStreamIdentities,
+        inventory,
         deferEmptySourceCheck,
       );
       const next = result.scheduledJobs?.[0];
@@ -5315,7 +5318,8 @@ export function createJunctionDeviceSyncProvider(
     job: DeviceSyncJobRecord,
     skippedOptionalResources: JunctionSkippedOptionalResource[],
     completedWorkoutStreamIdentities: ReadonlySet<string>,
-    deferEmptySourceCheck?: (fence: JunctionSourceLifecycleFence) => void,
+    inventory: { providers: readonly JunctionProviderConnection[] | null },
+    deferEmptySourceCheck: (fence: JunctionSourceLifecycleFence) => void,
   ): Promise<ProviderJobResult> {
     const window = resolveJobWindow(
       job,
@@ -5363,7 +5367,7 @@ export function createJunctionDeviceSyncProvider(
       throw invalidJunctionTimeseriesResourceProgress();
     }
     const listedSourceProviders = sourceProviderSlug || resource === "workout_stream"
-      ? await measureJunctionProviderRequest(
+      ? inventory.providers ??= await measureJunctionProviderRequest(
           context,
           "inventory",
           () => client.listUserProviders(context.account.externalAccountId, {
