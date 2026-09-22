@@ -126,7 +126,8 @@ it has been explicitly elevated to a cross-cutting invariant.
   root plus at most three concurrent children per session. Each child owns one
   independent bounded family and may not spawn a nested child or leave a
   background terminal. Messages and follow-up tasks are ordinary native
-  communication; they do not invalidate the workspace boundary. It never inherits the root turn's
+  communication; they do not invalidate the workspace boundary. A child never
+  inherits the root turn's
   invocation-scoped automation or device capability. Root completion or a
   later ordinary turn does not terminate valid detached work merely to rotate
   request authority. If the root replies while its child is still generating,
@@ -138,17 +139,23 @@ it has been explicitly elevated to a cross-cutting invariant.
   system-notification, and output-only turns never perform this recheck.
 - Before a hosted workspace snapshot, Murph waits for every exact resident child
   and checks every touched root and resident child for background terminals. A
-  root's lifecycle set retains every admitted child until that boundary clears;
+  child-turn map retains every observed child until that boundary clears;
   completion of one sibling must not evict another. Each native child turn start
   clears prior completion and becomes that child's current turn. Only a matching
   native completion can finish it; parent activity acknowledgements cannot finish
   a newer turn. A child admitted or restarted during boundary RPCs causes another
   quiescence check within the same bounded wait. An ordinary checkpoint wake
   interrupts only the boundary wait and preserves the warm App Server plus all
-  resident evidence. A timeout or unsupported lifecycle stops the exact process
-  and fails closed. Explicit workspace invocation abort/preemption interrupts
+  resident evidence, including pending usage reports. Parent activity metadata
+  can reserve a not-yet-started child but cannot mark work finished or reject a
+  checkpoint based on ancestry. A timeout or uncorrelatable native turn identity
+  stops the exact process and fails closed. Explicit workspace invocation abort/preemption interrupts
   the wait and synchronously tears down that exact process before workspace or
-  invocation ownership is released.
+  invocation ownership is released. Native follow-up acknowledgement proves
+  submission, not execution: the current App Server exposes no ordered queue-drain
+  barrier for accepted-but-unstarted work. This boundary tracks observed native
+  work; it does not claim a stronger native queue guarantee or synthesize one with
+  sleeps or policy rejections.
 - Before checkpoint construction, the runtime closes and joins asynchronous
   preparation admission. Unreserved process initialization that is still
   pending is then cancelled and its exact process is awaited through teardown.

@@ -1182,7 +1182,6 @@ class CodexAppServerProcess {
   private boundThreadId: string | null = null
   private boundThreadModel: string | null = null
   private boundThreadServiceTier: AssistantProviderServiceTier | null = null
-  private boundTurnId: string | null = null
   private cleanupProcessExitListener: () => void
   private completedTurn = false
   private lastThreadTokenUsage: CodexWarmThreadTokenUsage | null = null
@@ -1200,7 +1199,6 @@ class CodexAppServerProcess {
   // admitted since the last workspace boundary so checkpointing waits for and
   // scans all of them, including children that completed before their parent
   // reply.
-  private readonly detachedChildParentTurnIds = new Map<string, string>()
   private readonly detachedChildTurns = new Map<string, {
     turnId: string | null
     completed: boolean
@@ -1210,14 +1208,7 @@ class CodexAppServerProcess {
     string,
     NonNullable<CodexAppServerActiveTurnBinding['onSubagentMessage']>
   >()
-  private detachedChildViolation:
-    | 'outside_root'
-    | 'reused_child'
-    | 'malformed_lifecycle'
-    | 'nested_child'
-    | 'untracked_completion'
-    | null = null
-  private readonly detachedRootThreadIdsByTurnId = new Map<string, string>()
+  private detachedChildLifecycleMalformed = false
   private readonly detachedRootThreadIds = new Set<string>()
   private readonly pendingDetachedUsageReports = new Set<Promise<void>>()
   private stopCompleted = false
@@ -1572,7 +1563,7 @@ class CodexAppServerProcess {
         await this.assertNoBackgroundTerminals(signal)
         throwIfCodexBackgroundWorkWaitAborted(signal)
         this.assertBackgroundWorkProcessAvailable()
-        this.assertDetachedChildContractSupported()
+        this.assertDetachedChildLifecycleValid()
         // A follow-up can start while the terminal RPCs or usage reports are
         // settling. Wait and scan again, including newly admitted children.
         if (scannedGeneration === this.detachedChildWorkGeneration) {
@@ -1612,8 +1603,8 @@ class CodexAppServerProcess {
   }
 
   private hasPendingDetachedChildren(): boolean {
-    for (const threadId of this.detachedChildParentTurnIds.keys()) {
-      if (this.detachedChildTurns.get(threadId)?.completed !== true) {
+    for (const turn of this.detachedChildTurns.values()) {
+      if (!turn.completed) {
         return true
       }
     }
@@ -1627,7 +1618,7 @@ class CodexAppServerProcess {
     while (true) {
       throwIfCodexBackgroundWorkWaitAborted(signal)
       this.assertBackgroundWorkProcessAvailable()
-      this.assertDetachedChildContractSupported()
+      this.assertDetachedChildLifecycleValid()
       if (Date.now() >= deadline) {
         throw new VaultCliError(
           'ASSISTANT_CODEX_BACKGROUND_WORK_TIMEOUT',
@@ -1642,11 +1633,11 @@ class CodexAppServerProcess {
     }
   }
 
-  private assertDetachedChildContractSupported(): void {
-    if (this.detachedChildViolation) {
+  private assertDetachedChildLifecycleValid(): void {
+    if (this.detachedChildLifecycleMalformed) {
       throw new VaultCliError(
-        `ASSISTANT_CODEX_BACKGROUND_WORK_${this.detachedChildViolation.toUpperCase()}`,
-        `Unsupported Codex background work: ${this.detachedChildViolation}.`,
+        'ASSISTANT_CODEX_BACKGROUND_WORK_MALFORMED_LIFECYCLE',
+        'Codex child turn identity could not be established before the workspace boundary.',
         { retryable: true },
       )
     }
@@ -1664,7 +1655,10 @@ class CodexAppServerProcess {
   ): Promise<void> {
     while (this.pendingDetachedUsageReports.size > 0) {
       throwIfCodexBackgroundWorkWaitAborted(signal)
-      await Promise.all([...this.pendingDetachedUsageReports])
+      await waitForCodexBackgroundWorkOperation(
+        Promise.all([...this.pendingDetachedUsageReports]),
+        signal,
+      )
     }
   }
 
@@ -1674,7 +1668,7 @@ class CodexAppServerProcess {
     const generation = this.detachedChildWorkGeneration
     const threadIds = new Set([
       ...this.detachedRootThreadIds,
-      ...this.detachedChildParentTurnIds.keys(),
+      ...this.detachedChildTurns.keys(),
     ])
     for (const threadId of threadIds) {
       throwIfCodexBackgroundWorkWaitAborted(signal)
@@ -1703,95 +1697,25 @@ class CodexAppServerProcess {
   }
 
   private clearDetachedChildBoundary(): void {
-    this.boundTurnId = null
-    this.detachedChildParentTurnIds.clear()
     this.detachedChildTurns.clear()
     this.detachedChildWorkGeneration = 0
     this.detachedChildMessageHandlers.clear()
-    this.detachedChildViolation = null
-    this.detachedRootThreadIdsByTurnId.clear()
+    this.detachedChildLifecycleMalformed = false
     this.detachedRootThreadIds.clear()
   }
 
-  private admitDetachedChild(input: {
-    parentThreadId: string
-    parentTurnId: string
-    threadId: string
-  }): void {
-    if (
-      this.detachedRootThreadIdsByTurnId.get(input.parentTurnId)
-      !== input.parentThreadId
-    ) {
-      this.detachedChildViolation ??= 'outside_root'
-      return
-    }
-
-    const existingParentTurnId = this.detachedChildParentTurnIds.get(input.threadId)
-    if (
-      existingParentTurnId !== undefined
-      && existingParentTurnId !== input.parentTurnId
-    ) {
-      this.detachedChildViolation ??= 'reused_child'
-      return
-    }
-    if (existingParentTurnId === undefined) {
-      this.detachedChildWorkGeneration += 1
-    }
-    this.detachedChildParentTurnIds.set(input.threadId, input.parentTurnId)
-  }
-
   private observeDetachedChildLifecycle(message: CodexRpcMessage): void {
-    const activity = readCodexSubagentActivity(message)
-    if (activity) {
-      const senderThreadId = extractCodexThreadIdFromMessage(message)
-      if (activity.kind === 'malformed') {
-        this.detachedChildViolation ??= 'malformed_lifecycle'
-      } else if (activity.kind === 'started') {
-        if (
-          !senderThreadId
-          || this.detachedRootThreadIdsByTurnId.get(activity.turnId)
-            !== senderThreadId
-        ) {
-          this.detachedChildViolation ??= 'nested_child'
-        } else {
-          this.admitDetachedChild({
-            parentThreadId: senderThreadId,
-            parentTurnId: activity.turnId,
-            threadId: activity.agentThreadId,
-          })
-          if (this.activeTurn?.onSubagentMessage) {
-            this.detachedChildMessageHandlers.set(
-              activity.agentThreadId,
-              this.activeTurn.onSubagentMessage,
-            )
-          }
-        }
-      } else if (activity.kind === 'completed'
-        && !this.detachedChildTurns.has(activity.agentThreadId)) {
-        const currentParentThreadId = this.detachedRootThreadIdsByTurnId.get(
-          activity.turnId,
-        )
-        // A prior turn is absent after its boundary clears, so its delayed
-        // acknowledgement is inert. A current turn must name an admitted child.
-        if (currentParentThreadId !== undefined) {
-          if (
-            senderThreadId === currentParentThreadId
-            && this.detachedChildParentTurnIds.get(activity.agentThreadId)
-              === activity.turnId
-          ) {
-            this.detachedChildTurns.set(activity.agentThreadId, {
-              turnId: null,
-              completed: true,
-            })
-          } else {
-            this.detachedChildViolation ??= 'untracked_completion'
-          }
-        }
+    const childThreadId = readCodexStartedChildThreadId(message)
+    if (childThreadId && !this.detachedChildTurns.has(childThreadId)) {
+      // Spawn acknowledgement may precede the child's native turn start.
+      // Reserve it as pending, without treating ancestry or activity summaries
+      // as authority to finish work or reject a checkpoint.
+      this.detachedChildTurns.set(childThreadId, { turnId: null, completed: false })
+      this.detachedChildWorkGeneration += 1
+      if (this.activeTurn?.onSubagentMessage) {
+        this.detachedChildMessageHandlers.set(childThreadId, this.activeTurn.onSubagentMessage)
       }
-      // Interacted covers both messages and follow-up requests; interrupted
-      // is also a request, not proof of exit. Native turns own child liveness.
     }
-
     this.observeDetachedChildTurn(message)
   }
 
@@ -1801,12 +1725,12 @@ class CodexAppServerProcess {
       return
     }
     const threadId = extractCodexThreadIdFromMessage(message)
-    if (!threadId || this.detachedRootThreadIds.has(threadId)) {
+    if (!threadId || threadId === this.boundThreadId || this.detachedRootThreadIds.has(threadId)) {
       return
     }
     const turnId = extractCodexTurnIdFromMessage(message)
     if (!turnId) {
-      this.detachedChildViolation ??= 'malformed_lifecycle'
+      this.detachedChildLifecycleMalformed = true
       return
     }
     if (isCodexTurnStartedMethod(method)) {
@@ -2007,8 +1931,8 @@ class CodexAppServerProcess {
 
   get hasUncheckpointedDetachedWork(): boolean {
     return (
-      this.detachedChildParentTurnIds.size > 0 ||
-      this.detachedChildViolation !== null
+      this.detachedChildTurns.size > 0 ||
+      this.detachedChildLifecycleMalformed
     )
   }
 
@@ -2058,13 +1982,6 @@ class CodexAppServerProcess {
       this.boundThreadId = threadId
       this.detachedRootThreadIds.add(threadId)
     }
-  }
-
-  noteBoundTurn(threadId: string, turnId: string): void {
-    this.boundThreadId = threadId
-    this.boundTurnId = turnId
-    this.detachedRootThreadIds.add(threadId)
-    this.detachedRootThreadIdsByTurnId.set(turnId, threadId)
   }
 
   noteBoundThreadServiceTier(serviceTier: AssistantProviderServiceTier | null): void {
@@ -2129,20 +2046,6 @@ class CodexAppServerProcess {
       return false
     }
 
-    if (
-      isCodexTurnStartedMethod(readCodexEventMethod(message))
-      && !this.detachedChildParentTurnIds.has(threadId)
-    ) {
-      if (this.boundThreadId && this.boundTurnId) {
-        this.admitDetachedChild({
-          parentThreadId: this.boundThreadId,
-          parentTurnId: this.boundTurnId,
-          threadId,
-        })
-      } else {
-        this.detachedChildViolation ??= 'outside_root'
-      }
-    }
     handler(message)
     return true
   }
@@ -2300,35 +2203,14 @@ function readCodexBackgroundTerminalPresence(value: unknown): boolean {
   return data.length > 0
 }
 
-function readCodexSubagentActivity(message: CodexRpcMessage): {
-  agentThreadId: string
-  kind: 'completed' | 'interacted' | 'interrupted' | 'started'
-  turnId: string
-} | { kind: 'malformed' } | null {
-  const method = typeof message.method === 'string' ? message.method : null
-  if (method !== 'item/completed') {
+function readCodexStartedChildThreadId(message: CodexRpcMessage): string | null {
+  if (message.method !== 'item/completed') {
     return null
   }
   const item = asCodexRecord(asCodexRecord(message.params)?.item)
-  if (asCodexString(item?.type) !== 'subAgentActivity') {
-    return null
-  }
-  const agentThreadId = asCodexString(item?.agentThreadId)
-  const kind = asCodexString(item?.kind)
-  const turnId = asCodexString(asCodexRecord(message.params)?.turnId)
-  if (
-    !agentThreadId
-    || !turnId
-    || (
-      kind !== 'completed'
-      && kind !== 'started'
-      && kind !== 'interacted'
-      && kind !== 'interrupted'
-    )
-  ) {
-    return { kind: 'malformed' }
-  }
-  return { agentThreadId, kind, turnId }
+  return item?.type === 'subAgentActivity' && item.kind === 'started'
+    ? asCodexString(item.agentThreadId)
+    : null
 }
 
 function throwIfCodexBackgroundWorkWaitAborted(
@@ -5867,7 +5749,7 @@ async function runCodexAppServerTurnOnProcess(
       return
     }
     if (codexThreadId) {
-      codexProcess.noteBoundTurn(codexThreadId, candidateTurnId)
+      codexProcess.noteBoundThreadId(codexThreadId)
     }
   }
 
