@@ -30,6 +30,24 @@ const baseConversationInput: AssistantSystemPromptInput = {
 }
 
 describe('assistant dynamic context prompt blocks', () => {
+  it.each([false, true])('allows requested result waiting without blocking onboarding (%s)', (onboardingGuidance) => {
+    const { prompt } = buildAssistantSystemPromptLayers({
+      ...baseConversationInput, channel: 'linq', conversationScope: 'direct',
+      hostedRuntime: true, ordinaryInboundTurn: true, onboardingGuidance,
+    })
+    expect(prompt).toContain('When the user explicitly requests delegation, use a bounded child even for a small lookup.')
+    expect(prompt).toContain('use native `wait_agent` until completion, then give the answer in this turn')
+    expect(prompt).toContain('If the current request needs an unfinished child’s result, use native `wait_agent`')
+    expect(prompt).toContain('without promising an automatic later reply')
+    expect(prompt).toContain('independent background work must not hold the reply open')
+    expect(prompt).not.toContain('Do not message/resume/reuse/close/interrupt/wait on/nest it')
+    expect(prompt).not.toContain('do not call `wait_agent`, wait, or block the reply')
+    expect(prompt).not.toContain('If current answer/safe action depends on it, do it once in root')
+    if (onboardingGuidance) {
+      expect(prompt).toContain('Continue straight to the next question while the child works')
+    }
+  })
+
   it('keeps source-specific gaps and uncertain historical coverage in the composed group prompt', () => {
     const { prompt } = buildAssistantSystemPromptLayers({
       ...baseConversationInput, channel: 'linq', conversationScope: 'group',
