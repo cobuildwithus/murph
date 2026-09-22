@@ -28,7 +28,7 @@ for expected in \
   "Acquire::Retries \"$APT_RETRIES\";" \
   "Acquire::http::Timeout \"$APT_TIMEOUT_SECONDS\";" \
   "Acquire::https::Timeout \"$APT_TIMEOUT_SECONDS\";"; do
-  if ! grep -Fqx "$expected" <<< "$apt_policy"; then
+  if ! grep -Fqix "$expected" <<< "$apt_policy"; then
     echo "Playwright apt policy was not loaded: $expected" >&2
     exit 1
   fi

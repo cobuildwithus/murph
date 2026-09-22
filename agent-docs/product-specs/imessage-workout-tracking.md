@@ -81,6 +81,11 @@ writes, drops canonical fields, changes modes, or marks a workout complete to
 satisfy the editor. Completed workouts retain the same editable V6 path.
 Historical V4 links remain decodable but cannot open a read-only detail editor.
 
+Previously queued workout replies without editors remain readable. Delivery
+persists their existing semantic-text fallback before contacting the provider,
+using the original delivery identity across interruption and retry. It does not
+encode a new read-only workout card or modify canonical workout state.
+
 Generic compact tables keep the existing schema-version-3 native envelope. The
 static workout image keeps the authority-free schema-version-4 envelope. The
 installed native editor keeps schema version 6, whose compact typed projection

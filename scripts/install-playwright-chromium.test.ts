@@ -124,6 +124,21 @@ describe("install-playwright-chromium.sh", () => {
     );
   });
 
+  it("accepts loaded policy names with casing retained from an earlier apt config", () => {
+    const { result, root } = runWrapper({
+      aptConfig: [
+        'Acquire::Retries "1";',
+        'Acquire::http::timeout "180";',
+        'Acquire::https::timeout "180";',
+      ].join("\n"),
+    });
+
+    expect(result.status).toBe(0);
+    expect(readFileSync(path.join(root, "pnpm-calls"), "utf8").trim()).toBe(
+      "--dir apps/web exec playwright install --with-deps chromium",
+    );
+  });
+
   it("fails before Playwright when apt did not load the checked policy", () => {
     const { result, root } = runWrapper({
       aptConfig: [

@@ -7408,7 +7408,7 @@ if (!tool) {
     expect(result.finalMessage).not.toMatch(/no (?:future|later) delivery/iu)
   })
 
-  it('preserves current response-card shapes and rejects legacy-only nutrition authoring through the real App Server boundary', {
+  it('preserves current response-card shapes and rejects unverified workouts and legacy-only nutrition authoring through the real App Server boundary', {
     timeout: TURN_TIMEOUT_MS,
   }, async () => {
     const completedWorkoutCard = {
@@ -7500,7 +7500,7 @@ if (!tool) {
             namespace: 'murph',
           },
         },
-        { text: 'CARD_ATTACHED' },
+        { text: 'workout' in card ? 'WORKOUT_CARD_UNAVAILABLE' : 'CARD_ATTACHED' },
       )
 
       const result = await executeCodexAppServerTurn({
@@ -7524,18 +7524,21 @@ if (!tool) {
         'meal totals --from <date> --to <same-date> --resolve-goals --format json',
       )
       expect(JSON.stringify(discovered)).not.toContain('goal list --status active')
-      expect(result.runtimeIssueInputs).toEqual([])
       if ('workout' in card) {
-        expect(result.responseCard).toMatchObject({
-          ...card,
-          tracking: {
-            ...card.tracking,
-            snapshotAt: expect.stringMatching(
-              /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u,
-            ),
-          },
-        })
+        expect(result.responseCard).toBeNull()
+        expect(result.runtimeIssueInputs).toEqual([
+          expect.objectContaining({
+            component: 'assistant.workout-card-editor',
+            errorCode: 'WORKOUT_CARD_EDITOR_UNAVAILABLE',
+          }),
+          expect.objectContaining({
+            component: 'assistant.codex-action',
+            errorCode: 'CODEX_DYNAMIC_TOOL_CALL_FAILED',
+          }),
+        ])
+        expect(result.finalMessage).toBe('WORKOUT_CARD_UNAVAILABLE')
       } else {
+        expect(result.runtimeIssueInputs).toEqual([])
         expect(result.responseCard).toEqual(card)
       }
     }
