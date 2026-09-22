@@ -89,6 +89,9 @@ async function isolated(run: (directory: string, invoke: (
 type Case = { name: string; argv: string[]; command: string; code?: string; field?: string;
   validation?: CliValidationDiagnostic; requests?: number }
 const cases: Case[] = [
+  { name: 'food conflicting query forms', argv: ['food', 'search-labels', 'synthetic oats', '--query', 'PRIVATE_SENTINEL'],
+    command: 'food search-labels', code: 'VALIDATION_ERROR', field: 'query',
+    validation: { field: 'query', code: 'custom', missing: false } },
   { name: 'food limit validation before provider access', argv: ['food', 'search-labels', 'synthetic oats', '--limit', '999'],
     command: 'food search-labels', code: 'VALIDATION_ERROR', field: 'limit',
     validation: { field: 'limit', code: 'too_big', missing: false } },

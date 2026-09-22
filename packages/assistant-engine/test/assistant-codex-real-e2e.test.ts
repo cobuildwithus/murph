@@ -10624,6 +10624,23 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
     360_000,
   )
 
+  it('eager group data answers a shared steps question with one authorized read', async () => {
+    const journey = await runGroupSharedStepsReadJourney({
+      fixture: { averyValue: 13_579, date: '2026-07-28', jordanValue: 6_246 },
+      fullGroupTools: true,
+      prompt: ['Who has which shared step totals for July 28?'],
+      temporaryLabel: 'eager-data',
+    })
+    expectOneSharedStepsRead(journey)
+    expect(journey.dynamicActions).toHaveLength(1)
+    expectTwoLabeledSharedValues({
+      first: { displayName: 'Avery', value: 13_579 },
+      message: journey.finalMessage,
+      second: { displayName: 'Jordan', value: 6_246 },
+    })
+    expectNoSharedAttributionRefusal(journey.finalMessage)
+  }, 360_000)
+
   it(
     'refreshes labeled shared rows before an explicit current attribution question',
     async () => {
@@ -30319,6 +30336,12 @@ describeRealCodex('real Codex food label query recovery e2e', () => {
         writeFile(statePath, '', 'utf8'),
       ])
 
+      const manifest = await readAssistantCliLlmsFullManifestFromCliEntry({
+        cliEntryPath: fileURLToPath(new URL('../../cli/dist/bin.js', import.meta.url)),
+        workingDirectory: fileURLToPath(new URL('../../../', import.meta.url)),
+      })
+      const assistantCliContract = buildAssistantCliSurfaceContract(manifest)
+      expect(assistantCliContract).toContain('read `vault-cli <command> --help`')
       expect(syntheticPackageDescription.length).toBeGreaterThan(256)
       const inheritedPath = normalizeEnvString(config.env.PATH)
       const result = await executeRealCodexAppServerTurn({
@@ -30329,7 +30352,7 @@ describeRealCodex('real Codex food label query recovery e2e', () => {
           ?? undefined,
         codexHome: config.codexHome,
         developerInstructions: buildAssistantSystemPrompt({
-          assistantCliContract: 'Use vault-cli for canonical member data.',
+          assistantCliContract,
           assistantContextSnapshotPrompt: null,
           assistantHostedDeviceConnectAvailable: false,
           assistantHostedDeviceConnectProviders: [],
@@ -30399,6 +30422,8 @@ describeRealCodex('real Codex food label query recovery e2e', () => {
       expect(queries[1]).not.toBe(queries[0])
       expect(queries[1]).toMatch(/Northstar|chickpea/iu)
       expect(forbiddenVaultCommands).toEqual([])
+      expect(commands.filter(command => command.includes('--help')).length).toBeLessThanOrEqual(1)
+      expect(commandText).not.toContain('--schema')
       expect(commandText).toContain('food-journal')
       expect(commandText).not.toContain('commons knowledge search')
       expect(commandText).not.toMatch(
@@ -30506,6 +30531,8 @@ async function materializeFoodLabelQueryRecoveryVaultCli(input: {
       `  food\\ search-labels\\ --help*) printf '%s\\n' ${quoteNutritionShellLiteral(helpText)} ;;`,
       '  food\\ search-labels\\ *)',
       '    query="$3"',
+      '    if [ "$query" = "--query" ]; then query="$4"; fi',
+      '    case "$query" in --query=*) query="${query#--query=}" ;; esac',
       `    printf '%s\\n' "$query" >> ${quoteNutritionShellLiteral(input.queryLogPath)}`,
       `    if grep -q '^completed$' ${quoteNutritionShellLiteral(input.statePath)}; then`,
       '      printf \'duplicate food label lookup\\n\' >&2',
@@ -38785,6 +38812,7 @@ async function runGroupSharedStepsReadJourney(input: {
   fixture: GroupSharedStepsFixtureInput
   prompt: readonly string[]
   temporaryLabel: string
+  fullGroupTools?: boolean
 }) {
   const config = await resolveRealCodexE2eConfig()
   const workingDirectory = await mkdtemp(
@@ -38805,8 +38833,10 @@ async function runGroupSharedStepsReadJourney(input: {
         normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
       codexHome: config.codexHome,
       developerInstructions:
-        buildHostedGroupStatusDeveloperInstructions('shared_read'),
-      dynamicTools: [MURPH_GROUP_SHARED_READ_TOOL],
+        buildHostedGroupStatusDeveloperInstructions(input.fullGroupTools ? 'families' : 'shared_read'),
+      dynamicTools: input.fullGroupTools
+        ? resolveMurphDynamicTools({ groupAvailable: true, progressUpdateMode: 'group' })
+        : [MURPH_GROUP_SHARED_READ_TOOL],
       env: {
         ...config.env,
         [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
@@ -38837,7 +38867,7 @@ async function runGroupSharedStepsReadJourney(input: {
     const sharedReads = readCapabilityRoutingActions(result.jsonEvents).filter(
       (action) =>
         action.kind === 'dynamic'
-        && action.tool === MURPH_GROUP_SHARED_READ_TOOL.name,
+        && action.tool === (input.fullGroupTools ? MURPH_GROUP_DATA_TOOL.name : MURPH_GROUP_SHARED_READ_TOOL.name),
     )
     const finalAnswerEventIndex = result.jsonEvents.findIndex((event) => {
       const record = readRecord(event)
@@ -38858,6 +38888,7 @@ async function runGroupSharedStepsReadJourney(input: {
     return {
       finalAnswerEventIndex,
       finalMessage: result.finalMessage,
+      dynamicActions: readCapabilityRoutingActions(result.jsonEvents).filter(action => action.kind === 'dynamic'),
       sharedReads,
       sharedRequests,
     }
