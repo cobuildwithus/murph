@@ -22,13 +22,14 @@ Acquire::https::Timeout "$APT_TIMEOUT_SECONDS";
 EOF
 
 # Fail before Playwright if the runner did not load the policy that its
-# privileged apt subprocess will inherit.
+# privileged apt subprocess will inherit. APT keys are case-insensitive, and
+# dump preserves the casing from earlier runner configuration.
 apt_policy="$(apt-config dump)"
 for expected in \
   "Acquire::Retries \"$APT_RETRIES\";" \
   "Acquire::http::Timeout \"$APT_TIMEOUT_SECONDS\";" \
   "Acquire::https::Timeout \"$APT_TIMEOUT_SECONDS\";"; do
-  if ! grep -Fqx "$expected" <<< "$apt_policy"; then
+  if ! grep -Fiqx "$expected" <<< "$apt_policy"; then
     echo "Playwright apt policy was not loaded: $expected" >&2
     exit 1
   fi
