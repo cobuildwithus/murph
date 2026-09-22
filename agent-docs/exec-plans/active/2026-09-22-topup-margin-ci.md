@@ -17,6 +17,11 @@ configured value is 180, but the wrapper's case-sensitive full-line comparison
 rejects it. Match the fixed numeric policy lines case-insensitively; no new
 configuration parser or process owner is needed.
 
+A second release Web failure reproduces locally: the source-recorded sleep
+route test uses July fixtures with the real clock, so the route correctly
+filters them after 60 days. Pin Date.now only within that test and restore it
+through the test-finished hook; preserve production retention behavior.
+
 ## Scope and invariants
 
 Preserve the exact retry/timeout values, fail before Playwright on missing or
@@ -40,5 +45,7 @@ The wrapper also serves viewport CI. CI-only deployment; no production rollout.
 - Parent review: a case-insensitive fixed-string, full-line comparison preserves
   exact numeric validation. No new process, retry, parser, or runtime code.
 - Product UX: internal CI correction; no additional member-facing change.
+- Passed: the focused vault-share delivery file, 36 tests, after its one failing
+  fixture was reproduced with the real clock. Production retention is unchanged.
 - Required CI and final ReviewGPT remain in progress for the updated PR head.
 

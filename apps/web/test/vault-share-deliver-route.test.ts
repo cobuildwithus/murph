@@ -590,7 +590,11 @@ describe("vault-share deliver route", () => {
     });
   });
 
-  it("preserves source-recorded sleep times through the deliver route", async () => {
+  it("preserves source-recorded sleep times through the deliver route", async ({ onTestFinished }) => {
+    const now = vi.spyOn(Date, "now").mockReturnValue(
+      Date.parse("2026-07-25T12:00:00.000Z"),
+    );
+    onTestFinished(() => now.mockRestore());
     const projectionScope = hostedVaultShareProjectionKindToScope(
       "deep-sleep-sources-days.v1",
     );
