@@ -1,7 +1,7 @@
 # Hosted Usage Top-Ups
 
 Status: Implemented personal, Family-member, and hosted-group funding
-Last verified: 2026-08-26
+Last verified: 2026-09-22
 
 ## Decision
 
@@ -22,17 +22,17 @@ The personal and Family offer catalog is:
 
 | Offer code | Checkout subtotal | Usage credit granted |
 | --- | ---: | ---: |
-| `usage_5_usd` | $5 USD | $5 of Murph usage credit |
-| `usage_10_usd` | $10 USD | $10 of Murph usage credit |
-| `usage_25_usd` | $25 USD | $25 of Murph usage credit |
+| `usage_5_usd` | $5 USD | $4 of Murph usage credit |
+| `usage_10_usd` | $10 USD | $8 of Murph usage credit |
+| `usage_25_usd` | $25 USD | $20 of Murph usage credit |
 
 The one-time group contribution catalog is:
 
 | Offer code | Checkout subtotal | Usage credit granted |
 | --- | ---: | ---: |
-| `usage_5_usd` | $5 USD | $5 of Murph usage credit |
-| `usage_10_usd` | $10 USD | $10 of Murph usage credit |
-| `usage_20_usd` | $20 USD | $20 of Murph usage credit |
+| `usage_5_usd` | $5 USD | $4 of Murph usage credit |
+| `usage_10_usd` | $10 USD | $8 of Murph usage credit |
+| `usage_20_usd` | $20 USD | $16 of Murph usage credit |
 
 Group funding presents capped monthly sponsorship as the primary choice and a
 one-time contribution as the secondary choice. A monthly sponsor selects a
@@ -41,8 +41,16 @@ exact $5 purchases. No public surface converts dollars or usage credit
 into an estimated message count. `usage_25_usd` remains parseable for historical
 purchases and available only to current personal and Family surfaces.
 
+New purchases grant 80% of their cash subtotal as metered usage capacity,
+matching the paid subscription allowance policy. This leaves 20% before payment
+fees and other delivery costs; it is not a guarantee of net margin. Group
+sponsorship activation and automatic $5 refills each grant $4 of capacity.
+
 The cash subtotal and granted usage value are separate immutable purchase
-facts even when the initial offer is one-for-one. One dollar of v1 usage credit
+facts. Existing balances and purchases reserved before this catalog change keep
+their original grants, including delayed payment fulfillment and retries.
+Refunds and disputes continue to use the purchase's frozen grant. No credit
+migration or Stripe Price change is required. One dollar of v1 usage credit
 is one dollar of capacity under Murph's existing AI usage meter.
 It is not a token count, bank balance, Stripe customer balance, subscription
 invoice credit, transferable asset, or promise of cash redemption.
@@ -186,8 +194,8 @@ authorization-period-ordinal purchase creation.
 The existing post-settlement usage path may create that local purchase. It
 never calls Stripe or waits for payment. The bounded Web billing sweep performs
 saved-card work after commit. Stripe event reconciliation is the only authority
-that grants the $5 through the existing append-only credit ledger and reopens
-pending group work. Failed or authentication-required payment moves the
+that grants the purchase's frozen usage value through the existing append-only
+credit ledger and reopens pending group work. Failed or authentication-required payment moves the
 authorization to private recovery and blocks later automatic charges. A
 same-period recovery may reset that exact failed purchase only while its $5
 charge still fits under the current cap. If the payer has since reduced the cap

@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-22",
+  "order": 100,
+  "item": {
+    "id": "top-up-usage-allowances",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Updated top-up usage allowances",
+    "summary": "New top-ups allocate 80% of the purchase price to AI usage, matching paid plans.",
+    "details": "Purchase prices stay the same: $5, $10, $20, and $25 purchases provide $4, $8, $16, and $20 of metered usage capacity. This also applies to Family top-ups, group contributions, and new automatic group refills. Existing balances and purchases already started keep their original usage amounts.",
+    "relevanceTags": ["billing", "usage"],
+    "sourcePullRequests": []
+  }
+}
