@@ -2987,6 +2987,10 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       },
       runnerInput: baseRunnerInput,
       onCompleted(completion, notify) {
+        // Canonical imports can publish progress during preparation already.
+        if (acceptedCanonicalSystemProgressCheckpointOrdinal === 0) {
+          systemMailboxProgressedSinceCheckpoint ||= completion.systemProgressed === true;
+        }
         clinicalEnrichmentController?.kick();
         runtimeStateDirty = true;
         ensureIdleCheckpointTimerAfterDirtyWork();
@@ -3014,7 +3018,10 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
     await workspaceSystemWork.recover(
       systemMailboxProcessingMode ? HOSTED_SYSTEM_MAILBOX_MODEL_FREE_ROUTE_ACTIONS : undefined,
     );
+    let systemMailboxForegroundRecheckRequested = false;
     const returnSystemMailboxProcessingModeAfterInitialImport = async () => {
+      const initialSystemMailboxProgressGeneration =
+        BigInt(activeWorkspace?.systemMailboxProgressGeneration ?? "0");
       const canonicalWriteCheckpointCoalescer =
         createHostedWorkspaceCanonicalWriteCheckpointCoalescer({
           onCanonicalSystemProgressCommitted() {
@@ -3638,9 +3645,19 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
               nextWakeReason: HOSTED_ASSISTANT_WAKE_REASON,
             }
           : selectHostedRuntimeReturnWake(projectedWake, activeWorkspace);
+        // A retained device cursor need not leave mailbox lag. Wake the existing
+        // owner only after a checkpoint proves progress and retains due work.
+        const recheckOwner = resolveHostedSystemMailboxRecheckOwner({
+          assistantExecutionBlocked,
+          defaultOwnerAuthorityObserved,
+          defaultOwnerDueNow,
+          initialProgressGeneration: initialSystemMailboxProgressGeneration,
+          returnedWake,
+          workspace: activeWorkspace,
+        });
+        systemMailboxForegroundRecheckRequested = recheckOwner === "default";
         const invocationResult = buildHostedRuntimeInvocationResult({
-          immediateRecheckRequested: defaultOwnerAuthorityObserved
-            || (!assistantExecutionBlocked && defaultOwnerDueNow),
+          immediateRecheckRequested: recheckOwner !== null,
           nextWake: returnedWake,
           redactedStatus: await withHostedMailboxProgressStatus({
             mailboxState: latestMailboxImport.state,
@@ -4338,7 +4355,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         return systemMailboxResult;
       };
       if (
-        systemMailboxResult.immediateRecheckRequested !== true
+        !systemMailboxForegroundRecheckRequested
         || assistantExecutionBlocked
         || runtimeAbortController.signal.aborted
         || options.shutdownSignal?.aborted === true
@@ -9499,6 +9516,25 @@ function buildHostedRuntimeInvocationResult(input: {
       nextWakeAt: input.nextWake.nextWakeAt,
     }),
   };
+}
+
+function resolveHostedSystemMailboxRecheckOwner(input: {
+  assistantExecutionBlocked: boolean;
+  defaultOwnerAuthorityObserved: boolean;
+  defaultOwnerDueNow: boolean;
+  initialProgressGeneration: bigint;
+  returnedWake: HostedRuntimePendingWake;
+  workspace: HostedWorkspaceState | null;
+}): "default" | "system_mailbox" | null {
+  if (input.defaultOwnerAuthorityObserved
+    || (!input.assistantExecutionBlocked && input.defaultOwnerDueNow)) return "default";
+  return BigInt(input.workspace?.systemMailboxProgressGeneration ?? "0")
+      > input.initialProgressGeneration
+    && input.returnedWake.nextWakeReason === HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON
+    && input.workspace?.nextWakeReason === input.returnedWake.nextWakeReason
+    && input.workspace.nextWakeAt === input.returnedWake.nextWakeAt
+    && hostedRuntimeWakeIsDue(input.returnedWake.nextWakeAt)
+      ? "system_mailbox" : null;
 }
 
 // Retention competes with the runtime wake only when returning to the host;
