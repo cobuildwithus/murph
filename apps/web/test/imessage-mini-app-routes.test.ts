@@ -157,6 +157,37 @@ describe("iMessage mini-app routes", () => {
     mocks.readHostedMailboxWakeByDedupeKey.mockResolvedValue(null);
   });
 
+  it("accepts corrections across a 16 by 16 workout above the former request budget", async () => {
+    const result = { kind: "weight_reps", reps: 12, weight: 135, weightUnit: "lb" };
+    const body = { schemaVersion: 1, actionId: "2f1c1fdc-c7b0-4d90-b902-8e6295959243",
+      requestedAt: new Date().toISOString(), action: {
+        kind: "workout.live.apply", version: 1,
+        expectedWorkout: { actionBinding: "a".repeat(64),
+          exercises: Array.from({ length: 16 }, (_, i) => ({ name: `Exercise ${i + 1}`,
+            sets: Array.from({ length: 16 }, () => ({ logged: false })) })),
+        },
+        mutations: Array.from({ length: 256 }, (_, i) => ({ kind: "set.put",
+          exerciseName: `Exercise ${Math.floor(i / 16) + 1}`, exercisePosition: Math.floor(i / 16) + 1,
+          setPosition: i % 16 + 1, expectedResult: null, result })),
+        presentation: { title: "Workout", subtitle: null, footer: null,
+          workout: { version: 1, state: "completed",
+            exercises: Array.from({ length: 16 }, (_, i) => ({ name: `Exercise ${i + 1}`,
+              sets: Array.from({ length: 16 }, () => ({ status: "skipped", actual: null, target: null })) })),
+          },
+        },
+      },
+    };
+    expect(Buffer.byteLength(JSON.stringify(body))).toBeGreaterThan(24 * 1_024);
+    const original = await vi.importActual<typeof import("../src/lib/http")>("../src/lib/http");
+    mocks.readJsonObject.mockImplementationOnce(original.readJsonObject);
+    const response = await memberActionRoute.POST(jsonRequest(
+      "https://example.test/api/device-sync/companion/imessage-mini-app/member-actions",
+      MESSAGES_TOKEN, "POST", body,
+    ));
+    expect(response.status).toBe(202);
+    expect(mocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx).toHaveBeenCalledTimes(1);
+  });
+
   it("exchanges a verified Privy member session for a scoped derived credential", async () => {
     const request = jsonRequest(
       "https://example.test/api/device-sync/companion/imessage-mini-app/enrollment",

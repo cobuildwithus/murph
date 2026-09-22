@@ -10,6 +10,7 @@ import {
   clearLiveWorkoutSet,
   finishLiveWorkout,
   logLiveWorkoutSet,
+  removeLiveWorkoutExercise,
   setLiveWorkoutExerciseReps,
   startLiveWorkout,
   type StartLiveWorkoutExerciseInput,
@@ -360,6 +361,33 @@ export function registerWorkoutLiveCommands(workout: Cli.Cli): void {
         unitOverride: options.unitOverride,
         note: options.note,
         setCount: options.sets,
+      })
+    },
+  })
+
+  exercise.command('remove', {
+    description: 'Remove one explicitly selected exercise and its sets, preserving the rest of the exact workout.',
+    args: z.object({
+      exercise: z.string().min(1).max(160).optional().describe('Optional exact exercise name.'),
+    }),
+    options: withBaseOptions({
+      workoutId: workoutIdOption,
+      exerciseId: exerciseIdOption,
+      exerciseOrder: exerciseOrderOption,
+      expectedRevision: z.number().int().positive().describe(
+        'Exact lifecycle revision from the workout read approved for this removal.',
+      ),
+    }),
+    hint: 'Read the exact workout first. Stale revisions or ambiguous exercise names make no write. Remaining exercise orders and results are preserved.',
+    output: showResultSchema,
+    async run({ args, options }) {
+      return removeLiveWorkoutExercise({
+        vault: options.vault,
+        workoutId: options.workoutId,
+        exerciseId: options.exerciseId,
+        exerciseName: args.exercise,
+        exerciseOrder: options.exerciseOrder,
+        expectedRevision: options.expectedRevision,
       })
     },
   })

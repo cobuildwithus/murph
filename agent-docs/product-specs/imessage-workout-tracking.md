@@ -58,27 +58,35 @@ Workout state and progress summaries are derived from the structured exercise/se
 Tracked workout detail requires a canonical tracking marker in durable transcript context. The native URL strips the event id and snapshot time.
 
 The model never authors edit preconditions. At card attachment, runtime re-reads
-the exact canonical workout named by the tracking marker and may add one
-internal editor projection only while that workout is unfinished and its ordered
-exercise names, set counts, and logged states match the presentation.
+the exact canonical workout named by the tracking marker. Every newly attached
+workout card must include a verified editor projection: ordered exercise names,
+set counts, and logged states must match the canonical presentation.
 The projection preserves the closed result family, canonical zero values,
 nullable reps/weight, the raw optional set unit, and separate exercise unit
 context. A note is eligible only when its exact canonical value fits the
 40-character visible card field; a longer note is never substituted with a
 generic label inside editable state. Every completed set must fit exactly one
-supported note, reps, or weight/reps family; duration, distance, RPE,
-bodyweight, assistance, added-load, or mixed-result sets keep their original
-readable actual on V4 instead of entering a lossy editor. Duration, cardio,
-assisted-bodyweight, and weighted-bodyweight exercise modes remain V4 even
-before a result is logged because the direct editor cannot produce their native
-set shape. A read failure, mismatch, completed workout, or hidden or unsupported result
-leaves the card as the existing readable V4 snapshot.
+supported note, reps, or weight/reps family. Duration, distance, RPE, bodyweight,
+assistance, added-load, and mixed-result sets cannot enter a lossy editor.
+Duration, cardio, assisted-bodyweight, and weighted-bodyweight exercise modes
+are unsupported by the direct editor even before a result is logged.
+
+A missing vault, read failure, mismatched or ambiguous presentation, unsupported
+result, or invalid editor rejects workout-card attachment with a recoverable tool
+error and bounded diagnostic metadata. It attaches no read-only card. Murph may
+read the exact workout and retry attachment once from its complete current state.
+If that fails, it replies in ordinary text with verified results and a brief
+explanation that the editable card is unavailable. It never repeats successful
+writes, drops canonical fields, changes modes, or marks a workout complete to
+satisfy the editor. Completed workouts retain the same editable V6 path.
+Historical V4 links remain decodable but cannot open a read-only detail editor.
 
 Generic compact tables keep the existing schema-version-3 native envelope. The
 static workout image keeps the authority-free schema-version-4 envelope. The
 installed native editor keeps schema version 6, whose compact typed projection
-and opaque 64-character bindings stay under the existing 2,048-character URL
-ceiling. The revision binds the
+and opaque 64-character bindings respect the 2,048-character ceiling for
+new message links. Authenticated refresh and save results carry the typed V6
+envelope directly, so later corrections are independent of link length. The revision binds the
 canonical workout identity to its ordered hidden exercise/set-slot identity and
 last applied member-action generation without exposing any of those values.
 Mutable set results and annotations are intentionally excluded so their closed
@@ -95,11 +103,11 @@ specific snapshot that exceeds the existing URL ceiling still uses complete
 semantic text recovery instead of truncating or changing canonical workout
 data. V6 uses `[name, exerciseUnit, sets]`; a
 completed set replaces the actual display string with a closed compact
-note/reps/weight-reps tuple, while a pending set carries `null`. Native derives
+note/reps/weight-reps tuple, while a pending or skipped set carries `null`. Native derives
 display and optimistic preconditions from that typed tuple. Removing repeated
 wire keys keeps realistic six-exercise, four-set initial and late-active
 snapshots below the same URL ceiling without adding another projection owner;
-completed cards remain V4/read-only. Exact canonical pending plans remain in
+completed cards use V6 with skipped rows for unlogged sets. Exact canonical pending plans remain in
 the bounded V6 target string, while completed actuals retain their typed tuple.
 The native form recognizes only the producer's exact numeric weight/reps or
 reps target grammar and keeps every other target display-only.
@@ -386,9 +394,10 @@ action or generic structural reorder therefore invalidates every older
 positional card even when repeated visible values make its intended result
 appear unchanged. When two exercise blocks have the same projected identity
 after exercise order is excluded, mutable set results cannot distinguish their
-coordinates safely. Those workouts remain truthful read-only V4 cards, and the
+coordinates safely. New active-card attachment rejects those workouts, and the
 canonical owner rejects a previously issued V6 action if the current workout is
-ambiguous. Admission rejects a destructive batch when original edits,
+ambiguous. Existing V4 snapshots remain readable. Admission rejects a destructive
+batch when original edits,
 descending removals, and contiguous appends would recreate the same visible set
 sequence because it would have no observable structural effect. The canonical
 workout write records the request action id atomically with the final exercises.
@@ -434,9 +443,10 @@ owner, after exact removal binding and snapshot validation, uses the narrow
 set-removal replacement path. Runtime then records an `applied`, `unchanged`, or
 typed `rejected` receipt through the same mailbox checkpoint. The editor stays
 locked while polling that receipt and says the changes were saved only after an
-applied or converged result. A missing, completed, non-unique, or changed binding
+applied or converged result. A missing, non-unique, or changed binding
 is rejected without retargeting on first application; an exact persisted replay
-remains converged after its workout completes.
+remains converged after its workout completes. Completed native corrections
+preserve the original `endedAt` and duration, including added sets.
 
 This is the first family on the generic member-action delivery primitive. A
 future direct editor adds another explicit action variant and delegates to its
@@ -531,7 +541,8 @@ render deterministically into each pending V6 target as `<weight> <unit> ×
 <reps>`. Current native readers recognize only that exact bounded grammar as an
 incomplete default; ranges, qualitative instructions, AMRAP, and unknown target
 text remain display-only. Completed results still use the existing typed V6
-tuple, and V4 remains the complete read-only/static fallback.
+tuple, and V4 remains only the historical and authority-free static-image wire.
+New workout-card attachment never falls back to V4.
 
 This preserves every installed V6 reader without device-version negotiation,
 rollout flags, or a second protocol. Deploy all current server readers and the
@@ -562,9 +573,9 @@ omitted/null-equivalent retries retain the same admitted payload.
 
 Live refresh preserves the permanent card-reader contract: no new workout-card
 schema, producer flag, capability registry, or duplicated native result model is
-introduced. V4 remains the complete read-only wire and V6 remains the complete
-editable wire. Previously released readers continue to render both exactly as
-before; only a newer Messages extension elects to make the additional read.
+introduced. V4 is retained for historical decoding and static previews. V6 is the editable
+wire for active and completed workouts. The expanded native detail surface
+requires an editor binding; legacy links request a fresh card.
 
 ### Binding and authority
 
@@ -593,45 +604,37 @@ last-action generation without adding another identity store, so other stale
 legacy cards fail closed and retain their embedded snapshot. Legacy writes are
 accepted only when their full binding still exactly matches current state.
 
-### Result and fallback
+### Editable result and recovery
 
-The result contains one bounded canonical Murph card URL, not another workout
-or editor wire. The server encodes the current projection as ordinary V6 when
-the workout is active, structurally supported, editable, and the complete URL
-fits below 2,048 characters. Otherwise it emits ordinary V4 read-only when that
-complete presentation fits. The native result passes that URL through the
-existing strict card decoder. It never merges parallel result models or
-partially installs an editor. Initial V6 authoring still requires the embedded
-logged/pending states to equal the canonical workout; the snapshot read alone
-may advance stale progress before it emits a replacement card.
+Authenticated save and refresh results contain the strict V6 `card` envelope
+with an editor binding, regardless of active or completed state. They reuse the
+existing workout decoder without encoding a transcript URL. Readers accept the
+older `cardUrl` result for compatibility, but reject read-only returned cards.
+Exactly one representation is allowed. Initial message links still enforce the
+2,048-character URL limit and never downgrade to V4.
 
-The extension renders the embedded card immediately, keeps one transient
-selected-message session, and replaces that session only while its entire draft
-equals the card baseline, no admitted request exists, and submission state is
-idle. Network, credential-renewal, decode, non-unique-target, structural, or size
-failure leaves the complete embedded card and any local state unchanged. The
-extension performs no background refresh and stores no result. An oversized V4
-result or a V4/read-only returned result cannot continue refreshing because it
-contains no action binding.
+The action schema and native card agree on 16 exercises and 16 sets per exercise.
+A batch allows 512 mutations, covering simultaneous corrections, renames, removals,
+and replacements. Authenticated request and outcome body budgets are 4 MiB and
+1 MiB respectively; the strict logical bounds still apply.
+
+The extension renders its embedded card immediately and replaces a pristine
+selected-message session only when no admitted request exists and submission is
+idle. Save results rebase the draft while preserving newer unsent edits. Completed
+results keep correction controls available. Network, credentials, decode, binding,
+or structural failure preserves the existing card and local state. There is no
+background refresh, result cache, or alternate read-only detail view.
 
 ### Rollout and proof
 
-Release the compatible iOS reader before enabling the backend path and
-publishing the changelog claim. Both skew directions are safe: an older
-extension only renders its existing V4/V6 snapshot, while a newer extension
-against an older backend treats the unsupported snapshot action as a refresh
-failure and keeps that snapshot. The
-composite binding remains opaque to old iOS readers. No new card schema is
-persisted, so this change creates no installed-reader rollback floor or producer
-gate beyond the existing V4/V6 floor.
+Release native support for completed V6 cards and direct-envelope outcomes before
+enabling these backend producers. Existing links remain decodable, but older
+native readers cannot consume the new completed editor or direct result shape;
+this is a reader rollout requirement, not an already-deployed compatibility claim.
 
 The release remains on Product UX Hold until physical Messages-extension proof
-confirms expansion, refresh, fallback, and draft preservation on a real Xcode/
-iOS device host. Required proof covers exact V4/V6 historical decoding; current and legacy
-binding matching; cross-member, ambiguous, and structurally changed rejection;
-V6 result decoding through the existing native decoder; whole-editor fallback
-to V4 at the real URL ceiling; clean-session replacement; dirty, admitted,
-submitting, saved, and failed session preservation; presentation transitions;
-and physical Messages-extension behavior when an Xcode/device host is
-available. The static image remains V4 and all non-workout card families retain
-their existing envelopes.
+confirms expansion, repeated corrections, refresh, and draft preservation. Local
+proof covers completed/skipped decoding, canonical end-time preservation, strict
+editor attachment, stale and cross-member rejection, save/refresh above the URL
+ceiling, transport budgets, and independent cross-owner review. Static images
+remain authority-free V4 previews and other card families retain their envelopes.

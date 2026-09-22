@@ -259,14 +259,14 @@ export type WorkoutSessionAppCardEnvelopeV6 = {
     v: 1;
     t: string;
     u: string | null;
-    s: "a";
+    s: "a" | "c";
     e: Array<
       [
         name: string,
         exerciseUnit: "l" | "k" | null,
         sets: Array<
           [
-            status: "p" | "c",
+            status: "p" | "c" | "s",
             target: string | null,
             result: WorkoutSessionEditorResultWireV1 | null,
           ]
@@ -321,10 +321,9 @@ export function buildWorkoutSessionAppCardEnvelopeV6(input: {
 }): WorkoutSessionAppCardEnvelopeV6 {
   const editor = workoutSessionEditorProjectionV1Schema.parse(input.editor);
   if (
-    input.workout.state !== "active"
-    || editor.exercises.length !== input.workout.exercises.length
+    editor.exercises.length !== input.workout.exercises.length
   ) {
-    throw new TypeError("Workout editor projection does not match the active card.");
+    throw new TypeError("Workout editor projection does not match the card.");
   }
   return {
     schemaVersion: 6,
@@ -333,7 +332,7 @@ export function buildWorkoutSessionAppCardEnvelopeV6(input: {
       v: 1,
       t: input.title,
       u: input.subtitle,
-      s: "a",
+      s: input.workout.state === "active" ? "a" : "c",
       e: input.workout.exercises.map((exercise, exerciseIndex) => {
         const editorExercise = editor.exercises[exerciseIndex];
         if (
@@ -354,7 +353,7 @@ export function buildWorkoutSessionAppCardEnvelopeV6(input: {
               throw new TypeError("Workout editor projection does not match set state.");
             }
             return [
-              set.status === "completed" ? "c" : "p",
+              set.status === "completed" ? "c" : set.status === "skipped" ? "s" : "p",
               set.target,
               editorSet.result === null
                 ? null
@@ -443,7 +442,6 @@ function isWorkoutSessionWireHeader(
     || !isNullableSingleLineText(card.f, workoutSessionCardV1Bounds.footer)
     || (value.schemaVersion === 6 && !isWorkoutActionBinding(card.b))
     || (value.schemaVersion === 6 && !isWorkoutActionBinding(card.d))
-    || (value.schemaVersion === 6 && card.s !== "a")
   );
 }
 
@@ -490,9 +488,7 @@ function parseWorkoutSessionWireSet(
   if (
     !Array.isArray(set)
     || set.length !== 3
-    || (value.schemaVersion === 6
-      ? set[0] !== "p" && set[0] !== "c"
-      : set[0] !== "p" && set[0] !== "c" && set[0] !== "s")
+    || (set[0] !== "p" && set[0] !== "c" && set[0] !== "s")
     || !isNullableSingleLineText(
       set[1],
       workoutSessionCardV1Bounds.setValue,
@@ -531,13 +527,13 @@ function parseWorkoutSessionWireActual(
 ): string | null | undefined {
   if (
     value.schemaVersion === 6
-    && set[0] === "p"
+    && set[0] !== "c"
     && set[2] !== null
   ) {
     return undefined;
   }
   return value.schemaVersion === 6
-    ? set[0] === "p" && set[2] === null
+    ? set[0] !== "c" && set[2] === null
       ? null
       : renderWorkoutSessionEditorResultV1(
           set[2],

@@ -495,30 +495,11 @@ export function encodeWorkoutSessionAppCardUrl(
 
 export function encodeWorkoutSessionSnapshotAppCardUrl(
   presentation: WorkoutSessionPresentationV1 & {
-    editor?: WorkoutSessionEditorProjectionV1
+    editor: WorkoutSessionEditorProjectionV1
   },
 ): string {
-  if (presentation.editor !== undefined) {
-    const editablePayload = encodeAppCardEnvelopePayload(
-      buildWorkoutSessionAppCardEnvelopeV6({
-        editor: presentation.editor,
-        title: presentation.title,
-        subtitle: presentation.subtitle,
-        footer: presentation.footer,
-        workout: presentation.workout,
-      }),
-    )
-    if (
-      `${IMESSAGE_APP_CARD_URL_PREFIX}${editablePayload}`.length
-      < IMESSAGE_APP_CARD_URL_MAX_LENGTH
-    ) {
-      return encodeAppCardEnvelopeUrl(editablePayload)
-    }
-  }
   return encodeAppCardEnvelopeUrl(
-    encodeAppCardEnvelopePayload(
-      buildWorkoutSessionAppCardEnvelopeV4(presentation),
-    ),
+    encodeAppCardEnvelopePayload(buildWorkoutSessionAppCardEnvelopeV6(presentation)),
   )
 }
 
@@ -591,23 +572,17 @@ function encodeWorkoutSessionAppCardPayload(
   card: Extract<CompactTableResponseCardV1, { workout: unknown }>,
   includeActionBinding: boolean,
 ): string {
-  return encodeAppCardEnvelopePayload(
-    includeActionBinding
-      && card.editor !== undefined
-      ? buildWorkoutSessionAppCardEnvelopeV6({
-          editor: card.editor,
-          title: card.title,
-          subtitle: card.subtitle,
-          footer: card.footer,
-          workout: card.workout,
-        })
-      : buildWorkoutSessionAppCardEnvelopeV4({
-          title: card.title,
-          subtitle: card.subtitle,
-          footer: card.footer,
-          workout: card.workout,
-        }),
-  )
+  // Image previews carry no edit authority. Native workout links always do.
+  if (!includeActionBinding) {
+    return encodeAppCardEnvelopePayload(buildWorkoutSessionAppCardEnvelopeV4(card))
+  }
+  if (card.editor === undefined) {
+    throw new TypeError('A workout card requires a verified editor.')
+  }
+  return encodeAppCardEnvelopePayload(buildWorkoutSessionAppCardEnvelopeV6({
+    ...card,
+    editor: card.editor,
+  }))
 }
 
 function encodeAppCardEnvelopePayload(

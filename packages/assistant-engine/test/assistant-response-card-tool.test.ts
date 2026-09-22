@@ -5,7 +5,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type { AssistantResponseMedia } from '@murphai/operator-config/assistant-cli-contracts'
 import type {
@@ -17,7 +17,7 @@ import {
   type LinqFetch,
 } from '@murphai/operator-config/linq-runtime'
 import { createIntegratedVaultServices } from '@murphai/vault-usecases/vault-services'
-import { addStructuredWorkoutRecord } from '@murphai/vault-usecases/workouts'
+import { addStructuredWorkoutRecord, showWorkoutRecord } from '@murphai/vault-usecases/workouts'
 
 import {
   executeMurphDynamicToolRequest,
@@ -340,6 +340,7 @@ async function createChallengeVault(input: {
 
 async function createLiveWorkoutCardVault(input: {
   ambiguousDuplicate?: boolean
+  completed?: boolean
   hiddenNote?: string
   unsupportedSet?: {
     actual: string
@@ -352,7 +353,7 @@ async function createLiveWorkoutCardVault(input: {
       | 'weighted_bodyweight'
   }
 } = {}): Promise<{
-  card: AssistantResponseCard
+  card: CompactTableWorkoutResponseCardV1
   root: string
 }> {
   const root = await mkdtemp(path.join(tmpdir(), 'murph-workout-card-tool-'))
@@ -373,6 +374,7 @@ async function createLiveWorkoutCardVault(input: {
       workout: {
         sourceApp: 'murph-live',
         startedAt: '2026-08-12T14:00:00.000Z',
+        ...(input.completed ? { endedAt: '2026-08-12T14:01:00.000Z' } : {}),
         exercises: input.ambiguousDuplicate === true
           ? [8, 12].map((reps, index) => ({
               mode: 'bodyweight' as const,
@@ -424,7 +426,7 @@ async function createLiveWorkoutCardVault(input: {
       },
       workout: {
         version: 1,
-        state: 'active',
+        state: input.completed ? 'completed' : 'active',
         exercises: input.ambiguousDuplicate === true
           ? [8, 12].map((reps) => ({
               name: 'Single-arm row',
@@ -449,7 +451,7 @@ async function createLiveWorkoutCardVault(input: {
               sets: [
                 { status: 'completed', target: '185 lb × 8', actual: '0 lb × 0' },
                 { status: 'completed', target: '185 lb × 8', actual: '185 lb × 8' },
-                { status: 'pending', target: '185 lb × 8', actual: null },
+                { status: input.completed ? 'skipped' : 'pending', target: '185 lb × 8', actual: null },
               ],
             }]
           : [{
@@ -1300,9 +1302,8 @@ describe('murph.attach_response_card', () => {
   })
 
   it('adds runtime-owned tracking time before attaching a workout card', async () => {
-    const authoringInput = buildWorkoutCardAuthoringInput(
-      REALISTIC_LATE_WORKOUT_CARD,
-    )
+    const fixture = await createLiveWorkoutCardVault()
+    const authoringInput = buildWorkoutCardAuthoringInput(fixture.card)
     const beforeParse = Date.now()
     const request = readCardToolRequest({ card: authoringInput })
     const afterParse = Date.now()
@@ -1310,7 +1311,7 @@ describe('murph.attach_response_card', () => {
       throw new TypeError('Expected a valid workout card request.')
     }
 
-    const result = await executeCardTool({ request })
+    const result = await executeCardTool({ request, vaultRoot: fixture.root })
     const attachedCard = result.responseCardPatch?.card
     if (
       !attachedCard
@@ -1507,6 +1508,7 @@ describe('murph.attach_response_card', () => {
       vaultRoot: fixture.root,
     })
 
+    expect(result.runtimeIssueInputs).toBeUndefined()
     expect(result.responseCardPatch?.card).toMatchObject({
       editor: {
         version: 1,
@@ -1541,60 +1543,122 @@ describe('murph.attach_response_card', () => {
     })
   })
 
-  it('keeps ambiguous duplicate exercise coordinates on the V4 card', async () => {
-    const fixture = await createLiveWorkoutCardVault({
-      ambiguousDuplicate: true,
-    })
-    const attached = await executeCardTool({
-      request: {
-        card: fixture.card,
-        kind: 'attach-response-card',
-      },
-      vaultRoot: fixture.root,
-    })
-    const card = attached.responseCardPatch?.card
-    if (!card || card.kind !== 'compact_table' || !('workout' in card)) {
-      throw new TypeError('Expected the attached workout card.')
+  it('rejects active cards with bounded diagnostics when their vault cannot be read', async () => {
+    const fixture = await createLiveWorkoutCardVault()
+    for (const vaultRoot of [null, path.join(fixture.root, 'absent')]) {
+      const result = await executeCardTool({
+        request: { card: fixture.card, kind: 'attach-response-card' },
+        vaultRoot,
+      })
+      expect(result.rpcResult.success).toBe(false)
+      expect(result.responseCardPatch).toBeUndefined()
+      expect(result.runtimeIssueInputs).toEqual([expect.objectContaining({
+        errorCode: 'WORKOUT_CARD_EDITOR_UNAVAILABLE',
+        details: expect.objectContaining({
+          reason: vaultRoot === null ? 'missing_vault' : 'reader_failed',
+        }),
+      })])
+      const diagnostic = JSON.stringify(result.runtimeIssueInputs)
+      expect(diagnostic).not.toContain(fixture.root)
+      expect(diagnostic).not.toContain(JSON.stringify(fixture.card))
+      expect(result.runtimeIssueInputs?.[0]?.details).toMatchObject({
+        failureReason: 'unavailable',
+        diagnosticRole: 'classification',
+      })
     }
-
-    expect(card).not.toHaveProperty('editor')
-    const delivery = await persistWorkoutCardThroughLinq({
-      card,
-      idSuffix: 'ambiguous-duplicate',
-      vaultRoot: fixture.root,
-    })
-    expect(delivery.envelope.schemaVersion).toBe(4)
   })
 
-  it('keeps a hidden canonical note out of the persisted card and Linq request', async () => {
+  it('rejects ambiguous active cards without changing canonical coordinates', async () => {
+    const fixture = await createLiveWorkoutCardVault({ ambiguousDuplicate: true })
+    const before = await showWorkoutRecord(fixture.root, fixture.card.tracking.entityId)
+    const attached = await executeCardTool({
+      request: { card: fixture.card, kind: 'attach-response-card' },
+      vaultRoot: fixture.root,
+    })
+    expect(attached.rpcResult.success).toBe(false)
+    expect(attached.responseCardPatch).toBeUndefined()
+    expect(attached.runtimeIssueInputs?.[0]?.details).toMatchObject({
+      reason: 'projection_rejected',
+    })
+    expect(await showWorkoutRecord(fixture.root, fixture.card.tracking.entityId)).toEqual(before)
+  })
+
+  it('rejects hidden canonical notes without exposing or deleting them', async () => {
     const hiddenNote = 'n'.repeat(41)
     const fixture = await createLiveWorkoutCardVault({ hiddenNote })
+    const before = await showWorkoutRecord(fixture.root, fixture.card.tracking.entityId)
     const attached = await executeCardTool({
-      request: {
-        card: fixture.card,
-        kind: 'attach-response-card',
-      },
+      request: { card: fixture.card, kind: 'attach-response-card' },
       vaultRoot: fixture.root,
     })
-    const card = attached.responseCardPatch?.card
-    if (!card || card.kind !== 'compact_table' || !('workout' in card)) {
-      throw new TypeError('Expected the attached workout card.')
+    expect(attached.rpcResult.success).toBe(false)
+    expect(attached.responseCardPatch).toBeUndefined()
+    expect(JSON.stringify(attached)).not.toContain(hiddenNote)
+    expect(await showWorkoutRecord(fixture.root, fixture.card.tracking.entityId)).toEqual(before)
+  })
+
+  it('rejects an invalid hydrated editor instead of attaching the readable input', async () => {
+    const fixture = await createLiveWorkoutCardVault()
+    const workouts = await import('@murphai/vault-usecases/workouts')
+    const trusted = await workouts.readLiveWorkoutCardEditor({
+      vault: fixture.root,
+      workoutId: fixture.card.tracking.entityId,
+      presentation: fixture.card.workout,
+    })
+    if (!trusted) throw new TypeError('Expected a trusted editor fixture.')
+    const reader = vi.spyOn(workouts, 'readLiveWorkoutCardEditor').mockResolvedValueOnce({
+      ...trusted, editor: { ...trusted.editor, actionBinding: 'invalid-binding' },
+    })
+    try {
+      const result = await executeCardTool({
+        request: { card: fixture.card, kind: 'attach-response-card' },
+        vaultRoot: fixture.root,
+      })
+      expect(result.rpcResult.success).toBe(false)
+      expect(result.responseCardPatch).toBeUndefined()
+      expect(result.runtimeIssueInputs?.[0]?.details).toMatchObject({ reason: 'schema_rejected' })
+    } finally {
+      reader.mockRestore()
     }
+  })
 
-    expect(card).not.toHaveProperty('editor')
-    expect(JSON.stringify(card)).not.toContain(hiddenNote)
-
-    const delivery = await persistWorkoutCardThroughLinq({
-      card,
-      idSuffix: 'note-privacy',
+  it('accepts a corrected presentation after rejecting a stale active card', async () => {
+    const fixture = await createLiveWorkoutCardVault()
+    const stale = structuredClone(fixture.card)
+    stale.workout.exercises[0]!.name = 'Outdated exercise label'
+    const rejected = await executeCardTool({
+      request: { card: stale, kind: 'attach-response-card' },
       vaultRoot: fixture.root,
     })
+    expect(rejected.rpcResult.success).toBe(false)
+    expect(rejected.responseCardPatch).toBeUndefined()
+    const recovered = await executeCardTool({
+      request: { card: fixture.card, kind: 'attach-response-card' },
+      currentResponseCard: rejected.responseCardPatch?.card,
+      vaultRoot: fixture.root,
+    })
+    expect(recovered.rpcResult.success).toBe(true)
+    const card = recovered.responseCardPatch?.card
+    expect(card).toHaveProperty('editor.actionBinding', expect.stringMatching(/^[a-f0-9]{64}$/u))
+    if (!card) throw new TypeError('Expected an editable workout card.')
+    const delivery = await persistWorkoutCardThroughLinq({
+      card, idSuffix: 'editable-recovery', vaultRoot: fixture.root,
+    })
+    expect(delivery.envelope.schemaVersion).toBe(6)
+  })
 
-    expect(delivery.persistedCard).not.toHaveProperty('editor')
-    expect(JSON.stringify(delivery.persistedCard)).not.toContain(hiddenNote)
-    expect(JSON.stringify(delivery.request)).not.toContain(hiddenNote)
-    expect(delivery.envelope.schemaVersion).toBe(4)
-    expect(JSON.stringify(delivery.envelope)).not.toContain(hiddenNote)
+  it('attaches completed workouts with a verified editor', async () => {
+    const fixture = await createLiveWorkoutCardVault({ completed: true })
+    const result = await executeCardTool({
+      request: { card: fixture.card, kind: 'attach-response-card' },
+      vaultRoot: fixture.root,
+    })
+    expect(result.rpcResult.success).toBe(true)
+    expect(result.responseCardPatch?.card).toMatchObject({
+      workout: { state: 'completed' },
+      editor: { actionBinding: expect.stringMatching(/^[a-f0-9]{64}$/u) },
+    })
+    expect(result.runtimeIssueInputs).toBeUndefined()
   })
 
   it.each([
@@ -1643,37 +1707,17 @@ describe('murph.attach_response_card', () => {
       canonical: { note: 'Slow tempo', reps: 8 },
       label: 'mixed note',
     },
-  ])('preserves a canonical $label result through the V4 delivery path', async (fixtureInput, testIndex) => {
-    const fixture = await createLiveWorkoutCardVault({
-      unsupportedSet: fixtureInput,
-    })
+  ])('rejects unsupported active $label cards without losing canonical results', async (fixtureInput) => {
+    const fixture = await createLiveWorkoutCardVault({ unsupportedSet: fixtureInput })
+    const before = await showWorkoutRecord(fixture.root, fixture.card.tracking.entityId)
     const attached = await executeCardTool({
-      request: {
-        card: fixture.card,
-        kind: 'attach-response-card',
-      },
+      request: { card: fixture.card, kind: 'attach-response-card' },
       vaultRoot: fixture.root,
     })
-    const card = attached.responseCardPatch?.card
-    if (!card || card.kind !== 'compact_table' || !('workout' in card)) {
-      throw new TypeError('Expected the attached workout card.')
-    }
-    expect(card).not.toHaveProperty('editor')
-    expect(card.workout.exercises[0]?.sets[0]?.actual)
-      .toBe(fixtureInput.actual)
-
-    const delivery = await persistWorkoutCardThroughLinq({
-      card,
-      idSuffix: `unsupported-${testIndex}`,
-      vaultRoot: fixture.root,
-    })
-    expect(delivery.persistedCard).not.toHaveProperty('editor')
-    expect(delivery.persistedCard.workout.exercises[0]?.sets[0]?.actual)
-      .toBe(fixtureInput.actual)
-    expect(delivery.persisted?.message).toContain(fixtureInput.actual)
-    expect(delivery.request.message.parts[0]?.fallback_text).toContain('workout')
-    expect(delivery.envelope.schemaVersion).toBe(4)
-    expect(JSON.stringify(delivery.envelope)).toContain(fixtureInput.actual)
+    expect(attached.rpcResult.success).toBe(false)
+    expect(attached.responseCardPatch).toBeUndefined()
+    expect(attached.runtimeIssueInputs?.[0]?.details).toMatchObject({ reason: 'projection_rejected' })
+    expect(await showWorkoutRecord(fixture.root, fixture.card.tracking.entityId)).toEqual(before)
   })
 
   it('refuses group cards without a complete read, authorized participants, backed definition scopes, or canonical page', async () => {

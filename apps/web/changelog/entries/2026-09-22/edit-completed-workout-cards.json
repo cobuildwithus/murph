@@ -1,0 +1,17 @@
+{
+  "publishedOn": "2026-09-22",
+  "order": 100,
+  "item": {
+    "id": "edit-completed-workout-cards",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Correct completed workouts from their cards",
+    "summary": "Workout cards stay editable after you finish, so you can correct sets, weights, and exercise names in Messages.",
+    "details": "Corrections preserve the original finish time. Larger edits keep the editor available for the next correction, and Murph no longer substitutes a read-only workout card when editing is unavailable. Requires the updated Murph Messages extension.",
+    "relevanceTags": [
+      "workouts",
+      "imessage"
+    ],
+    "sourcePullRequests": []
+  }
+}
