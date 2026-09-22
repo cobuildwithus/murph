@@ -1,6 +1,6 @@
 # Prompt cache diagnostics and workflow cost optimization
 
-Status: active
+Status: completed
 Created: 2026-09-22
 Updated: 2026-09-22
 
@@ -110,3 +110,20 @@ extraction without weakening behavior or transport reliability.
 - No member-visible behavior changes, so no changelog entry is needed.
 - PR/review/CI results remain external completion evidence. The production
   cache-policy follow-up is not represented as shipped or as a 90% result.
+
+## Completion
+
+- Instrumentation and local replay scope is complete in PR #3653. Parent final
+  review found no further changes; no runtime policy optimization is shipped.
+- Round 1 ReviewGPT returned PASS with zero findings on
+  fab5ee7b9b3728c5d8b7684835308df2452b91c1. The Hercules lane confirmed the full
+  snapshot attachment, exact response identity, GPT-6 Pro model and completion
+  marker after approximately nine minutes. Earlier tooling failures were invalid
+  attempts, not substantive review rounds.
+- Required CI passed on the reviewed implementation head. This explanatory plan
+  closure changes no executable behavior and uses the documented review exemption;
+  required checks on the final documentation commit remain the handoff gate.
+- Follow-up: select and validate a production integration for per-member stable
+  clinical cache keys and response comparisons, then investigate scheduled idle
+  gaps with the richer diagnostics. The 90% production target remains unproven.
+Completed: 2026-09-22
