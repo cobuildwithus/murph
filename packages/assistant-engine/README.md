@@ -352,6 +352,11 @@ native function, while code-mode-only models receive its schema in `exec`
 guidance without a search step. Murph must not add a second discovery action,
 execution envelope, or compatibility namespace.
 
+Authorized full group conversations expose `group_data` eagerly because shared
+reads are routine and namespace discovery expands unrelated schemas. Its input
+schema and authorization remain identical; private conversations keep the group
+family deferred, and read-only scheduled group turns keep their narrower tool.
+
 Response-card, exercise-routine, Telegram rich-content, and group-challenge
 card tools follow the same deferred contract. Resident messaging guidance
 provides the discovery trigger; the discovered tool remains the sole owner of

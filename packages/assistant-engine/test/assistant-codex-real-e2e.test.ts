@@ -371,14 +371,76 @@ function describeRealCodex(name: string, factory: () => void): void {
 }
 
 describeRealCodex('real clinical document extraction journeys', () => {
-  it('clinical extraction live preserves historical dates and blocks undated visits', async () => {
+  it('clinical extraction live recovers unsupported dates without rewriting valid siblings', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const fixture = await createCanonicalLiveFixture(config)
+    const rawRef = 'raw/clinical/fhir/synthetic-source/synthetic-batch/attachments/recovery.txt'
+    const documentPath = path.join(fixture.vault, rawRef)
+    const sourceText = [
+      'SYNTHETIC HISTORY REPORT. Three separate visits for the current member.',
+      'Routine review: February 3, 2025.',
+      'Mobility review: March 12, 2020.',
+      'Exercise counseling: 2026-07-10T12:00:00Z.',
+      'Exported 2026-07-10. Export time is not a visit date.',
+    ].join('\n')
+    const initialRecords = [
+      { payload: { kind: 'note', occurredAt: '2025-02-03', title: 'Routine review', note: 'Routine review.' }, dateBasis: 'document', dateEvidence: 'February 3, 2025' },
+      { payload: { kind: 'note', occurredAt: '2026-07-10T12:00:00Z', title: 'Mobility review', note: 'Mobility review.' }, dateBasis: 'document', dateEvidence: 'March 12, 2020' },
+      { payload: { kind: 'note', occurredAt: '2026-07-10T12:00:00Z', title: 'Exercise counseling', note: 'Exercise counseling.' } },
+    ]
+    const nativeExecute = clinicalExtractionCodex.executeCodexAppServerTurn
+    // Seed the exact bad proposal, then use the real provider for recovery.
+    const observer = vi.spyOn(clinicalExtractionCodex, 'executeCodexAppServerTurn')
+      .mockResolvedValueOnce({
+        finalMessage: JSON.stringify({ status: 'complete', records: initialRecords }),
+        transcriptMessage: null, acceptedNoReplyDeliveryContextOrdinals: [], finalAction: null, finalActionExplicit: false,
+        reactions: [], precedingAgentMessageSegments: [], responseDeliveryContextOrdinal: 0, targetInputId: null,
+        additionalUsages: [], responseMedia: [], followUpRequest: null, responseCard: null, jsonEvents: [],
+        providerActionCount: 0, runtimeIssueInputs: [], rolloutRelativePath: null, sessionId: null,
+        stderr: '', stdout: '', threadId: null, turnId: null,
+      })
+      .mockImplementation(nativeExecute)
+    let providerEntries = 0
+    try {
+      await mkdir(path.dirname(documentPath), { recursive: true })
+      await writeFile(documentPath, sourceText)
+      const writesBefore = await listWriteOperationMetadataPaths(fixture.vault)
+      const result = await executeClinicalDocumentExtraction({
+        workspaceRoot: fixture.vault, documentPath, timeZone: 'UTC', extractedText: sourceText,
+        source: { rawRef, sha256: createHash('sha256').update(sourceText).digest('hex'), mediaType: 'text/plain' },
+        family: 'history', codexCommand: fixture.codexCommand, codexHome: fixture.codexHome,
+        env: fixture.env, model: config.model, modelProvider: config.modelProvider, reasoningEffort: 'low',
+        beforeProviderEntry: async () => { providerEntries += 1 },
+        onProviderUsage: ({ usage }) => { recordRealCodexProviderUsage(usage.usage) },
+      })
+      expect(providerEntries).toBe(2)
+      expect(observer).toHaveBeenCalledTimes(2)
+      expect(result.status).toBe('complete')
+      expect(result.records).toHaveLength(3)
+      expect(result.records[0]).toEqual(initialRecords[0])
+      expect(result.records.map((record) => new Date(record.payload.occurredAt).toISOString()))
+        .toEqual(['2025-02-03T00:00:00.000Z', '2020-03-12T00:00:00.000Z', '2026-07-10T12:00:00.000Z'])
+      expect(result.records[1]?.payload.occurredAt).toBe('2020-03-12')
+      expect(result.records.every((record) => record.dateBasis === 'document' && sourceText.includes(record.dateEvidence!))).toBe(true)
+      expect(await listWriteOperationMetadataPaths(fixture.vault)).toEqual(writesBefore)
+      expect(await readFile(documentPath, 'utf8')).toBe(sourceText)
+      process.stdout.write(`[clinical-date-recovery-live] ${JSON.stringify(result)}\n`)
+    } finally {
+      observer.mockRestore()
+      await fixture.close()
+      await removeRealCodexTemporaryPaths(config.temporaryPaths)
+    }
+  }, 360_000)
+
+  it('clinical extraction live preserves supported dates across import-day context', async () => {
     const config = await resolveRealCodexE2eConfig()
     const fixture = await createCanonicalLiveFixture(config)
     const rawRef = 'raw/clinical/fhir/synthetic-source/synthetic-batch/attachments/history.txt'
     const documentPath = path.join(fixture.vault, rawRef)
     const sourceText = [
-      'SYNTHETIC HISTORY REPORT. These are three separate facts for the current member.',
+      'SYNTHETIC HISTORY REPORT. These are four separate facts for the current member.',
       'Visit: routine review, occurred 2025-02-03T15:00:00Z.',
+      'Separate visit: mobility review, occurred March 12, 2020 at noon UTC.',
       'Separate follow-up: exercise counseling, occurred 2026-07-10T12:00:00Z.',
       'Separate visit: nutrition counseling. Its date is unknown; no date elsewhere applies to it.',
       'Exported 2026-07-10. Export time is not a visit date.',
@@ -389,7 +451,7 @@ describeRealCodex('real clinical document extraction journeys', () => {
       await writeFile(documentPath, sourceText)
       const writesBefore = await listWriteOperationMetadataPaths(fixture.vault)
       const result = await executeClinicalDocumentExtraction({
-        workspaceRoot: fixture.vault, documentPath, extractedText: sourceText,
+        workspaceRoot: fixture.vault, documentPath, timeZone: 'UTC', extractedText: sourceText,
         source: { rawRef, sha256: createHash('sha256').update(sourceText).digest('hex'), mediaType: 'text/plain' },
         family: 'history', codexCommand: fixture.codexCommand, codexHome: fixture.codexHome,
         env: fixture.env, model: config.model, modelProvider: config.modelProvider, reasoningEffort: 'low',
@@ -398,9 +460,9 @@ describeRealCodex('real clinical document extraction journeys', () => {
       })
       expect(providerEntries).toBe(1)
       expect(result.status).toBe('blocked')
-      expect(result.records).toHaveLength(2)
+      expect(result.records).toHaveLength(3)
       expect(result.records.map((record) => new Date(record.payload.occurredAt).toISOString()).sort())
-        .toEqual(['2025-02-03T15:00:00.000Z', '2026-07-10T12:00:00.000Z'])
+        .toEqual(['2020-03-12T12:00:00.000Z', '2025-02-03T15:00:00.000Z', '2026-07-10T12:00:00.000Z'])
       expect(result.records.every((record) => record.dateBasis === 'document' && Boolean(record.dateEvidence))).toBe(true)
       expect(result.records.every((record) => sourceText.includes(record.dateEvidence!))).toBe(true)
       expect(result.reason).toMatch(/unknown|undated|date/iu)
@@ -462,7 +524,7 @@ describeRealCodex('real clinical document extraction journeys', () => {
         await execFileAsync('pdftoppm', ['-png', '-scale-to', '1400', '-singlefile', documentPath, path.join(renderRoot, 'page-1')], { timeout: 30_000 })
         const writesBefore = await listWriteOperationMetadataPaths(fixture.vault)
         const result = await executeClinicalDocumentExtraction({
-          workspaceRoot: fixture.vault, documentPath,
+          workspaceRoot: fixture.vault, documentPath, timeZone: 'UTC',
           source: { rawRef, sha256: createHash('sha256').update(pdf).digest('hex'), mediaType: 'application/pdf' },
           renderedPages: [{ page: 1, path: path.join(renderRoot, 'page-1.png') }], scratchRoots: [renderRoot],
           family, codexCommand: fixture.codexCommand, codexHome: fixture.codexHome,
@@ -523,6 +585,7 @@ describeRealCodex('real clinical document extraction journeys', () => {
         const result = await executeClinicalDocumentExtraction({
           workspaceRoot: fixture.vault,
           documentPath,
+          timeZone: 'UTC',
           extractedText: sourceText,
           source: { rawRef, sha256: createHash('sha256').update(sourceText).digest('hex'), mediaType: 'text/plain' },
           family: 'labs',
@@ -10623,6 +10686,23 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
     },
     360_000,
   )
+
+  it('eager group data answers a shared steps question with one authorized read', async () => {
+    const journey = await runGroupSharedStepsReadJourney({
+      fixture: { averyValue: 13_579, date: '2026-07-28', jordanValue: 6_246 },
+      fullGroupTools: true,
+      prompt: ['Who has which shared step totals for July 28?'],
+      temporaryLabel: 'eager-data',
+    })
+    expectOneSharedStepsRead(journey, '2026-07-28')
+    expect(journey.dynamicActions).toHaveLength(1)
+    expectTwoLabeledSharedValues({
+      first: { displayName: 'Avery', value: 13_579 },
+      message: journey.finalMessage,
+      second: { displayName: 'Jordan', value: 6_246 },
+    })
+    expectNoSharedAttributionRefusal(journey.finalMessage)
+  }, 360_000)
 
   it(
     'refreshes labeled shared rows before an explicit current attribution question',
@@ -30466,6 +30546,12 @@ describeRealCodex('real Codex food label query recovery e2e', () => {
         writeFile(statePath, '', 'utf8'),
       ])
 
+      const manifest = await readAssistantCliLlmsFullManifestFromCliEntry({
+        cliEntryPath: fileURLToPath(new URL('../../cli/dist/bin.js', import.meta.url)),
+        workingDirectory: fileURLToPath(new URL('../../../', import.meta.url)),
+      })
+      const assistantCliContract = buildAssistantCliSurfaceContract(manifest)
+      expect(assistantCliContract).toContain('read `vault-cli <command> --help`')
       expect(syntheticPackageDescription.length).toBeGreaterThan(256)
       const inheritedPath = normalizeEnvString(config.env.PATH)
       const result = await executeRealCodexAppServerTurn({
@@ -30476,7 +30562,7 @@ describeRealCodex('real Codex food label query recovery e2e', () => {
           ?? undefined,
         codexHome: config.codexHome,
         developerInstructions: buildAssistantSystemPrompt({
-          assistantCliContract: 'Use vault-cli for canonical member data.',
+          assistantCliContract,
           assistantContextSnapshotPrompt: null,
           assistantHostedDeviceConnectAvailable: false,
           assistantHostedDeviceConnectProviders: [],
@@ -30546,6 +30632,8 @@ describeRealCodex('real Codex food label query recovery e2e', () => {
       expect(queries[1]).not.toBe(queries[0])
       expect(queries[1]).toMatch(/Northstar|chickpea/iu)
       expect(forbiddenVaultCommands).toEqual([])
+      expect(commands.filter(command => command.includes('--help')).length).toBeLessThanOrEqual(1)
+      expect(commandText).not.toContain('--schema')
       expect(commandText).toContain('food-journal')
       expect(commandText).not.toContain('commons knowledge search')
       expect(commandText).not.toMatch(
@@ -30653,6 +30741,8 @@ async function materializeFoodLabelQueryRecoveryVaultCli(input: {
       `  food\\ search-labels\\ --help*) printf '%s\\n' ${quoteNutritionShellLiteral(helpText)} ;;`,
       '  food\\ search-labels\\ *)',
       '    query="$3"',
+      '    if [ "$query" = "--query" ]; then query="$4"; fi',
+      '    case "$query" in --query=*) query="${query#--query=}" ;; esac',
       `    printf '%s\\n' "$query" >> ${quoteNutritionShellLiteral(input.queryLogPath)}`,
       `    if grep -q '^completed$' ${quoteNutritionShellLiteral(input.statePath)}; then`,
       '      printf \'duplicate food label lookup\\n\' >&2',
@@ -38932,6 +39022,7 @@ async function runGroupSharedStepsReadJourney(input: {
   fixture: GroupSharedStepsFixtureInput
   prompt: readonly string[]
   temporaryLabel: string
+  fullGroupTools?: boolean
 }) {
   const config = await resolveRealCodexE2eConfig()
   const workingDirectory = await mkdtemp(
@@ -38952,8 +39043,10 @@ async function runGroupSharedStepsReadJourney(input: {
         normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
       codexHome: config.codexHome,
       developerInstructions:
-        buildHostedGroupStatusDeveloperInstructions('shared_read'),
-      dynamicTools: [MURPH_GROUP_SHARED_READ_TOOL],
+        buildHostedGroupStatusDeveloperInstructions(input.fullGroupTools ? 'families' : 'shared_read'),
+      dynamicTools: input.fullGroupTools
+        ? resolveMurphDynamicTools({ groupAvailable: true, progressUpdateMode: 'group' })
+        : [MURPH_GROUP_SHARED_READ_TOOL],
       env: {
         ...config.env,
         [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
@@ -38984,7 +39077,7 @@ async function runGroupSharedStepsReadJourney(input: {
     const sharedReads = readCapabilityRoutingActions(result.jsonEvents).filter(
       (action) =>
         action.kind === 'dynamic'
-        && action.tool === MURPH_GROUP_SHARED_READ_TOOL.name,
+        && action.tool === (input.fullGroupTools ? MURPH_GROUP_DATA_TOOL.name : MURPH_GROUP_SHARED_READ_TOOL.name),
     )
     const finalAnswerEventIndex = result.jsonEvents.findIndex((event) => {
       const record = readRecord(event)
@@ -39005,6 +39098,7 @@ async function runGroupSharedStepsReadJourney(input: {
     return {
       finalAnswerEventIndex,
       finalMessage: result.finalMessage,
+      dynamicActions: readCapabilityRoutingActions(result.jsonEvents).filter(action => action.kind === 'dynamic'),
       sharedReads,
       sharedRequests,
     }
@@ -39020,7 +39114,7 @@ type GroupSharedStepsReadJourney = Awaited<
   ReturnType<typeof runGroupSharedStepsReadJourney>
 >
 
-function expectOneSharedStepsRead(journey: GroupSharedStepsReadJourney): void {
+function expectOneSharedStepsRead(journey: GroupSharedStepsReadJourney, freshnessDate?: string): void {
   expect(journey.sharedReads).toHaveLength(1)
   expect(journey.sharedReads[0]).toMatchObject({
     argumentsValue: {
@@ -39028,8 +39122,12 @@ function expectOneSharedStepsRead(journey: GroupSharedStepsReadJourney): void {
       projectionScopes: [{ projectionKind: 'steps-days.v0' }],
     },
   })
+  const requestedFreshness = readRecord(journey.sharedRequests[0])?.freshness
   expect(journey.sharedRequests).toEqual([{
     projectionScopes: [{ projectionKind: 'steps-days.v0' }],
+    ...(freshnessDate && requestedFreshness !== undefined
+      ? { freshness: [{ projectionScopeKey: 'steps-days.v0', date: freshnessDate }] }
+      : {}),
   }])
   expect(journey.finalAnswerEventIndex).toBeGreaterThan(
     journey.sharedReads[0]?.eventIndex ?? Number.MAX_SAFE_INTEGER,

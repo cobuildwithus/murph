@@ -95,8 +95,16 @@ describe("hosted Resend plain-text email sender", () => {
       expect(payload.text).toContain("012345");
       expect(payload.html).toContain(">012345</span>");
       expect(payload.html).toContain('src="cid:murph-logo"');
-      expect(Buffer.from(payload.attachments[0].content, "base64").subarray(0, 8))
-        .toEqual(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
+      let logoBytes = 0;
+      for (const attachment of payload.attachments) {
+        const png = Buffer.from(attachment.content, "base64");
+        logoBytes += png.length;
+        expect(png.subarray(0, 8))
+          .toEqual(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
+        expect(png.readUInt32BE(16)).toBe(591);
+        expect(png.readUInt32BE(20)).toBe(132);
+      }
+      expect(logoBytes).toBeLessThan(12_000);
       return new Response(JSON.stringify({ id: "synthetic-auth-email" }), { status: 200 });
     });
     await sendHostedResendPlainTextEmail({

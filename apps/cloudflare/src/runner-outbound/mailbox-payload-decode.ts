@@ -1,3 +1,4 @@
+import { readMailboxWebTiming } from "./mailbox-timing.ts";
 import {
   parseHostedExecutionWake,
   parseHostedMailboxFetchResponse,
@@ -158,10 +159,14 @@ export async function decodeRunnerMailboxFetchResponse(input: {
   env: RunnerOutboundEnvironmentSource;
   environment: ReturnType<typeof readHostedExecutionEnvironment>;
   response: Response;
+  timings?: Record<string, number>;
   userId: string;
 }): Promise<Response> {
+  const timings = input.timings ?? {};
+  const bodyStartedAt = performance.now();
   const rawResponse = await input.response.json();
   const mailbox = parseHostedMailboxFetchResponse(rawResponse);
+  timings.mailboxWorkerResponseBodyMs = Math.max(0, Math.round(performance.now() - bodyStartedAt));
   const ingressCryptoContext = typeof rawResponse === "object" && rawResponse !== null
     && "ingressCryptoContext" in rawResponse ? rawResponse.ingressCryptoContext : undefined;
   if (mailbox.userId !== input.userId
@@ -170,6 +175,10 @@ export async function decodeRunnerMailboxFetchResponse(input: {
   }
   const consumed = mailbox.consumedSeqByLane?.find((cursor) => cursor.lane === "conversation");
   let decode: ReturnType<typeof createRunnerMailboxPayloadDecoder> | undefined;
+  let cryptoElapsedMs = 0;
+  let decryptElapsedMs = 0;
+  let decodedCount = 0;
+  let failedCount = 0;
   for (const item of mailbox.items) {
     if (item.kind !== "conversation.message" || item.lane !== "conversation"
       || item.consumedAt || !item.payloadInlineCiphertext || item.payloadRef
@@ -177,26 +186,62 @@ export async function decodeRunnerMailboxFetchResponse(input: {
       continue;
     }
     try {
-      decode ??= createRunnerMailboxPayloadDecoder({
-        ...input,
-        ingressCryptoContext,
-      });
-      const wake = await (await decode)({
-        itemRef: item,
-        payloadCiphertext: item.payloadInlineCiphertext,
-        payloadRequestId: null,
-        payloadSchema: item.payloadSchema,
-        payloadSource: "inline",
-      });
+      if (!decode) {
+        const cryptoStartedAt = performance.now();
+        decode = createRunnerMailboxPayloadDecoder({ ...input, ingressCryptoContext });
+        try { await decode; }
+        finally { cryptoElapsedMs += performance.now() - cryptoStartedAt; }
+      }
+      const decodePayload = await decode;
+      const decryptStartedAt = performance.now();
+      let wake: HostedExecutionWake;
+      try {
+        wake = await decodePayload({
+          itemRef: item,
+          payloadCiphertext: item.payloadInlineCiphertext,
+          payloadRequestId: null,
+          payloadSchema: item.payloadSchema,
+          payloadSource: "inline",
+        });
+      } finally { decryptElapsedMs += performance.now() - decryptStartedAt; }
       if (wake.userId === input.userId && wake.kind === "conversation.message") {
         item.decodedWake = wake;
+        decodedCount += 1;
       }
     } catch {
+      failedCount += 1;
       // Keep lazy import's existing item-scoped failure/retry behavior. A bad
       // payload must not make the whole fetch (including other lanes) fail.
     }
   }
+  const serializeStartedAt = performance.now();
   const response = json(mailbox);
   response.headers.set("cache-control", "no-store");
+  Object.assign(timings, {
+    mailboxWorkerCryptoContextMs: Math.max(0, Math.round(cryptoElapsedMs)),
+    mailboxWorkerPayloadDecryptMs: Math.max(0, Math.round(decryptElapsedMs)),
+    mailboxWorkerSerializeMs: Math.max(0, Math.round(performance.now() - serializeStartedAt)),
+    mailboxWorkerDecodedCount: decodedCount,
+    mailboxWorkerDecodeFailedCount: failedCount,
+  });
   return response;
+}
+
+/** Complete the mailbox-only response and measure its existing work. */
+export async function completeRunnerMailboxFetchResponse(input: Parameters<typeof decodeRunnerMailboxFetchResponse>[0] & {
+  body: string | undefined;
+  requestStartedAt: number;
+  forwardStartedAt: number;
+}): Promise<{ response: Response; timings: Record<string, number> }> {
+  const timings = {
+    ...readMailboxWebTiming(input.response),
+    mailboxWorkerPrepareMs: Math.max(0, Math.round(input.forwardStartedAt - input.requestStartedAt)),
+    mailboxWorkerWebFetchMs: Math.max(0, Math.round(performance.now() - input.forwardStartedAt)),
+  };
+  const response = input.response.ok && input.body && JSON.parse(input.body).decodeInlinePayloads === true
+    ? await decodeRunnerMailboxFetchResponse({ ...input, timings })
+    : input.response;
+  return { response, timings: { ...timings,
+    mailboxWorkerTotalMs: Math.max(0, Math.round(performance.now() - input.requestStartedAt)),
+  } };
 }

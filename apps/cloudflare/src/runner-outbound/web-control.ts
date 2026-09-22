@@ -44,7 +44,7 @@ import {
 import {
   addRunnerMailboxCryptoContextRequest,
   handleRunnerMailboxPayloadDecodeRequest,
-  decodeRunnerMailboxFetchResponse,
+  completeRunnerMailboxFetchResponse,
 } from "./mailbox-payload-decode.ts";
 import {
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH,
@@ -72,6 +72,7 @@ export async function handleRunnerWebControlRequest(input: {
   url: URL;
   userId: string;
 }): Promise<Response> {
+  const requestStartedAt = performance.now();
   const policy = readHostedRunnerWebControlPolicy({
     method: input.request.method,
     path: input.url.pathname,
@@ -222,6 +223,7 @@ export async function handleRunnerWebControlRequest(input: {
       String(vaultShareEffectDeadlineAtEpochMs),
     );
   }
+  const forwardStartedAt = performance.now();
   const response = await forwardWithRuntimeUsageSettlement({
     env: input.env, userId: input.userId, writeAuthority, body, usageRecord: isUsageRecordRequest,
     forward: () => fetchHostedExecutionWebControlPlaneResponse({
@@ -251,6 +253,9 @@ export async function handleRunnerWebControlRequest(input: {
         : input.environment.webControlTimeoutMs,
     }),
   });
+  const mailboxResponse = policy.operation === "mailbox_fetch"
+    ? await completeRunnerMailboxFetchResponse({ ...input, response, body, requestStartedAt, forwardStartedAt })
+    : null;
   const responseBodyMetadata = response.ok || isClinicalRecordsRequest
     ? {}
     : await readHostedRunnerSafeResponseBodyMetadata(response.clone());
@@ -260,6 +265,7 @@ export async function handleRunnerWebControlRequest(input: {
       contentTypePresent: response.headers.has("content-type"),
       method,
       operation: policy.operation,
+      ...mailboxResponse?.timings,
       ...responseBodyMetadata,
       ...readHostedSnapshotResponseHeaderMetadata(
         response,
@@ -282,10 +288,7 @@ export async function handleRunnerWebControlRequest(input: {
     }
   }
 
-  if (response.ok && policy.operation === "mailbox_fetch"
-    && body && JSON.parse(body).decodeInlinePayloads === true) {
-    return decodeRunnerMailboxFetchResponse({ ...input, response });
-  }
+  if (mailboxResponse) return mailboxResponse.response;
 
   if (!isVaultShareDeliveryRequest) {
     return response;
