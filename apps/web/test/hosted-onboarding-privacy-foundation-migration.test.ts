@@ -1221,6 +1221,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260917033000_managed_snapshot_encrypted_md5",
       "20260917160000_clinical_daily_sync",
       "20260920210000_snapshot_recovery_deadline",
+      "20260922170000_hosted_sponsorship_topup_margin",
       "migration_lock.toml",
     ]);
     expect(migrationEntries).toEqual(
