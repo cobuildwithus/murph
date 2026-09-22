@@ -1,6 +1,6 @@
 # Remove one exercise from a live workout
 
-Status: active
+Status: completed
 Created: 2026-09-22
 Updated: 2026-09-22
 
@@ -116,3 +116,13 @@ failed because the active developer directory is Command Line Tools rather than
 full Xcode. Simulator and physical Messages proof remain outstanding. Native
 support for completed V6 and direct-envelope results must precede backend
 producer rollout. No commit, release, or real message delivery was performed.
+
+
+Implementation checkpoint closed for release review. User authorization now
+includes PR publication, requested ReviewGPT, merge, and deployment. Backend
+PR #3654 pairs with native PR cobuildwithus/murph-ios#167. CLI command tests
+(15) and typecheck plus changelog archive tests (10) pass. Generated CLI command
+schema/type/hash changes are included. Release execution remains a separate
+verified outcome: native build/signing and physical Messages proof must precede
+backend producer rollout. No production deployment is claimed by this plan.
+Completed: 2026-09-22
