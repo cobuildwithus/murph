@@ -381,6 +381,33 @@ function buildAggregateOnlyOpenAiImageUsageRecord(): AssistantUsageRecord {
 }
 
 describe("hosted AI usage allowance pricing", () => {
+  it.each(["gpt-6-sol", "gpt-6-luna"])("prices %s at the configured launch rates", (model) => {
+    for (const tokenPricingBasis of ["standard", "openai-flex", "openai-priority"] as const) {
+      const priced = priceHostedAiUsageForAllowance({
+        ...BASE_USAGE_RECORD,
+        requestedModel: model,
+        servedModel: `openai/${model}-2026-09-22`,
+        inputTokens: 1_000_000,
+        cachedInputTokens: 200_000,
+        cacheWriteTokens: 100_000,
+        outputTokens: 1_000_000,
+        tokenPricingBasis,
+      });
+      expect(priced).toMatchObject({
+        costUsdMicros: 17_500_000n,
+        counted: true,
+        pricingVersion: "murph-launch-2026-09-22-gpt-6-sol-luna",
+        pricingSnapshot: { model, modelSource: "served", pricingSource: "murph-launch-configuration" },
+      });
+    }
+    expect(() => priceHostedAiUsageForAllowance({
+      ...BASE_USAGE_RECORD,
+      requestedModel: model,
+      servedModel: model,
+      providerName: "venice",
+    })).toThrow("pricing is missing for the provider model");
+  });
+
   it("prices platform usage from uncached input, cached input, and output tokens", () => {
     expect(priceHostedAiUsageForAllowance(BASE_USAGE_RECORD)).toMatchObject({
       costUsdMicros: 759n,

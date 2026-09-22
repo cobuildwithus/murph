@@ -184,6 +184,8 @@ const cleanupHostedRunnerContainerLocalState = vi.fn<
 const collectDockerDevDiagnostics = vi.fn(async () => "Docker diagnostics:\n- docker version: ok");
 const DEFAULT_CODEX_MODEL_CATALOG_TEXT = JSON.stringify({
   models: [
+    { slug: "gpt-6-sol" },
+    { slug: "gpt-6-luna" },
     {
       name: "GPT-5.6-Sol",
       service_tiers: [
@@ -3033,6 +3035,8 @@ describe("hosted local dev stack", () => {
           status: 0,
           stdout: JSON.stringify({
             models: [
+              { slug: "gpt-6-sol" },
+              { slug: "gpt-6-luna" },
               {
                 name: "GPT-5.6-Sol",
                 service_tiers: [
@@ -3143,6 +3147,8 @@ describe("hosted local dev stack", () => {
     expect(catalogWrite).toBeDefined();
     expect(JSON.parse(String(catalogWrite?.[1]))).toMatchObject({
       models: [
+        { slug: "gpt-6-sol", tool_mode: "code_mode" },
+        { slug: "gpt-6-luna", tool_mode: "code_mode" },
         {
           service_tiers: expect.arrayContaining([
             expect.objectContaining({ id: "flex" }),
@@ -3194,13 +3200,15 @@ describe("hosted local dev stack", () => {
       stdout: "{not-json",
     },
     {
-      expectedMessage: "Hosted local dev Codex model catalog is missing gpt-5.6-sol.",
+      expectedMessage: "Hosted local dev Codex model catalog is missing gpt-6-sol.",
       stdout: JSON.stringify({ models: [] }),
     },
     {
       expectedMessage: "Hosted local dev Codex model catalog is missing gpt-5.4-mini.",
       stdout: JSON.stringify({
         models: [
+          { slug: "gpt-6-sol" },
+          { slug: "gpt-6-luna" },
           { slug: "gpt-5.6-sol" },
           { slug: "gpt-5.6-terra" },
           { slug: "gpt-5.6-luna" },

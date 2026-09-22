@@ -37,6 +37,8 @@ const runnerPythonPathFinallyCleanupBlock = `} finally {
   }`;
 
 const hostedRunnerProductModelSlugs = [
+  "gpt-6-sol",
+  "gpt-6-luna",
   "gpt-6-astra",
   "gpt-5.6-sol",
   "gpt-5.6-terra",
@@ -613,7 +615,7 @@ describe("hosted runner container image contract", () => {
     expect(finalDockerfile).not.toContain("future_gpt_model_from");
     expect(finalDockerfile).toContain('"id":"flex"');
     expect(finalDockerfile).toContain(
-      'jq -s -e \'length == 1 and (.[0] as $catalog | ([$catalog.models[]?.slug] | sort) == (["gpt-6-astra","gpt-5.6-sol","gpt-5.6-terra","gpt-5.6-luna"] | sort)',
+      'jq -s -e \'length == 1 and (.[0] as $catalog | ([$catalog.models[]?.slug] | sort) == (["gpt-6-sol","gpt-6-luna","gpt-6-astra","gpt-5.6-sol","gpt-5.6-terra","gpt-5.6-luna"] | sort)',
     );
     expect(finalDockerfile).toContain(
       'LABEL murph.hosted.local-build-id="${HOSTED_RUNNER_LOCAL_BUILD_ID}"',
@@ -732,6 +734,8 @@ describe("hosted runner container image contract", () => {
     const { patchFilter, standardFilter, validationFilter } = readFinalImageCodexModelCatalogJqFilters(finalDockerfile);
     const stockCatalogWithoutFlex: CodexModelCatalog = {
       models: [
+        { slug: "gpt-6-sol", service_tiers: [{ id: "priority", name: "Priority" }] },
+        { slug: "gpt-6-luna", service_tiers: [{ id: "priority", name: "Priority" }] },
         {
           slug: "gpt-6-astra",
           context_window: 272_000,
@@ -774,7 +778,7 @@ describe("hosted runner container image contract", () => {
 
     const standardCatalog = parseCodexModelCatalogJson(runJqFilter(standardFilter, patchedCatalog));
     expect(readCodexModelSlugs(standardCatalog)).toEqual([
-      "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna",
+      "gpt-6-sol", "gpt-6-luna", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna",
     ]);
     expect(standardCatalog.models).toEqual(patchedCatalog.models.filter((model) => model.slug !== "gpt-6-astra"));
     expect(finalDockerfile).toContain('"${MURPH_HOSTED_CODEX_MODEL_CATALOG_JSON}.astra"');
@@ -865,7 +869,7 @@ describe("hosted runner container image contract", () => {
       tool_mode: "code_mode",
     });
     expect(readCodexModelSlugs(parseCodexModelCatalogJson(runJqFilter(standardFilter, productCatalog))).sort())
-      .toEqual(["gpt-5.6-luna", "gpt-5.6-sol", "gpt-5.6-terra"]);
+      .toEqual(["gpt-5.6-luna", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-6-luna", "gpt-6-sol"]);
   });
 
   it("pins the checked-in and rendered Wrangler config to an app-local build context", async () => {

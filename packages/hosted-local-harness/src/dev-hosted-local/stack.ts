@@ -191,6 +191,8 @@ const MURPH_RUNNER_BUNDLE_TEST_PARSER_TOOLCHAIN_ENV =
 const HOSTED_LOCAL_CODEX_MODEL_CATALOG_FILE =
   "codex-model-catalog.openai-flex.json";
 const HOSTED_LOCAL_OPENAI_PRODUCT_MODEL_SLUGS = [
+  "gpt-6-sol",
+  "gpt-6-luna",
   "gpt-5.6-sol",
   "gpt-5.6-terra",
   "gpt-5.6-luna",

@@ -583,6 +583,16 @@ const hostedGeminiVideoAnalysisRolloutModels = new Set<string>(
   HOSTED_GEMINI_VIDEO_ANALYSIS_ROLLOUT_MODELS,
 );
 
+// Launch configuration: both models use the supplied $2.50/$15 rates.
+// Cache and service-tier discounts must be verified before rollout; do not
+// inherit a different model family's billing policy or pricing provenance.
+const HOSTED_AI_USAGE_ALLOWANCE_GPT_6_SOL_LUNA_MODEL_PRICE = {
+  cachedInputUsdMicrosPerMillionTokens: 2_500_000n,
+  cacheWriteUsdMicrosPerMillionTokens: 2_500_000n,
+  inputUsdMicrosPerMillionTokens: 2_500_000n,
+  outputUsdMicrosPerMillionTokens: 15_000_000n,
+} as const;
+
 const HOSTED_AI_USAGE_ALLOWANCE_GPT_56_SOL_MODEL_PRICE = {
   cachedInputUsdMicrosPerMillionTokens: 400_000n,
   cacheWriteUsdMicrosPerMillionTokens: 5_000_000n,
@@ -608,6 +618,8 @@ const HOSTED_AI_USAGE_ALLOWANCE_OPENAI_MODEL_PRICES: Record<
   HostedAiUsageAllowancePricedModel,
   HostedAiUsageAllowanceModelPrice
 > = {
+  "gpt-6-sol": HOSTED_AI_USAGE_ALLOWANCE_GPT_6_SOL_LUNA_MODEL_PRICE,
+  "gpt-6-luna": HOSTED_AI_USAGE_ALLOWANCE_GPT_6_SOL_LUNA_MODEL_PRICE,
   "gpt-6-astra": {
     cachedInputUsdMicrosPerMillionTokens: 1_000_000n,
     cacheWriteUsdMicrosPerMillionTokens: 12_500_000n,
@@ -677,7 +689,23 @@ const HOSTED_AI_USAGE_ALLOWANCE_GPT_56_TOKEN_PRICING_BASES = {
   },
 } as const;
 
+const HOSTED_AI_USAGE_ALLOWANCE_GPT_6_SOL_LUNA_TOKEN_PRICING_BASIS = {
+  multiplierDenominator: 1n,
+  multiplierNumerator: 1n,
+  pricingSource: "murph-launch-configuration",
+  pricingVersion: "murph-launch-2026-09-22-gpt-6-sol-luna",
+  requiredProviderKind: "openai",
+} as const satisfies HostedAiUsageAllowanceTokenPricingBasisConfig;
+
+const HOSTED_AI_USAGE_ALLOWANCE_GPT_6_SOL_LUNA_TOKEN_PRICING_BASES = {
+  standard: HOSTED_AI_USAGE_ALLOWANCE_GPT_6_SOL_LUNA_TOKEN_PRICING_BASIS,
+  "openai-flex": HOSTED_AI_USAGE_ALLOWANCE_GPT_6_SOL_LUNA_TOKEN_PRICING_BASIS,
+  "openai-priority": HOSTED_AI_USAGE_ALLOWANCE_GPT_6_SOL_LUNA_TOKEN_PRICING_BASIS,
+} as const;
+
 const HOSTED_AI_USAGE_ALLOWANCE_MODEL_TOKEN_PRICING_BASES = {
+  "gpt-6-sol": HOSTED_AI_USAGE_ALLOWANCE_GPT_6_SOL_LUNA_TOKEN_PRICING_BASES,
+  "gpt-6-luna": HOSTED_AI_USAGE_ALLOWANCE_GPT_6_SOL_LUNA_TOKEN_PRICING_BASES,
   "gpt-6-astra": {
     "openai-flex": {
       ...HOSTED_AI_USAGE_ALLOWANCE_GPT_56_TOKEN_PRICING_BASES["openai-flex"],

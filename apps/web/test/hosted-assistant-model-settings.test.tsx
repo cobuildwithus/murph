@@ -129,6 +129,25 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
+test("GPT-6 models are available on Pulse and identify the active fallback accurately", () => {
+  const markup = renderToStaticMarkup(createElement(HostedAssistantModelSettings, {
+    canUpgradeToEdge: true,
+    configurationAvailable: true,
+    initialDormantSolPreference: true,
+    initialModel: "gpt-6-sol",
+    initialProvider: "openai",
+    solAvailable: false,
+  }));
+  const { document } = parseHTML(markup);
+  const sol = document.querySelector('input[id="assistant-model-gpt-6-sol"]');
+  const luna = document.querySelector('input[id="assistant-model-gpt-6-luna"]');
+  assert.ok(sol?.hasAttribute("checked"));
+  assert.equal(sol?.hasAttribute("disabled"), false);
+  assert.equal(luna?.hasAttribute("disabled"), false);
+  assert.match(document.textContent ?? markup, /GPT-6 Sol is active while Edge is paused/);
+  assert.match(markup, /GPT-5.6 Sol is still saved/);
+});
+
 test("eligible Pulse members discover the Edge upgrade from the disabled Sol card", () => {
   const markup = renderToStaticMarkup(
     createElement(HostedAssistantModelSettings, {
@@ -140,9 +159,9 @@ test("eligible Pulse members discover the Edge upgrade from the disabled Sol car
     }),
   );
 
-  assert.match(markup, />Luna</);
+  assert.match(markup, />GPT-5.6 Luna</);
   assert.match(markup, />Terra</);
-  assert.match(markup, />Sol</);
+  assert.match(markup, />GPT-5.6 Sol</);
   assert.doesNotMatch(markup, /Sol requires an active Edge plan\./);
   assert.match(markup, /High usage · Edge required/);
   assert.match(markup, /!opacity-100/);
@@ -167,9 +186,9 @@ test("other non-Edge members can still choose Luna or Terra without an invalid u
     }),
   );
 
-  assert.match(markup, />Luna</);
+  assert.match(markup, />GPT-5.6 Luna</);
   assert.match(markup, />Terra</);
-  assert.match(markup, />Sol</);
+  assert.match(markup, />GPT-5.6 Sol</);
   assert.doesNotMatch(markup, /Sol requires an active Edge plan\./);
   assert.match(markup, /High usage · Edge required/);
   assert.doesNotMatch(markup, />Upgrade to Edge<\/button>/);
@@ -612,7 +631,7 @@ test("retrying a failed endpoint exit preserves dormant Sol", async () => {
   }
   assertHiddenSaveAnnouncement(
     view.container,
-    /Saved\. Inference on Terra through Venice while Edge is paused; Sol remains saved\./u,
+    /Saved\. Inference on Terra through Venice while Edge is paused; GPT-5\.6 Sol remains saved\./u,
   );
 
   view.cleanup();
@@ -923,7 +942,7 @@ test("a provider-only save preserves a dormant Sol preference", async () => {
   assert.equal(findHiddenSaveAnnouncement(view.container), announcement);
   assert.match(
     announcement.textContent ?? "",
-    /Saved\. Inference on Terra through Venice while Edge is paused; Sol remains saved\./u,
+    /Saved\. Inference on Terra through Venice while Edge is paused; GPT-5\.6 Sol remains saved\./u,
   );
   assert.equal(findButton(view.container, "Save change").disabled, false);
 
@@ -1514,7 +1533,7 @@ test("a dormant Sol preference is explained and can be replaced with Terra", asy
 
   assert.match(
     view.container.textContent ?? "",
-    /Terra is active while Edge is paused\. Sol is still saved and will return with Edge\./,
+    /GPT-5\.6 Terra is active while Edge is paused\. GPT-5\.6 Sol is still saved and will return with Edge\./,
   );
   assert.equal(findButton(view.container, "Save change").disabled, false);
 

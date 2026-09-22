@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-22",
+  "order": 100,
+  "item": {
+    "id": "gpt6-sol-luna",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "GPT-6 Sol is the new default",
+    "summary": "Murph uses GPT-6 Sol by default for managed OpenAI chats, with GPT-6 Luna also available to choose.",
+    "details": "Your saved model choices stay in place. Choose either GPT-6 model in Settings or ask Murph to switch; these models use OpenAI, while Venice keeps its existing choices.",
+    "relevanceTags": ["assistant", "models", "settings"],
+    "sourcePullRequests": []
+  }
+}
