@@ -1,6 +1,6 @@
 # Reduce avoidable food and group reply work
 
-Status: active
+Status: completed
 Created: 2026-09-22
 Updated: 2026-09-22
 
@@ -47,3 +47,15 @@ Updated: 2026-09-22
 
 - Focused CLI and assistant-engine Vitest suites; package typechecks; named live assistant journeys; diff/complexity and required exact-head CI.
 - Expected outcomes: first-attempt valid command syntax, bounded returned evidence, no duplicate writes or unauthorized group data, useful final replies.
+
+## Implementation and proof
+
+- Added a single-food named query alternative with exclusive-form validation, concise repair hints, unchanged provider requests, and bounded validation telemetry.
+- Replaced schema-first syntax discovery with help-first guidance, including the loaded food skill; authorized full group turns receive the unchanged group-data schema eagerly.
+- CLI provider/parity tests: 49 passing; focused CLI schema/help and subprocess tests pass. Assistant prompt/skill/tool tests: 186 passing. Runtime telemetry tests: 30 passing. Changelog rendering: 10 passing.
+- CLI, assistant-engine, runtime-state, and Web typechecks pass. Complexity guard: four source files, no hotspots above 20.
+- Live local-subscription proof: Sol shared-step attribution uses one authorized read, with a bounded optional freshness request; Terra food-query recovery retries once without schema discovery or writes. Both replies reviewed Ready.
+- Synthetic complete native provider requests grow by 185 bytes for direct turns and 19,390 bytes for full group turns; the group tradeoff exposes only the existing data tool upfront to avoid namespace discovery. Exact target tokenizer unavailable; no token or wall-clock savings claim.
+- Public changelog describes the supported member outcome. All durable evidence and fixtures are synthetic; private Ops diagnostics remain outside repository artifacts.
+- Remaining shipping gates are tracked on PR #3650: exact pushed candidate review, required CI, and mergeability.
+Completed: 2026-09-22

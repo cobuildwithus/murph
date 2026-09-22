@@ -10631,7 +10631,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
       prompt: ['Who has which shared step totals for July 28?'],
       temporaryLabel: 'eager-data',
     })
-    expectOneSharedStepsRead(journey)
+    expectOneSharedStepsRead(journey, '2026-07-28')
     expect(journey.dynamicActions).toHaveLength(1)
     expectTwoLabeledSharedValues({
       first: { displayName: 'Avery', value: 13_579 },
@@ -38904,7 +38904,7 @@ type GroupSharedStepsReadJourney = Awaited<
   ReturnType<typeof runGroupSharedStepsReadJourney>
 >
 
-function expectOneSharedStepsRead(journey: GroupSharedStepsReadJourney): void {
+function expectOneSharedStepsRead(journey: GroupSharedStepsReadJourney, freshnessDate?: string): void {
   expect(journey.sharedReads).toHaveLength(1)
   expect(journey.sharedReads[0]).toMatchObject({
     argumentsValue: {
@@ -38912,8 +38912,12 @@ function expectOneSharedStepsRead(journey: GroupSharedStepsReadJourney): void {
       projectionScopes: [{ projectionKind: 'steps-days.v0' }],
     },
   })
+  const requestedFreshness = readRecord(journey.sharedRequests[0])?.freshness
   expect(journey.sharedRequests).toEqual([{
     projectionScopes: [{ projectionKind: 'steps-days.v0' }],
+    ...(freshnessDate && requestedFreshness !== undefined
+      ? { freshness: [{ projectionScopeKey: 'steps-days.v0', date: freshnessDate }] }
+      : {}),
   }])
   expect(journey.finalAnswerEventIndex).toBeGreaterThan(
     journey.sharedReads[0]?.eventIndex ?? Number.MAX_SAFE_INTEGER,
