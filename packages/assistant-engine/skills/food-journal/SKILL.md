@@ -290,7 +290,9 @@ Before calculating a meal total:
   toppings, and caloric drinks when they are visible, named, or strongly implied
   by the preparation. Do not silently assume restaurant or prepared food has no
   added fat.
-- Use `vault-cli food search-labels` for one item or
+- Use `vault-cli food search-labels 'rolled oats' --generic --format json`
+  for one item (the documented `--query 'rolled oats'` alternative is also
+  accepted; never supply both forms), or
   `vault-cli food search-labels-batch` for several before estimating from memory
   or searching the web. Use `--generic` for ordinary ingredients where a USDA
   generic row is preferable; use normal lookup for branded, packaged, menu, UPC,
@@ -301,6 +303,9 @@ Before calculating a meal total:
   Do not pass a JSON array or invent `--queries`. When independent label
   lookups and a needed compact memory read are known, run them in the same
   tool round; save only after their results are available.
+  For a syntax failure, correct the returned field using these examples;
+  if still unclear, read the command's `--help` once. Do not fetch the full
+  output schema to discover a query flag or positional argument.
   The default returns one compact nutrition match
   per component with serving, calories, protein, carbohydrate, fat, fiber, and
   a bounded exact-product contaminant summary. Read `contaminantSummary` by

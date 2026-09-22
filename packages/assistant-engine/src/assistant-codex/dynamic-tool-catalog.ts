@@ -1462,6 +1462,11 @@ export const MURPH_GROUP_DATA_TOOL = buildMurphGroupFamilyTool({
     'Read shared data, record sender metrics, or manage disclosure/access.',
 })
 
+const MURPH_GROUP_DATA_EAGER_TOOL = {
+  ...MURPH_GROUP_DATA_TOOL,
+  deferLoading: false,
+} as const
+
 export const MURPH_GROUP_MEMBERSHIP_TOOL = buildMurphGroupFamilyTool({
   name: 'group_membership',
   description:
@@ -1793,6 +1798,7 @@ export const MURPH_DYNAMIC_TOOLS = [
 
 export type MurphDynamicTool =
   | (typeof MURPH_DYNAMIC_TOOLS)[number]
+  | typeof MURPH_GROUP_DATA_EAGER_TOOL
   | typeof MURPH_ATTACH_FOLLOW_UP_TOOL
   | typeof MURPH_MEMBER_MEMORY_TOOL
   | typeof MURPH_GROUP_ASSISTANT_CONFIGURATION_TOOL
@@ -1934,6 +1940,11 @@ export function resolveMurphDynamicTools(
     }
   }
   if (availability.progressUpdateMode === 'group') {
+    // Shared reads are routine in this audience; avoid a namespace discovery turn.
+    const groupDataToolIndex = tools.indexOf(MURPH_GROUP_DATA_TOOL)
+    if (groupDataToolIndex >= 0) {
+      tools[groupDataToolIndex] = MURPH_GROUP_DATA_EAGER_TOOL
+    }
     const progressToolIndex = tools.indexOf(MURPH_SEND_PROGRESS_UPDATE_TOOL)
     if (progressToolIndex >= 0) {
       tools[progressToolIndex] = MURPH_GROUP_SEND_PROGRESS_UPDATE_TOOL

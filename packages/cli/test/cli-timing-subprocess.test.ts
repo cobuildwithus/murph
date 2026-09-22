@@ -89,6 +89,9 @@ async function isolated(run: (directory: string, invoke: (
 type Case = { name: string; argv: string[]; command: string; code?: string; field?: string;
   validation?: CliValidationDiagnostic; requests?: number }
 const cases: Case[] = [
+  { name: 'food conflicting query forms', argv: ['food', 'search-labels', 'synthetic oats', '--query', 'PRIVATE_SENTINEL'],
+    command: 'food search-labels', code: 'VALIDATION_ERROR', field: 'query',
+    validation: { field: 'query', code: 'custom', missing: false } },
   { name: 'food limit validation before provider access', argv: ['food', 'search-labels', 'synthetic oats', '--limit', '999'],
     command: 'food search-labels', code: 'VALIDATION_ERROR', field: 'limit',
     validation: { field: 'limit', code: 'too_big', missing: false } },
@@ -198,8 +201,10 @@ test('early root/built-in parse rejection and natural version success retain exa
 test('real batch children report once, preserve stop-on-error and reject nested batches unchanged', async () => {
   await isolated(async (directory, invoke) => {
     const common = ['--vault', path.join(directory, 'vault'), '--format', 'json']
-    const argv = ['batch', '--compact', '--stop-on-error', '--command', JSON.stringify(cases[3]!.argv),
-      '--command', JSON.stringify(cases[1]!.argv), '--command', JSON.stringify(cases[4]!.argv), ...common]
+    const argv = ['batch', '--compact', '--stop-on-error',
+      '--command', JSON.stringify(['exercise', 'list', '--query', 'squat', '--limit', '1']),
+      '--command', JSON.stringify(['exercise', 'list', '--kind', 'synthetic-invalid']),
+      '--command', JSON.stringify(['food', 'search-labels', 'synthetic oats', '--limit', '1']), ...common]
     const off = await invoke(argv, 0, false)
     const on = await invoke(argv)
     assert.deepEqual({ ...on, timing: null }, off)

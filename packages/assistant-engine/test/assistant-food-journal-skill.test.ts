@@ -323,7 +323,7 @@ describe('assistant food journal skill', () => {
     expect(skill).toContain(
       "activation/readback, and fresh same-date totals.",
     )
-    expect(skill).toContain('vault-cli food search-labels`')
+    expect(skill).toContain("vault-cli food search-labels 'rolled oats' --generic --format json`")
     expect(skill).toContain('vault-cli food search-labels-batch`')
     expect(skill).toContain(
       'When the user names a restaurant and recognizable menu item, and known context\ndoes not trigger one of the numeric safety exceptions below, resolve nutrition\nbefore the meal mutation.',
