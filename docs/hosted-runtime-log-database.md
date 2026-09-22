@@ -230,7 +230,7 @@ export raw JSON or subject identifiers just to investigate a latency span.
 
 `runner.provider_egress_diagnostic` is the bounded provider-request trace for
 hosted OpenAI Responses traffic and Venice Responses calls explicitly tagged by
-Codex as `request_kind: memory`. Version 3 records request and input byte counts,
+Codex as `request_kind: memory`. Version 4 records request and input byte counts,
 allowlisted shape/model kinds, cache-key presence, and keyed prefix fingerprints.
 For parsed Responses input, it also extends the existing aligned
 `inputNestedMetricKinds`, `inputNestedMetricCounts`, and
@@ -260,6 +260,105 @@ the diagnostic records fingerprint availability only. Provider request and
 response bodies, prompts, messages, tool arguments/results, arbitrary response
 headers, account balances, credentials, paths, vault content, and direct member
 identifiers remain excluded.
+
+Version 4 additionally counts `additional_tools` items and their tool definitions
+inside Responses Lite input. `toolCount` retains its top-level-only meaning;
+`additionalToolCount` captures the embedded definitions. `effectiveToolsFingerprint`
+hashes the ordered top-level and embedded tool groups, excluding item IDs.
+`responseFormatFingerprint` hashes a supplied `text.format`. Both fingerprints
+require the existing secret and skip payloads larger than 256 KiB.
+Allowlisted `reasoningEffortKind`, `verbosityKind`, `serviceTierKind`,
+`cacheModeKind`, `cacheTtlKind`, and `comparisonResponsePresent` explain compatible
+settings without storing arbitrary strings or response identifiers. Missing
+fields mean unspecified, not a particular effective provider default.
+These additions fit the existing runtime-log parser; no migration or consumer
+upgrade is needed. They describe HTTP request bodies, not opaque WebSocket frames.
+
+#### Local HTTP and WebSocket cache replay
+
+The pinned Codex binary does not expose `prompt_cache_options` or forward
+`prompt_cache_diagnostics` through App Server. Use the isolated development
+adapter to test the actual binary without changing hosted WebSocket forwarding:
+
+```sh
+node scripts/replay-prompt-cache.mjs --env-file .env --scenario document --transport websocket --policy baseline
+node scripts/replay-prompt-cache.mjs --env-file .env --scenario document --transport websocket --policy key
+node scripts/replay-prompt-cache.mjs --env-file .env --scenario scheduled --transport http --policy baseline
+```
+
+The selected file supplies only `OPENAI_API_KEY`. Use a development key; these
+commands make billable requests. The adapter listens on loopback with a random
+capability token. It forwards only Responses requests to the fixed API endpoint,
+holds at most 128 recent comparison IDs in memory, and prints JSON metadata.
+No prompt, model output, document text, key, response ID, or thread ID is printed.
+Fingerprints are salted per run and cannot be joined across runs.
+
+The document fixture calls `executeClinicalDocumentExtraction` with synthetic
+dated measurements, real validation and the named read-only permission profile.
+The scheduled fixture uses the production system-prompt builder, dynamic-tool
+definitions and native resumed thread. It does not replay the hosted scheduler,
+delivery pipeline, production transcripts, or long idle periods. Neither fixture
+sends member messages. Assertions verify successful model output/extraction.
+
+Policies are `baseline` (preserve native key and implicit caching), `key` (stable
+synthetic cohort key), `breakpoint` (first developer block), `stable` (both), and
+`explicit` (stable key and developer-only writes). The cohort key is an experiment,
+not a production global cache key: a hosted implementation must preserve the
+member/workspace boundary and distinguish incompatible extraction families.
+
+Each completed generated response becomes the next comparison baseline.
+WebSocket `generate: false` warmups are logged separately and never become a
+comparison baseline or enter generation cost totals. Failed responses do not
+advance the baseline. A diagnostic `unavailable` is inconclusive; reported usage
+still measures cache reuse. Incremental WebSocket requests can omit tools and
+earlier messages retained through `previous_response_id`, so per-frame hashes
+must not be interpreted as the full effective prompt.
+
+The summary reports generated completions, input/cached/write tokens and input
+cost units (ordinary input = 1, cache read = 0.1, cache write = 1.25). It excludes
+output cost and is not a dollar invoice. Compare token-weighted reuse across
+complete runs, and report warm-only results separately from first cold requests.
+
+Synthetic local evidence on 2026-09-22, three document extractions per policy:
+
+| Policy | Input tokens | Cached tokens | Cache-write tokens | Input cost units |
+| --- | ---: | ---: | ---: | ---: |
+| Native key, implicit | 16,833 | 0 | 16,824 | 21,039.0 |
+| Stable key, implicit | 16,839 | 10,688 | 6,142 | 8,755.3 |
+| Native key, developer breakpoint | 16,839 | 0 | 16,830 | 21,046.5 |
+| Stable key, explicit-only | 16,839 | 9,572 | 4,786 | 9,420.7 |
+
+Native-key comparisons reported `prompt_cache_key_changed`; breakpoint-only
+did not resolve it. Stable-key warm requests reused about 95.3% of input (63.5%
+including the first cold request) and reduced whole-fixture input cost about
+58.4%. Stable-key diagnostics were sometimes `unavailable`, so the savings claim
+uses usage counts. Explicit-only writes cost more than stable-key implicit
+caching in this fixture and are not a recommended default.
+Scheduled prompt continuations reused about 99.6% of input on both transports;
+including the cold first turn reduced the three-turn ratio to about 66.5%.
+These are local synthetic results, not a demonstrated production improvement
+or a guarantee of 90% aggregate caching. Production response diagnostics and a
+stable document cache key still require native Codex support or a separately
+integrated runner-local adapter; this replay adapter is not wired into hosted
+execution and does not alter production cache policy.
+
+Upstream source was checked at OpenAI Codex
+[`559264d92e4462e887d7508c705599f33daf4f1e`](https://github.com/openai/codex/commit/559264d92e4462e887d7508c705599f33daf4f1e)
+on 2026-09-22. Its
+[HTTP/WebSocket request structs](https://github.com/openai/codex/blob/559264d92e4462e887d7508c705599f33daf4f1e/codex-rs/codex-api/src/common.rs#L259)
+still omit `prompt_cache_options`, and
+[App Server completions](https://github.com/openai/codex/blob/559264d92e4462e887d7508c705599f33daf4f1e/codex-rs/app-server-protocol/src/protocol/v2/thread.rs#L1861)
+still expose usage and response IDs without `prompt_cache_diagnostics`.
+[Ephemeral root forks now inherit parent cache routing](https://github.com/openai/codex/blob/559264d92e4462e887d7508c705599f33daf4f1e/codex-rs/core/src/session/session.rs#L883),
+while keeping their own storage/lifecycle identity. This is a potential future
+native reuse mechanism, not a drop-in clinical fix: forked history differs from
+Murph's fresh one-shot confined extraction contract. No Codex upgrade or fork
+lifecycle is introduced by this diagnostic change.
+
+See the [OpenAI diagnostics guide](https://developers.openai.com/api/docs/guides/prompt-caching/diagnostics)
+for comparison semantics and the [caching guide](https://developers.openai.com/api/docs/guides/prompt-caching)
+for cache lifetime and write pricing. Current GPT-5.6+ TTL supports `30m`; it does
+not promise that an infrequent scheduled job retains a warm prefix indefinitely.
 
 The row is observability only and remains failure-isolated from provider egress.
 Venice foreground and untagged calls do not create these rows. Container egress
