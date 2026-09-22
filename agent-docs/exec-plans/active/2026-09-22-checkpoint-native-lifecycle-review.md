@@ -48,7 +48,20 @@ No additional scheduler, persistent ledger, compatibility layer or native fork.
   cancellation during pending usage, stale completion and unfinished-child timeout.
 - Passed package typecheck, complexity, privacy and parent candidate diff review.
   Production diff removes 82 net lines; lifecycle checks stay below the threshold.
-- PR, exact-head CI, ReviewGPT and mergeability: pending.
+- PR #3651 is open. Its complete Assistant Engine CI coverage and both required
+  CLI host checks passed at the initial candidate. Final exact-head CI is pending.
+- Initial review attempts did not send: one lane could not select the model and
+  another kept Send disabled after attachment staging. No substantive review
+  exists for the initial candidate; preserve this attempt history when retrying.
+- CI exposed two unchanged proof bugs: case-sensitive apt dump validation rejects
+  a correctly loaded timeout, and a fixed July sleep fixture expires against the
+  real clock. Remove the redundant apt guard and fix only that test's Date clock.
+  Isolated Ubuntu proof preserves the 180-second apt timeout and Playwright exit
+  status; four installer tests, 36 route tests and Web typecheck pass.
+- A Google font-loader CI failure did not reproduce with any of the three actual
+  configured loaders. Leave font behavior intact and rerun on the next candidate.
+- Public-safe Frog entries record the apt and fixture-clock causes. Final
+  ReviewGPT and current-base mergeability are pending.
 - No live model call is required: native lifecycle consumption changes; model
   instructions, tools, inference and provider-visible input do not.
 
