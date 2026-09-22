@@ -1,4 +1,4 @@
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
 	buildHostedVaultShareGenerationToken: vi.fn(),
@@ -346,10 +346,6 @@ function heartRateZonesDeliveryBody(): HostedVaultShareDeliverRequest {
 }
 
 describe("vault-share deliver route", () => {
-  afterEach(() => {
-    vi.useRealTimers();
-  });
-
   beforeAll(async () => {
     deliverRoute = await import(
       "../app/api/internal/hosted-runtime/vault-share/deliver/route"
@@ -594,9 +590,10 @@ describe("vault-share deliver route", () => {
     });
   });
 
-  it("preserves source-recorded sleep times through the deliver route", async () => {
-    vi.useFakeTimers({ toFake: ["Date"] });
-    vi.setSystemTime(new Date("2026-07-25T12:00:00.000Z"));
+  it("preserves source-recorded sleep times through the deliver route", async ({ onTestFinished }) => {
+    // Keep this fixed-date fixture inside the route's history window.
+    const clock = vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-07-25T12:00:00.000Z"));
+    onTestFinished(() => clock.mockRestore());
     const projectionScope = hostedVaultShareProjectionKindToScope(
       "deep-sleep-sources-days.v1",
     );

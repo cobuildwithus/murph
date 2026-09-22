@@ -71,3 +71,13 @@ Runner-only code update. No persisted schema or protocol producer changes. Old
 runners retain the old rejection behavior; ordinary replacement adopts the fix.
 No migration or rollback floor. Reverting reintroduces the original rejection.
 Production deployment is outside the current request.
+
+## Base reconciliation
+
+Main independently fixed the same expired sleep fixture with a test-local
+Date.now spy and added its canonical Frog entry. Retain that existing correction,
+remove the redundant local clock setup and duplicate friction entry, and merge
+the base normally. All 36 route tests and Web typecheck pass after resolution.
+The Assistant Engine implementation remains unchanged. The updated initial
+candidate also encountered a disabled Send button before ReviewGPT submission;
+no substantive review has yet been submitted.
