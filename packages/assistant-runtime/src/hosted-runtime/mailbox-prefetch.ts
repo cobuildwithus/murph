@@ -2,6 +2,7 @@ import {
   HOSTED_MAILBOX_LANES,
   type HostedMailboxFetchResponse,
   type HostedMailboxLane,
+  type HostedMailboxWakeHighWater,
   type HostedWorkspaceInvocationRequest,
   type HostedWorkspaceState,
 } from "@murphai/hosted-execution/runtime-control";
@@ -78,6 +79,26 @@ export function canUseHostedMailboxPrefixPrefetch(input: {
   return input.lanes.every((lane) =>
     prefetch.importedSeqByLane[lane] === input.state.watermarks[lane]
   );
+}
+
+/** A wake hint never advances cursors; it only permits reusing the same fenced read. */
+export async function hostedMailboxPrefixPrefetchCoversWake(
+  prefetch: HostedMailboxPrefixPrefetch,
+  highWater: HostedMailboxWakeHighWater | null | undefined,
+): Promise<boolean> {
+  if (!highWater) return false;
+  try {
+    const response = await prefetch.response;
+    return HOSTED_MAILBOX_LANES.every((lane) => {
+      const observed = response.maxSeqByLane.find((value) => value.lane === lane)?.maxSeq;
+      return observed !== undefined && /^(?:0|[1-9][0-9]*)$/u.test(observed)
+        && BigInt(observed) >= BigInt(highWater[lane]);
+    });
+  } catch (error) {
+    if (prefetch.signal?.aborted) throw error;
+    // The ordinary fresh fetch retains retry and cancellation ownership.
+    return false;
+  }
 }
 
 export function resolveHostedWorkspaceRunMailboxFetchLimit(maxMailboxItems?: number | null): number {

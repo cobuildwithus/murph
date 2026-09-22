@@ -104,6 +104,8 @@ import {
   recordHostedSystemMailboxItemAfterCheckpoint,
 } from "../src/hosted-runtime/system-mailbox.ts";
 import {
+  findNextHostedSystemMailboxQueueItem,
+  projectHostedDeviceHintCoverage,
   readHostedSystemMailboxState,
   systemMailboxItemIsDue,
   updateHostedSystemMailboxState,
@@ -16848,10 +16850,13 @@ describe("hosted device-sync runtime", () => {
 
 
 test.each([
-  { minutesUntilDue: 25, dirty: true, expectedReconcile: true },
-  { minutesUntilDue: 45, dirty: true, expectedReconcile: false },
+  { minutesUntilDue: 25, dirty: true, retained: false, expectedReconcile: true },
+  { minutesUntilDue: 25, dirty: true, retained: true, expectedReconcile: true },
+  { minutesUntilDue: 25, dirty: false, retained: true, expectedReconcile: false },
+  { minutesUntilDue: 45, dirty: true, retained: true, expectedReconcile: false },
+  { minutesUntilDue: 45, dirty: true, retained: false, expectedReconcile: false },
   { minutesUntilDue: 25, dirty: false, expectedReconcile: false },
-])("hosted webhook cadence coalescing: $minutesUntilDue minutes, dirty=$dirty", async ({ minutesUntilDue, dirty, expectedReconcile }) => {
+])("hosted webhook cadence coalescing: $minutesUntilDue minutes, dirty=$dirty retained=$retained", async ({ minutesUntilDue, dirty, retained, expectedReconcile }) => {
   const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace("hosted-cadence-coalescing-");
   const now = new Date().toISOString();
   const connectionId = "hosted-synthetic-coalescing";
@@ -16876,9 +16881,39 @@ test.each([
   };
   let yieldBeforeDrain = false;
   try {
-    await withHostedCanonicalWritePort({ async persistCanonicalWrite() {}, async persistRuntimeState() {} }, () => runHostedDeviceSyncPass(buildDeviceSyncWake({
+    let wake: HostedExecutionDeviceSyncWake = buildDeviceSyncWake({
       connectionId, expectedConnectedAt: now, occurredAt: now, provider: "junction", reason: "webhook_hint",
-    }), vaultRoot, {
+    });
+    if (retained) {
+      const retryAt = new Date(Date.parse(now) + 24 * 60 * 60_000).toISOString();
+      const item: HostedSystemMailboxPendingItem = {
+        attemptCount: 1, deviceSyncContinuationOwner: true, itemId: "synthetic-retained-owner", lastAttemptAt: now,
+        lastErrorCode: null, lastErrorMessage: null, mailboxDedupeKey: "evt_device_sync_wake",
+        mailboxLaneSeq: "1", nextAttemptAt: retryAt, occurredAt: now,
+        postCheckpointRecord: null, requestId: null, routeAction: "run-device-sync-wake",
+        status: "pending", wake: buildDeviceSyncWake({
+          connectionId, expectedConnectedAt: now, occurredAt: now, provider: "junction", reason: "reconcile_due",
+          hint: { jobs: [{ kind: "resource", availableAt: retryAt, dedupeKey: "synthetic-future-history",
+            payload: { resource: "weight", resourceCategory: "timeseries" } }] },
+        }),
+      };
+      const pending = [item, {
+        ...item, attemptCount: 0, lastAttemptAt: null, deviceSyncContinuationOwner: undefined,
+        itemId: "synthetic-webhook", mailboxLaneSeq: "2", nextAttemptAt: null, wake,
+      }];
+      const selected = findNextHostedSystemMailboxQueueItem({ now, state: { pending }, allowedRouteActions: ["run-device-sync-wake"] });
+      assert.ok(selected);
+      assert.equal(selected.itemId, item.itemId);
+      assert.equal(selected.nextAttemptAt, null);
+      const coverage = projectHostedDeviceHintCoverage({ now, pending });
+      assert.equal(coverage.get(item.itemId)?.coveredHintIds.has("synthetic-webhook"), true);
+      assert.equal(coverage.get(item.itemId)?.admittedWake, undefined);
+      assert.equal(selected.wake.kind, "device-sync.wake");
+      if (selected.wake.kind !== "device-sync.wake") throw new Error("Expected retained device wake");
+      wake = selected.wake;
+      assert.equal(wake.reason, "reconcile_due");
+    }
+    await withHostedCanonicalWritePort({ async persistCanonicalWrite() {}, async persistRuntimeState() {} }, () => runHostedDeviceSyncPass(wake, vaultRoot, {
       providerConfigs: { junction: { environment: "sandbox", region: "us" } },
       publicBaseUrl: "https://sync.example.test", secret: DEVICE_SYNC_SECRET,
     }, port, 120_000, {
@@ -16891,7 +16926,7 @@ test.each([
     try {
       const jobs = database.prepare("select kind from device_job where status = 'queued'").all();
       assert.equal(jobs.some((job) => job.kind === "reconcile"), expectedReconcile);
-      assert.equal(jobs.some((job) => job.kind === "resource"), dirty);
+      assert.equal(jobs.some((job) => job.kind === "resource"), dirty || retained === true);
     } finally { database.close(); }
   } finally { await cleanup(); }
 });

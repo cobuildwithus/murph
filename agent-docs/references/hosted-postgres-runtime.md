@@ -144,6 +144,28 @@ resource rows. Transactions contain bounded database work only, with five-second
 transaction/admission limits. External allocation, container operations, provider
 calls, and R2 writes run outside transactions.
 
+Protected checkpoint recovery uses the same lock order. The operator job first
+authenticates surviving sources, builds a candidate in private scratch and
+round-trips its encrypted archive. A signed, member-bound recovery callback
+stages its complete reference with the existing orphan cleanup owner before a
+short-lived immutable upload. The job verifies the uploaded bytes before asking
+Web to publish. Publication rechecks account admission, exact workspace version,
+source snapshot and full Browser Vault reference, and terminal cleanup state.
+It atomically retires the previous attempt and advances the checkpoint; it never
+claims native stop or releases a target. The ordinary recheck adapter owns that
+proof and subsequent execution. Recovery clears obsolete receipt-chain hints
+and omits mailbox acknowledgment fields, preserving the mailbox counters and
+pending items. Partial rebuilds preserve the original authenticated projection
+as a labelled source document and use manual onboarding completion only when
+explicitly instructed, leaving existing completed onboarding unchanged. Surviving
+files remain byte-identical except the current audit and recovery event shards.
+Their original byte prefixes must survive alongside two validated audit records
+and the exact document event returned by the canonical import owner. The event
+proof stays private and is excluded from the emitted summary. The encrypted replica read bound includes base64/envelope overhead
+above the supported plaintext maximum. Partial recovery does not claim the
+missing canonical files were restored.
+Deploy the Web recovery reader before enabling protected recovery workflow modes.
+
 Owner locks return the current row, and callback/provider admission reads member
 existence from the member lock itself. These paths use three ordered lock queries
 in the completed Postgres phase, without separate owner/member rereads. Returned

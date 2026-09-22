@@ -65,6 +65,14 @@ privacy, authorization, or provider boundaries.
 
 - Keep the existing `open | completed` onboarding state. Open onboarding does
   not gate ordinary Murph use.
+- While onboarding is open, the cron wake projection omits unclaimed weekly
+  health insight, monthly improvement coach, and weekly research scout work,
+  using the execution owner's exact managed identities. Canonical schedules
+  stay active; running claims, pending deliveries, retries, and uncertain
+  onboarding reads keep their ordinary wakes. After foreground delivery, the
+  existing hosted reconciliation refreshes eligibility even when no seed
+  changed or no current default route is available. It preserves earlier
+  phase-owned work and uses the existing short status retry when interrupted.
 - Keep the existing `finish-onboarding-followup` managed automation as the one
   finite three-day recovery and continuation mechanism. Do not add a second
   automation for unfinished context collection or split open onboarding into

@@ -180,6 +180,7 @@ async function wakeExistingRuntime(ctx: ProcessingContext, owner: HostedRuntimeO
   const wake = await ensureActiveRuntimeProcessing({ activeRuntime: {
     attemptId: identity.attemptId, leaseGeneration: identity.generation, userId: ctx.input.userId,
     processingMode: owner.processingMode, orchestration: ctx.input.orchestration,
+    ...(ctx.input.mailboxWakeHighWater ? { mailboxWakeHighWater: ctx.input.mailboxWakeHighWater } : {}),
     ...(owner.processingMode === "system_mailbox" && ctx.mode === "default" ? { requestedProcessingMode: ctx.mode } : {}),
   }, diagnostics: ctx.diagnostics, commandBudget: ctx.budget, env: ctx.env,
     runnerContainerName: owner.runnerContainerName, runnerContainerNamespace: ctx.namespace, runnerRuntimeEnvSource: ctx.source });

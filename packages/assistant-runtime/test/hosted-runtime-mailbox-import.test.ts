@@ -23,6 +23,7 @@ import {
   fetchAndProcessHostedMailboxPrefix,
   prefetchHostedMailboxPrefix,
 } from "../src/hosted-runtime/mailbox-import.ts";
+import { hostedMailboxPrefixPrefetchCoversWake } from "../src/hosted-runtime/mailbox-prefetch.ts";
 import type {
   HostedRuntimeMailboxPort,
 } from "../src/hosted-runtime-contracts.ts";
@@ -291,6 +292,54 @@ describe("hosted mailbox import loop", () => {
     assert.deepEqual(systemResult.fetchedLanes, ["system"]);
     assert.equal(systemResult.state.watermarks.conversation, "1");
     assert.equal(systemResult.state.watermarks.system, "1");
+  });
+
+  test("covered wake reuse preserves bounded prefix cursors and backlog continuation", async () => {
+    const state = createEmptyHostedMailboxImportState();
+    const { fetchRequests, mailboxPort } = createMailboxPort({
+      items: [1, 2, 3].map((seq) => createMailboxItem({
+        id: `mailbox_bounded_${seq}`, laneSeq: String(seq),
+      })),
+    });
+    const fetch = mailboxPort.fetch.bind(mailboxPort);
+    mailboxPort.fetch = async (request, context) => {
+      const response = await fetch(request, context);
+      return { ...response, items: response.items.slice(0, request.limitPerLane) };
+    };
+    const prefetch = prefetchHostedMailboxPrefix({
+      lanes: ["conversation", "system"], limitPerLane: 1, mailboxPort,
+      requestId: "bounded_prefetch", state,
+    });
+    assert.equal(await hostedMailboxPrefixPrefetchCoversWake(prefetch, {
+      conversation: "3", system: "0",
+    }), true);
+    const imported: string[] = [];
+    const result = await fetchAndProcessHostedMailboxPrefix({
+      expectedUserId: TEST_USER_ID,
+      async importItem(input) { imported.push(input.item.laneSeq); return { status: "imported" }; },
+      lanes: ["conversation"], limitPerLane: 1, mailboxPort, now: () => TEST_NOW,
+      prefetch, requestId: "bounded_import", state,
+    });
+    assert.deepEqual(imported, ["1"]);
+    assert.equal(result.state.watermarks.conversation, "1");
+    assert.equal(result.state.watermarks.system, "0");
+    assert.equal(result.nextRetryAt, TEST_NOW);
+    assert.equal(fetchRequests.length, 1);
+  });
+
+  test("coverage selection propagates an aborted speculative fetch", async () => {
+    const controller = new AbortController();
+    const aborted = new Error("Synthetic speculative fetch aborted.");
+    const { mailboxPort } = createMailboxPort({ items: [] });
+    mailboxPort.fetch = async () => { throw aborted; };
+    controller.abort(aborted);
+    const prefetch = prefetchHostedMailboxPrefix({
+      limitPerLane: 1, mailboxPort, requestId: "aborted_prefetch", signal: controller.signal,
+      state: createEmptyHostedMailboxImportState(),
+    });
+    await assert.rejects(hostedMailboxPrefixPrefetchCoversWake(prefetch, {
+      conversation: "0", system: "0",
+    }), (error) => error === aborted);
   });
 
   test("falls back independently by lane when the mixed prefetch rejects", async () => {

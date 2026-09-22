@@ -31,6 +31,13 @@ When an exact read feeds a mutation, carry the observed lifecycle revision or
 source revision into the canonical core writer rather than treating projection
 state as write authority.
 
+Experiment progress and outcome analysis share one canonical evidence snapshot
+through `readExperimentQuerySource()`, deriving the selected metrics without
+rebuilding the global query/search database. Outcome persistence keeps evidence
+analysis and the canonical write under the existing reentrant lock. A linked
+outcome replay resolves only the experiment family and saved outcome before
+returning; it does not rebuild unrelated query state.
+
 Experiment edit option compilation lives in `src/experiment-onboarding-options.ts`
 alongside onboarding capture and assistant-support options. The pure builders
 validate protocol references, run logging, analysis, and dates. The experiment

@@ -58,6 +58,14 @@ import {
 } from './onboarding-followup-seed.js'
 import { assistantRouteSupportsGroupRoomModel } from './group-room-model.js'
 
+import { withAssistantCronWriteLock } from './cron/locking.js'
+import { resolveAssistantStatePaths } from './store/paths.js'
+import { ensureAssistantCronState } from './cron/store.js'
+import {
+  findAssistantCronCanonicalRuntimeRecord,
+  readAssistantCronCanonicalRuntimeStore,
+} from './cron/runtime-state.js'
+
 export { MURPH_ONBOARDING_FOLLOWUP_AUTOMATION }
 
 export type MurphManagedAutomationSchedule = Exclude<
@@ -829,11 +837,15 @@ export const MURPH_MANAGED_AUTOMATIONS = [
     ],
     instructions: [
       'Goal: consolidate durable user context from recent assistant/user conversation history into the canonical vault memory surface.',
-      'Read existing saved context by calling `murph.member_memory` with `action="show"` first. Existing memory is for deduplication and mutation targeting only; it is never an independent source for new writes.',
-      'Retrieval budget: use only the engine-supplied "Conversation evidence" section appended to this prompt. It already contains the bounded committed user and assistant conversation messages from the last 7 days. If that section reports no messages, do not write any new memory.',
-      'Write durable memory only by calling `murph.member_memory` with `action="upsert"` or `action="update"` when a concise, user-useful fact is clearly supported by the supplied conversation evidence and is not already represented. For update, pass the target record\'s exact `updatedAt` from show as `expectedUpdatedAt`.',
+      'Read existing saved context by calling `murph.member_memory` with `action="show"` first. Existing memory may support faithful shortening of that same record; it cannot support new facts, inferred traits, or broader preferences.',
+      'Retrieval budget: use only the engine-supplied "Conversation evidence" section appended to this prompt. It already contains the bounded committed user and assistant conversation messages from the last 7 days. If that section reports a collection failure, make no mutations. If it reports no messages, do not add facts; only maintain existing records under the rules below.',
+      'For additions and factual changes, write durable memory only by calling `murph.member_memory` with `action="upsert"` or `action="update"` when a concise, user-useful fact is clearly supported by the supplied conversation evidence and is not already represented. For update, pass the target record\'s exact `updatedAt` from show as `expectedUpdatedAt`.',
       'For `action="update"` or `action="forget"`, pass the target record\'s exact `updatedAt` as `expectedUpdatedAt`. If either action reports that memory changed after show, leave the newer value unchanged and end that write attempt.',
-      'Before returning, validate each proposed write against existing memory and the supplied conversation evidence. Skip anything uncertain, duplicated, sensitive, or merely transient task detail.',
+      'Maintain a compact profile: Identity for enduring background, Preferences for stable choices and constraints, Instructions for explicit ways the user wants help, and Context for current circumstances. Save one self-contained fact per record. Prefer concise wording, but preserve conditions, exceptions, dates, negation, and uncertainty even when that needs more space.',
+      'First apply clear user corrections and withdrawals to the exact existing record. Then inspect every remaining shown non-health record for repeated explanations of the same fact and remove that repetition with update. Complete this cleanup even when you already saved conversation changes; those writes do not finish the existing-record review. This is wording-only cleanup, not a factual replacement, and needs no new conversation evidence. Never combine records, delete apparent duplicates, drop a qualification to fit a budget, or rewrite an already concise record. Preserve source dates in the text; updatedAt records an edit, not fresh confirmation by the user. Make at most one mutation per shown record in this pass.',
+      'Capture explicit procedural preferences in Instructions as a concise condition and desired response: what situation triggers it and how the user wants help. Do not turn a single situational request into a permanent rule, infer personality or wealth, or treat preferences as tool or external-action permission.',
+      'Preserve explicit dates and temporary scope during wording-only compaction. When the user clearly withdraws a temporary fact with no useful lasting replacement, use forget; do not turn it into a negative or historical note. Elapsed time changes relevance, not permission to erase a memory: never automatically forget or remove a fact because its date passed. Only clear user evidence may initiate factual replacement or forgetting. Never infer expiry from updatedAt, silence, or an unanchored relative date, and never infer completion from a goal deadline. Do not recreate withdrawn facts from older messages in the overlapping evidence window.',
+      'Before returning, validate every addition or factual change against supplied conversation evidence; validate faithful shortening against the exact shown record as well. Do not add duplicate facts. Skip anything uncertain, sensitive, or merely transient task detail.',
       'Do not use the shell or read transcript files, session storage, hidden Codex memory state, assistant runtime logs, filesystem trees, or vault health data. Do not call external services or send the user a message.',
       'Do not save assistant speculation, generic advice, transient task details, credentials, payment details, contact details, identifiers of any kind, or medical or health details from conversation text.',
       `Return exactly \`{"kind":"skip","privateSummary":"${MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_PRIVATE_SUMMARY}"}\`.`,
@@ -1118,6 +1130,11 @@ export async function applyMurphManagedAutomations(
       input,
       now,
       rawSeed,
+      resolveScheduleStableKey,
+      reportStableKeyFailure: (error) => {
+        result.stableKeyFailure = error
+        result.stableKeyRetryNeeded = true
+      },
     })
     if (outcome === 'yielded') {
       return { ...result, yielded: true }
@@ -1305,12 +1322,21 @@ async function reconcileMurphManagedAutomation({
   input,
   now,
   rawSeed,
+  resolveScheduleStableKey,
+  reportStableKeyFailure,
 }: {
   existing: AutomationRecord
   input: ApplyMurphManagedAutomationsInput
   now: Date
   rawSeed: MurphManagedAutomationSeed
+  resolveScheduleStableKey: () => Promise<string | null>
+  reportStableKeyFailure: (error?: unknown) => void
 }): Promise<'updated' | 'skipped' | 'yielded'> {
+  if (isLegacyPersonalPatternsSchedule(existing, rawSeed)) {
+    return reconcilePersonalPatternsSchedule({
+      existing, options: input, now, resolveScheduleStableKey, reportStableKeyFailure,
+    })
+  }
   const preserveExistingSchedule =
     shouldSpreadMurphManagedAutomationSchedule(rawSeed)
   const seed = rawSeed
@@ -1546,13 +1572,21 @@ function shouldSpreadMurphManagedAutomationSchedule(
   seed: MurphManagedAutomationSeed,
 ): boolean {
   return seed.schedule.kind === 'cron' &&
-    MURPH_MANAGED_WEEKLY_SCHEDULE_SPREADS[seed.automationId] !== undefined
+    (seed.automationId === MURPH_PERSONAL_PATTERNS_UPDATE_AUTOMATION_ID ||
+      MURPH_MANAGED_WEEKLY_SCHEDULE_SPREADS[seed.automationId] !== undefined)
 }
 
 function resolveMurphManagedAutomationCreateSeed(input: {
   seed: MurphManagedAutomationSeed
   stableKey: string | null
 }): MurphManagedAutomationSeed | null {
+  if (input.seed.automationId === MURPH_PERSONAL_PATTERNS_UPDATE_AUTOMATION_ID
+    && input.seed.schedule.kind === 'cron') {
+    return input.stableKey === null ? null : {
+      ...input.seed,
+      schedule: resolvePersonalPatternsSpreadSchedule(input.stableKey, input.seed.schedule.timeZone),
+    }
+  }
   const spread = MURPH_MANAGED_WEEKLY_SCHEDULE_SPREADS[input.seed.automationId]
   if (!spread || input.seed.schedule.kind !== 'cron') {
     return input.seed
@@ -1570,6 +1604,86 @@ function resolveMurphManagedAutomationCreateSeed(input: {
       stableKey: input.stableKey,
     }),
   }
+}
+
+// Daily maintenance has no promised delivery hour. Spread it at minute granularity
+// over 09:00–16:59 local time, retaining one stable slot across restarts and moves.
+function resolvePersonalPatternsSpreadSchedule(stableKey: string, timeZone?: string) {
+  const slot = stableHashToIndex(`murph-personal-patterns-daily:${stableKey}`, 8 * 60)
+  const minuteOfDay = 9 * 60 + slot
+  return {
+    kind: 'dailyLocal' as const,
+    localTime: `${String(Math.floor(minuteOfDay / 60)).padStart(2, '0')}:${String(minuteOfDay % 60).padStart(2, '0')}`,
+    ...(timeZone ? { timeZone } : {}),
+  }
+}
+
+function isLegacyPersonalPatternsSchedule(existing: AutomationRecord, seed: MurphManagedAutomationSeed): boolean {
+  return seed.automationId === MURPH_PERSONAL_PATTERNS_UPDATE_AUTOMATION_ID
+    && existing.status === 'active'
+    && existing.schedule.kind === 'cron'
+    && existing.schedule.expression === '0 13 * * *'
+}
+
+async function reconcilePersonalPatternsSchedule(input: {
+  existing: AutomationRecord
+  options: ApplyMurphManagedAutomationsInput
+  now: Date
+  resolveScheduleStableKey: () => Promise<string | null>
+  reportStableKeyFailure: (error?: unknown) => void
+}): Promise<'updated' | 'skipped'> {
+  let stableKey: string | null
+  try {
+    stableKey = await input.resolveScheduleStableKey()
+  } catch (error) {
+    input.reportStableKeyFailure(error)
+    return 'skipped'
+  }
+  if (stableKey === null) {
+    input.reportStableKeyFailure()
+    return 'skipped'
+  }
+  return await spreadExistingPersonalPatternsSchedule({ ...input, stableKey }) ? 'updated' : 'skipped'
+}
+
+async function spreadExistingPersonalPatternsSchedule(input: {
+  existing: AutomationRecord
+  options: ApplyMurphManagedAutomationsInput
+  now: Date
+  stableKey: string
+}): Promise<boolean> {
+  const paths = resolveAssistantStatePaths(input.options.vaultRoot)
+  await ensureAssistantCronState(paths)
+  return withAssistantCronWriteLock(paths, async () => {
+    if (input.options.shouldYield?.()) return false
+    const existing = await showAutomation({
+      automationId: input.existing.automationId, vaultRoot: input.options.vaultRoot,
+    })
+    if (!existing || existing.status !== 'active' || existing.schedule.kind !== 'cron'
+      || existing.schedule.expression !== '0 13 * * *') return false
+    const runtimeStore = await readAssistantCronCanonicalRuntimeStore(paths, { reclaimStaleRunningClaims: false })
+    const runtime = findAssistantCronCanonicalRuntimeRecord(runtimeStore, existing.automationId)
+    if (runtime?.state.runningAt || runtime?.state.pendingDeliveryIntentId
+      || runtime?.state.pendingOccurrenceAt || runtime?.state.retryAfterAt) return false
+    const vault = await loadVault({ vaultRoot: input.options.vaultRoot })
+    const schedule = resolvePersonalPatternsSpreadSchedule(input.stableKey, existing.schedule.timeZone)
+    const firstOccurrenceAt = computeAssistantCronFirstRunAfterCurrentLocalDay({
+      after: input.now,
+      schedule: { ...schedule, timeZone: schedule.timeZone ?? normalizeIanaTimeZone(vault.metadata.timezone) ?? 'UTC' },
+    })
+    if (input.options.shouldYield?.()) return false
+    // Schedule and lower bound commit in one canonical record: a crash cannot
+    // expose another run today or strand a temporary one-shot schedule.
+    await patchAutomation({
+      lookup: existing.automationId,
+      expectedUpdatedAt: existing.updatedAt,
+      schedule,
+      scheduleNotBefore: new Date(Date.parse(firstOccurrenceAt) - 1),
+      now: input.now,
+      vaultRoot: input.options.vaultRoot,
+    })
+    return true
+  })
 }
 
 function resolveMurphManagedWeeklySpreadSchedule(input: {

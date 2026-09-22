@@ -28,7 +28,8 @@ import type {
 import {
   createDefaultLocalAssistantModelTarget,
 } from '@murphai/operator-config/assistant-backend'
-import { readMemoryDocument } from '@murphai/core'
+import { readMemoryDocument, upsertMemory } from '@murphai/core'
+import { readAssistantCurrentStatePrompt } from '../src/assistant/current-state.ts'
 import {
   HOSTED_OPENAI_CODEX_MODEL_PROVIDER_ID,
 } from '@murphai/operator-config/assistant/target-runtime'
@@ -3881,6 +3882,57 @@ text(result.output);
       expect(() => normalizeSharedSchemaFirstInputForEquality(JSON.stringify(body))).toThrow()
     }
   })
+
+  it.skipIf(process.env.MURPH_MEASURE_MEMORY_INPUT !== '1').each(['direct', 'group'] as const)(
+    'memory profile complete provider input (%s)', { timeout: TURN_TIMEOUT_MS }, async (scope) => {
+      const groupConversation = scope === 'group'
+      const scenario = await prepareScriptedTurnScenario()
+      for (let index = 0; index < 8; index += 1) {
+        await upsertMemory(scenario.turnInput.workingDirectory, {
+          now: new Date(Date.UTC(2030, 0, 1, 12, index)), section: 'Preferences',
+          text: `For synthetic activity ${index}, prefers brief suggestions with one optional next step.`,
+        })
+      }
+      const tools = resolveMurphDynamicTools({
+        allowFinishWithoutReply: true, assistantConfigurationAvailable: !groupConversation,
+        automationAvailable: true, groupAssistantConfigurationAvailable: groupConversation,
+        groupAvailable: !groupConversation, groupChallengeResponseCardsAvailable: groupConversation,
+        groupSharedReadAvailable: groupConversation, imageGenerationAvailable: false,
+        progressUpdatesAvailable: false, responseCardsAvailable: !groupConversation,
+      })
+      const layers = buildAssistantSystemPromptLayers({
+        assistantCliContract: null, assistantHostedAutomationAvailable: true,
+        assistantHostedGroupToolSurface: groupConversation ? 'shared_read' : 'families',
+        assistantProgressUpdatesAvailable: false, assistantStyleSettingsAvailable: false,
+        channel: 'linq', cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+        conversationScope: scope, currentLocalDate: '2030-01-10',
+        currentInstant: '2030-01-10T16:00:00.000Z', currentTimeZone: 'UTC',
+        hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic',
+        onboardingGuidance: false, ordinaryInboundTurn: true,
+      })
+      const developerInstructions = [layers.staticCacheableCorePrompt, layers.stableRouteCapabilityPrompt, layers.threadContextPrompt].join('\n\n')
+      const memory = groupConversation ? null : await readAssistantCurrentStatePrompt({ vaultRoot: scenario.turnInput.workingDirectory })
+      const prompt = [layers.dynamicTurnContextPrompt, memory, 'Suggest a brief reset for this evening.'].filter(Boolean).join('\n\n')
+      scenario.stub.markRequestBaseline()
+      scenario.stub.captureProviderRequestDiagnostics({ completeInput: true })
+      scenario.stub.queue({ text: 'SYNTHETIC_MEMORY_INPUT_CAPTURED' })
+      const result = await executeCodexAppServerTurn({
+        ...scenario.turnInput, baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        developerInstructions, dynamicTools: tools, groupConversation, prompt,
+      })
+      expect(result.finalMessage).toBe('SYNTHETIC_MEMORY_INPUT_CAPTURED')
+      expect(scenario.stub.requestCountSinceBaseline()).toBe(1)
+      const capture = scenario.stub.requestSummariesSinceBaseline()[0]?.completeProviderInput
+      if (!capture) throw new Error('Missing complete provider input')
+      const normalized = normalizeSharedSchemaFirstInputForEquality(capture.json)
+      const directory = process.env.MURPH_MEMORY_INPUT_OUTPUT_DIR
+      if (directory) {
+        await mkdir(directory, { recursive: true })
+        await writeFile(path.join(directory, `${scope}.json`), normalized.json)
+      }
+      process.stdout.write(`[memory-input] ${JSON.stringify({ scope, bytes: Buffer.byteLength(normalized.json), instructionsBytes: Buffer.byteLength(developerInstructions), memoryBytes: Buffer.byteLength(memory ?? ''), toolBytes: Buffer.byteLength(JSON.stringify(tools)) })}\n`)
+    },
+  )
 
   // Optional, synthetic, free measurement against the supplied PR3059 baseline.
   // Both phases retain its card recovery paragraph and identical canonical tools.

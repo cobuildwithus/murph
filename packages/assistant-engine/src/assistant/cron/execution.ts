@@ -55,7 +55,10 @@ import {
   isRetiredMurphManagedAutomationId,
   isRecognizedMurphOnboardingFollowupAutomation,
   MURPH_MONTHLY_IMPROVEMENT_COACH_AUTOMATION_ID,
+  MURPH_PERSONAL_PATTERNS_UPDATE_AUTOMATION_ID,
+  MURPH_JOURNAL_CONNECTED_CONTEXT_MORNING_AUTOMATION_ID,
   MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
+  MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
   MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID,
   resolveMurphManagedAutomationOwnerScope,
   resolveMurphManagedMaintenancePolicy,
@@ -204,7 +207,8 @@ export const ASSISTANT_CRON_INDEPENDENT_AUTOMATION_AUTHORITY_INSTRUCTIONS = [
 // Hosted cron turns are off the user hotpath, so clean first runs prefer the
 // OpenAI flex tier (~50% token cost). The Codex provider boundary validates
 // route support and bounds flex execution with a deadline; failures land in the
-// normal cron backoff (30s first retry), and that retry runs at standard tier.
+// normal cron backoff (30s first retry). Maintenance stays on Flex; ordinary
+// reminders may retry at standard tier to bound delivery lateness.
 
 interface DueAssistantCronCandidate {
   canonicalEntry?: {
@@ -481,6 +485,28 @@ export function buildRunnableAssistantCronJobProjection(input: {
       ...canonicalEntries.map((entry) => entry.job),
     ]),
   }
+}
+
+export async function resolveAssistantCronWakeEntries(input: {
+  entries: readonly RunnableAssistantCronCanonicalEntry[]
+  vault: string
+}): Promise<readonly RunnableAssistantCronCanonicalEntry[]> {
+  const blockedCandidates = new Set(input.entries.filter((entry) =>
+    entry.job.enabled
+    && entry.runtimeState.state.runningAt === null
+    && entry.runtimeState.state.pendingDeliveryIntentId === null
+    && entry.runtimeState.state.retryAfterAt === null
+    && isResearchOrientedManagedAutomationCronJob({ kind: 'canonical', ...entry })
+  ))
+  if (blockedCandidates.size === 0) return input.entries
+
+  // Suppression is derived from onboarding, never a persisted pause. Hosted
+  // foreground completion refreshes the projection after delivery. Uncertain reads
+  // keep the ordinary timer so a transient failure cannot strand future work.
+  const onboarding = await readAssistantOnboardingState(input.vault).catch(() => null)
+  return onboarding?.status === 'open'
+    ? input.entries.filter((entry) => !blockedCandidates.has(entry))
+    : input.entries
 }
 
 export function isAssistantCronBackgroundMaintenanceYieldError(
@@ -831,6 +857,7 @@ export async function executeClaimedAssistantCronJob(
         const serviceTier = resolveAssistantCronTurnServiceTier({
           executionContext: input.executionContext ?? null,
           job: claimedJob,
+          backgroundMaintenance: assistantCronJobPrefersFlexRetries(input.job),
         })
         const scheduledInvocationAuthority =
           resolveAssistantCronScheduledInvocationAuthority({
@@ -2119,7 +2146,25 @@ async function runAssistantCronAutomationPreconditions(input: {
   return lifecycleSkipReason
 }
 
+// These managed jobs have no user-promised delivery minute. Timed reminders,
+// meal closeouts and independent follow-ups retain standard-tier recovery.
+const FLEX_RETRY_AUTOMATION_IDS = new Set([
+  MURPH_PERSONAL_PATTERNS_UPDATE_AUTOMATION_ID,
+  MURPH_JOURNAL_CONNECTED_CONTEXT_MORNING_AUTOMATION_ID,
+  MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
+  MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
+  MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID,
+  MURPH_MONTHLY_IMPROVEMENT_COACH_AUTOMATION_ID,
+])
+
+function assistantCronJobPrefersFlexRetries(job: ResolvedAssistantCronJob): boolean {
+  return assistantCronJobIsPreemptibleBackgroundMaintenance(job)
+    || (job.kind === 'canonical' && job.source.kind === 'automation'
+      && FLEX_RETRY_AUTOMATION_IDS.has(job.source.automationId))
+}
+
 function resolveAssistantCronTurnServiceTier(input: {
+  backgroundMaintenance: boolean
   executionContext: AssistantExecutionContext | null
   job: AssistantCronJob
 }): AssistantProviderServiceTier | null {
@@ -2128,9 +2173,11 @@ function resolveAssistantCronTurnServiceTier(input: {
     return null
   }
 
-  // Retries after a failed (or deadline-aborted) flex run use the standard
-  // tier so the existing 30s failure backoff bounds reminder lateness.
-  return input.job.state.consecutiveFailures === 0 ? 'flex' : null
+  // Maintenance tolerates capacity delays and retains Flex pricing on retries.
+  // Ordinary reminders retain the standard-tier fallback after their first failure.
+  return input.backgroundMaintenance || input.job.state.consecutiveFailures === 0
+    ? 'flex'
+    : null
 }
 
 function resolveAssistantCronAutomationTargetOverride(

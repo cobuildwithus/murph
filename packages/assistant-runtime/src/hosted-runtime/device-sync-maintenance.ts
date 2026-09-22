@@ -158,19 +158,19 @@ type HostedDeviceSyncMaintenanceStore = ReturnType<
 >;
 
 async function coalesceHostedWebhookReconcile(input: {
-  wake: HostedRuntimeEvent;
   wakeLocalAccountId: string | null;
   syncState: HostedDeviceSyncRuntimeSyncState;
   service: DeviceSyncService;
   shouldYield: (() => boolean) | null;
 }): Promise<void> {
-  const { wake, wakeLocalAccountId, syncState, service, shouldYield } = input;
+  const { wakeLocalAccountId, syncState, service, shouldYield } = input;
   if (
-    wake.kind === "device-sync.wake" && wake.reason === "webhook_hint"
-    && wakeLocalAccountId && syncState.pendingDirtyPayloadJobs.length > 0
+    wakeLocalAccountId && syncState.pendingDirtyPayloadJobs.length > 0
     && requireHostedRuntimeDeviceSyncStore(service).getAccountById(wakeLocalAccountId)?.provider === "junction"
     && !shouldYieldHostedDeviceSync(shouldYield)
   ) {
+    // Retained reconciliation owners also absorb webhook hints, so actual
+    // dirty admission, not the original wake reason, qualifies this pass.
     // Use this already-awake pass for a nearby full pull. Never refresh a
     // complete content proof from a partial webhook import, or delay the
     // pull floor merely because a webhook arrived. The ordinary hourly
@@ -371,7 +371,7 @@ export async function runHostedDeviceSyncPass(
       });
     }
 
-    await coalesceHostedWebhookReconcile({ wake, wakeLocalAccountId, syncState, service, shouldYield });
+    await coalesceHostedWebhookReconcile({ wakeLocalAccountId, syncState, service, shouldYield });
 
     if (shouldYieldHostedDeviceSync(shouldYield)) {
       return buildHostedDeviceSyncYieldedPassResult({
@@ -1460,7 +1460,10 @@ export async function runHostedDeviceSyncWakeLane(input: {
       ...(nextWake.reason ? { nextWakeReason: nextWake.reason } : {}),
       parserProcessed: 0,
       postCheckpointRecord: deviceSyncResult.postCheckpointRecord ?? null,
-      ...(jobTimingDiagnostics.some((diagnostic) => diagnostic.canonicalProgressCommitted === true)
+      ...(jobTimingDiagnostics.some((diagnostic) =>
+        diagnostic.canonicalProgressCommitted === true
+        || diagnostic.continuationProgressCommitted === true
+      )
         ? { systemProgressed: true as const }
         : {}),
       ...(deviceSyncResult.stagedDirtyAcks
@@ -1596,6 +1599,10 @@ function writeHostedDeviceSyncPassLifecycleLog(input: {
                 0,
               ),
               deviceSyncJobTimingCount: input.jobTimingDiagnostics.length,
+              deviceSyncContinuationProgressCommittedCount: input.jobTimingDiagnostics.reduce(
+                (total, diagnostic) => total + (diagnostic.continuationProgressCommitted === true ? 1 : 0),
+                0,
+              ),
               deviceSyncImportAppliedCount: jobTimingSummary.importOutcomes.applied,
               deviceSyncImportNoopCount: jobTimingSummary.importOutcomes.noop,
               deviceSyncImportFailedCount: jobTimingSummary.importOutcomes.failed,

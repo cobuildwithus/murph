@@ -38,10 +38,22 @@ document page at a time with up to three read-only family leaves and a shared
 120-second provider timeout. The pure schemas bound each family's proposals;
 model output cannot choose canonical identities or source paths. Proposals carry
 `dateBasis` (`document`, `source`, or `unknown`) and a literal `dateEvidence`
-excerpt for document dates. These optional schema fields preserve old frozen
-proposal compatibility. New extraction must identify its date basis; unknown
-dates remain blocked. Only the host supplies the attested parent clinical date,
-and retrieval timestamps never establish a visit date.
+excerpt for document dates. Persisted schemas still read older proposals, while
+fresh provider output requires a non-null date basis. Canonical admission holds
+missing or unknown provenance and document excerpts that lack a matching full
+date or mix conflicting dates. Common ISO, named-month and numeric date forms
+remain supported, including timezone normalization and calendar-only occurredAt
+values without an invented time. Source-based records use
+only the attested parent clinical date. Valid siblings still import when another
+fact is held; retrieval timestamps never establish a visit date. Before freezing,
+extraction shares the canonical date check and vault timezone, then gives an
+affected family one read-only correction turn against the same source. Only date
+fields on invalid records may change. The turn has a 30-second cap inside the
+existing page deadline and is skipped unless that budget, the child's bounded
+interrupt/stop cleanup, and five seconds to return remain. The allowance derives
+from the existing child timeout constants. It rechecks provider authority, honors cancellation, and
+uses a separate review usage identity. Failed corrections preserve successful
+facts; unresolved dates remain held without retrying frozen proposals.
 
 Vault use cases freeze proposals in private operational state. A separate
 bounded canonical apply derives source identity and raw/page evidence, checks

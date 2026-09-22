@@ -161,7 +161,7 @@ function inventoryCursor(info: unknown): string | undefined {
   return info.cursor;
 }
 
-function requireHostedRecoveryBoundary(env: Env): void {
+export function requireHostedRecoveryBoundary(env: Env): void {
   // Both source and secrets must be admitted by the private protected job.
   if (env.GITHUB_ACTIONS !== "true" || env.GITHUB_REPOSITORY !== "cobuildwithus/murph-cloud"
     || env.GITHUB_REF !== "refs/heads/main" || env.RECOVERY_PROTECTED_ENVIRONMENT !== "production") {

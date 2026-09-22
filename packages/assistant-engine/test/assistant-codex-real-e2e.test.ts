@@ -371,14 +371,76 @@ function describeRealCodex(name: string, factory: () => void): void {
 }
 
 describeRealCodex('real clinical document extraction journeys', () => {
-  it('clinical extraction live preserves historical dates and blocks undated visits', async () => {
+  it('clinical extraction live recovers unsupported dates without rewriting valid siblings', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const fixture = await createCanonicalLiveFixture(config)
+    const rawRef = 'raw/clinical/fhir/synthetic-source/synthetic-batch/attachments/recovery.txt'
+    const documentPath = path.join(fixture.vault, rawRef)
+    const sourceText = [
+      'SYNTHETIC HISTORY REPORT. Three separate visits for the current member.',
+      'Routine review: February 3, 2025.',
+      'Mobility review: March 12, 2020.',
+      'Exercise counseling: 2026-07-10T12:00:00Z.',
+      'Exported 2026-07-10. Export time is not a visit date.',
+    ].join('\n')
+    const initialRecords = [
+      { payload: { kind: 'note', occurredAt: '2025-02-03', title: 'Routine review', note: 'Routine review.' }, dateBasis: 'document', dateEvidence: 'February 3, 2025' },
+      { payload: { kind: 'note', occurredAt: '2026-07-10T12:00:00Z', title: 'Mobility review', note: 'Mobility review.' }, dateBasis: 'document', dateEvidence: 'March 12, 2020' },
+      { payload: { kind: 'note', occurredAt: '2026-07-10T12:00:00Z', title: 'Exercise counseling', note: 'Exercise counseling.' } },
+    ]
+    const nativeExecute = clinicalExtractionCodex.executeCodexAppServerTurn
+    // Seed the exact bad proposal, then use the real provider for recovery.
+    const observer = vi.spyOn(clinicalExtractionCodex, 'executeCodexAppServerTurn')
+      .mockResolvedValueOnce({
+        finalMessage: JSON.stringify({ status: 'complete', records: initialRecords }),
+        transcriptMessage: null, acceptedNoReplyDeliveryContextOrdinals: [], finalAction: null, finalActionExplicit: false,
+        reactions: [], precedingAgentMessageSegments: [], responseDeliveryContextOrdinal: 0, targetInputId: null,
+        additionalUsages: [], responseMedia: [], followUpRequest: null, responseCard: null, jsonEvents: [],
+        providerActionCount: 0, runtimeIssueInputs: [], rolloutRelativePath: null, sessionId: null,
+        stderr: '', stdout: '', threadId: null, turnId: null,
+      })
+      .mockImplementation(nativeExecute)
+    let providerEntries = 0
+    try {
+      await mkdir(path.dirname(documentPath), { recursive: true })
+      await writeFile(documentPath, sourceText)
+      const writesBefore = await listWriteOperationMetadataPaths(fixture.vault)
+      const result = await executeClinicalDocumentExtraction({
+        workspaceRoot: fixture.vault, documentPath, timeZone: 'UTC', extractedText: sourceText,
+        source: { rawRef, sha256: createHash('sha256').update(sourceText).digest('hex'), mediaType: 'text/plain' },
+        family: 'history', codexCommand: fixture.codexCommand, codexHome: fixture.codexHome,
+        env: fixture.env, model: config.model, modelProvider: config.modelProvider, reasoningEffort: 'low',
+        beforeProviderEntry: async () => { providerEntries += 1 },
+        onProviderUsage: ({ usage }) => { recordRealCodexProviderUsage(usage.usage) },
+      })
+      expect(providerEntries).toBe(2)
+      expect(observer).toHaveBeenCalledTimes(2)
+      expect(result.status).toBe('complete')
+      expect(result.records).toHaveLength(3)
+      expect(result.records[0]).toEqual(initialRecords[0])
+      expect(result.records.map((record) => new Date(record.payload.occurredAt).toISOString()))
+        .toEqual(['2025-02-03T00:00:00.000Z', '2020-03-12T00:00:00.000Z', '2026-07-10T12:00:00.000Z'])
+      expect(result.records[1]?.payload.occurredAt).toBe('2020-03-12')
+      expect(result.records.every((record) => record.dateBasis === 'document' && sourceText.includes(record.dateEvidence!))).toBe(true)
+      expect(await listWriteOperationMetadataPaths(fixture.vault)).toEqual(writesBefore)
+      expect(await readFile(documentPath, 'utf8')).toBe(sourceText)
+      process.stdout.write(`[clinical-date-recovery-live] ${JSON.stringify(result)}\n`)
+    } finally {
+      observer.mockRestore()
+      await fixture.close()
+      await removeRealCodexTemporaryPaths(config.temporaryPaths)
+    }
+  }, 360_000)
+
+  it('clinical extraction live preserves supported dates across import-day context', async () => {
     const config = await resolveRealCodexE2eConfig()
     const fixture = await createCanonicalLiveFixture(config)
     const rawRef = 'raw/clinical/fhir/synthetic-source/synthetic-batch/attachments/history.txt'
     const documentPath = path.join(fixture.vault, rawRef)
     const sourceText = [
-      'SYNTHETIC HISTORY REPORT. These are three separate facts for the current member.',
+      'SYNTHETIC HISTORY REPORT. These are four separate facts for the current member.',
       'Visit: routine review, occurred 2025-02-03T15:00:00Z.',
+      'Separate visit: mobility review, occurred March 12, 2020 at noon UTC.',
       'Separate follow-up: exercise counseling, occurred 2026-07-10T12:00:00Z.',
       'Separate visit: nutrition counseling. Its date is unknown; no date elsewhere applies to it.',
       'Exported 2026-07-10. Export time is not a visit date.',
@@ -389,7 +451,7 @@ describeRealCodex('real clinical document extraction journeys', () => {
       await writeFile(documentPath, sourceText)
       const writesBefore = await listWriteOperationMetadataPaths(fixture.vault)
       const result = await executeClinicalDocumentExtraction({
-        workspaceRoot: fixture.vault, documentPath, extractedText: sourceText,
+        workspaceRoot: fixture.vault, documentPath, timeZone: 'UTC', extractedText: sourceText,
         source: { rawRef, sha256: createHash('sha256').update(sourceText).digest('hex'), mediaType: 'text/plain' },
         family: 'history', codexCommand: fixture.codexCommand, codexHome: fixture.codexHome,
         env: fixture.env, model: config.model, modelProvider: config.modelProvider, reasoningEffort: 'low',
@@ -398,9 +460,9 @@ describeRealCodex('real clinical document extraction journeys', () => {
       })
       expect(providerEntries).toBe(1)
       expect(result.status).toBe('blocked')
-      expect(result.records).toHaveLength(2)
+      expect(result.records).toHaveLength(3)
       expect(result.records.map((record) => new Date(record.payload.occurredAt).toISOString()).sort())
-        .toEqual(['2025-02-03T15:00:00.000Z', '2026-07-10T12:00:00.000Z'])
+        .toEqual(['2020-03-12T12:00:00.000Z', '2025-02-03T15:00:00.000Z', '2026-07-10T12:00:00.000Z'])
       expect(result.records.every((record) => record.dateBasis === 'document' && Boolean(record.dateEvidence))).toBe(true)
       expect(result.records.every((record) => sourceText.includes(record.dateEvidence!))).toBe(true)
       expect(result.reason).toMatch(/unknown|undated|date/iu)
@@ -462,7 +524,7 @@ describeRealCodex('real clinical document extraction journeys', () => {
         await execFileAsync('pdftoppm', ['-png', '-scale-to', '1400', '-singlefile', documentPath, path.join(renderRoot, 'page-1')], { timeout: 30_000 })
         const writesBefore = await listWriteOperationMetadataPaths(fixture.vault)
         const result = await executeClinicalDocumentExtraction({
-          workspaceRoot: fixture.vault, documentPath,
+          workspaceRoot: fixture.vault, documentPath, timeZone: 'UTC',
           source: { rawRef, sha256: createHash('sha256').update(pdf).digest('hex'), mediaType: 'application/pdf' },
           renderedPages: [{ page: 1, path: path.join(renderRoot, 'page-1.png') }], scratchRoots: [renderRoot],
           family, codexCommand: fixture.codexCommand, codexHome: fixture.codexHome,
@@ -523,6 +585,7 @@ describeRealCodex('real clinical document extraction journeys', () => {
         const result = await executeClinicalDocumentExtraction({
           workspaceRoot: fixture.vault,
           documentPath,
+          timeZone: 'UTC',
           extractedText: sourceText,
           source: { rawRef, sha256: createHash('sha256').update(sourceText).digest('hex'), mediaType: 'text/plain' },
           family: 'labs',
@@ -14683,10 +14746,11 @@ describeRealCodex('real Codex Personal Patterns typed-ledger Luna high digest e2
 
 describeRealCodex('real Codex Personal Pattern cross-automation history e2e', () => {
   it.each([
-    { priorFinding: 'covered', initialDigestSent: false },
-    { priorFinding: 'covered', initialDigestSent: true },
-    { priorFinding: 'unrelated', initialDigestSent: true },
-  ] as const)('checks prior $priorFinding insight before sending (initial digest: $initialDigestSent)', async ({ priorFinding, initialDigestSent }) => {
+    { priorFinding: 'covered', initialDigestSent: false, slot: 'default' },
+    { priorFinding: 'covered', initialDigestSent: true, slot: 'default' },
+    { priorFinding: 'covered', initialDigestSent: true, slot: 'staggered' },
+    { priorFinding: 'unrelated', initialDigestSent: true, slot: 'default' },
+  ] as const)('checks prior $priorFinding insight before sending (initial digest: $initialDigestSent, slot: $slot)', async ({ priorFinding, initialDigestSent, slot }) => {
     const config = await resolveRealCodexE2eConfig()
     const automation = MURPH_MANAGED_AUTOMATIONS.find(
       (candidate) => candidate.slug === 'personal-patterns-update',
@@ -14716,7 +14780,8 @@ describeRealCodex('real Codex Personal Pattern cross-automation history e2e', ()
         codexHome: config.codexHome,
         developerInstructions: buildWeeklyHealthInsightDeveloperInstructions({
           currentLocalDate: '2026-08-29',
-          scheduledOccurrenceAt: '2026-08-29T17:00:00.000Z',
+          scheduledOccurrenceAt: slot === 'staggered'
+            ? '2026-08-29T19:37:00.000Z' : '2026-08-29T17:00:00.000Z',
         }),
         dynamicTools: [MURPH_FINISH_WITHOUT_REPLY_TOOL],
         env: config.env,
@@ -14742,7 +14807,7 @@ describeRealCodex('real Codex Personal Pattern cross-automation history e2e', ()
       expect(ledger?.results).toHaveLength(1)
       expect(ledger?.results[0]).toMatchObject({ factorId: 'yard-work', outcomeId: 'hrv', lagDays: 1 })
       process.stdout.write(`[pattern-history-e2e] ${JSON.stringify({
-        priorFinding, initialDigestSent, decision,
+        priorFinding, initialDigestSent, slot, decision,
       })}\n`)
       if (priorFinding === 'covered') {
         expect(decision.kind).toBe('skip')
@@ -19576,6 +19641,151 @@ describeRealCodex('real Codex upcoming context use e2e', () => {
       await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
     }
   }, 360_000)
+})
+
+describeRealCodex('real Codex memory profile improvement e2e', () => {
+  it('maintains legacy memory, learns a procedure, and applies it in a fresh conversation', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-memory-profile-e2e-'))
+    try {
+      for (let index = 1; index <= 24; index += 1) {
+        await upsertMemory(workingDirectory, {
+          section: 'Context', text: `Studio shelf ${index} holds materials for workshop ${index}.`,
+        })
+      }
+      const baseline = await readMemoryDocument(workingDirectory)
+      const verbose = await upsertMemory(workingDirectory, {
+        now: new Date('2026-09-12T12:00:00Z'), section: 'Preferences',
+        text: 'For weekly project status summaries, the preferred format is three concise bullets: progress, obstacles, and the next step. '
+          + 'To explain that same preference in more detail, keep the weekly project status summary to three bullets, one about progress, one about obstacles, and one about the next step. '
+          + 'The member does not want extra check-ins unless they explicitly ask for them. This qualification matters: no unsolicited extra check-ins. '
+          + 'This format preference was stated on 2026-09-12.',
+      })
+      const expired = await upsertMemory(workingDirectory, {
+        section: 'Context', text: 'Temporarily using a borrowed desk only from 2026-09-13 through 2026-09-15.',
+      })
+      const ambiguous = await upsertMemory(workingDirectory, {
+        section: 'Context', text: 'Using a borrowed desk this weekend.',
+      })
+      const unfinished = await upsertMemory(workingDirectory, {
+        section: 'Context', text: 'Wants to finish organizing the workspace by 2026-09-15; completion is unknown.',
+      })
+      const mixed = await upsertMemory(workingDirectory, {
+        section: 'Context', text: 'Used a borrowed desk from 2026-09-13 through 2026-09-15; prefers a quiet workspace long term.',
+      })
+      const corrected = await upsertMemory(workingDirectory, {
+        section: 'Preferences', text: 'For book-club recaps, prefers lengthy essays.',
+      })
+      const withdrawn = await upsertMemory(workingDirectory, {
+        section: 'Context', text: 'Temporarily borrowing a keyboard for the workshop.',
+      })
+      const assistantOnly = await upsertMemory(workingDirectory, {
+        section: 'Instructions', text: 'For playlist choices, offer four options.',
+      })
+      const session = parseAssistantSessionRecord({
+        alias: null,
+        binding: { actorId: null, channel: 'linq', conversationKey: 'linq:direct:memory-profile-proof', delivery: null, identityId: null, threadId: 'memory-profile-proof', threadIsDirect: true },
+        createdAt: '2026-09-20T12:00:00.000Z', lastTurnAt: '2026-09-20T12:00:00.000Z',
+        resumeState: null, schema: 'murph.assistant-session.v1', sessionId: 'session-memory-profile-proof',
+        target: { adapter: 'codex-cli', approvalPolicy: 'never', codexCommand: null, codexHome: config.codexHome, model: config.model, modelProvider: config.modelProvider, oss: false, profile: null, reasoningEffort: 'medium', sandbox: 'read-only' },
+        turnCount: 1, updatedAt: '2026-09-20T12:00:00.000Z',
+      })
+      await saveAssistantSession(workingDirectory, session)
+      await appendAssistantTranscriptEntries(workingDirectory, session.sessionId, [{
+        createdAt: '2026-09-20T12:00:00.000Z', kind: 'user',
+        text: 'From now on, whenever I say I am stuck choosing a next step, offer exactly two small options and let me choose. Please skip the pep talk. For book-club recaps, I now want three bullets instead of lengthy essays, except keep the monthly recap detailed. I returned the borrowed workshop keyboard and no longer use it.',
+      }, {
+        createdAt: '2026-09-20T12:01:00.000Z', kind: 'assistant',
+        text: 'I think you no longer want four playlist options; I will remove that preference.',
+      }])
+      const evidence = await readAssistantMaintenanceConversationEvidence({
+        now: new Date('2026-09-21T12:00:00Z'), profile: 'member-memory', vault: workingDirectory,
+      })
+      const seed = MURPH_MANAGED_AUTOMATIONS.find(entry => entry.automationId === MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID)
+      if (!seed) throw new Error('Expected managed memory seed')
+      const maintenanceInput = {
+        approvalPolicy: 'never' as const, baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions: buildAssistantMaintenanceSystemPromptWithCacheMetadata({ currentLocalDate: '2026-09-21', currentTimeZone: 'UTC', profile: 'member-memory' }).prompt,
+        dynamicTools: [MURPH_MEMBER_MEMORY_TOOL], env: config.env, ephemeral: true,
+        memberMemoryMaintenanceAuthorized: true, model: config.model, modelProvider: config.modelProvider,
+        processLifetime: 'one-shot' as const, prompt: [seed.instructions, evidence.prompt].join('\n\n'),
+        reasoningEffort: 'medium' as const, runtimeWorkspaceRoots: [workingDirectory],
+        sandbox: 'read-only' as const, vaultRoot: workingDirectory, workingDirectory,
+      }
+      const result = await executeRealCodexAppServerTurn(maintenanceInput)
+      expect(parseAssistantNotificationDecision(result.finalMessage).kind).toBe('skip')
+      const actions = readCapabilityRoutingActions(result.jsonEvents)
+      expect(actions.filter(action => action.kind === 'command')).toEqual([])
+      const calls = actions.filter(action => action.kind === 'dynamic')
+      process.stdout.write(`[memory-profile-maintenance] ${JSON.stringify(calls.map(call => ({ action: call.argumentsValue.action, success: call.success })))}\n`)
+      expect(calls.every(call => call.tool === MURPH_MEMBER_MEMORY_TOOL.name && call.success)).toBe(true)
+      expect(calls.filter(call => call.argumentsValue.action === 'show')).toHaveLength(1)
+      expect(calls.filter(call => call.argumentsValue.action === 'update')).toHaveLength(2)
+      expect(calls.filter(call => call.argumentsValue.action === 'forget')).toHaveLength(1)
+      expect(calls.filter(call => call.argumentsValue.action === 'upsert')).toHaveLength(1)
+      expect(calls.find(call => call.argumentsValue.memoryId === verbose.record.id)?.argumentsValue).toMatchObject({ memoryId: verbose.record.id, expectedUpdatedAt: verbose.record.updatedAt })
+      const after = await readMemoryDocument(workingDirectory)
+      expect(after.records).toHaveLength(baseline.records.length + 8)
+      for (const original of baseline.records) {
+        const { sourceLine: _sourceLine, ...canonical } = original
+        expect(after.records.find(record => record.id === original.id)).toMatchObject(canonical)
+      }
+      expect(after.records.some(record => record.id === withdrawn.record.id)).toBe(false)
+      expect(after.records.find(record => record.id === assistantOnly.record.id)).toMatchObject({ text: assistantOnly.record.text, section: assistantOnly.record.section, createdAt: assistantOnly.record.createdAt, updatedAt: assistantOnly.record.updatedAt })
+      const replacement = after.records.find(record => record.id === corrected.record.id)?.text ?? ''
+      expect(replacement).toMatch(/three|3/iu)
+      expect(replacement).toMatch(/bullets/iu)
+      expect(replacement).toMatch(/monthly.*detail|detail.*monthly/iu)
+      expect(calls.find(call => call.argumentsValue.memoryId === corrected.record.id)?.argumentsValue.expectedUpdatedAt).toBe(corrected.record.updatedAt)
+      expect(calls.find(call => call.argumentsValue.memoryId === withdrawn.record.id)?.argumentsValue.expectedUpdatedAt).toBe(withdrawn.record.updatedAt)
+      expect(after.records.find(record => record.id === expired.record.id)?.text).toBe(expired.record.text)
+      expect(after.records.find(record => record.id === mixed.record.id)?.text).toBe(mixed.record.text)
+      expect(after.records.find(record => record.id === ambiguous.record.id)?.text).toBe(ambiguous.record.text)
+      expect(after.records.find(record => record.id === unfinished.record.id)?.text).toBe(unfinished.record.text)
+      const compact = after.records.find(record => record.id === verbose.record.id)?.text ?? ''
+      expect(compact.length).toBeLessThan(verbose.record.text.length)
+      expect(compact).toMatch(/three|3/iu)
+      expect(compact).toMatch(/progress/iu)
+      expect(compact).toMatch(/obstacles/iu)
+      expect(compact).toMatch(/next step/iu)
+      expect(compact).toMatch(/2026-09-12|September 12(?:th)?,? 2026|12(?:th)? September 2026/iu)
+      expect(compact).toMatch(/(?:no|unless|only|without|not).*check.ins|check.ins.*(?:ask|request)/iu)
+      const procedure = after.records.find(record => record.section === 'Instructions' && !baseline.records.some(original => original.id === record.id) && record.id !== assistantOnly.record.id)
+      expect(procedure?.text).toMatch(/two|2/iu)
+      expect(procedure?.text).toMatch(/stuck/iu)
+      expect(procedure?.text).toMatch(/choos(?:e|ing)|choice/iu)
+      // A second overlapping pass must not duplicate facts, erase history,
+      // or edit concise records merely to make them look recently verified.
+      const replay = await executeRealCodexAppServerTurn(maintenanceInput)
+      expect(parseAssistantNotificationDecision(replay.finalMessage).kind).toBe('skip')
+      expect(readCapabilityRoutingActions(replay.jsonEvents).filter(action => action.kind === 'dynamic').map(action => action.argumentsValue.action)).toEqual(['show'])
+      expect((await readMemoryDocument(workingDirectory)).records).toEqual(after.records)
+      const reply = await executeRealCodexAppServerTurn({
+        ...maintenanceInput,
+        developerInstructions: buildDirectConversationDeveloperInstructions(),
+        dynamicTools: [], memberMemoryMaintenanceAuthorized: false,
+        prompt: resolveAssistantProviderPrompt({
+          dynamicTools: [], prompt: 'I am stuck choosing a next step for winding down tonight. I could put tomorrow\'s things by the door, clear one small surface, or pick an outfit. Help me choose from those; no research, saving, or scheduling.',
+          providerConfig: normalizeAssistantProviderConfig({ provider: 'codex-cli' }),
+          turnContextPrompt: await readAssistantCurrentStatePrompt({ vaultRoot: workingDirectory }),
+          workingDirectory,
+        }),
+      })
+      process.stdout.write(`[memory-profile-e2e] ${JSON.stringify({ maintenanceActions: calls.length, replayActions: 1, compact, procedure: procedure?.text, reply: reply.finalMessage })}\n`)
+      expect(readCapabilityRoutingActions(reply.jsonEvents)).toEqual([])
+      expect(reply.finalMessage).not.toMatch(/saved memory|memory record|maintenance|borrowed desk|you.ve got this/iu)
+      expect(reply.finalMessage).toMatch(/choose|pick|which|rather/iu)
+      // Count offered choices, not a separate sentence rejecting the third one.
+      const optionLines = [...reply.finalMessage.matchAll(/(?:^|\n)\s*(?:\d+[.)]|[-*])\s+([^\n]+)/gu)].map(match => match[1])
+      if (optionLines.length > 0) expect(optionLines).toHaveLength(2)
+      const choices = optionLines.length > 0 ? optionLines.join('\n') : reply.finalMessage
+      expect([/door/iu, /surface/iu, /outfit/iu].filter(pattern => pattern.test(choices))).toHaveLength(2)
+    } finally {
+      await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+    }
+  }, 540_000)
 })
 
 describeRealCodex('real Codex bounded current-state memory e2e', () => {

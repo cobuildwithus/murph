@@ -1,0 +1,19 @@
+{
+  "publishedOn": "2026-09-20",
+  "order": 100,
+  "item": {
+    "id": "memory-that-keeps-the-useful-details",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "More useful memory in everyday conversations",
+    "summary": "Murph can carry more of your established preferences and preferred ways of getting help into private conversations.",
+    "details": "Regular memory maintenance now shortens wordy memories while preserving their meaning, dates, and exceptions. It can learn explicit preferences for how you want help. Memories are not automatically deleted just because they are old. Existing active memory maintenance picks up the improvement automatically.",
+    "relevanceTags": [
+      "memory",
+      "personalization"
+    ],
+    "sourcePullRequests": [
+      3617
+    ]
+  }
+}

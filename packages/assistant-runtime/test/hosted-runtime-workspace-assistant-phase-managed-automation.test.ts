@@ -877,7 +877,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("checkpoints
     );
   });
 
-  it("uses the fresh hosted conversation route for managed automation seeding", async () => {
+  it.each([0, 1])("refreshes fresh conversation cron eligibility with %i seeded changes", async (created) => {
     const seededNextWakeAt = "2026-04-30T17:00:00.000Z";
     const defaultRoute = {
       channel: "linq",
@@ -904,7 +904,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("checkpoints
       },
     });
     mocks.applyMurphManagedAutomations.mockResolvedValueOnce({
-      created: 1,
+      created,
       skipped: 0,
       updated: 0,
     });
@@ -950,12 +950,76 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("checkpoints
     expect(postCheckpoint).toEqual(expect.objectContaining({
       checkpointReason: "assistant_runtime_commit",
       nextWakeAt: seededNextWakeAt,
-      redactedStatus: expect.objectContaining({
-        murphManagedAutomationCreated: 1,
+      ...(created > 0 ? { redactedStatus: expect.objectContaining({
+        murphManagedAutomationCreated: created,
         murphManagedAutomationSkipped: 0,
         murphManagedAutomationUpdated: 0,
-      }),
+      }) } : {}),
     }));
+  });
+
+  it("keeps an eligibility retry when foreground yield prevents post-reply projection", async () => {
+    let shouldYield = false;
+    mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
+      assistantAutomationCurrentTurnDeliveryIntentIds: [],
+      assistantAutomationProgressed: true,
+      nextWakeAt: null,
+      redactedLogEntries: [],
+    });
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 1,
+      now: () => "2026-04-27T00:00:00.000Z",
+      shouldYieldBackgroundMaintenance: () => shouldYield,
+    }));
+    shouldYield = true;
+    await expect(result.afterCheckpoint?.()).resolves.toEqual(expect.objectContaining({
+      nextWakeAt: "2026-04-27T00:00:30.000Z",
+    }));
+    expect(mocks.getAssistantCronStatus).not.toHaveBeenCalled();
+    expect(mocks.readAssistantInputEvent).not.toHaveBeenCalled();
+    expect(mocks.applyMurphManagedAutomations).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { cronFails: false, cronWake: "2026-04-30T17:00:00.000Z", phaseWake: null },
+    { cronFails: false, cronWake: "2026-04-30T17:00:00.000Z", phaseWake: "2026-04-27T00:05:00.000Z" },
+    { cronFails: false, cronWake: null, phaseWake: null },
+    { cronFails: true, cronWake: null, phaseWake: null },
+  ])("refreshes eligibility without a seed route while preserving phase work: %j", async ({
+    cronFails, cronWake, phaseWake,
+  }) => {
+    mocks.readAssistantInputEvent.mockResolvedValueOnce(null);
+    if (cronFails) {
+      mocks.getAssistantCronStatus.mockRejectedValueOnce(new Error("synthetic status read failure"));
+    } else {
+      mocks.getAssistantCronStatus.mockResolvedValueOnce({
+        dueJobs: 0, enabledJobs: 1, nextRunAt: cronWake, runningJobs: 0, totalJobs: 1,
+      });
+    }
+    mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
+      assistantAutomationCurrentTurnDeliveryIntentIds: [],
+      assistantAutomationProgressed: true,
+      nextWakeAt: phaseWake,
+      redactedLogEntries: [],
+    });
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 1,
+      now: () => "2026-04-27T00:00:00.000Z",
+    }));
+    expect(mocks.getAssistantCronStatus).not.toHaveBeenCalled();
+    const postCheckpoint = await result.afterCheckpoint?.();
+    expect(mocks.applyMurphManagedAutomations).not.toHaveBeenCalled();
+    expect(mocks.getAssistantCronStatus).toHaveBeenCalledTimes(1);
+    const expectedWake = phaseWake ?? cronWake
+      ?? (cronFails ? "2026-04-27T00:00:30.000Z" : null);
+    if (expectedWake) {
+      expect(postCheckpoint).toEqual(expect.objectContaining({
+        checkpointReason: "assistant_runtime_commit",
+        nextWakeAt: expectedWake,
+      }));
+    } else {
+      expect(postCheckpoint).toBeNull();
+    }
   });
 
   it("does not wait on fresh managed automation cron status after foreground yield starts", async () => {

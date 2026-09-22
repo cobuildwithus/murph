@@ -2,6 +2,8 @@ import { parseHostedWorkspaceSnapshotUploadSession, type HostedWorkspaceSnapshot
 import { parseHostedRuntimeOwnerIdentity, type HostedRuntimeOwnerIdentity } from "./runtime-owner.ts";
 import { requireObject, requireString } from "./parsers/assertions.ts";
 import { HOSTED_WORKSPACE_SNAPSHOT_MAX_SINGLE_PART_BYTES } from "./workspace-snapshot-v2.ts";
+export { HOSTED_CHECKPOINT_RECOVERY_PATH, fingerprintRecoveryReplica, parseHostedCheckpointRecoveryRequest,
+  type HostedCheckpointRecoveryRequest } from "./checkpoint-recovery.ts";
 
 export const HOSTED_RUNTIME_RESOURCES_PATH = "/api/internal/hosted-runtime/resources";
 export const HOSTED_RUNTIME_ORPHAN_GRACE_MS = 65 * 60_000;

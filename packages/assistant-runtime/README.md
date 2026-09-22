@@ -11,6 +11,9 @@ Current responsibilities:
   admission and delivery idempotency; automatic photos remain import-only
 
 - run bounded hosted workspace invocations for assistant, inbox, and device-sync work behind an explicit runtime context object
+- yield system-mailbox completion during container shutdown, drain owned projection
+  work, and retain checkpointed recording with its due successor wake; explicit
+  host aborts and checkpoint failures remain errors
 - preserve independent system-work completion across empty runtime nudges during projection discovery/delivery, browser-vault publication, recording, and snapshotting; qualify notifications against the bounded conversation mailbox and reuse that fetched batch for a real foreground handoff
 - settle independent system-work writes before a clean foreground return so late
   completion enters the existing durable checkpoint and browser publication path;

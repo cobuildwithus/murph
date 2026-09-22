@@ -5569,6 +5569,69 @@ describe("RunnerContainer", () => {
     expect(await container.listSchedules("onActivityExpired")).toEqual([]);
   });
 
+  it.each(["drained", "still-active", "conversation-warm"] as const)(
+    "rechecks a completed invocation's callback drain once, preserving %s evidence",
+    async (outcome) => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      try {
+        const completedAt = Date.parse("2026-08-01T12:00:00.125Z");
+        vi.setSystemTime(completedAt);
+        let callbackPending = false;
+        let receipt: number | null = null;
+        const { container, destroy } = createContainerDouble({
+          containerFetch: vi.fn(async (url: string) => Response.json(
+            url.endsWith("/health") ? {
+              ...createRunnerHealthResult(),
+              activeJobCount: callbackPending ? 1 : 0,
+              conversationActivityReceivedAtEpochMs: receipt,
+            } : createRunnerResult(),
+          )),
+        });
+        const request = createRunnerRequest("evt_completion_callback_drain");
+        await container.invoke({
+          job: { kind: "workspace-invocation", request },
+          timeoutMs: 60_000, userId: request.userId,
+        });
+        // The HTTP response settled, but the entrypoint's finally block still
+        // owns the active count while its completion callback awaits this DO.
+        callbackPending = true;
+        await container.onRuntimeCompletionRecorded({
+          attemptId: request.attemptId, leaseGeneration: request.leaseGeneration,
+          userId: request.userId,
+        });
+        expect(destroy).not.toHaveBeenCalled();
+        const schedules = await container.listSchedules("onActivityExpired");
+        expect(schedules).toHaveLength(1);
+        const recheckAt = schedules[0]!.time * 1_000;
+        expect(recheckAt - completedAt).toBeGreaterThanOrEqual(1_000);
+        expect(recheckAt - completedAt).toBeLessThanOrEqual(2_000);
+
+        callbackPending = outcome === "still-active";
+        receipt = outcome === "conversation-warm" ? completedAt : null;
+        vi.setSystemTime(recheckAt);
+        await container.onActivityExpired();
+        if (outcome === "drained") {
+          expect(destroy).toHaveBeenCalledOnce();
+          expect(await container.listSchedules("onActivityExpired")).toEqual([]);
+        } else {
+          expect(destroy).not.toHaveBeenCalled();
+          const nextAt = outcome === "conversation-warm"
+            ? Math.ceil((completedAt + 600_000) / 1_000)
+            : (recheckAt + 60_000) / 1_000;
+          expect(await container.listSchedules("onActivityExpired"))
+            .toMatchObject([{ time: nextAt }]);
+          if (outcome === "still-active") {
+            vi.setSystemTime(nextAt * 1_000);
+            await container.onActivityExpired();
+            expect(destroy).not.toHaveBeenCalled();
+            expect(await container.listSchedules("onActivityExpired"))
+              .toMatchObject([{ time: nextAt + 60 }]);
+          }
+        }
+      } finally { vi.useRealTimers(); }
+    },
+  );
+
   it.each(["default", "system_mailbox"] as const)(
     "lets active %s work cross expiry, then stops without a new grace period",
     async (processingMode) => {
