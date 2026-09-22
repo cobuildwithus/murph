@@ -1,5 +1,9 @@
 # Murph Agent Docs Index
 
+Stable host-supplied group report labels and consented contact fallback are
+recorded in [group report labels](exec-plans/completed/2026-09-22-group-report-labels.md).
+The presentation and privacy contracts remain owned by ARCHITECTURE.md and SECURITY.md.
+
 Automation database load, daily scheduling, and Flex retry work:
 [`2026-09-21-automation-query-load.md`](exec-plans/completed/2026-09-21-automation-query-load.md).
 
