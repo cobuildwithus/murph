@@ -2344,11 +2344,11 @@ pnpm --dir apps/cloudflare runner:docker:base
 ```
 
 That image is prepared in the local Docker cache under the stable GHCR tag
-`ghcr.io/cobuildwithus/murph-cloudflare-runner-base:node24.14.1-codex0.153.4`,
+`ghcr.io/cobuildwithus/murph-cloudflare-runner-base:node24.14.1-codex0.155.1`,
 which is also the final app-layer Dockerfile default. Using the pullable GHCR
 name avoids BuildKit treating the prepared base as a Docker Hub `library/*`
 image during local Wrangler container builds.
-Codex CLI 0.153.4 supplies the native Astra entry; the image no longer
+Codex CLI 0.155.1 supplies the native Astra entry; the image no longer
 synthesizes Astra from Sol. The existing standard catalog and separately
 authorized Astra catalog retain their model filtering, mixed Code Mode, Flex,
 and context-window validation. Missing product models fail the image build.
