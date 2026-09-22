@@ -49,8 +49,14 @@ sponsorship activation and automatic $5 refills each grant $4 of capacity.
 The cash subtotal and granted usage value are separate immutable purchase
 facts. Existing balances and purchases reserved before this catalog change keep
 their original grants, including delayed payment fulfillment and retries.
-Refunds and disputes continue to use the purchase's frozen grant. No credit
-migration or Stripe Price change is required. One dollar of v1 usage credit
+Refunds and disputes continue to use the purchase's frozen grant. No balance
+rewrite or Stripe Price change is required. Before deploying the reduced-grant
+catalog, apply `20260922170000_hosted_sponsorship_topup_margin`: the sponsorship
+purchase constraint must allow both historical 5,000,000 and current 4,000,000
+micro grants on exact $5 purchases. The forward migration preserves all other
+sponsorship shape checks and validates existing rows. Keep this widened
+constraint during Web rollback so either catalog can fulfill frozen purchases.
+One dollar of v1 usage credit
 is one dollar of capacity under Murph's existing AI usage meter.
 It is not a token count, bank balance, Stripe customer balance, subscription
 invoice credit, transferable asset, or promise of cash redemption.
