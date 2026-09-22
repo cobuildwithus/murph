@@ -591,36 +591,43 @@ describe("vault-share deliver route", () => {
   });
 
   it("preserves source-recorded sleep times through the deliver route", async () => {
-    const projectionScope = hostedVaultShareProjectionKindToScope(
-      "deep-sleep-sources-days.v1",
-    );
-    const share = {
-      ...ACTIVE_SHARE,
-      projectionKind: projectionScope.projectionKind,
-      projectionScope,
-      projectionScopeKey: buildHostedVaultShareProjectionScopeKey(projectionScope),
-    };
-    const body = sourceAwareSleepDeliveryBody(2);
-    const records = body.records.slice(0, 2);
-    mocks.findActiveHostedVaultShares.mockResolvedValue([share]);
+    // The static source timestamps must stay inside the delivery retention window.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-07-24T12:00:00.000Z"));
+    try {
+      const projectionScope = hostedVaultShareProjectionKindToScope(
+        "deep-sleep-sources-days.v1",
+      );
+      const share = {
+        ...ACTIVE_SHARE,
+        projectionKind: projectionScope.projectionKind,
+        projectionScope,
+        projectionScopeKey: buildHostedVaultShareProjectionScopeKey(projectionScope),
+      };
+      const body = sourceAwareSleepDeliveryBody(2);
+      const records = body.records.slice(0, 2);
+      mocks.findActiveHostedVaultShares.mockResolvedValue([share]);
 
-    const response = await deliverRoute.POST(buildRequest({
-      projectionKind: projectionScope.projectionKind,
-      records,
-    }));
+      const response = await deliverRoute.POST(buildRequest({
+        projectionKind: projectionScope.projectionKind,
+        records,
+      }));
 
-    expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ status: "delivered" });
-    expect(mocks.replaceHostedVaultShareProjectionSnapshot).toHaveBeenCalledWith({
-      ...deliveryEffectControls(),
-      records,
-      share,
-      sourceWorkspaceVersion: VALID_BODY.sourceWorkspaceVersion,
-    });
-    expect(records.map((record) => record.data)).toEqual([
-      expect.objectContaining({ recordedAt: "2026-07-24T06:00:00.000Z" }),
-      expect.objectContaining({ recordedAt: "2026-07-24T07:00:00.000Z" }),
-    ]);
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ status: "delivered" });
+      expect(mocks.replaceHostedVaultShareProjectionSnapshot).toHaveBeenCalledWith({
+        ...deliveryEffectControls(),
+        records,
+        share,
+        sourceWorkspaceVersion: VALID_BODY.sourceWorkspaceVersion,
+      });
+      expect(records.map((record) => record.data)).toEqual([
+        expect.objectContaining({ recordedAt: "2026-07-24T06:00:00.000Z" }),
+        expect.objectContaining({ recordedAt: "2026-07-24T07:00:00.000Z" }),
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("returns no-active-share and appends nothing when no grant exists", async () => {
