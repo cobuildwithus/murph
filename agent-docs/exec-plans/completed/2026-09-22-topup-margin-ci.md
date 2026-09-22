@@ -1,12 +1,13 @@
 # Complete top-up margin PR checks
 
-Status: active
+Status: completed
 Created: 2026-09-22
 Updated: 2026-09-22
 
 ## Goal
 
-Complete PR 3646 with green required CI and its final billing review.
+Repair the reproduced CI blockers on PR 3646 with focused proof, then submit
+the complete candidate to required CI and final billing review.
 
 ## Evidence and correction
 
@@ -47,5 +48,11 @@ The wrapper also serves viewport CI. CI-only deployment; no production rollout.
 - Product UX: internal CI correction; no additional member-facing change.
 - Passed: the focused vault-share delivery file, 36 tests, after its one failing
   fixture was reproduced with the real clock. Production retention is unchanged.
-- Required CI and final ReviewGPT remain in progress for the updated PR head.
+- Implementation and parent review are complete. Seven installer tests,
+  36 vault-share tests, shell syntax, repository-tools typecheck, Web typecheck,
+  focused lint, documentation drift, and complexity checks pass.
+- Required CI and final ReviewGPT remain delivery gates on the final pushed
+  candidate. The original run passed both CLI platforms; its two reproduced
+  failures are covered by the corrections above.
 
+Completed: 2026-09-22
