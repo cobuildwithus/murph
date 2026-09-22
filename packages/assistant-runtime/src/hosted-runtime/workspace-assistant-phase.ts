@@ -1478,6 +1478,9 @@ function buildHostedPhaseOptionalTools(
     ...(input.runtime.platform.planUsageToolPort
       ? { planUsageTool: input.runtime.platform.planUsageToolPort }
       : {}),
+    ...(input.runtime.platform.pollToolPort
+      ? { pollTool: input.runtime.platform.pollToolPort }
+      : {}),
     ...(input.runtime.platform.imessageContactToolPort
       ? { imessageContactTool: input.runtime.platform.imessageContactToolPort }
       : {}),

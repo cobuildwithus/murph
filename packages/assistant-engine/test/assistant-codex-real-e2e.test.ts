@@ -41735,3 +41735,91 @@ async function refreshJournalTestContext(vaultRoot: string, instant: string) {
   const state = await readAssistantContextSnapshotState(vaultRoot)
   return upcomingContextSchema.parse(state?.lastCompleted?.upcomingContext)
 }
+
+describeRealCodex('real Codex native conversation polls e2e', () => {
+  it.each(['create', 'read', 'unknown', 'named-create', 'anonymous-create', 'named-read', 'imessage-read', 'proactive-create', 'delegated-choice', 'settled-decision', 'human-owned'] as const)('native conversation polls %s', async (scenario) => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-poll-e2e-'))
+    const { MURPH_POLL_TOOL } = await import('../src/assistant-codex/dynamic-tools/conversation-polls.js')
+    const pollRef = 'poll_' + 'a'.repeat(32)
+    const noPoll = ['delegated-choice', 'settled-decision', 'human-owned'].includes(scenario)
+    const reading = scenario.endsWith('read')
+    const named = scenario.startsWith('named-') || scenario === 'imessage-read'
+    const channel = scenario === 'imessage-read' ? 'linq' : 'telegram'
+    const calls: Array<import('@murphai/hosted-execution/conversation-polls').ConversationPollRequest> = []
+    try {
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions: buildAssistantSystemPrompt({
+          assistantCliContract: null, assistantKnowledgeToolsAvailable: false, assistantPollsAvailable: true,
+          channel, cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+          conversationScope: 'group', currentLocalDate: '2026-09-21',
+          currentInstant: '2026-09-21T16:00:00.000Z', currentTimeZone: 'America/New_York',
+          hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false,
+          turnTrigger: null,
+        }),
+        dynamicTools: [MURPH_POLL_TOOL], env: config.env,
+        hostedToolContext: {
+          computerToolsAvailable: false, vaultFileSendAvailable: false,
+          pollTool: { request: async (request) => {
+            calls.push(request)
+            return scenario === 'unknown' ? { status: 'unknown', polls: [] } : {
+              status: reading ? 'results' : 'sent',
+              polls: [{ pollRef, channel, question: 'Which day for our walk?',
+                options: [{ text: 'Saturday', votes: reading ? 3 : 0 }, { text: 'Sunday', votes: reading ? 1 : 0 }],
+                totalVoters: reading ? 4 : 0, anonymous: !named, multipleAnswers: channel === 'linq',
+                closed: false, observedAt: '2026-09-21T15:59:00.000Z',
+                freshness: reading ? 'provider_update' : 'creation',
+                ...(named && reading ? { voters: [{ kind: channel === 'linq' ? 'imessage_handle' as const : 'telegram_user' as const, id: channel === 'linq' ? 'riley@example.test' : '17', ...(channel === 'telegram' ? { displayName: 'Riley Example' } : {}), optionIndexes: [0], observedAt: '2026-09-21T15:59:00.000Z' }], voterSource: channel === 'linq' ? 'provider_read' as const : 'received_updates' as const, nextVoterCursor: null } : {}) }],
+            }
+          } },
+          currentInvocationScope: () => ({ origin: { kind: 'accepted_input', sessionId: 'synthetic-poll-session', assistantInputId: 'ain_' + 'b'.repeat(32) }, conversationScope: 'group' }),
+          currentHostedDeliveryContext: () => null, currentHostedMailboxItemIds: () => [],
+          sendVaultFile: async () => { throw new Error('No file send authorized.') },
+        },
+        model: config.model, modelProvider: config.modelProvider,
+        prompt: scenario === 'proactive-create'
+          ? 'Saturday or Sunday for our walk? We keep going in circles. Let’s get everyone’s preference and settle on a day.'
+          : scenario === 'delegated-choice'
+          ? 'Murph, pick Saturday or Sunday for our walk. Both work equally well; use your judgment and choose one for us.'
+          : scenario === 'settled-decision'
+          ? 'Murph, we already agreed Saturday for our walk. What should we bring if rain is forecast?'
+          : scenario === 'human-owned'
+          ? 'Riley, Saturday or Sunday for our walk? I want to hear what works for you before we ask the rest of the group.'
+          : reading
+          ? `Read results for our walk poll ${pollRef}. Which day is ahead and who voted? ${channel === 'linq' ? 'Give the voter handles you can see.' : ''} Please leave voting open.`
+          : `Please create ${scenario === 'named-create' ? 'a non-anonymous poll so we can see who voted' : scenario === 'anonymous-create' ? 'an anonymous poll so names are hidden' : 'a poll'} here: Which day for our walk? Options: Saturday and Sunday.`,
+        reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
+      })
+      process.stdout.write(JSON.stringify({ scenario: 'native poll ' + scenario, reply: result.finalMessage, actions: calls.map((call) => call.request.action) }) + '\n')
+      if (noPoll) {
+        expect(calls).toHaveLength(0)
+        if (scenario === 'delegated-choice') expect(result.finalMessage).toMatch(/Saturday|Sunday/iu)
+        if (scenario === 'settled-decision') expect(result.finalMessage).toMatch(/rain|waterproof|jacket|umbrella/iu)
+        if (scenario === 'human-owned') expect(result.finalMessage.trim()).toBe('')
+        return
+      }
+      expect(calls).toHaveLength(1)
+      expect(calls[0]?.request).toMatchObject(reading ? { action: 'read', pollRef } : { action: 'create', ...(scenario === 'proactive-create' ? {} : { question: 'Which day for our walk?' }), options: ['Saturday', 'Sunday'] })
+      if (scenario === 'named-create' || scenario === 'anonymous-create') expect(calls[0]?.request).toMatchObject({ anonymous: scenario === 'anonymous-create' })
+      if (reading) {
+        expect(result.finalMessage).toMatch(/Saturday/iu)
+        expect(result.finalMessage).toMatch(/3/)
+        expect(result.finalMessage).toMatch(/1/)
+        if (!named) expect(result.finalMessage).toMatch(/anonymous|can't see who|cannot see who/iu)
+        if (scenario === 'named-read') expect(result.finalMessage).toMatch(/Riley/iu)
+        if (scenario === 'imessage-read') expect(result.finalMessage).toContain('riley@example.test')
+        expect(result.finalMessage).not.toMatch(/closed|stopped voting/iu)
+      } else if (scenario === 'unknown') {
+        expect(result.finalMessage).toMatch(/confirm|sure|unclear|may have|couldn't tell/iu)
+        expect(result.finalMessage).not.toMatch(/successfully|created (?:the|your) poll|poll is live/iu)
+      } else {
+        // The native poll itself fulfills the request; a second message is optional.
+        if (result.finalMessage.trim()) expect(result.finalMessage).toMatch(/poll|vote|posted|sent|done/iu)
+        expect(result.finalMessage).not.toMatch(/vote by replying|reply with (?:Saturday|Sunday)/iu)
+      }
+    } finally { await rm(workingDirectory, { force: true, recursive: true }) }
+  }, 720_000)
+})

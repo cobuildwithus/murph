@@ -11,7 +11,8 @@ set -euo pipefail
 # source before installing the required Ubuntu libraries and fonts.
 sudo rm -f /etc/apt/sources.list.d/google-chrome.sources
 
-readonly APT_POLICY_PATH="/etc/apt/apt.conf.d/99murph-playwright"
+# Load after the GitHub runner image's zz-retries defaults.
+readonly APT_POLICY_PATH="/etc/apt/apt.conf.d/zzzz-murph-playwright"
 readonly APT_RETRIES=1
 readonly APT_TIMEOUT_SECONDS=180
 

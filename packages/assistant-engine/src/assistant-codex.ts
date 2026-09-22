@@ -6634,40 +6634,42 @@ function isInvalidDynamicToolRequest(
   return 'validationDigest' in request
 }
 
-function isSerializedDynamicToolRequest(
-  request: MurphDynamicToolRequest,
-): boolean {
-  return request.kind === 'automation' ||
-    request.kind === 'automation-local-at-recovery-dismissal' ||
-    request.kind === 'invalid-automation-arguments' ||
-    request.kind === 'device' ||
-    request.kind === 'generate-image' ||
-    request.kind === 'generate-voice-memo' ||
-    request.kind === 'generate-song' ||
-    request.kind === 'attach-group-challenge-response-card' ||
-    request.kind === 'attach-response-card' ||
-    request.kind === 'response-card-envelope-too-large' ||
-    request.kind === 'attach-response-media' ||
-    request.kind === 'send-vault-file' ||
-    request.kind === 'pending-vault-files-list' ||
-    request.kind === 'pending-vault-files-cancel' ||
-    request.kind === 'assistant-configuration' ||
-    request.kind === 'assistant-style' ||
-    request.kind === 'personalization' ||
-    request.kind === 'subscription' ||
-    request.kind === 'analyze-video' ||
-    (request.kind === 'group' &&
-      request.request.action === 'ask_current_sender' &&
-      request.request.mode !== 'new') ||
-    request.kind === 'react-to-message' ||
-    request.kind === 'select-reply-target' ||
-    request.kind === 'computer-open' ||
-    request.kind === 'computer-act' ||
-    request.kind === 'computer-os-control' ||
-    request.kind === 'computer-pause-for-user' ||
-    request.kind === 'computer-finish-run' ||
-    request.kind === 'invalid-computer-arguments'
+function isSerializedDynamicToolRequest(request: MurphDynamicToolRequest): boolean {
+  return serializedDynamicToolKinds.has(request.kind) ||
+    (request.kind === 'group' && request.request.action === 'ask_current_sender' && request.request.mode !== 'new')
 }
+
+const serializedDynamicToolKinds: ReadonlySet<MurphDynamicToolRequest['kind']> = new Set([
+  'poll',
+  'invalid-poll-arguments',
+  'automation',
+  'automation-local-at-recovery-dismissal',
+  'invalid-automation-arguments',
+  'device',
+  'generate-image',
+  'generate-voice-memo',
+  'generate-song',
+  'attach-group-challenge-response-card',
+  'attach-response-card',
+  'response-card-envelope-too-large',
+  'attach-response-media',
+  'send-vault-file',
+  'pending-vault-files-list',
+  'pending-vault-files-cancel',
+  'assistant-configuration',
+  'assistant-style',
+  'personalization',
+  'subscription',
+  'analyze-video',
+  'react-to-message',
+  'select-reply-target',
+  'computer-open',
+  'computer-act',
+  'computer-os-control',
+  'computer-pause-for-user',
+  'computer-finish-run',
+  'invalid-computer-arguments',
+])
 
 function isResponseAttachmentDynamicToolRequest(
   request: MurphDynamicToolRequest,
@@ -6685,7 +6687,9 @@ function isResponseAttachmentDynamicToolRequest(
 function isInvocationScopedRootToolRequest(
   request: MurphDynamicToolRequest,
 ): boolean {
-  return request.kind === 'automation' ||
+  return request.kind === 'poll' ||
+    request.kind === 'invalid-poll-arguments' ||
+    request.kind === 'automation' ||
     request.kind === 'automation-local-at-recovery-dismissal' ||
     request.kind === 'invalid-automation-arguments' ||
     request.kind === 'device' ||
