@@ -122,11 +122,11 @@ it has been explicitly elevated to a cross-cutting invariant.
   terminal lifecycle receipt is advisory, and canonical readback confirms the
   write before Murph says it finished.
 - A detached Codex MultiAgent V2 child admitted before a root reply may continue
-  after that reply only as a one-shot leaf. Hosted configuration admits the
+  after that reply as a bounded leaf. Hosted configuration admits the
   root plus at most three concurrent children per session. Each child owns one
-  independent bounded family and may not interact with the root or another
-  child, be reused for another turn, spawn a nested child, or leave a background
-  terminal. It never inherits the root turn's
+  independent bounded family and may not spawn a nested child or leave a
+  background terminal. Messages and follow-up tasks are ordinary native
+  communication; they do not invalidate the workspace boundary. It never inherits the root turn's
   invocation-scoped automation or device capability. Root completion or a
   later ordinary turn does not terminate valid detached work merely to rotate
   request authority. If the root replies while its child is still generating,
@@ -139,7 +139,11 @@ it has been explicitly elevated to a cross-cutting invariant.
 - Before a hosted workspace snapshot, Murph waits for every exact resident child
   and checks every touched root and resident child for background terminals. A
   root's lifecycle set retains every admitted child until that boundary clears;
-  completion of one sibling must not evict another. An ordinary checkpoint wake
+  completion of one sibling must not evict another. Each native child turn start
+  clears prior completion and becomes that child's current turn. Only a matching
+  native completion can finish it; parent activity acknowledgements cannot finish
+  a newer turn. A child admitted or restarted during boundary RPCs causes another
+  quiescence check within the same bounded wait. An ordinary checkpoint wake
   interrupts only the boundary wait and preserves the warm App Server plus all
   resident evidence. A timeout or unsupported lifecycle stops the exact process
   and fails closed. Explicit workspace invocation abort/preemption interrupts
