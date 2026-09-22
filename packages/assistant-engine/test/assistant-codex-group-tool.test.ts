@@ -288,6 +288,21 @@ describe("murph.group dynamic tool", () => {
       );
   });
 
+  it("exposes authorized group data without a discovery round in group conversations", () => {
+    const direct = resolveMurphDynamicTools({ groupAvailable: true, progressUpdateMode: "direct" });
+    const group = resolveMurphDynamicTools({ groupAvailable: true, progressUpdateMode: "group" });
+    const directData = direct.find((tool) => tool.name === "group_data");
+    const groupData = group.find((tool) => tool.name === "group_data");
+    expect(directData).toMatchObject({ deferLoading: true });
+    expect(groupData).toMatchObject({ deferLoading: false });
+    expect(groupData?.inputSchema).toBe(directData?.inputSchema);
+    expect(group.map((tool) => tool.name)).toEqual(direct.map((tool) => tool.name));
+    expect(group.filter((tool) => tool.name.startsWith("group_") && tool.name !== "group_data")
+      .every((tool) => "deferLoading" in tool && tool.deferLoading === true)).toBe(true);
+    expect(resolveMurphDynamicTools({ groupAvailable: false, progressUpdateMode: "group" })
+      .some((tool) => tool.name === "group_data")).toBe(false);
+  });
+
   it("advertises family-bounded schemas", () => {
     const groupConsultTool = MURPH_GROUP_FAMILY_TOOLS.find(
       (tool) => tool.name === "group_consult",

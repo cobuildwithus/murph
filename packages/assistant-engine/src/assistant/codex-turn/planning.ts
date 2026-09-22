@@ -459,6 +459,10 @@ interface AssistantRouteTurnPlanInput {
   messageTargetAuthorizerAvailable?: boolean | null
 }
 
+function areConversationPollsAvailable(input: AssistantRouteTurnPlanInput, acceptedInputIds: readonly string[], channel: string | null): boolean {
+  return acceptedInputIds.length > 0 && (channel === 'linq' || channel === 'telegram') && input.hostedToolContext?.pollTool != null
+}
+
 function resolvePrivateMemberToolAvailability({
   input,
   privateInteractiveAudience,
@@ -1031,6 +1035,17 @@ export async function resolveAssistantRouteTurnPlan(
           assistantContextSnapshotElapsedMs = elapsedMs
         },
       )
+  const currentAudienceDeliveryFields =
+    resolveAssistantCurrentAudienceDeliveryFields({
+      input: input.input,
+      session: input.session,
+      sharedPlan: input.sharedPlan,
+    })
+  const userActionAcceptedInputIds = resolveAssistantUserActionAcceptedInputIds({
+    acceptedInputItems: input.acceptedInputItems ?? [],
+    turnTrigger: input.input.turnTrigger ?? null,
+  })
+  const pollsAvailable = areConversationPollsAvailable(input, userActionAcceptedInputIds, currentAudienceDeliveryFields.channel)
   const modelBehaviorProfile = resolveAssistantModelBehaviorProfile(
     input.route.providerOptions,
   )
@@ -1114,6 +1129,7 @@ export async function resolveAssistantRouteTurnPlan(
             : 'none',
       assistantKnowledgeToolsAvailable:
         promptCapabilityAvailability.assistantKnowledgeToolsAvailable,
+      assistantPollsAvailable: pollsAvailable,
       assistantProgressUpdatesAvailable: input.progressDelivery != null,
       assistantResearchAvailable,
       assistantToolNameAliases,
@@ -1174,12 +1190,6 @@ export async function resolveAssistantRouteTurnPlan(
   const threadStartDeveloperInstructions = normalizeNullableString(
     buildDeveloperInstructions(threadStartPromptResult),
   )
-  const currentAudienceDeliveryFields =
-    resolveAssistantCurrentAudienceDeliveryFields({
-      input: input.input,
-      session: input.session,
-      sharedPlan: input.sharedPlan,
-    })
   const imageGenerationAvailable =
     scheduledInvocationScope === null ||
     getAssistantChannelAdapter(
@@ -1200,10 +1210,6 @@ export async function resolveAssistantRouteTurnPlan(
     resolveAssistantProductFeedbackAcceptedInputIds(
       input.acceptedInputItems ?? [],
     ).length > 0
-  const userActionAcceptedInputIds = resolveAssistantUserActionAcceptedInputIds({
-    acceptedInputItems: input.acceptedInputItems ?? [],
-    turnTrigger: input.input.turnTrigger ?? null,
-  })
   const allowFinishWithoutReply =
     input.allowFinishWithoutReply ?? input.profile.toolProfile === 'provider-turn'
   // Maintenance turns run without a delivery target. Each mutable profile
@@ -1221,6 +1227,7 @@ export async function resolveAssistantRouteTurnPlan(
           ? [MURPH_MEMBER_MEMORY_TOOL]
           : []
       : resolveMurphDynamicTools({
+        pollsAvailable,
         assistantStyleSettingsAvailable,
         allowFinishWithoutReply,
         imageGenerationAvailable,

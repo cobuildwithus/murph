@@ -1,3 +1,5 @@
+import { MURPH_POLL_TOOL } from './dynamic-tools/conversation-polls.js'
+export { MURPH_POLL_TOOL } from './dynamic-tools/conversation-polls.js'
 import { MURPH_CONVERSATION_ATTACHMENTS_TOOL } from './dynamic-tools/conversation-attachments.js'
 export { MURPH_CONVERSATION_ATTACHMENTS_TOOL } from './dynamic-tools/conversation-attachments.js'
 import * as z from '@murphai/contracts/zod-runtime'
@@ -1462,6 +1464,11 @@ export const MURPH_GROUP_DATA_TOOL = buildMurphGroupFamilyTool({
     'Read shared data, record sender metrics, or manage disclosure/access.',
 })
 
+const MURPH_GROUP_DATA_EAGER_TOOL = {
+  ...MURPH_GROUP_DATA_TOOL,
+  deferLoading: false,
+} as const
+
 export const MURPH_GROUP_MEMBERSHIP_TOOL = buildMurphGroupFamilyTool({
   name: 'group_membership',
   description:
@@ -1753,6 +1760,7 @@ const MURPH_BASE_DYNAMIC_TOOLS = [
   MURPH_PERSONALIZATION_TOOL,
   MURPH_FAMILY_PLAN_TOOL,
   MURPH_PLAN_USAGE_TOOL,
+  MURPH_POLL_TOOL,
   MURPH_IMESSAGE_CONTACT_TOOL,
   MURPH_SUBSCRIPTION_TOOL,
   ...MURPH_GROUP_FAMILY_TOOLS,
@@ -1793,6 +1801,7 @@ export const MURPH_DYNAMIC_TOOLS = [
 
 export type MurphDynamicTool =
   | (typeof MURPH_DYNAMIC_TOOLS)[number]
+  | typeof MURPH_GROUP_DATA_EAGER_TOOL
   | typeof MURPH_ATTACH_FOLLOW_UP_TOOL
   | typeof MURPH_MEMBER_MEMORY_TOOL
   | typeof MURPH_GROUP_ASSISTANT_CONFIGURATION_TOOL
@@ -1816,6 +1825,7 @@ export interface MurphDynamicToolAvailability {
   familyPlanAvailable?: boolean | null
   labsAvailable?: boolean | null
   planUsageAvailable?: boolean | null
+  pollsAvailable?: boolean | null
   imessageContactAvailable?: boolean | null
   imageGenerationAvailable?: boolean | null
   subscriptionAvailable?: boolean | null
@@ -1881,6 +1891,7 @@ const TOOL_AVAILABILITY: ReadonlyMap<MurphDynamicTool, AvailabilityPredicate> =
     [MURPH_FAMILY_PLAN_TOOL, defaultOff((a) => a.familyPlanAvailable)],
     [MURPH_LABS_TOOL, defaultOff((a) => a.labsAvailable)],
     [MURPH_PLAN_USAGE_TOOL, defaultOff((a) => a.planUsageAvailable)],
+    [MURPH_POLL_TOOL, defaultOff((a) => a.pollsAvailable)],
     [MURPH_IMESSAGE_CONTACT_TOOL, defaultOff((a) => a.imessageContactAvailable)],
     [MURPH_SUBSCRIPTION_TOOL, defaultOff((a) => a.subscriptionAvailable)],
     ...MURPH_GROUP_FAMILY_TOOLS.map(
@@ -1934,6 +1945,11 @@ export function resolveMurphDynamicTools(
     }
   }
   if (availability.progressUpdateMode === 'group') {
+    // Shared reads are routine in this audience; avoid a namespace discovery turn.
+    const groupDataToolIndex = tools.indexOf(MURPH_GROUP_DATA_TOOL)
+    if (groupDataToolIndex >= 0) {
+      tools[groupDataToolIndex] = MURPH_GROUP_DATA_EAGER_TOOL
+    }
     const progressToolIndex = tools.indexOf(MURPH_SEND_PROGRESS_UPDATE_TOOL)
     if (progressToolIndex >= 0) {
       tools[progressToolIndex] = MURPH_GROUP_SEND_PROGRESS_UPDATE_TOOL

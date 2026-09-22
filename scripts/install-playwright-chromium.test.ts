@@ -114,7 +114,7 @@ describe("install-playwright-chromium.sh", () => {
     expect(readFileSync(path.join(root, "sudo-calls"), "utf8").trim().split("\n"))
       .toEqual([
         "rm -f /etc/apt/sources.list.d/google-chrome.sources",
-        "tee /etc/apt/apt.conf.d/99murph-playwright",
+        "tee /etc/apt/apt.conf.d/zzzz-murph-playwright",
       ]);
     expect(readFileSync(path.join(root, "apt-config-calls"), "utf8").trim()).toBe(
       "dump",

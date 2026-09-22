@@ -1,3 +1,5 @@
+import { type ConversationPollAction } from '@murphai/hosted-execution/conversation-polls'
+import { readConversationPollDynamicToolRequest, executeConversationPollTool } from './dynamic-tools/conversation-polls.js'
 import { nutritionCardAttachmentGuidance } from '../assistant/nutrition-card-introduction.js'
 import { parseDynamicToolArguments } from './dynamic-tools/dynamic-tool-wrapper.js'
 import {
@@ -1574,6 +1576,11 @@ export type MurphDynamicToolRequest =
       validationDigest: SafeToolCallValidationDigest
     }
   | {
+      kind: 'invalid-poll-arguments'
+      validationDigest: SafeToolCallValidationDigest
+    }
+  | { kind: 'poll'; request: ConversationPollAction }
+  | {
       kind: 'invalid-imessage-contact-arguments'
       validationDigest: SafeToolCallValidationDigest
     }
@@ -1730,6 +1737,7 @@ export function readMurphDynamicToolRequest(
   }
 
   for (const readRequest of [
+    readConversationPollDynamicToolRequest,
     readDeviceDynamicToolRequest,
     readLabsDynamicToolRequest,
     readPendingVaultFilesDynamicToolRequest,
@@ -3733,14 +3741,9 @@ async function dispatchMurphDynamicToolRequest(
         request: input.request.request,
       })
     case 'plan-usage':
-      return await executePlanUsageTool({
-        hostedToolContext: input.hostedToolContext ?? null,
-        request: input.request.request,
-      })
+    case 'poll':
     case 'imessage-contact':
-      return await executeIMessageContactTool({
-        hostedToolContext: input.hostedToolContext ?? null,
-      })
+      return await executeCurrentConversationTool(input, input.request)
     case 'subscription':
       return await executeSubscriptionTool({
         hostedToolContext: input.hostedToolContext ?? null,
@@ -4188,6 +4191,18 @@ function projectHostedPlanUsageForAssistant(input: HostedPlanUsageStatus) {
 
 function projectHostedGroupPlanLabel(label: string): string {
   return label.replace(/\bGroup\b/gu, HOSTED_GROUP_MEMBER_PLAN_DISPLAY_NAME)
+}
+
+async function executeCurrentConversationTool(
+  input: ExecuteMurphDynamicToolRequestInput,
+  request: Extract<MurphDynamicToolRequest, { kind: 'poll' | 'plan-usage' | 'imessage-contact' }>,
+): Promise<MurphDynamicToolExecutionResult> {
+  const hostedToolContext = input.hostedToolContext ?? null
+  switch (request.kind) {
+    case 'poll': return executeConversationPollTool({ request: request.request, context: hostedToolContext })
+    case 'plan-usage': return executePlanUsageTool({ request: request.request, hostedToolContext })
+    case 'imessage-contact': return executeIMessageContactTool({ hostedToolContext })
+  }
 }
 
 async function executeIMessageContactTool(input: {

@@ -189,6 +189,10 @@
     "./runtime-resource-purge": {
       "types": "./dist/runtime-resource-purge.d.ts",
       "default": "./dist/runtime-resource-purge.js"
+    },
+    "./conversation-polls": {
+      "types": "./dist/conversation-polls.d.ts",
+      "default": "./dist/conversation-polls.js"
     }
   },
   "files": [

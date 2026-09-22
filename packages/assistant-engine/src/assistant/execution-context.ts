@@ -1,3 +1,4 @@
+import type { ConversationPollTool } from "@murphai/hosted-execution/conversation-polls";
 import type { AssistantAutomationExecutionInspection } from './cron/inspection.js'
 import {
   normalizeAssistantBackendTarget,
@@ -581,6 +582,7 @@ export interface AssistantHostedExecutionContext {
   deviceConnectProviders?: readonly AssistantHostedDeviceConnectProvider[]
   deviceTool?: AssistantHostedDeviceTool | null
   familyPlanTool?: AssistantHostedFamilyPlanTool | null
+  pollTool?: ConversationPollTool | null
   imessageContactTool?: AssistantHostedIMessageContactTool | null
   personalizationTool?: AssistantHostedPersonalizationTool | null
   groupParticipantDisplayNameReader?: AssistantHostedGroupParticipantDisplayNameReader | null
@@ -748,6 +750,7 @@ export function normalizeAssistantExecutionContext(
         ? { imageGenerationLauncher: hosted.imageGenerationLauncher }
         : {}),
       ...optionalHostedField('familyPlanTool', familyPlanTool),
+      ...optionalHostedField('pollTool', hosted.pollTool && typeof hosted.pollTool.request === 'function' ? { request: hosted.pollTool.request.bind(hosted.pollTool) } : undefined),
       ...optionalHostedField('imessageContactTool', imessageContactTool),
       ...optionalHostedField('personalizationTool', personalizationTool),
       ...optionalHostedField('groupParticipantDisplayNameReader', groupParticipantDisplayNameReader),

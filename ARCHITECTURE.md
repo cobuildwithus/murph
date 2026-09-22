@@ -1230,6 +1230,62 @@ durably publishes its replacement, and atomically consumes the claim while
 returning browser control to the assistant. An ambiguous failure retains the
 claim for bounded stale-owner recovery; overlapping resumes cannot call Kernel.
 
+## Native Conversation Polls
+
+`murph.poll` is an attended current-conversation tool for hosted iMessage and
+Telegram. Its public contract lives at `@murphai/hosted-execution/conversation-polls`;
+the runtime injects a signed transport port and Web owns authorization and provider
+effects in `apps/web/src/lib/hosted-polls`. Accepted mailbox input supplies the
+channel and target; tool arguments cannot select another conversation or member.
+Canonical routing, current runtime ownership and active access are checked before
+an action. Creation rechecks route and access before claiming dispatch.
+
+`HostedConversationPoll` owns encrypted definitions and provider receipts. Member
+and conversation blind indexes scope reads; the Telegram poll ID is blind-indexed
+for secret-verified poll webhooks. Definitions, routing coordinates and snapshots
+are encrypted in the existing member private lane, and member deletion cascades
+receipts. Provider calls and encryption stay outside short database transactions.
+One creation per accepted input has a durable dispatch claim; replay returns its
+receipt or an explicit unknown outcome without sending again. A lost response may
+leave an unknown receipt. List is capped at ten polls created by Murph in this
+conversation. Arbitrary provider IDs cannot select another poll. Read exposes
+provider voter identities in pages of 50 with a continuation cursor; list keeps only summaries.
+
+Linq uses its SDK's native poll create/read methods. The question is a separate
+idempotent text message, followed by an iMessage poll with public multiple-choice
+voting. Anonymous iMessage requests fail before sending. Reads fetch current
+counts, distinct total voters and voter handles from Linq. Telegram uses
+single-choice `sendPoll`, with `anonymous` defaulting to true; false creates named
+voting. It stores aggregate `poll` updates and supports `stopPoll` with final
+counts. Telegram reads return the last observed snapshot and timestamp; they cannot fetch a live tally. Duplicate/older
+updates cannot overwrite newer or closed results. A bounded creation-binding race
+returns a retryable webhook response, and a final binding lookup covers a receipt
+committing between the initial and pending lookups. Votes do not wake Murph or
+send replies.
+
+Named Telegram `poll_answer` updates belong to `HostedConversationPollVote`, one
+encrypted receipt per blinded voter and poll. Its own update ID guards changes and
+retractions independently of the aggregate tally or other voters. Retractions
+retain a tombstone; late answers may still arrive after close. Identities and
+selections are encrypted with vote-specific AAD in the member private lane;
+member deletion cascades through the poll. Reads fetch at most 51 rows and batch
+decrypt a page of 50 using the existing secure-box owner. Telegram identities are
+received updates, not a guaranteed complete voter census. Anonymous polls never
+store or return voter answers. A chat identity is returned as a chat, not resolved
+to a hidden person.
+
+The system prompt admits proactive polls only with the native tool available.
+Use concrete shared decisions on an open conversational floor; preserve direct
+answers, delegated judgment, settled decisions and human-owned exchanges. Polls
+record preferences without authorizing bookings or other downstream effects.
+
+Deploy the additive poll migration, then Web, then the runtime tool. Existing
+runtimes remain compatible. Keep Web's poll callback while new runtimes exist;
+keep Telegram poll webhook consumption while open polls exist. Ensure a manually
+restricted Telegram webhook `allowed_updates` includes both `poll` and
+`poll_answer`. Default Telegram updates include both. After rollout, create/read a synthetic poll on each channel
+and vote/read/close on Telegram; verify no assistant turn starts for votes.
+
 ## Hosted Phone Calls
 
 Outbound hosted phone calls are a web-owned Retell side effect reached through
@@ -2586,9 +2642,11 @@ Detached MultiAgent V2 work is a bounded path, not a process-memory queue.
 Before the root reply, Murph retains a durable accepted input, canonical fact,
 or raw source and gives each child its exact source words, ids, or refs. A
 loaded skill may assign one independent canonical record family per child; all
-writes remain idempotently attributable to that source. Work that needs a
-user-facing result in the current reply remains in the root turn. A child
-terminal event is only an advisory lifecycle receipt, so canonical readback
+writes remain idempotently attributable to that source. Reply-critical work stays
+in the root by default. Explicitly requested bounded lookups may use a child; the root uses native `wait_agent` when needed and
+synthesizes the result before its final reply. Failure yields an honest blocker,
+not a promise of an automatic follow-up. Independent onboarding saves remain
+nonblocking. A child terminal event is only an advisory lifecycle receipt, so canonical readback
 confirms a write before Murph reports it as finished.
 
 Hosted configuration admits one root plus at most three concurrent children
@@ -2598,9 +2656,9 @@ terminal is allowed. Root completion and later ordinary turns leave valid
 detached work alone. When a root replies while its child is still generating,
 every later ordinary inbound root turn checks Codex's native parent-thread
 completion context again. It incorporates a newly completed relevant result at
-most once and never waits or calls `wait_agent` for an unfinished child before
-replying. Use, failure, cancellation, or loss of relevance stops rechecks for
-that child. Scheduled automation, maintenance, system-notification, and
+most once. It uses native `wait_agent` if the current request needs that
+unfinished result; otherwise it replies without waiting. Use, failure,
+cancellation, or loss of relevance stops rechecks for that child. Scheduled automation, maintenance, system-notification, and
 output-only turns never recheck. This adds no queue, wake, or automatic
 follow-up owner. Before publishing a workspace snapshot, the runtime waits for
 every exact resident child and checks every touched root and child for

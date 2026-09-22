@@ -15,6 +15,10 @@ Active delegated-request protection during background checkpointing is owned by
 `ARCHITECTURE.md`; review remediation and proof are recorded in
 [`2026-09-20-background-ask-lifetime.md`](exec-plans/completed/2026-09-20-background-ask-lifetime.md).
 
+Requested delegated-answer waiting and preserved nonblocking onboarding are
+owned by `ARCHITECTURE.md`; verification is tracked in
+`exec-plans/completed/2026-09-21-delegated-answer-wait.md`.
+
 Background assistant checkpoint timing is owned by
 `agent-docs/references/hosted-runtime-protocol.md`; implementation and focused proof
 are recorded in
@@ -411,6 +415,7 @@ is recorded in [`2026-09-18-ios-canary-deployment-continuity.md`](exec-plans/com
 | `agent-docs/product-specs/murph-personas.md` | Murph persona behavior. | Murph persona behavior | High | 2026-07-22 |
 | `agent-docs/product-specs/murph-tone-and-voice.md` | Murph speaking-style preference spec. | Murph speaking-style preference spec | Medium | 2026-08-10 |
 | `agent-docs/product-specs/shared-message-targeting.md` | Shared opaque accepted-message reference, authority resolver, native-reply marker, reaction reuse, provider behavior, and immediate runner rollout contract. | Assistant messaging behavior | High | 2026-07-16 |
+| `agent-docs/exec-plans/completed/2026-09-21-native-chat-polls.md` | Native iMessage and Telegram polls, voter results, and tasteful proactive tool use; current behavior is owned by `ARCHITECTURE.md`. | Historical implementation evidence | Low | 2026-09-21 |
 | `agent-docs/product-specs/group-chat-social-dynamics.md` | Group conversation behavior, unanswered-request reconsideration, and requested graph presentation. | Group conversation behavior | High | 2026-09-17 |
 | `agent-docs/product-specs/group-managed-automations.md` | Implemented member/group managed-owner isolation, execution checks, and retirement behavior. | Managed group automation behavior | High | 2026-07-26 |
 | `agent-docs/product-specs/group-health-newsletter.md` | Group newsletter behavior. | Group newsletter behavior | Medium | 2026-08-22 |
