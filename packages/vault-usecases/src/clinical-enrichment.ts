@@ -3,6 +3,7 @@ import { mkdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 
 import {
+  clinicalExtractionDateIsSupported,
   clinicalDocumentExtractionOutputSchemaForFamily,
   clinicalDocumentExtractionOutputSchema,
   clinicalRawManifestSchema,
@@ -45,7 +46,7 @@ const jobSchema = z.object({
 type Job = z.infer<typeof jobSchema>;
 export type ClinicalEnrichmentSource = Pick<z.infer<typeof sourceSchema>, "rawRef" | "sha256" | "mediaType"> & { clinicalOccurredAt?: string };
 export type ClinicalEnrichmentWork =
-  | { status: "extract"; jobId: string; source: ClinicalEnrichmentSource; documentPath: string; page: number }
+  | { status: "extract"; jobId: string; source: ClinicalEnrichmentSource; documentPath: string; page: number; timeZone: string }
   | { status: "deferred"; jobId: string; nextAttemptAt: string }
   | { status: "apply" | "advance"; jobId: string };
 const indexSchema = z.object({ schema: z.literal("murph.clinical-enrichment-index.v1"), pending: z.array(digestSchema).max(128) }).strict();
@@ -184,7 +185,8 @@ async function prepareCurrentClinicalDocument(
     return { status: "apply", jobId: job.jobId };
   }
   await saveJob(vaultRoot, job);
-  return { status: "extract", jobId: job.jobId, source: { rawRef: job.source.rawRef, sha256: job.source.sha256, mediaType: job.source.mediaType, clinicalOccurredAt: attested.parent.clinicalOccurredAt }, documentPath: attested.documentPath, page: job.page };
+  const metadata = vaultMetadataSchema.parse(await readVaultMetadataSource(vaultRoot));
+  return { status: "extract", jobId: job.jobId, source: { rawRef: job.source.rawRef, sha256: job.source.sha256, mediaType: job.source.mediaType, clinicalOccurredAt: attested.parent.clinicalOccurredAt }, documentPath: attested.documentPath, page: job.page, timeZone: metadata.timezone };
 }
 
 export async function persistClinicalEnrichmentProposals(input: { vaultRoot: string; jobId: string; sourceSha256: string; page: number; totalPages: number; outputs: Record<(typeof families)[number], ClinicalDocumentExtractionOutput> }): Promise<void> {
@@ -214,7 +216,7 @@ export async function persistClinicalEnrichmentProposals(input: { vaultRoot: str
 // Version the cache when extraction semantics change. It is private, disposable
 // runtime state; current parent evidence and canonical authority are still checked.
 function extractionCachePath(vaultRoot: string, sha256: string, mediaType: string, page: number, clinicalOccurredAt?: string): string {
-  return path.join(rootPath(vaultRoot), "extraction-v2", hash(JSON.stringify([digestSchema.parse(sha256), mediaType, clinicalOccurredAt ?? null])), `${page}.json`);
+  return path.join(rootPath(vaultRoot), "extraction-v3", hash(JSON.stringify([digestSchema.parse(sha256), mediaType, clinicalOccurredAt ?? null])), `${page}.json`);
 }
 
 function stable(value: unknown): string {
@@ -304,20 +306,18 @@ function findExtractedRecord(rows: CanonicalEntity[], externalRef: ExternalRef) 
 
 function clinicalProposalDate(
   record: ClinicalDocumentExtractionOutput["records"][number],
-  parent: { clinicalOccurredAt?: string; retrievedAt: string },
+  parent: { clinicalOccurredAt?: string },
+  timeZone: string,
 ): ClinicalDocumentExtractionPayload | null {
   const payload = record.payload;
-  if (record.dateBasis === "document") return record.dateEvidence ? payload : null;
+  if (!clinicalExtractionDateIsSupported(record, parent.clinicalOccurredAt, timeZone)) return null;
+  if (record.dateBasis === "document") return payload;
   if (record.dateBasis === "source") {
     // Resolve against this attested parent, including when identical document
     // bytes reused a cached extraction made for another parent.
     return parent.clinicalOccurredAt ? { ...payload, occurredAt: parent.clinicalOccurredAt } : null;
   }
-  if (record.dateBasis === "unknown") return null;
-  // Legacy frozen proposals lack date evidence. Preserve independently dated
-  // facts, but hold ambiguous retrieval-day proposals instead of guessing.
-  return payload.occurredAt.slice(0, 10) === parent.retrievedAt.slice(0, 10)
-    ? null : payload;
+  return null;
 }
 
 async function planClinicalEnrichmentPage(
@@ -343,7 +343,7 @@ async function planClinicalEnrichmentPage(
     if (output.status === "blocked") hold(`${family}: ${output.reason}`.slice(0, 500));
     for (const record of output.records) {
       const proposed = record.payload;
-      const payload = clinicalProposalDate(record, parent);
+      const payload = clinicalProposalDate(record, parent, metadata.timezone);
       if (!payload) { hold("Clinical fact has no supported event date."); continue; }
       const labHold = clinicalEnrichmentLabHoldReason(payload);
       if (labHold) { hold(labHold); continue; }

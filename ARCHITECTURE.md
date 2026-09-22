@@ -1131,15 +1131,29 @@ Checkpoint-only return paths keep extraction paused for the durable successor.
 If this invocation instead accepts another foreground pass after checkpointing,
 it resumes its paused extractor unless shutdown or owner handoff has started.
 
+Before freezing proposals, extraction uses the shared date consistency check
+with the vault timezone. An affected family gets one read-only, date-only
+correction turn against the same bound source, capped at 30 seconds within the
+existing page deadline. Correction is skipped unless its full 30-second budget
+and the child's interrupt/stop cleanup budget plus five seconds to return remain.
+The cleanup allowance derives from the existing child timeout constants.
+Supported calendar-only dates stay
+calendar dates without an invented time. Only invalid record indices can change,
+and only their date fields. Valid siblings survive failed or unusable corrections; unresolved
+dates remain held. Authority checks and cancellation also fence correction,
+whose usage has a separate review-stage identity. Replay uses frozen results
+without another correction call.
+
 `@murphai/vault-usecases/clinical-enrichment` freezes validated proposals in
 private operational state. A separate short `apply-clinical-enrichment` action
 uses the canonical writer, attaches host-derived source identity and evidence,
 requires an explicit document date with supporting excerpt or resolves a
 source-based date against the attested parent, checks existing facts and reads
 back accepted writes before advancing the page. Host-owned date provenance tags
-and evidence travel with accepted records. Legacy frozen proposals with ambiguous
-retrieval-day dates are held rather than rewritten; independently dated facts
-retain their dates. Extraction cache v2 binds bytes, media type and parent clinical-date context;
+and evidence travel with accepted records. Missing date provenance is held for
+both fresh and previously frozen proposals. Document evidence must contain a
+matching full date and no conflicting dates; valid siblings continue to import.
+Extraction cache v3 binds bytes, media type and parent clinical-date context;
 cached source-based proposals resolve against each current attested parent.
 Derived records use the attested parent source identity, an extraction facet and
 the parent revision. The existing writer index enforces parent revision guards
@@ -2572,9 +2586,11 @@ Detached MultiAgent V2 work is a bounded path, not a process-memory queue.
 Before the root reply, Murph retains a durable accepted input, canonical fact,
 or raw source and gives each child its exact source words, ids, or refs. A
 loaded skill may assign one independent canonical record family per child; all
-writes remain idempotently attributable to that source. Work that needs a
-user-facing result in the current reply remains in the root turn. A child
-terminal event is only an advisory lifecycle receipt, so canonical readback
+writes remain idempotently attributable to that source. Reply-critical work stays
+in the root by default. Explicitly requested bounded lookups may use a child; the root uses native `wait_agent` when needed and
+synthesizes the result before its final reply. Failure yields an honest blocker,
+not a promise of an automatic follow-up. Independent onboarding saves remain
+nonblocking. A child terminal event is only an advisory lifecycle receipt, so canonical readback
 confirms a write before Murph reports it as finished.
 
 Hosted configuration admits one root plus at most three concurrent children
@@ -2584,9 +2600,9 @@ terminal is allowed. Root completion and later ordinary turns leave valid
 detached work alone. When a root replies while its child is still generating,
 every later ordinary inbound root turn checks Codex's native parent-thread
 completion context again. It incorporates a newly completed relevant result at
-most once and never waits or calls `wait_agent` for an unfinished child before
-replying. Use, failure, cancellation, or loss of relevance stops rechecks for
-that child. Scheduled automation, maintenance, system-notification, and
+most once. It uses native `wait_agent` if the current request needs that
+unfinished result; otherwise it replies without waiting. Use, failure,
+cancellation, or loss of relevance stops rechecks for that child. Scheduled automation, maintenance, system-notification, and
 output-only turns never recheck. This adds no queue, wake, or automatic
 follow-up owner. Before publishing a workspace snapshot, the runtime waits for
 every exact resident child and checks every touched root and child for

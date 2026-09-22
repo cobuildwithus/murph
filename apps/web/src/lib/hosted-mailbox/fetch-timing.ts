@@ -18,6 +18,7 @@ export async function runWithHostedMailboxFetchTiming<T>(
     authenticated(): void;
     failed(): void;
   }) => Promise<T>,
+  reportServerTiming?: (value: string) => void,
 ): Promise<T> {
   const firstRequest = firstRequestInModule;
   firstRequestInModule = false;
@@ -60,6 +61,19 @@ export async function runWithHostedMailboxFetchTiming<T>(
   } finally {
     finishPhase();
     const totalMs = Math.round(performance.now() - startedAt);
+    // Keep the existing Worker header contract while sharing the log's clock.
+    const headerPhases = {
+      auth: phases.authentication, parse: phases.parse,
+      transaction_start: phases.transaction_acquire, fence: phases.authority,
+      member: phases.member, access: phases.access, projection: phases.mailbox,
+      usage: phases.usage,
+      transaction_finish: (phases.projection ?? 0) + (phases.transaction_finish ?? 0),
+      group: phases.group_presentation, crypto: phases.ingress_context,
+      serialize: phases.serialize, total: totalMs,
+    };
+    reportServerTiming?.(Object.entries(headerPhases)
+      .filter((entry): entry is [string, number] => entry[1] !== undefined)
+      .map(([key, ms]) => `murph_mailbox_${key};dur=${Math.max(0, Math.round(ms))}`).join(", "));
     if (firstRequest || !completed || totalMs >= SLOW_FETCH_MS
       || (signedRequestToHandlerMs ?? 0) >= SLOW_FETCH_MS) {
       try {

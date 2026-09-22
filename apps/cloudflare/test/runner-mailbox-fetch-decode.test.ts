@@ -5,7 +5,11 @@ import { buildHostedMailboxPayloadScope, buildHostedMailboxPayloadSecureBoxAad, 
 import { parseHostedMailboxFetchResponse } from "@murphai/hosted-execution/parsers";
 
 const mocks = vi.hoisted(() => ({ forward: vi.fn(), crypto: vi.fn(),
-  suppliedCrypto: vi.fn(), cached: vi.fn() }));
+  suppliedCrypto: vi.fn(), cached: vi.fn(), log: vi.fn() }));
+vi.mock("@murphai/hosted-execution", async (original) => ({
+  ...await original<typeof import("@murphai/hosted-execution")>(),
+  emitHostedExecutionStructuredLog: mocks.log,
+}));
 vi.mock("../src/hosted-crypto/runtime-user-crypto-context.ts", async (original) => ({
   ...await original<typeof import("../src/hosted-crypto/runtime-user-crypto-context.ts")>(),
   requireHostedUserCryptoContextFromResponse: mocks.suppliedCrypto,
@@ -112,6 +116,24 @@ describe("Worker mailbox fetch/decode composition", () => {
     expect(await response.json()).toMatchObject({ items: Array.from({ length: count }, (_, index) => ({
       decodedWake: index === 0 ? wake : { ...wake, eventId: `synthetic-event-${index + 1}` },
     })) });
+    expect(mocks.crypto).toHaveBeenCalledTimes(1);
+  });
+  it("logs finite Web phases and Worker decoding on the same mailbox response", async () => {
+    mocks.forward.mockResolvedValue(Response.json(await mailboxFixture(), { headers: {
+      "server-timing": "murph_mailbox_total;dur=640, murph_mailbox_auth;dur=120, murph_mailbox_projection;dur=400, private_field;dur=99",
+    } }));
+    expect((await handle(request())).status).toBe(200);
+    const entry = mocks.log.mock.calls.map(([entry]) => entry).find((entry) =>
+      entry.message === "Hosted runner web-control response received.");
+    expect(entry.details).toMatchObject({ mailboxWebTotalMs: 640, mailboxWebAuthMs: 120,
+      mailboxWebProjectionMs: 400, mailboxWorkerDecodedCount: 1, mailboxWorkerDecodeFailedCount: 0 });
+    for (const field of ["mailboxWorkerPrepareMs", "mailboxWorkerWebFetchMs", "mailboxWorkerResponseBodyMs",
+      "mailboxWorkerCryptoContextMs", "mailboxWorkerPayloadDecryptMs", "mailboxWorkerSerializeMs", "mailboxWorkerTotalMs"]) {
+      expect(entry.details[field]).toBeGreaterThanOrEqual(0);
+    }
+    expect(JSON.stringify(entry)).not.toContain("private_field");
+    expect(JSON.stringify(entry)).not.toContain("Hello");
+    expect(mocks.forward).toHaveBeenCalledTimes(1);
     expect(mocks.crypto).toHaveBeenCalledTimes(1);
   });
   it.each([2, 100])("decodes %i items with one supplied ingress context and no context RPC", async (count) => {
