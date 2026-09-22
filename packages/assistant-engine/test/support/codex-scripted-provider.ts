@@ -9,7 +9,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const SCRIPTED_STUB_KEY_ENV = 'MURPH_SCRIPTED_STUB_KEY'
-export const SCRIPTED_MODEL = 'gpt-5.6-terra'
+export const SCRIPTED_MODEL = 'gpt-5.6-sol'
 const SCRIPTED_MODEL_PROVIDER = 'local-stub'
 const codexCommand = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),

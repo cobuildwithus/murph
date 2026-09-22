@@ -1,4 +1,5 @@
 import type {
+  HostedAiUsageAllowancePricedModel,
   HostedRuntimeAssistantConfigurationControlRequest,
   HostedRuntimeAssistantConfigurationSnapshot,
   HostedRuntimeAssistantConfigurationToolRequest,
@@ -14,7 +15,6 @@ import {
 } from "./parsers/assertions.ts";
 
 export const HOSTED_ASSISTANT_LUNA_MODEL = "gpt-5.6-luna" as const;
-export const HOSTED_ASSISTANT_TERRA_MODEL = "gpt-5.6-terra" as const;
 export const HOSTED_ASSISTANT_SOL_MODEL = "gpt-5.6-sol" as const;
 export const HOSTED_ASSISTANT_GPT_6_SOL_MODEL = "gpt-6-sol" as const;
 export const HOSTED_ASSISTANT_GPT_6_LUNA_MODEL = "gpt-6-luna" as const;
@@ -26,7 +26,6 @@ export const HOSTED_ASSISTANT_PRODUCT_MODELS = [
   HOSTED_ASSISTANT_GPT_6_SOL_MODEL,
   HOSTED_ASSISTANT_GPT_6_LUNA_MODEL,
   HOSTED_ASSISTANT_LUNA_MODEL,
-  HOSTED_ASSISTANT_TERRA_MODEL,
   HOSTED_ASSISTANT_SOL_MODEL,
   HOSTED_ASSISTANT_ASTRA_MODEL,
 ] as const;
@@ -37,9 +36,9 @@ export type HostedAssistantProductModel =
 export const HOSTED_ASSISTANT_OPENAI_PROVIDER = "openai" as const;
 export const HOSTED_ASSISTANT_VENICE_PROVIDER = "venice" as const;
 
-export const HOSTED_ASSISTANT_VENICE_PROVIDER_MODELS: Partial<Record<HostedAssistantProductModel, string>> = {
+export const HOSTED_ASSISTANT_VENICE_PROVIDER_MODELS: Partial<Record<HostedAiUsageAllowancePricedModel, string>> = {
   [HOSTED_ASSISTANT_LUNA_MODEL]: "openai-gpt-56-luna",
-  [HOSTED_ASSISTANT_TERRA_MODEL]: "openai-gpt-56-terra",
+  "gpt-5.6-terra": "openai-gpt-56-terra",
   [HOSTED_ASSISTANT_SOL_MODEL]: "openai-gpt-56-sol",
 };
 

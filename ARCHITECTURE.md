@@ -1340,10 +1340,12 @@ Web exposes the native field only when its existing assistant-configuration
 resolution confirms that the current managed runtime is authorized for the
 full product-model catalog; missing authority and custom inference fail closed.
 The production image defaults to a catalog containing GPT-6 Sol and Luna plus
-GPT-5.6 Luna, Terra, and Sol. Native bundled metadata must contain all five;
-the image fails validation instead of synthesizing missing model entries. Web separately derives Astra authority from the canonical available models
+GPT-5.6 Luna and Sol. CLI 0.155.1 uses its native catalog plus the exact Sol/Luna
+entries pinned in `apps/cloudflare/config/codex-gpt6-models.json` from OpenAI
+commit `49e95cc73f4eb2999b1d14f863c009168df6122b`. All GPT-6 entries retain
+the native 272K context limit. The image fails validation for missing entries. Web separately derives Astra authority from the canonical available models
 and managed OpenAI provider; only an explicitly authorized workspace selects the
-expanded image-owned Astra catalog. Missing authority retains the five-model
+expanded image-owned Astra catalog. Missing authority retains the four-model
 catalog, preserving Edge and group delegation while Codex's native validation
 rejects Astra before a provider request. Catalog selection changes the native
 launch key, so a warm process cannot retain an earlier catalog after access changes.
@@ -1595,9 +1597,12 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   Nullable hosted-member model and reasoning preferences are web-owned,
   billing-gated control facts. Managed OpenAI personal and group chats default
   to GPT-6 Sol. Active members may select GPT-6 Sol or Luna and the existing
-  GPT-5.6 Luna or Terra; GPT-5.6 Sol and GPT-6 Astra retain their premium gates.
-  Explicit legacy choices stay saved, while a null preference follows the
-  default. Venice retains GPT-5.6 Terra as its default and supports only its
+  GPT-5.6 Luna; GPT-5.6 Sol and GPT-6 Astra retain their premium gates.
+  Saved Terra preferences now resolve to GPT-6 Sol; other explicit choices stay
+  saved, while a null preference follows the default. Persisted Terra automation
+  overrides also resolve to Sol without rewriting canonical records. Unsupported
+  inherited automation preferences remain dormant across provider changes.
+  Venice uses GPT-5.6 Sol as its fallback and supports only its
   existing mapped models; GPT-6 Sol and Luna selection requires OpenAI. The
   common reasoning set remains `low`/`medium`/`high`/`xhigh`, with low represented
   by an absent reasoning override. Web always projects the resolved model

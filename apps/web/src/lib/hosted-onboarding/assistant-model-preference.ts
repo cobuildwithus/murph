@@ -15,7 +15,6 @@ import {
   HOSTED_ASSISTANT_PRODUCT_MODELS,
   HOSTED_ASSISTANT_REASONING_EFFORTS,
   HOSTED_ASSISTANT_SOL_MODEL,
-  HOSTED_ASSISTANT_TERRA_MODEL,
   HOSTED_ASSISTANT_VENICE_PROVIDER,
   isHostedAssistantProductModel,
   isHostedAssistantReasoningEffort,
@@ -301,7 +300,7 @@ export async function updateHostedMemberAssistantConfigurationTx(input: {
   });
 
   const defaultModel = (input.provider ?? current.provider) === HOSTED_ASSISTANT_VENICE_PROVIDER
-    ? HOSTED_ASSISTANT_TERRA_MODEL
+    ? HOSTED_ASSISTANT_SOL_MODEL
     : HOSTED_ASSISTANT_DEFAULT_MODEL;
   const nextModelPreference = input.model === undefined
     ? member.assistantModelPreference
@@ -428,7 +427,7 @@ function resolveEffectiveHostedAssistantModel(input: {
   storedModel: HostedAssistantProductModel | null;
 }): HostedAssistantProductModel {
   const defaultModel = input.provider === HOSTED_ASSISTANT_VENICE_PROVIDER
-    ? HOSTED_ASSISTANT_TERRA_MODEL : HOSTED_ASSISTANT_DEFAULT_MODEL;
+    ? HOSTED_ASSISTANT_SOL_MODEL : HOSTED_ASSISTANT_DEFAULT_MODEL;
   if (input.storedModel !== null
       && input.provider === HOSTED_ASSISTANT_VENICE_PROVIDER
       && !HOSTED_ASSISTANT_VENICE_PROVIDER_MODELS[input.storedModel]) {

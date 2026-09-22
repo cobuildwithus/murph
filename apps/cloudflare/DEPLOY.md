@@ -1980,7 +1980,7 @@ Hosted assistant config:
 - `HOSTED_ASSISTANT_PROVIDER`; keep the fleet default `openai`. A per-member
   Venice selection arrives through the signed workspace projection rather than
   this deploy default.
-- `HOSTED_ASSISTANT_MODEL`; worker deploy preflight requires an explicit allowance-priced direct OpenAI model slug. Supported slugs include `gpt-6-sol`, `gpt-6-luna`, `gpt-6-astra`, `gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna`. GPT-6 Sol is the managed OpenAI default. Production deploys require `HOSTED_ASSISTANT_REASONING_EFFORT=low`.
+- `HOSTED_ASSISTANT_MODEL`; worker deploy preflight requires an explicit allowance-priced direct OpenAI model slug. Supported slugs include `gpt-6-sol`, `gpt-6-luna`, `gpt-6-astra`, `gpt-5.6-sol`, and `gpt-5.6-luna`. GPT-6 Sol is the managed OpenAI default. Production deploys require `HOSTED_ASSISTANT_REASONING_EFFORT=low`.
 - `HOSTED_ASSISTANT_APPROVAL_POLICY`
 - `HOSTED_ASSISTANT_REASONING_EFFORT`
 - `HOSTED_ASSISTANT_SANDBOX`
@@ -2348,8 +2348,12 @@ That image is prepared in the local Docker cache under the stable GHCR tag
 which is also the final app-layer Dockerfile default. Using the pullable GHCR
 name avoids BuildKit treating the prepared base as a Docker Hub `library/*`
 image during local Wrangler container builds.
-Codex CLI 0.155.1 supplies the native Astra entry; the image no longer
-synthesizes Astra from Sol. The existing standard catalog and separately
+Codex CLI 0.155.1 supplies the native Astra entry. Its bundled catalog is
+supplemented with the unchanged Sol/Luna launch entries in
+`config/codex-gpt6-models.json`, pinned to OpenAI Codex commit
+`49e95cc73f4eb2999b1d14f863c009168df6122b`. The source URL is stored beside
+the entries; remove the supplement when a stable CLI bundles equivalent entries.
+Terra is excluded from active catalogs; historical usage pricing remains readable. The existing standard catalog and separately
 authorized Astra catalog retain their model filtering, mixed Code Mode, Flex,
 and context-window validation. Missing product models fail the image build.
 The saved `portable-responses-v1` custom-inference verification identity remains

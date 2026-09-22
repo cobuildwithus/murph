@@ -9,7 +9,6 @@ import {
   HOSTED_ASSISTANT_LUNA_MODEL,
   HOSTED_ASSISTANT_OPENAI_PROVIDER,
   HOSTED_ASSISTANT_SOL_MODEL,
-  HOSTED_ASSISTANT_TERRA_MODEL,
   HOSTED_ASSISTANT_VENICE_PROVIDER,
   isHostedAssistantProductModel,
   isHostedAssistantProvider,
@@ -94,7 +93,7 @@ const MODEL_OPTIONS = [
     description: "An alternative GPT-6 model",
     model: HOSTED_ASSISTANT_GPT_6_LUNA_MODEL,
     name: "GPT-6 Luna",
-    usage: "Balanced usage",
+    usage: "Low usage",
   },
   {
     artwork: "luna",
@@ -102,13 +101,6 @@ const MODEL_OPTIONS = [
     model: HOSTED_ASSISTANT_LUNA_MODEL,
     name: "GPT-5.6 Luna",
     usage: "Low usage",
-  },
-  {
-    artwork: "terra",
-    description: "Advanced health intelligence",
-    model: HOSTED_ASSISTANT_TERRA_MODEL,
-    name: "Terra",
-    usage: "Balanced usage",
   },
   {
     artwork: "sol",
@@ -964,7 +956,7 @@ function readProductModelName(model: HostedAssistantProductModel): string {
   if (model === HOSTED_ASSISTANT_LUNA_MODEL || model === HOSTED_ASSISTANT_GPT_6_LUNA_MODEL) {
     return "Luna";
   }
-  return model === HOSTED_ASSISTANT_SOL_MODEL || model === HOSTED_ASSISTANT_GPT_6_SOL_MODEL ? "Sol" : "Terra";
+  return model === HOSTED_ASSISTANT_SOL_MODEL || model === HOSTED_ASSISTANT_GPT_6_SOL_MODEL ? "Sol" : "Murph";
 }
 
 function readProviderName(provider: HostedAssistantProvider): string {
