@@ -2586,9 +2586,11 @@ Detached MultiAgent V2 work is a bounded path, not a process-memory queue.
 Before the root reply, Murph retains a durable accepted input, canonical fact,
 or raw source and gives each child its exact source words, ids, or refs. A
 loaded skill may assign one independent canonical record family per child; all
-writes remain idempotently attributable to that source. Work that needs a
-user-facing result in the current reply remains in the root turn. A child
-terminal event is only an advisory lifecycle receipt, so canonical readback
+writes remain idempotently attributable to that source. Reply-critical work stays
+in the root by default. Explicitly requested bounded lookups may use a child; the root uses native `wait_agent` when needed and
+synthesizes the result before its final reply. Failure yields an honest blocker,
+not a promise of an automatic follow-up. Independent onboarding saves remain
+nonblocking. A child terminal event is only an advisory lifecycle receipt, so canonical readback
 confirms a write before Murph reports it as finished.
 
 Hosted configuration admits one root plus at most three concurrent children
@@ -2598,9 +2600,9 @@ terminal is allowed. Root completion and later ordinary turns leave valid
 detached work alone. When a root replies while its child is still generating,
 every later ordinary inbound root turn checks Codex's native parent-thread
 completion context again. It incorporates a newly completed relevant result at
-most once and never waits or calls `wait_agent` for an unfinished child before
-replying. Use, failure, cancellation, or loss of relevance stops rechecks for
-that child. Scheduled automation, maintenance, system-notification, and
+most once. It uses native `wait_agent` if the current request needs that
+unfinished result; otherwise it replies without waiting. Use, failure,
+cancellation, or loss of relevance stops rechecks for that child. Scheduled automation, maintenance, system-notification, and
 output-only turns never recheck. This adds no queue, wake, or automatic
 follow-up owner. Before publishing a workspace snapshot, the runtime waits for
 every exact resident child and checks every touched root and child for

@@ -127,7 +127,9 @@ export function noteCliTimingFailure(error: unknown): void {
     name === "ZodError" ? "invalid_payload" : undefined);
   const stage = ownData(ownData(error, "context"), "stage") ?? ownData(error, "stage") ??
     (validation ? "validation" : undefined);
+  // Domain validation uses fieldErrors; schema-owned publicIssues take precedence.
   invocation.failure = { code: cliTimingFailureCode(code), stage: cliTimingFailureStage(stage), count: 1,
+    ...cliTimingValidationFailure(invocation.command, code, error, "fieldErrors"),
     ...cliTimingValidationFailure(invocation.command, code, error, "publicIssues") };
 }
 

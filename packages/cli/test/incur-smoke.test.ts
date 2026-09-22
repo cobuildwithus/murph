@@ -2595,6 +2595,15 @@ test('supplement search-labels-batch schema exposes hosted batch lookup inputs',
   )
 })
 
+test('food search-labels help explains both query forms without the output schema', async () => {
+  const help = await runSourceCliRaw(['food', 'search-labels', '--help'])
+  assert.match(help, /--query/u)
+  assert.match(help, /never both/u)
+  assert.match(help, /rolled oats/u)
+  assert.ok(Buffer.byteLength(help) < 8_000)
+  assert.doesNotMatch(help, /contaminantSummary/u)
+})
+
 test('food search-labels schema exposes hosted label lookup inputs', async () => {
   const schema = JSON.parse(
     await runSourceCliRaw(['food', 'search-labels', '--schema', '--format', 'json']),
@@ -2608,8 +2617,9 @@ test('food search-labels schema exposes hosted label lookup inputs', async () =>
     }
   }
 
-  assert.deepEqual(schema.args.required, ['query'])
+  assert.deepEqual(schema.args.required ?? [], [])
   assert.equal(schema.args.properties.query?.maxLength, 256)
+  assert.match(String(schema.options.properties.query?.description ?? ''), /Alternative to the positional query/u)
   assert.match(
     String(schema.args.properties.query?.description ?? ''),
     /Food product, brand, USDA FDC id, UPC, or generic ingredient/u,
