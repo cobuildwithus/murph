@@ -29,7 +29,7 @@ export const CANARY_RESET_TIMEOUT_MS = 300_000;
 export const CANARY_OUTCOME_WAIT_MS = HOSTED_EXECUTION_DEFAULT_RUNNER_IDLE_TTL_MS + 120_000;
 const CANARY_OUTCOME_POLL_MS = 1_000;
 const CANARY_TURNS = [
-  { prompt: "Hey Murph", stage: "welcome" },
+  { prompt: "Hey Murph let's get started with my health!", stage: "welcome" },
   { prompt: "Yes, ready.", stage: "identity-question" },
   { prompt: "My name is Robin. I am 32 and a woman.", stage: "runtime-identity" },
   {

@@ -150,7 +150,7 @@ describe("production conversation canary runner", () => {
     });
     expect(mocks.messages).toEqual([]);
     expect(mocks.spaceSend.mock.calls.slice(0, 3).map(([text]) => text)).toEqual([
-      "Hey Murph",
+      "Hey Murph let's get started with my health!",
       "Yes, ready.",
       "My name is Robin. I am 32 and a woman.",
     ]);
