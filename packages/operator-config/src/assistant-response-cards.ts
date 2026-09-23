@@ -572,12 +572,17 @@ function encodeWorkoutSessionAppCardPayload(
   card: Extract<CompactTableResponseCardV1, { workout: unknown }>,
   includeActionBinding: boolean,
 ): string {
-  // Image previews carry no edit authority. Native workout links always do.
+  // Image previews carry no edit authority.
   if (!includeActionBinding) {
     return encodeAppCardEnvelopePayload(buildWorkoutSessionAppCardEnvelopeV4(card))
   }
   if (card.editor === undefined) {
     throw new TypeError('A workout card requires a verified editor.')
+  }
+  // Shared Messages links must also render on installed clients that reject completed V6.
+  // Capable clients receive completed editors through authenticated refresh/save results.
+  if (card.workout.state === 'completed') {
+    return encodeAppCardEnvelopePayload(buildWorkoutSessionAppCardEnvelopeV4(card))
   }
   return encodeAppCardEnvelopePayload(buildWorkoutSessionAppCardEnvelopeV6({
     ...card,

@@ -78,8 +78,10 @@ read the exact workout and retry attachment once from its complete current state
 If that fails, it replies in ordinary text with verified results and a brief
 explanation that the editable card is unavailable. It never repeats successful
 writes, drops canonical fields, changes modes, or marks a workout complete to
-satisfy the editor. Completed workouts retain the same editable V6 path.
-Historical V4 links remain decodable but cannot open a read-only detail editor.
+satisfy the editor. Completed workouts retain a verified editor internally, but
+shared message links use the installed-client-compatible V4 summary. Explicitly
+opted-in refresh/save requests can receive completed V6 editors. Updated native
+detail views require an editor; completed summary links remain readable in the transcript.
 
 Previously queued workout replies without editors remain readable. Delivery
 persists their existing semantic-text fallback before contacting the provider,
@@ -90,8 +92,9 @@ Generic compact tables keep the existing schema-version-3 native envelope. The
 static workout image keeps the authority-free schema-version-4 envelope. The
 installed native editor keeps schema version 6, whose compact typed projection
 and opaque 64-character bindings respect the 2,048-character ceiling for
-new message links. Authenticated refresh and save results carry the typed V6
-envelope directly, so later corrections are independent of link length. The revision binds the
+new active message links. Authenticated refresh and save requests that explicitly
+opt into `envelope-v6` receive the typed envelope directly, so later corrections
+are independent of link length. Other requests retain legacy URL results. The revision binds the
 canonical workout identity to its ordered hidden exercise/set-slot identity and
 last applied member-action generation without exposing any of those values.
 Mutable set results and annotations are intentionally excluded so their closed
@@ -112,7 +115,8 @@ note/reps/weight-reps tuple, while a pending or skipped set carries `null`. Nati
 display and optimistic preconditions from that typed tuple. Removing repeated
 wire keys keeps realistic six-exercise, four-set initial and late-active
 snapshots below the same URL ceiling without adding another projection owner;
-completed cards use V6 with skipped rows for unlogged sets. Exact canonical pending plans remain in
+completed shared cards use V4 summaries with skipped rows for unlogged sets;
+opted-in authenticated results use V6. Exact canonical pending plans remain in
 the bounded V6 target string, while completed actuals retain their typed tuple.
 The native form recognizes only the producer's exact numeric weight/reps or
 reps target grammar and keeps every other target display-only.
@@ -578,8 +582,9 @@ omitted/null-equivalent retries retain the same admitted payload.
 
 Live refresh preserves the permanent card-reader contract: no new workout-card
 schema, producer flag, capability registry, or duplicated native result model is
-introduced. V4 is retained for historical decoding and static previews. V6 is the editable
-wire for active and completed workouts. The expanded native detail surface
+introduced. V4 remains the completed shared-message summary and static-preview
+wire. V6 is the active shared-message wire and the explicitly negotiated editable
+result wire for active and completed workouts. The expanded native detail surface
 requires an editor binding; legacy links request a fresh card.
 
 ### Binding and authority
@@ -611,12 +616,23 @@ accepted only when their full binding still exactly matches current state.
 
 ### Editable result and recovery
 
-Authenticated save and refresh results contain the strict V6 `card` envelope
-with an editor binding, regardless of active or completed state. They reuse the
-existing workout decoder without encoding a transcript URL. Readers accept the
-older `cardUrl` result for compatibility, but reject read-only returned cards.
-Exactly one representation is allowed. Initial message links still enforce the
-2,048-character URL limit and never downgrade to V4.
+Durable save and refresh receipts contain the strict V6 `card` envelope with an
+editor binding, regardless of active or completed state. The authenticated status
+route returns that representation only for the exact request header
+`X-Murph-Workout-Card-Format: envelope-v6`. Missing or unknown values receive the
+existing `cardUrl` result: active V6 or completed V4. Existing URL-only receipts
+pass through unchanged. The request capability changes presentation only, after
+all existing member, credential, and consent checks, and adds no persisted state.
+Responses are private and non-cacheable and vary on the capability header.
+
+Exactly one result representation is returned. Legacy URLs remain below 2,048
+characters. An oversized legacy apply result omits the optional result while
+preserving the successful write status; an oversized legacy snapshot returns
+`rejected` / `workout_changed` without a result, matching the prior URL-bound
+read path. Neither projection changes the durable receipt. Opted-in results
+retain the full envelope independently of link length. Shared message links
+always use active V6 or completed V4 because one member may use multiple app
+versions; completed transport conversion never bypasses verified-editor admission.
 
 The action schema and native card agree on 16 exercises and 16 sets per exercise.
 A batch allows 512 mutations, covering simultaneous corrections, renames, removals,
@@ -632,14 +648,17 @@ background refresh, result cache, or alternate read-only detail view.
 
 ### Rollout and proof
 
-Release native support for completed V6 cards and direct-envelope outcomes before
-enabling these backend producers. Existing links remain decodable, but older
-native readers cannot consume the new completed editor or direct result shape;
-this is a reader rollout requirement, not an already-deployed compatibility claim.
+The backend can deploy before a native update. Previously installed clients
+continue receiving their existing active editor, completed summary, and URL
+result protocols. A newly available app does not retire these defaults. A native
+client must explicitly send the capability header to use direct completed editors;
+app publication and physical Messages proof gate that richer native experience,
+not backend compatibility or deployment.
 
-The release remains on Product UX Hold until physical Messages-extension proof
-confirms expansion, repeated corrections, refresh, and draft preservation. Local
-proof covers completed/skipped decoding, canonical end-time preservation, strict
-editor attachment, stale and cross-member rejection, save/refresh above the URL
-ceiling, transport budgets, and independent cross-owner review. Static images
-remain authority-free V4 previews and other card families retain their envelopes.
+Local mixed-version proof covers the frozen installed Swift decoder, active and
+completed message links, legacy and opted-in apply/snapshot results, unknown
+capabilities, URL overflow, unchanged durable receipts, and existing auth gates.
+Canonical completed/skipped projection, original end-time preservation, strict
+editor attachment, stale and cross-member rejection, and bounded transport retain
+their existing proof. Static images remain authority-free V4 previews and other
+card families retain their envelopes.

@@ -321,7 +321,11 @@ describe('workout session response cards', () => {
       return encodeWorkoutSessionAppCardUrl(card)
     })
 
-    expect(urls.map(decodeAppCardUrl)).toEqual(Array.from({ length: 3 }, () => expect.objectContaining({ schemaVersion: 6 })))
+    expect(urls.map(decodeAppCardUrl)).toEqual([
+      expect.objectContaining({ schemaVersion: 6 }),
+      expect.objectContaining({ schemaVersion: 6 }),
+      expect.objectContaining({ schemaVersion: 4 }),
+    ])
     expect(urls.every((url) => url.length < 2_048)).toBe(true)
 
     const oversizedEditorCard = {
@@ -654,7 +658,7 @@ describe('workout session response cards', () => {
     expect(decodeAppCardUrl(
       encodeWorkoutSessionAppCardUrl(completedCard),
     )).toMatchObject({
-      schemaVersion: 6,
+      schemaVersion: 4,
       card: {
         s: 'c',
         u: null,
@@ -662,18 +666,16 @@ describe('workout session response cards', () => {
         e: [
           [
             'Bench press',
-            'l',
             [
-              ['c', '185 lb × 8', ['w', 8, 185, null]],
-              ['c', '185 lb × 8', ['w', 7, 185, 'l']],
+              ['c', '185 lb × 8', '185 lb × 8'],
+              ['c', '185 lb × 8', '185 lb × 7'],
               ['s', '185 lb × 6–8', null],
             ],
           ],
           [
             'Incline dumbbell press',
-            'l',
             [
-              ['c', '55 lb × 10', ['w', 10, 55, null]],
+              ['c', '55 lb × 10', '55 lb × 10'],
               ['s', '55 lb × 8–10', null],
               ['s', null, null],
             ],
@@ -681,6 +683,9 @@ describe('workout session response cards', () => {
         ],
       },
     })
+    expect(decodeAppCardUrl(encodeWorkoutSessionSnapshotAppCardUrl({
+      ...completedCard, editor: completedCard.editor,
+    }))).toMatchObject({ schemaVersion: 6, card: { s: 'c', b: completedCard.editor.actionBinding } })
   })
 
 })
