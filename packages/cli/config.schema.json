@@ -5802,6 +5802,47 @@
                             }
                           }
                         },
+                        "remove": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "options": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "properties": {
+                                "requestId": {
+                                  "description": "Optional caller-supplied request id for audit correlation.",
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 128
+                                },
+                                "workoutId": {
+                                  "type": "string",
+                                  "pattern": "^evt_[0-9A-Za-z]+$",
+                                  "description": "Canonical workout id returned by workout start or workout show."
+                                },
+                                "exerciseId": {
+                                  "description": "Optional stable source exercise id, such as an exercise catalog id.",
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 200
+                                },
+                                "exerciseOrder": {
+                                  "description": "Optional one-based exercise order within the exact workout.",
+                                  "type": "integer",
+                                  "exclusiveMinimum": 0,
+                                  "maximum": 9007199254740991
+                                },
+                                "expectedRevision": {
+                                  "type": "integer",
+                                  "exclusiveMinimum": 0,
+                                  "maximum": 9007199254740991,
+                                  "description": "Exact lifecycle revision from the workout read approved for this removal."
+                                }
+                              }
+                            }
+                          }
+                        },
                         "set-reps": {
                           "type": "object",
                           "additionalProperties": false,

@@ -4674,6 +4674,106 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
     360_000,
   )
 
+  it('attaches an editable completed workout without reopening or rewriting it', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const fixture = await createCanonicalLiveFixture(config, 'linq')
+    const workouts = await import('@murphai/vault-usecases/workouts')
+    const provider = vi.spyOn(clinicalExtractionCodex, 'executeCodexAppServerTurn')
+    try {
+      const started = await workouts.startLiveWorkout({
+        exercises: [{ mode: 'bodyweight', name: 'Calf raise', setCount: 4 }],
+        name: 'Finished movement', startedAt: '2026-08-20T12:00:00.000Z', vault: fixture.vault,
+      })
+      await workouts.logLiveWorkoutSet({
+        exerciseOrder: 1, setOrder: 1, reps: 8, workoutId: started.eventId,
+        vault: fixture.vault,
+      })
+      await workouts.finishLiveWorkout({
+        workoutId: started.eventId, endedAt: '2026-08-20T12:30:00.000Z', vault: fixture.vault,
+      })
+      const before = await showWorkoutRecord(fixture.vault, started.eventId)
+      const result = await fixture.message(
+        `Show the editable card for my completed Finished movement workout ${started.eventId}, including the skipped sets, so I can correct it. Do not reopen it or change any results.`,
+      )
+      expect(provider).toHaveBeenCalledTimes(1)
+      const turn = await provider.mock.results[0]!.value
+      expect(turn.responseCard).toMatchObject({
+        workout: {
+          state: 'completed',
+          exercises: [{ name: 'Calf raise', sets: [
+            { status: 'completed' }, { status: 'skipped' }, { status: 'skipped' }, { status: 'skipped' },
+          ] }],
+        },
+        editor: { actionBinding: expect.stringMatching(/^[a-f0-9]{64}$/u) },
+      })
+      expect(turn.runtimeIssueInputs).toEqual([])
+      expect(await showWorkoutRecord(fixture.vault, started.eventId)).toEqual(before)
+      expect(result.delivery).toBeNull()
+    } finally {
+      provider.mockRestore()
+      await fixture.close()
+      await removeRealCodexTemporaryPaths(config.temporaryPaths)
+    }
+  }, 360_000)
+
+  it.each(['transient', 'persistent'] as const)(
+    'recovers %s workout editor failure without sending a read-only active card',
+    async (failureMode) => {
+      const config = await resolveRealCodexE2eConfig()
+      const fixture = await createCanonicalLiveFixture(config, 'linq')
+      const workouts = await import('@murphai/vault-usecases/workouts')
+      const nativeRead = workouts.readLiveWorkoutCardEditor
+      const readEditor = vi.spyOn(workouts, 'readLiveWorkoutCardEditor')
+      const provider = vi.spyOn(clinicalExtractionCodex, 'executeCodexAppServerTurn')
+      let reads = 0
+      readEditor.mockImplementation(async (input) => {
+        reads += 1
+        if (failureMode === 'persistent' || reads === 1) {
+          throw Object.assign(new Error('Synthetic reader interruption'), { code: 'EACCES' })
+        }
+        return nativeRead(input)
+      })
+      try {
+        const started = await startLiveWorkout({
+          exercises: [{ mode: 'bodyweight', name: 'Calf raise', setCount: 4 }],
+          name: 'Afternoon movement',
+          startedAt: new Date().toISOString(),
+          vault: fixture.vault,
+        })
+        const before = await showWorkoutRecord(fixture.vault, started.eventId)
+        const result = await fixture.message(
+          `Show me the editable workout card for my saved Afternoon movement workout ${started.eventId}. Do not change the workout or log any sets.`,
+        )
+        expect(provider).toHaveBeenCalledTimes(1)
+        const turn = await provider.mock.results[0]!.value
+        expect(readEditor).toHaveBeenCalledTimes(2)
+        expect(readEditor.mock.calls.every(([input]) => input.workoutId === started.eventId && input.vault === fixture.vault)).toBe(true)
+        expect(await showWorkoutRecord(fixture.vault, started.eventId)).toEqual(before)
+        const vault = await readVaultRawTolerant(fixture.vault)
+        expect(vault.events.filter((event) => workoutSessionSchema.safeParse(event.attributes.workout).success)).toHaveLength(1)
+        expect(result.delivery).toBeNull()
+        if (failureMode === 'transient') {
+          expect(turn.responseCard).toMatchObject({
+            workout: { state: 'active', exercises: [{ name: 'Calf raise' }] },
+            editor: { version: 1, actionBinding: expect.stringMatching(/^[a-f0-9]{64}$/u) },
+          })
+        } else {
+          expect(turn.responseCard).toBeNull()
+          expect(result.response).toMatch(/card/iu)
+          expect(result.response).not.toMatch(/read.only|actionBinding|projection|schema|(?:sent|attached) (?:the |your |an? )?(?:editable )?card/iu)
+        }
+        expect(turn.runtimeIssueInputs.filter((issue: { errorCode: string | null }) => issue.errorCode === 'WORKOUT_CARD_EDITOR_UNAVAILABLE'))
+          .toHaveLength(failureMode === 'transient' ? 1 : 2)
+      } finally {
+        readEditor.mockRestore()
+        provider.mockRestore()
+        await fixture.close()
+        await removeRealCodexTemporaryPaths(config.temporaryPaths)
+      }
+    },
+    360_000,
+  )
+
   it(
     'keeps resistance and bodyweight editor modes explicit before any load is logged',
     async () => {
@@ -4753,6 +4853,7 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
           ].join(' '),
           reasoningEffort: 'low',
           sandbox: 'workspace-write',
+          vaultRoot: workingDirectory,
           workingDirectory,
         })
         const vault = await readVaultRawTolerant(workingDirectory)
@@ -4788,6 +4889,26 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
             kind: 'workout',
           },
           workout: { state: 'active' },
+          editor: {
+            actionBinding: expect.stringMatching(/^[a-f0-9]{64}$/u),
+            version: 1,
+            exercises: [
+              {
+                unitOverride: 'lb',
+                sets: Array.from({ length: 3 }, () => ({
+                  logged: false,
+                  result: null,
+                })),
+              },
+              {
+                unitOverride: null,
+                sets: Array.from({ length: 3 }, () => ({
+                  logged: false,
+                  result: null,
+                })),
+              },
+            ],
+          },
         })
         expectStructuredWorkoutAuthoringAttempt({
           entityId: workout.id,

@@ -1,6 +1,9 @@
 import * as z from "./zod-runtime.ts";
 import {
   workoutSessionPresentationV1Schema,
+  workoutSessionCardV1Bounds,
+  parseWorkoutSessionAppCardEnvelopeV4,
+  type WorkoutSessionAppCardEnvelopeV6,
 } from "./workout-session-card.ts";
 import {
   workoutMemberActionExpectedSetResultV1Schema,
@@ -15,11 +18,12 @@ export {
 export const memberActionV1Bounds = {
   actionId: 36,
   exerciseName: 60,
-  exercises: 8,
+  exercises: workoutSessionCardV1Bounds.exercises,
   expectedFreeformResult: 400,
   freeformResult: 200,
-  mutations: 72,
-  setsPerExercise: 8,
+  mutations: 2 * workoutSessionCardV1Bounds.exercises
+    * workoutSessionCardV1Bounds.setsPerExercise,
+  setsPerExercise: workoutSessionCardV1Bounds.setsPerExercise,
 } as const;
 
 const UUID_PATTERN =
@@ -506,13 +510,26 @@ export type MemberActionRejectionReasonV1 = z.infer<
   typeof memberActionRejectionReasonV1Schema
 >;
 
+const workoutLiveCardResultShape = {
+  card: z.custom<WorkoutSessionAppCardEnvelopeV6>((value) =>
+    value !== null && typeof value === "object" && "schemaVersion" in value
+    && value.schemaVersion === 6 && parseWorkoutSessionAppCardEnvelopeV4(value) !== null,
+  ).optional(),
+  // Read compatibility for already persisted results from the URL-based producer.
+  cardUrl: z.string().max(2_047).regex(WORKOUT_APP_CARD_URL_PATTERN).optional(),
+};
+
+function hasExactlyOneWorkoutCard(value: { card?: unknown; cardUrl?: string }): boolean {
+  return (value.card !== undefined) !== (value.cardUrl !== undefined);
+}
+
 export const workoutLiveSnapshotMemberActionResultV1Schema = z
   .object({
-    cardUrl: z.string().max(2_047).regex(WORKOUT_APP_CARD_URL_PATTERN),
+    ...workoutLiveCardResultShape,
     kind: z.literal("workout.live.snapshot"),
     version: z.literal(1),
   })
-  .strict();
+  .strict().refine(hasExactlyOneWorkoutCard, "Expected exactly one authoritative workout card.");
 
 export type WorkoutLiveSnapshotMemberActionResultV1 = z.infer<
   typeof workoutLiveSnapshotMemberActionResultV1Schema
@@ -520,11 +537,11 @@ export type WorkoutLiveSnapshotMemberActionResultV1 = z.infer<
 
 export const workoutLiveApplyMemberActionResultV1Schema = z
   .object({
-    cardUrl: z.string().max(2_047).regex(WORKOUT_APP_CARD_URL_PATTERN),
+    ...workoutLiveCardResultShape,
     kind: z.literal("workout.live.apply"),
     version: z.literal(1),
   })
-  .strict();
+  .strict().refine(hasExactlyOneWorkoutCard, "Expected exactly one authoritative workout card.");
 
 export type WorkoutLiveApplyMemberActionResultV1 = z.infer<
   typeof workoutLiveApplyMemberActionResultV1Schema

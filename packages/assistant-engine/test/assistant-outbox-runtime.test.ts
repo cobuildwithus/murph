@@ -2423,11 +2423,25 @@ describe('assistant outbox runtime', () => {
     })
   })
 
-  it.each(['goal-aware', 'totals-only'] as const)('persists one %s text fallback identity before acceptance and reuses it after restart', async (mode) => {
+  it.each(['goal-aware', 'totals-only', 'legacy-active-workout', 'legacy-completed-workout'] as const)('persists one %s text fallback identity before acceptance and reuses it after restart', async (mode) => {
     const { vaultRoot } = await createInitializedAssistantVault(
       'assistant-outbox-card-fallback-restart-',
     )
-    const card = mode === 'goal-aware' ? NUTRITION_RESPONSE_CARD : {
+    const legacyWorkout = mode === 'legacy-active-workout' || mode === 'legacy-completed-workout'
+    const card = legacyWorkout ? {
+      ...WORKOUT_RESPONSE_CARD,
+      workout: {
+        ...WORKOUT_RESPONSE_CARD.workout,
+        state: mode === 'legacy-active-workout' ? 'active' as const : 'completed' as const,
+        exercises: WORKOUT_RESPONSE_CARD.workout.exercises.map((exercise) => ({
+          ...exercise,
+          sets: exercise.sets.map((set) => ({
+            ...set,
+            status: mode === 'legacy-completed-workout' ? 'skipped' as const : set.status,
+          })),
+        })),
+      },
+    } : mode === 'goal-aware' ? NUTRITION_RESPONSE_CARD : {
       ...NUTRITION_RESPONSE_CARD,
       goals: { calories: null, proteinGrams: null, carbsGrams: null, fatGrams: null, fiberGrams: null },
     }
@@ -2448,7 +2462,9 @@ describe('assistant outbox runtime', () => {
       vault: vaultRoot,
     })
     const originalIdempotencyKey = `assistant-outbox:${intent.intentId}`
-    const fallbackIdempotencyKey = `${originalIdempotencyKey}:fallback`
+    const fallbackIdempotencyKey = legacyWorkout
+      ? originalIdempotencyKey
+      : `${originalIdempotencyKey}:fallback`
     const processTerminated = new Error('simulated process termination')
     const sendLinq = vi.fn<NonNullable<AssistantChannelDependencies['sendLinq']>>()
     const providerRequests: Array<Record<string, unknown>> = []
@@ -2503,7 +2519,7 @@ describe('assistant outbox runtime', () => {
           deliveryIdempotencyKey: fallbackIdempotencyKey,
           status: 'sending',
         })
-      expect(delivered.idempotencyKey).toBe(fallbackIdempotencyKey)
+      expect(delivered.idempotencyKey ?? request.idempotencyKey).toBe(fallbackIdempotencyKey)
       throw processTerminated
     })
 
@@ -2551,10 +2567,13 @@ describe('assistant outbox runtime', () => {
       message,
     })
     expect(sendLinq.mock.calls[1]?.[0]).not.toHaveProperty('card')
-    expect(providerRequests).toHaveLength(4)
-    expect(providerRequests.slice(1).map((request) => (
+    expect(providerRequests).toHaveLength(legacyWorkout ? 2 : 4)
+    expect(providerRequests.slice(legacyWorkout ? 0 : 1).map((request) => (
       request.message as { idempotency_key?: string }
-    ).idempotency_key)).toEqual([
+    ).idempotency_key)).toEqual(legacyWorkout ? [
+      originalIdempotencyKey,
+      originalIdempotencyKey,
+    ] : [
       originalIdempotencyKey,
       fallbackIdempotencyKey,
       fallbackIdempotencyKey,
@@ -2571,7 +2590,7 @@ describe('assistant outbox runtime', () => {
     const sentMemory = await readMemoryDocument(vaultRoot)
     expect(sentMemory.records.some((record) => record.text === NUTRITION_GOAL_INVITATION_SENT_MEMORY))
       .toBe(mode === 'totals-only')
-    if (mode === 'goal-aware') expect(sentMemory).toMatchObject({ exists: memoryBefore.exists, records: memoryBefore.records })
+    if (mode !== 'totals-only') expect(sentMemory).toMatchObject({ exists: memoryBefore.exists, records: memoryBefore.records })
 
   })
 
