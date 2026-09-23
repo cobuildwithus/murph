@@ -40,7 +40,7 @@ Outcome: identical useful deliveries and silence with less background work.
 Reaches: paused and opted-out outreach, active recurring and one-shot reminders,
 reactivation by inbound input, silent maintenance, startup delay and recovery.
 Proof: production scheduling/transport boundaries with synthetic fixtures;
-focused real-assistant proof if model-facing behavior changes. Verdict pending.
+focused real-assistant proof. Verdict: Ready after deterministic and live replay.
 
 ## Failure and evolution
 
@@ -95,11 +95,26 @@ typechecks passed, including the final engine/runtime rerun and Web typecheck.
 `pnpm complexity:diff`, `pnpm docs:drift`, diff whitespace and added-content
 privacy checks passed.
 
-The focused real-Codex canonical reminder journey now covers suppression,
-reactivation, one queued send, reconciliation and cancellation. The first local
-subscription attempt could not refresh authentication before a model response;
-the first alternate profile failed provider authentication. The supported
-alternate-profile retries are continuing. No credentials were copied.
+The focused real-Codex canonical reminder journey passed with gpt-6-sol and
+local subscription auth, covering suppression, reactivation, one queued send,
+reconciliation and cancellation. Command: `pnpm test:assistant:live -- --test
+'real model canonical reminder create fire and cancel' --model gpt-6-sol`
+with the supported alternate-profile option. Three model turns created the
+saved reminder, produced one concise delivery, and cancelled it; canonical
+state and outbox assertions passed. The actual synthetic replies were reviewed:
+truthful confirmation, one reminder, clear cancellation; UX verdict Ready.
+
+Initial local profiles failed authentication or quota before producing a model
+response. The first authenticated run then exposed missing built CLI artifacts
+in the fresh worktree. After `pnpm --filter @murphai/murph...
+--workspace-concurrency=1 build` and `node scripts/assemble-assistant-cli-surface.mjs`,
+the same profile passed. No credentials were copied. The missing CLI preflight
+is recorded in `.agents/friction-log/20260923093310-canonical-live-assistant/friction.md`.
+It is a proof-preparation issue, independent of the production change.
+
+Candidate: PR #3669. Parent review is complete; final ReviewGPT and required
+exact-head CI remain pending. The initial draft CI failures are explicit
+Ready-for-review guards, not test failures. Current-base merge-tree is clean.
 
 Rollout: deploy the additive Web milestone parser before the runtime producer;
 retain that consumer until new producers retire. Old singleton/assistant-batch
