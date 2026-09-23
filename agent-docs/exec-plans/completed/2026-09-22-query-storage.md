@@ -29,10 +29,30 @@ summary results, search, and complete query-cache restore. No production mutatio
   Existing complexity hotspots remain unchanged except idle maintenance decreases.
 - Product UX: internal physical representation only; public APIs and evidence stay
   intact. Changelog not applicable because member behavior is unchanged.
-- Pending: scoped candidate commit, PR, exact-head CI and final ReviewGPT.
+- Implementation is committed in PR #3660. Final ReviewGPT round 1 returned PASS
+  on b5009189455aa972a2d15c140ea51291118842cb with no qualifying findings.
+  Mountain lane selected GPT-6 Pro; the response model slug, exact preceding user
+  turn, response SHA-256 and completion marker were verified. Capture followed
+  the accepted send by 673 seconds, above the 180-second gate minimum.
+  The full snapshot metadata named sensitive scope, round 1, the same immutable
+  first/current head and no remediation delta. The substantive owner-path review
+  also reported 3,015 codec roundtrips, transaction rollback, malformed-data and
+  sparse-rowid/FTS checks. Its full repository suite was not run; CI owns that gate.
+- Review conversation: https://chatgpt.com/c/6ab32150-d8b8-83e9-b77a-ef0a9812b105
+- Local ignored evidence: `audit-packages/pr-3660-round-1.md` and its capture/model
+  verification sidecars. Response SHA-256:
+  `ec72cdc311ccf1fdd1934cba61fb81e8b258c8f408716060157b5a4673a9a72c`.
+- Parent final review accepted PASS: no outstanding findings. This closeout changes
+  only explanatory plan/index documentation; it does not alter the reviewed
+  production source, schema or behavior. Exact final-head CI is tracked by the PR
+  required checks and remains mandatory for handoff. No merge or deployment is
+  included in this task. Private source archive and production state stay untouched.
 
 ## Decisions
 
 SQLite owns compaction's transaction and interruption safety. No custom temporary
 file swap, scheduler, canonical migration, or additional durable truth owner.
 The original audit plan is completed historical evidence and remains unchanged.
+Status: completed
+Updated: 2026-09-22
+Completed: 2026-09-22
