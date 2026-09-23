@@ -1,12 +1,11 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { Buffer } from "node:buffer";
 
-import { KeyManagementServiceClient, protos } from "@google-cloud/kms";
-import { getVercelOidcToken } from "@vercel/oidc";
-import {
+import type { KeyManagementServiceClient, protos } from "@google-cloud/kms";
+import type {
   IdentityPoolClient,
   OAuth2Client,
-  type IdentityPoolClientOptions,
+  IdentityPoolClientOptions,
 } from "google-auth-library";
 
 const GCP_CLOUD_KMS_SCOPE = "https://www.googleapis.com/auth/cloudkms";
@@ -1074,7 +1073,19 @@ class HostedLocalGcpKmsClient implements HostedGcpKmsClient {
 }
 
 class OfficialHostedGcpKmsSdkTransport implements HostedGcpKmsSdkTransport {
-  constructor(private readonly client: KeyManagementServiceClient) {}
+  private client: Promise<KeyManagementServiceClient> | null = null;
+
+  constructor(private readonly config: HostedGcpKmsSdkClientConfiguration) {}
+
+  private getClient(): Promise<KeyManagementServiceClient> {
+    // Envelope verification does not need Google auth or KMS. Load the SDKs
+    // only for a real operation, sharing initialization across concurrent calls.
+    this.client ??= createOfficialGcpKmsSdkClient(this.config).catch((error: unknown) => {
+      this.client = null;
+      throw error;
+    });
+    return this.client;
+  }
 
   async encrypt(
     request: HostedGcpKmsSdkEncryptRequest,
@@ -1174,11 +1185,15 @@ class OfficialHostedGcpKmsSdkTransport implements HostedGcpKmsSdkTransport {
     request: object,
     options: HostedGcpKmsSdkCallOptions,
   ): Promise<TResponse> {
-    await runHostedGcpKmsFailureStage(
+    const client = await runHostedGcpKmsFailureStage(
       "sdk_initialize",
-      async () => await waitForAbortablePromise(this.client.initialize(), options.signal),
+      async () => {
+        const loaded = await waitForAbortablePromise(this.getClient(), options.signal);
+        await waitForAbortablePromise(loaded.initialize(), options.signal);
+        return loaded;
+      },
     );
-    const invoke = this.client.innerApiCalls[method];
+    const invoke = client.innerApiCalls[method];
     if (typeof invoke !== "function") {
       throw new TypeError(`Google Cloud KMS SDK method ${method} is unavailable.`);
     }
@@ -1187,7 +1202,7 @@ class OfficialHostedGcpKmsSdkTransport implements HostedGcpKmsSdkTransport {
       throw new TypeError(`Google Cloud KMS SDK method ${method} requires a resource name.`);
     }
     const call = requireCancellablePromise<[TResponse, unknown, unknown]>(
-      Reflect.apply(invoke, this.client.innerApiCalls, [
+      Reflect.apply(invoke, client.innerApiCalls, [
         request,
         {
           otherArgs: {
@@ -1207,47 +1222,19 @@ class OfficialHostedGcpKmsSdkTransport implements HostedGcpKmsSdkTransport {
   }
 }
 
-class HostedGcpIdentityPoolClient extends IdentityPoolClient {
-  private activeRefreshContext: HostedGcpAuthRefreshContext | null = null;
-  private readonly refreshContextOwner = {};
-
-  override getAccessToken(): ReturnType<IdentityPoolClient["getAccessToken"]> {
-    const inheritedContext = hostedGcpAuthRefreshContext.getStore()?.owner
-      === this.refreshContextOwner
-      ? hostedGcpAuthRefreshContext.getStore()
-      : undefined;
-    const ownsContext = !inheritedContext && !this.activeRefreshContext;
-    const context = inheritedContext
-      ?? this.activeRefreshContext
-      ?? createAuthRefreshContext(this.refreshContextOwner);
-    if (ownsContext) {
-      this.activeRefreshContext = context;
-    }
-    associateHostedGcpKmsAttemptWithAuthRefresh(context);
-    const operation = hostedGcpAuthRefreshContext.run(
-      context,
-      () => runHostedGcpKmsFailureStage(
-        "auth_refresh_wait",
-        async () => await super.getAccessToken(),
-      ),
-    );
-    if (!ownsContext) {
-      return operation;
-    }
-    return operation.finally(() => {
-      if (this.activeRefreshContext === context) {
-        this.activeRefreshContext = null;
-      }
-      finishHostedGcpKmsAuthRefreshContext(context);
-    });
-  }
-}
-
 function createOfficialGcpKmsSdkTransport(
   config: HostedGcpKmsSdkClientConfiguration,
 ): HostedGcpKmsSdkTransport {
-  const authClient = createOfficialGoogleAuthClient(config.credentials);
-  configureOfficialGoogleAuthTransport(authClient);
+  return new OfficialHostedGcpKmsSdkTransport(config);
+}
+
+async function createOfficialGcpKmsSdkClient(
+  config: HostedGcpKmsSdkClientConfiguration,
+): Promise<KeyManagementServiceClient> {
+  const [{ KeyManagementServiceClient }, authClient] = await Promise.all([
+    import("@google-cloud/kms"),
+    createOfficialGoogleAuthClient(config.credentials),
+  ]);
   const clientOptions: NonNullable<ConstructorParameters<typeof KeyManagementServiceClient>[0]> = {
     apiEndpoint: config.apiEndpoint,
     authClient,
@@ -1256,14 +1243,48 @@ function createOfficialGcpKmsSdkTransport(
     scopes: Array.from(config.scopes),
     universeDomain: "googleapis.com",
   };
-  return new OfficialHostedGcpKmsSdkTransport(
-    new KeyManagementServiceClient(clientOptions),
-  );
+  return new KeyManagementServiceClient(clientOptions);
 }
 
-function createOfficialGoogleAuthClient(
+async function createOfficialGoogleAuthClient(
   credentials: HostedGcpKmsCredentialConfiguration,
-): IdentityPoolClient | OAuth2Client {
+): Promise<IdentityPoolClient | OAuth2Client> {
+  const { IdentityPoolClient, OAuth2Client } = await import("google-auth-library");
+  class HostedGcpIdentityPoolClient extends IdentityPoolClient {
+    private activeRefreshContext: HostedGcpAuthRefreshContext | null = null;
+    private readonly refreshContextOwner = {};
+
+    override getAccessToken(): ReturnType<IdentityPoolClient["getAccessToken"]> {
+      const inheritedContext = hostedGcpAuthRefreshContext.getStore()?.owner
+        === this.refreshContextOwner
+        ? hostedGcpAuthRefreshContext.getStore()
+        : undefined;
+      const ownsContext = !inheritedContext && !this.activeRefreshContext;
+      const context = inheritedContext
+        ?? this.activeRefreshContext
+        ?? createAuthRefreshContext(this.refreshContextOwner);
+      if (ownsContext) {
+        this.activeRefreshContext = context;
+      }
+      associateHostedGcpKmsAttemptWithAuthRefresh(context);
+      const operation = hostedGcpAuthRefreshContext.run(
+        context,
+        () => runHostedGcpKmsFailureStage(
+          "auth_refresh_wait",
+          async () => await super.getAccessToken(),
+        ),
+      );
+      if (!ownsContext) {
+        return operation;
+      }
+      return operation.finally(() => {
+        if (this.activeRefreshContext === context) {
+          this.activeRefreshContext = null;
+        }
+        finishHostedGcpKmsAuthRefreshContext(context);
+      });
+    }
+  }
   if (credentials.kind === "static-access-token") {
     const client = new OAuth2Client({
       forceRefreshOnFailure: false,
@@ -1277,6 +1298,7 @@ function createOfficialGoogleAuthClient(
       expiry_date: Number.MAX_SAFE_INTEGER,
       token_type: "Bearer",
     });
+    addBoundedGoogleAuthTransportInterceptor(client.transporter, "auth_refresh_wait");
     return client;
   }
 
@@ -1310,29 +1332,27 @@ function createOfficialGoogleAuthClient(
     },
     type: GCP_EXTERNAL_ACCOUNT_TYPE,
   };
-  return new HostedGcpIdentityPoolClient(options);
+  const client = new HostedGcpIdentityPoolClient(options);
+  configureOfficialGoogleAuthTransport(client);
+  return client;
 }
 
 function configureOfficialGoogleAuthTransport(
-  authClient: IdentityPoolClient | OAuth2Client,
+  authClient: IdentityPoolClient,
 ): void {
-  if (authClient instanceof IdentityPoolClient) {
-    addBoundedGoogleAuthTransportInterceptor(
-      authClient.transporter,
-      "service_account_impersonation",
-    );
-    const stsCredential = Reflect.get(authClient, "stsCredential");
-    if (!isRecord(stsCredential)) {
-      throw new TypeError("Google Workload Identity STS transport is unavailable.");
-    }
-    const stsTransport = Reflect.get(stsCredential, "transporter");
-    if (!isGoogleAuthTransport(stsTransport)) {
-      throw new TypeError("Google Workload Identity STS transport is unavailable.");
-    }
-    addBoundedGoogleAuthTransportInterceptor(stsTransport, "sts_exchange");
-    return;
+  addBoundedGoogleAuthTransportInterceptor(
+    authClient.transporter,
+    "service_account_impersonation",
+  );
+  const stsCredential = Reflect.get(authClient, "stsCredential");
+  if (!isRecord(stsCredential)) {
+    throw new TypeError("Google Workload Identity STS transport is unavailable.");
   }
-  addBoundedGoogleAuthTransportInterceptor(authClient.transporter, "auth_refresh_wait");
+  const stsTransport = Reflect.get(stsCredential, "transporter");
+  if (!isGoogleAuthTransport(stsTransport)) {
+    throw new TypeError("Google Workload Identity STS transport is unavailable.");
+  }
+  addBoundedGoogleAuthTransportInterceptor(stsTransport, "sts_exchange");
 }
 
 function addBoundedGoogleAuthTransportInterceptor(
@@ -1442,6 +1462,7 @@ function readHostedGcpKmsCredentialConfiguration(
         ? AbortSignal.any([signal, timeoutSignal])
         : timeoutSignal;
       try {
+        const { getVercelOidcToken } = await waitForAbortablePromise(import("@vercel/oidc"), combinedSignal);
         const token = await waitForAbortablePromise(getVercelOidcToken(), combinedSignal);
         if (signal?.aborted) {
           throw createCallerAbortError();

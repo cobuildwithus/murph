@@ -1412,6 +1412,47 @@ or an ephemeral preview deployment URL as a long-lived provider callback or
 webhook base. Web build validation and the browser start boundary reject a
 hostname mismatch before provider authorization begins.
 
+### Mailbox fetch timing
+
+`/api/internal/hosted-mailbox/fetch` emits one content-free
+`hosted-mailbox.fetch.timing` record for the first request in a module instance,
+a failed request, or a request with at least 250 ms of handler work or verified
+signed-request age at handler entry. Fast later requests remain quiet.
+
+`phaseMs` separates authentication (including replay-nonce persistence), parsing,
+transaction acquisition, runtime authority locks/reads, member projection, access,
+mailbox projection, usage, response projection, transaction finish, optional group
+presentation, ingress-envelope verification, and serialization. `failedPhase`
+retains the failing phase even when the transaction rolls back afterward.
+`totalMs` stops when the handler constructs its response; it excludes framework
+response flushing and network transport.
+
+`poolAcquireMs` records actual pg checkouts, including new connection setup or
+pool queuing. Matching `poolBeforeAcquire` counts show idle/total connections and
+queued requests at checkout start. These help distinguish an empty pool from
+contention but do not independently measure TCP, TLS, or server-side waits.
+`dbNN.<model>.<operation>` gives query wall time without SQL, parameters or row
+contents. The record includes at most 24 operations and 24 pool samples plus
+aggregate counts/totals. Pool durations overlap query and transaction phase
+durations: do not add them together. The authority phase includes lock waits and
+SQL/network work, rather than claiming a pure server lock-wait measurement.
+
+`handlerStartedAt` and verified `signedAt` support platform-log correlation.
+`signedRequestToHandlerMs` also includes transport and inter-host clock skew;
+`firstRequestInModule` is not a Vercel cold-start verdict. Request bodies, member
+and attempt identifiers, nonce values, signatures and error prose are excluded.
+Diagnostics add no database writes or network requests and logging failure cannot
+replace the response or original error.
+
+The Google KMS, Google auth and Vercel OIDC SDKs load only for real KMS operations.
+Ingress-envelope reads verify signatures locally without evaluating those SDKs.
+Concurrent first KMS operations share client construction inside the existing
+`sdk_initialize` deadline/cancellation boundary; auth refresh and RPC policies are
+unchanged. This is Web-only, requires no migration or Worker rollout order, and
+preserves the existing response contract. After deployment, compare first-module
+and slow-fetch phase records with the same Vercel invocation metadata; local
+import benchmarks alone do not establish production latency savings.
+
 ### Vercel setup
 
 Set these under `Settings -> Environment Variables` in the Vercel project that

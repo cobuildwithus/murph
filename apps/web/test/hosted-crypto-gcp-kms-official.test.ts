@@ -263,6 +263,7 @@ afterEach(() => {
     "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJob3N0ZWQtdGVzdCJ9.synthetic-signature",
   );
   googleSdkMocks.authClients.length = 0;
+  googleSdkMocks.kmsClients.length = 0;
   googleSdkMocks.authRequest = null;
   googleSdkMocks.authRequests.length = 0;
   googleSdkMocks.kmsCall = null;
@@ -270,6 +271,17 @@ afterEach(() => {
 });
 
 describe("official Google Cloud KMS SDK boundary", () => {
+  it("defers SDK construction and shares one client across concurrent first operations", async () => {
+    const before = googleSdkMocks.kmsClients.length;
+    const client = createHostedGcpKmsClientFromEnv(STATIC_ENV);
+    expect(googleSdkMocks.kmsClients).toHaveLength(before);
+    const input = { additionalAuthenticatedData: "domain=control", keyName: KMS_KEY_NAME,
+      plaintext: new Uint8Array([1, 2, 3]) };
+    await Promise.all([client.encrypt(input), client.encrypt(input)]);
+    expect(googleSdkMocks.kmsClients).toHaveLength(before + 1);
+    expect(googleSdkMocks.kmsCalls).toHaveLength(2);
+  });
+
   it("uses the official client resources with cancellable no-retry unary calls and CRC wrappers", async () => {
     const client = createHostedGcpKmsClientFromEnv(STATIC_ENV);
 

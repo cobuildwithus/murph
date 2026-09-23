@@ -538,6 +538,10 @@ The admission and runtime launch reduction is recorded in
 Five-minute ingress cache retention and member isolation proof are tracked in
 [`ingress cache retention`](exec-plans/completed/2026-09-21-ingress-cache-five-minutes.md).
 
+Mailbox callback phase diagnostics and lazy Google SDK loading are owned by
+`apps/web/README.md` under "Mailbox fetch timing". Implementation evidence is
+tracked in `exec-plans/completed/2026-09-21-mailbox-fetch-startup.md`.
+
 ## Conventions
 
 Local feedback diagnostics are documented in
