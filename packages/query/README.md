@@ -18,6 +18,9 @@ carrying previous generations into compressed workspace snapshots. This adds
 no work to fresh read-only queries. The complete query database
 and its required sidecars remain eligible for encrypted checkpoint/restore;
 canonical source manifests still decide whether a restored cache is fresh.
+Malformed plain or archived audit JSONL retains the safe query-source error contract:
+logical vault-relative path and line number, without storage parser causes or
+source content.
 Version 31 creates query databases with 8 KiB pages to reduce overflow-page
 waste for JSON-heavy rows. The four standalone entity/search date indexes are
 omitted: existing date predicates use `COALESCE`/`substr`, while lexical search

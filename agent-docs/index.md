@@ -653,3 +653,6 @@ completion are tracked in [`query storage`](exec-plans/completed/2026-09-22-quer
 Worker callback preparation, HTTP-header timing, and bounded Vercel region
 attribution are tracked in
 [`mailbox latency phases`](exec-plans/completed/2026-09-22-mailbox-latency-phases.md).
+
+Preserving query-source error privacy across audit archives is tracked in
+[`audit query errors`](exec-plans/completed/2026-09-22-audit-query-errors.md).
