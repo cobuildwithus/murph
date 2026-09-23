@@ -152,6 +152,19 @@ describe("host-supplied shared participant labels", () => {
     expect(mocks.phones).not.toHaveBeenCalled();
   });
 
+  it("keeps identity and grants intact when a sparse metric batch uses fallback names", async () => {
+    mocks.enabled.mockReturnValue(true);
+    const { input } = setup();
+    const populated = await labelHostedGroupSharedMembers(input);
+    const sparseRows = input.members.map((row) => ({ ...row, projections: row.projections.map((projection) => ({
+      ...projection, dataStatus: "missing" as const, records: [],
+    })) }));
+    const sparse = await labelHostedGroupSharedMembers({ ...input, members: sparseRows });
+    expect(populated[0]?.displayName).toBe("Cedar");
+    expect(sparse[0]).toEqual({ ...sparseRows[0], displayName: "Participant FE225EF08E25" });
+    expect(mocks.contacts).toHaveBeenCalledOnce();
+  });
+
   it.each(["revoked-or-unsafe", "crypto-failure", "contact-failure", "wrong-phone", "unverified", "left-group", "changed-membership"])(
     "retains data and a stable label after %s", async (failure) => {
       mocks.enabled.mockReturnValue(true);

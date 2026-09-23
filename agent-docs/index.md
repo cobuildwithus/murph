@@ -5,6 +5,8 @@ recorded in [group report labels](exec-plans/completed/2026-09-22-group-report-l
 The presentation and privacy contracts remain owned by ARCHITECTURE.md and SECURITY.md.
 Plain contact-name presentation and PR preparation are tracked in
 [report label follow-up](exec-plans/completed/2026-09-22-group-report-labels-pr.md).
+The [email batch follow-up](exec-plans/completed/2026-09-22-group-report-email-batches.md)
+preserves one naming snapshot across sparse shared-data reads.
 
 Automation database load, daily scheduling, and Flex retry work:
 [`2026-09-21-automation-query-load.md`](exec-plans/completed/2026-09-21-automation-query-load.md).

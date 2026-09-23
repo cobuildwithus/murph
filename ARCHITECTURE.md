@@ -4082,6 +4082,10 @@ or roster position. Duplicate names receive a participant disambiguator.
 These labels are presentation only, carry no sender/effect authority, and are
 neither cached nor persisted. The existing displayName wire field carries them
 so old runtime consumers remain compatible.
+Multi-batch email aggregation retains the first complete host naming snapshot;
+presentation differences across metric batches do not invalidate a report.
+Member/participant identities, current-turn handles, grants, and recipient
+authorization remain independently checked.
 
 Group-to-private growth attribution is a separate, non-authoritative analytics
 projection. The existing capped roster reconciliation also upserts one global,
