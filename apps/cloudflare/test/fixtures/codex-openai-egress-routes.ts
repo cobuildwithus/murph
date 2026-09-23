@@ -205,6 +205,30 @@ export const PINNED_CODEX_OPENAI_EGRESS_INVENTORY = {
   ],
   nonProviderBinaryCandidates: [
     {
+      candidate: "/v1/liveuse",
+      disposition: "binary_false_positive",
+      owner: "codex",
+      reason: "The rebuilt 0.156.1 Linux CLI joins /v1/live to the adjacent useCases field label; scanning stops at its uppercase C. realtime_websocket/methods.rs constructs only the reviewed /v1/live endpoint.",
+    },
+    {
+      candidate: "/v1/6",
+      disposition: "binary_false_positive",
+      owner: "dependency",
+      reason: "The 0.156.1 Linux release places the /v1/ base-path literal beside numeric printable data among unrelated string constants. The pinned provider source contains no /v1/6 endpoint.",
+    },
+    {
+      candidate: "/v1/analytics/codex/turn-costsvariant",
+      disposition: "binary_false_positive",
+      owner: "codex-analytics",
+      reason: "The 0.156.1 Linux release joins the turn-cost route to adjacent serialized variant text. backend-client/src/client/turn_usage.rs sets only /v1/analytics/codex/turn-costs on the separate analytics origin.",
+    },
+    {
+      candidate: "/v1/liveapi.pathopponentazurefd.",
+      disposition: "binary_false_positive",
+      owner: "codex",
+      reason: "The 0.156.1 Linux release joins the /v1/live literal to unrelated field labels and host text. realtime_websocket/methods.rs constructs only the reviewed /v1/live endpoint.",
+    },
+    {
       candidate: "/v1/livecomments",
       disposition: "binary_false_positive",
       owner: "codex",

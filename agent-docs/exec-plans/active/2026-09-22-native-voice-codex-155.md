@@ -147,3 +147,28 @@ on 0.156.1 before the authorized fifth review.
   call proof remain completion gates.
 - Hosted-local startup proof passes 84 tests and its typecheck after removing
   the launch merge. Post-reconciliation complexity guard passes.
+
+## Final candidate proof and review
+
+- Final ReviewGPT round 5 passes at
+  `39960f678edefb1f12f59036868d780e40e8b87a` with GPT-6 Pro. The full
+  snapshot retained the first and previous review anchors. Committed user-turn
+  identity, preceding-turn signature, model identity and response SHA-256
+  `0800d36a2c2e09f774ce67cc89bbd3284bd2b975436129be4cd2492d0bd30698`
+  are verified; the owned review tab is closed. No serious bug or material
+  simplification finding remains.
+- The exact pinned Linux source image builds successfully. Its source fingerprint
+  is `6c0b8cb850851674f8d1e9ee279c80aab4d8235b355a4489188d49e12ae7e0fe`.
+  All four native voice cases, all 29 provider route/authority cases and the
+  final-image permission confinement proof pass against the extracted CLI.
+- Stock Linux provider proof passes 27 cases with two native-only skips. Four
+  source-traced concatenated binary strings receive explicit false-positive
+  dispositions in the existing test inventory. No provider allowlist or unknown
+  route rejection changes. These explain both failed CI route-inventory jobs.
+  Cloudflare typecheck passes after generating the runner's Prisma client.
+- The legacy macOS existing-call test passes alone with only its test startup
+  grace extended, completing in 1.08 seconds. The temporary diagnostic edit is
+  restored; no production timeout or committed patch changes. The original
+  65/66 suite result remains recorded without claiming a full green rerun.
+- The reviewed private build-cache companion PR #166 is merged at
+  `8cdaa121ed2e31a9514366b85331e30e09111efb`. This does not deploy voice.
