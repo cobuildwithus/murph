@@ -74,7 +74,6 @@ import {
 import {
   runOnboardingGoalCheckinAuthorityPrecondition,
 } from '../onboarding-goal-checkin-automation.js'
-import { canSkipManagedJournalConnectedContext } from '../journal-connected-context-eligibility.js'
 import { canSkipManagedPersonalPatterns } from '../personal-patterns-eligibility.js'
 import { canSkipManagedAutomaticMealCloseout } from '../automatic-meal-closeout-eligibility.js'
 import {
@@ -2109,17 +2108,6 @@ async function runAssistantCronAutomationPreconditions(input: {
       : null
   if (lifecycleResult?.kind === 'skip') {
     lifecycleSkipReason = lifecycleResult.reason
-  }
-  if (
-    lifecycleSkipReason === null &&
-    await canSkipManagedJournalConnectedContext({
-      automationId: input.source.automationId,
-      connectedApps: input.executionContext?.hosted?.connectedApps ?? null,
-      signal: input.signal,
-      vaultRoot: input.vault,
-    })
-  ) {
-    lifecycleSkipReason = 'Journal connected context has no connected accounts or existing ledger.'
   }
   if (lifecycleSkipReason === null
     && input.trigger === 'scheduled' && input.consecutiveFailures === 0

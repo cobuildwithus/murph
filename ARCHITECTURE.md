@@ -341,12 +341,12 @@ preserving independent follow-ups. Active connections are eligible silently,
 without connection-age or notice gates; explicit opt-outs remain controlling.
 The detailed contract is owned by `agent-docs/product-specs/journal.md`.
 
-The canonical cron lifecycle skips a managed Journal connected-context pass
-only when its ledger is genuinely missing and its complete connected-account
-inventory is empty. Existing ledgers, new accounts, unavailable ports, and
-failed reads keep the normal pass, preserving capture and due follow-ups.
-The account inventory owner rejects malformed pages instead of presenting them
-as empty. Journal, Personal Patterns, weekly digest/insight/research, monthly coaching,
+The canonical cron lifecycle admits the morning Journal pass even without a
+ledger or connected accounts: existing reminders may need repairs from
+member-supplied canonical context. The skill checks saved opt-outs before any
+connected-app call and owns source eligibility. The account inventory owner
+rejects malformed pages instead of presenting them as empty.
+Journal, Personal Patterns, weekly digest/insight/research, monthly coaching,
 and private memory/room-model maintenance retain
 Flex on failed-attempt retries. Ordinary reminders may retry at Standard after
 a failed Flex attempt. The provider boundary validates model and catalog support

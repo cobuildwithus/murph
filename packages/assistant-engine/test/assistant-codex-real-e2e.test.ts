@@ -19904,13 +19904,14 @@ describeRealCodex('real Codex morning reminder reconciliation e2e', () => {
     try {
       const binDirectory = path.join(workingDirectory, 'bin')
       await materializeJournalConnectedContextVaultCli({ binDirectory, vaultRoot: workingDirectory,
-        ledgerText: JSON.stringify({ version: 1, optOuts: { global: false, accounts: [], providers: [], categories: [] }, activeAccounts: [] }),
+        ledgerText: null,
       })
+      await expect(getKnowledgePage({ vault: workingDirectory, slug: 'journal-connected-context' })).rejects.toMatchObject({ code: 'knowledge_page_not_found' })
       const session = await upsertEvent({ vaultRoot: workingDirectory, payload: {
         kind: 'note', noteType: 'journal-plan', source: 'manual', title: 'Pool session',
-        occurredAt: '2026-11-12T20:00:00+01:00', timeZone: 'Europe/Warsaw',
-        note: 'Member confirmed today that the November 12 pool session moved from 18:00 to 20:00. Bring a towel.',
-        plan: { category: 'training', status: 'planned', endsAt: '2026-11-12T21:00:00+01:00', lastVerifiedAt: now.toISOString() },
+        occurredAt: '2026-11-12T12:00:00+01:00', timeZone: 'Europe/Warsaw',
+        note: 'Member confirmed today that the November 12 pool session moved from 18:00 to 12:00. Bring a towel.',
+        plan: { category: 'training', status: 'planned', endsAt: '2026-11-12T13:00:00+01:00', lastVerifiedAt: now.toISOString() },
       } })
       const collection = await upsertEvent({ vaultRoot: workingDirectory, payload: {
         kind: 'note', noteType: 'journal-context', source: 'manual', title: 'Repaired glasses collected',
@@ -19961,7 +19962,7 @@ describeRealCodex('real Codex morning reminder reconciliation e2e', () => {
           connectedApps: { request: async request => {
             providerOperations.push(request.operation)
             if (request.operation !== 'manage') throw new Error('There are no connected accounts to read.')
-            return { result: { accounts: [] } }
+            return { result: { accounts: [], toolkits: [] } }
           } },
           automationTool: { request: async request => {
             requests.push(request)
@@ -20009,7 +20010,7 @@ describeRealCodex('real Codex morning reminder reconciliation e2e', () => {
       expect(!/racket/iu.test(equipmentInstructions) || /only|suppl|provid|not.*racket|no.*racket/iu.test(equipmentInstructions)).toBe(true)
       expect(after[0]?.instructions).not.toBe(records[0]?.instructions)
       expect(after[0]?.schedule).toEqual(records[0]?.schedule)
-      expect(after[1]?.schedule).toEqual({ kind: 'at', at: '2026-11-12T18:00:00.000Z' })
+      expect(after[1]?.schedule).toEqual({ kind: 'at', at: '2026-11-12T10:00:00.000Z' })
       expect(after[1]?.contextReferences).toEqual(records[1]?.contextReferences)
       expect(after[2]?.status).toBe('archived')
       expect(after.slice(3, 7)).toEqual(records.slice(3, 7))
@@ -38612,13 +38613,15 @@ async function materializeJournalConnectedContextVaultCli(input: {
   binDirectory: string
   commandLogPath?: string
   vaultRoot: string
-  ledgerText?: string
+  ledgerText?: string | null
 }): Promise<void> {
   await initializeVault({ vaultRoot: input.vaultRoot, timezone: 'Europe/Warsaw' })
-  await upsertKnowledgePage({
-    vault: input.vaultRoot, slug: 'journal-connected-context', title: 'Journal connected context',
-    body: input.ledgerText ?? '# Journal connected context\n\n- account: calendar_old\n  toolkit: googlecalendar\n  state: baseline',
-  })
+  if (input.ledgerText !== null) {
+    await upsertKnowledgePage({
+      vault: input.vaultRoot, slug: 'journal-connected-context', title: 'Journal connected context',
+      body: input.ledgerText ?? '# Journal connected context\n\n- account: calendar_old\n  toolkit: googlecalendar\n  state: baseline',
+    })
+  }
   await materializeRealWorkoutVaultCli({
     binDirectory: input.binDirectory,
     commandLogPath: input.commandLogPath ?? path.join(input.vaultRoot, 'commands.log'),
