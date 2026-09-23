@@ -1,6 +1,6 @@
 # Protect admitted runtime startup from idle cleanup
 
-Status: active
+Status: completed
 Created: 2026-09-22
 Updated: 2026-09-22
 
@@ -26,7 +26,7 @@ Exercise real binding, readiness, expiry and SQLite stores with synthetic native
 
 1. Add a regression that fails on the existing cleanup path.
 2. Add the canonical-owner guard and update the lifecycle owner documentation.
-3. Verify, review, commit and open the scoped fix PR; complete required review gates.
+3. Verified and reviewed the candidate and opened PR #3664. Required exact-head CI is tracked on the PR before delivery.
 
 ## Verification
 
@@ -35,10 +35,12 @@ Exercise real binding, readiness, expiry and SQLite stores with synthetic native
 - Cloudflare typecheck passes after local Prisma generation; the initial unprepared checkout lacked generated Prisma exports.
 - Complexity diff passes: existing debt 67 and maximum 72 unchanged. Existing unrelated hotspots remain out of scope.
 - Changelog production rendering: 10 tests pass from repository-root Vitest; the documented app-local command matches no files (existing Frog reports). Web typecheck and docs drift pass.
-- Final ReviewGPT and required PR CI pending on PR #3664.
+- ReviewGPT round 1 passed on exact head `3198c5da6cb33129976fc9710f331a096dfc612b`; Pro response model and response hash verified, with zero findings. Parent review agrees. The first browser lane failed before submission; the replacement lane completed the same round.
+- Final required CI remains the PR delivery gate. Implementation and local proof are complete; no production deployment has run.
 
 ## Product UX
 
 - Outcome: avoid destroying a ready session during admitted message handoff.
 - Reaches: hosted member runtimes using immutable bound slots; platform rollout interruptions remain separate.
 - Proof: real lifecycle/binding owners with synthetic native/control boundaries, including readiness completing while the control read remains unresolved. Delivery and assistant behavior are unchanged; production latency is not claimed from local tests.
+Completed: 2026-09-22
