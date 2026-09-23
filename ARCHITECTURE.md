@@ -346,6 +346,11 @@ ledger or connected accounts: existing reminders may need repairs from
 member-supplied canonical context. The skill checks saved opt-outs before any
 connected-app call and owns source eligibility. The account inventory owner
 rejects malformed pages instead of presenting them as empty.
+Hosted foreground operations and route-authorized scheduled notifications bind
+the same automation tool through one execution-context factory. Cron supplies its
+verified delivery route before actual turn planning; the shared context has no
+ambient mutation tool. The canonical tool still owns version checks, route
+preservation, and readback. No per-job mutation allowlist or parallel repair API.
 Journal, Personal Patterns, weekly digest/insight/research, monthly coaching,
 and private memory/room-model maintenance retain
 Flex on failed-attempt retries. Ordinary reminders may retry at Standard after

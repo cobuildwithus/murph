@@ -227,6 +227,12 @@ older memory or provider evidence. Match the same subject and occurrence; a plan
 an absent reply, a failed/partial read, or an event missing from a search does not
 prove completion or cancellation. Respect all source and category opt-outs.
 
+A repair needs a concrete contradiction with current evidence. Judge correctness
+by meaning: equivalent wording is already correct. Do not polish a repaired
+instruction, add generic future-proofing, or add a new suppression condition to a
+recurring habit because one occurrence is complete. Stop once the mismatch is
+resolved; the same evidence on another pass is not a new reason to edit.
+
 Repair every supported mismatch through the existing automation inspect and
 version-checked patch path, not just location. This includes stale activity,
 preparation, equipment, venue, wording, dates, timezone assumptions, and references.
@@ -250,14 +256,14 @@ Keep changing facts in their canonical owners. Replace a permanently embedded
 incidental assumption with instructions to resolve current context at execution;
 for outdoor reminders, refer to the `connected-apps` location policy and then
 weather. Make the smallest instruction edit, preserving the original activity and
-delivery
-conditions. Reuse that policy instead of copying its procedure or adding new
+delivery conditions. Reuse that policy instead of copying its procedure or adding new
 weather-based suppression rules. Preserve an explicitly fixed destination or venue
 unless that destination itself was corrected. Do not copy the new itinerary into
 every reminder or create another location store. The reminder still resolves location if this morning pass fails.
 
 Patch only fields justified by current evidence. Preserve delivery route, audience,
-identity, and all unrelated fields. Use the owning support/clinical skill for
+identity, and all unrelated fields. Correcting content or timing is not a reason
+to change the reminder's model or reasoning settings. Use the owning support/clinical skill for
 managed, regimen, or experiment reminders; repair their reminder representation
 from the canonical plan without inventing treatment changes, modifying the plan,
 or overriding code-owned lifecycle rules. Do not touch group reminders or built-in

@@ -130,7 +130,10 @@ The morning pass uses `gpt-6-sol` with low reasoning effort for contextual
 reconciliation of existing reminders as well as connected plans. Cron admits it
 even when there is no connected-context ledger or connected account, because
 member-supplied facts can still require reminder repairs. The skill checks saved
-opt-outs before account selection or any connected-app call. Ordinary managed
+opt-outs before account selection or any connected-app call. Morning runs have
+ordinary vault read/write access and the normal automation editing tool; they do
+not use a separate reminder permission list. Existing member/conversation ownership
+and version-checked writes remain authoritative. Ordinary managed
 reconciliation archives the fixed afternoon automation without removing its
 Journal records or standalone follow-ups. Existing paused/archived morning records
 retain their status; active records converge to the current recipe.

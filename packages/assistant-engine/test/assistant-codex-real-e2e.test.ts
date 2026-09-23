@@ -20016,7 +20016,10 @@ describeRealCodex('real Codex morning reminder reconciliation e2e', () => {
       expect(after.slice(3, 7)).toEqual(records.slice(3, 7))
       expect(after.slice(7, 9).map(record => record?.status).sort()).toEqual(['active', 'archived'])
       expect(after.slice(9)).toEqual(records.slice(9))
-      for (const [index, record] of after.entries()) expect(record?.route).toEqual(records[index]?.route)
+      for (const [index, record] of after.entries()) {
+        expect(record?.route).toEqual(records[index]?.route)
+        expect(record?.assistantTargetOverride).toEqual(records[index]?.assistantTargetOverride)
+      }
       expect(providerOperations.every(operation => operation === 'manage')).toBe(true)
       expect((await readEvent({ vaultRoot: workingDirectory, eventId: session.eventId })).event).toEqual(session.event)
       expect((await readEvent({ vaultRoot: workingDirectory, eventId: collection.eventId })).event).toEqual(collection.event)
