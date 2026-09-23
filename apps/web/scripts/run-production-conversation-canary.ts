@@ -59,6 +59,7 @@ type LinqProductionCanaryResetResult = {
 
 type LinqProductionCanaryTurnResult = {
   latencyMs: number;
+  senderSendMs: number;
   stage: (typeof CANARY_TURNS)[number]["stage"];
   turn: number;
 };
@@ -106,12 +107,13 @@ export async function runLinqProductionCanary(
         void replyPromise.catch(() => undefined);
         throwCanaryFailure("send-unconfirmed");
       }
+      const senderSendMs = Math.round(performance.now() - sentAt);
       const reply = await replyPromise.catch(() => {
         throwCanaryFailure(`reply-unavailable; turn=${turn}; stage=${stage}; wait_limit_ms=${CANARY_REPLY_WAIT_MS}`);
       });
       const replyAt = performance.now();
       const latencyMs = Math.round(replyAt - sentAt);
-      const turnResult = { latencyMs, stage, turn };
+      const turnResult = { latencyMs, senderSendMs, stage, turn };
       reportTurn?.(turnResult);
       if (latencyMs >= CANARY_REPLY_BUDGET_MS) {
         throwCanaryFailure(
