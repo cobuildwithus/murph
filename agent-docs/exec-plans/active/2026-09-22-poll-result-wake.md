@@ -37,7 +37,7 @@ Provider and encryption work stays outside database transactions. The notificati
 
 - Implemented provider-bound Linq event reads, Telegram checkpoint evaluation, conservative roster thresholds, one-shot mailbox claim and wake recovery.
 - Parent review caught opaque assistant thread IDs versus native delivery targets; destination checks now use the canonical delivery target, and tests preserve an opaque context thread ID.
-- Focused Web proof: 96 tests across poll effects, provider events, notification ordering/replay/authority, Linq route regression and changelog rendering pass.
+- Focused Web proof: 97 tests across poll effects, provider events, notification ordering/replay/authority, Linq route regression and changelog rendering pass.
 - Web, assistant-engine and hosted-execution typechecks pass. Changed Web source ESLint, provider-request guard, docs drift and complexity guard pass. Existing webhook and prompt hotspots do not grow; new functions stay below 20.
 - Two production-notification real-Codex journeys on gpt-5.6-terra, local subscription: an unacknowledged majority queues exactly one short truthful tally reply; an already settled conversation skips with zero outbox entries. Reply review Ready. No production channel send claimed.
 - Changelog remains content-only, verified through the archive renderer and existing archive design reference. No new UI or screenshot required.
@@ -47,3 +47,7 @@ Provider and encryption work stays outside database transactions. The notificati
 
 - Freshness regression proof passes: production poll guidance makes a current read before participation claims; an independent five-attendee meetup fixture returns five distinct voters despite seven selections, with no unnecessary reminder. Real-Codex reply review Ready. Assistant deterministic tests and typecheck pass.
 - Refreshed complete provider-input measurement against the original PR base: individual 150140 to 152616 UTF-8 bytes, group 140544 to 143020, each +2476. Assembled instructions +1085, tool/schema +840; exact tokenizer unavailable. The conditional poll-result notification is a newly admitted turn, not additional ordinary-turn input.
+
+- Final ReviewGPT round 2 accepted one original-PR defect: the notification admission used the group-only authority checker for direct destinations. After user resume, replaced it with the existing direct/group-aware notification authority owner; no new state or abstraction.
+- Composed Linq and Telegram webhook tests reproduce both direct-channel failures before the correction, then pass with the real destination resolver, binder and authority checker. They also prove replay does not append twice and changed routing or revoked access prevents admission. The focused routing/notification/migration batch passes 43 tests.
+- Corrected the migration inventory proof to include the additive poll-notification migration. An unchanged billing PostgreSQL CI shard failed; a targeted rerun is pending, with no unrelated billing change claimed.

@@ -5,8 +5,7 @@ import { buildConversationPollResultInstructions } from "@murphai/hosted-executi
 import { getPrisma } from "../prisma";
 import { appendPreparedHostedMailboxEnvelopeTx, prepareHostedMailboxEnvelopeAppend, readHostedMailboxItemByDedupeKey } from "../hosted-mailbox/store";
 import { requireHostedRuntimeActiveAccess, isHostedRuntimeInactiveAccessError, hasHostedRuntimeActiveAccessForUpdateTx } from "../hosted-mailbox/runtime-access";
-import { resolveHostedAssistantNotificationDestination, bindHostedAssistantNotificationDestination } from "../hosted-routing/assistant-notification-destination";
-import { assertHostedThreadRouteEgressAuthority } from "../hosted-routing/thread-route-store";
+import { resolveHostedAssistantNotificationDestination, bindHostedAssistantNotificationDestination, assertHostedAssistantNotificationRouteAuthority } from "../hosted-routing/assistant-notification-destination";
 import { signalHostedMailboxAppendRuntime } from "../hosted-orchestration/signal-runtime";
 import { readPollDefinition, readPollResult } from "./store";
 import { readPollCompletion } from "./completion";
@@ -38,7 +37,7 @@ export async function maybeNotifyPollResult(row: HostedConversationPoll, voterHa
   }) });
   const appended = await prisma.$transaction(async (tx) => {
     if (!await hasHostedRuntimeActiveAccessForUpdateTx(row.memberId, { prisma: tx })) return null;
-    if (bound.externalThreadRouteAuthority) await assertHostedThreadRouteEgressAuthority({ authority: bound.externalThreadRouteAuthority, prisma: tx });
+    if (bound.externalThreadRouteAuthority) await assertHostedAssistantNotificationRouteAuthority({ authority: bound.externalThreadRouteAuthority, prisma: tx });
     const claimed = await tx.hostedConversationPoll.updateMany({ where: { id: row.id, resultNotifiedAt: null, resultEncrypted: row.resultEncrypted }, data: { resultNotifiedAt: new Date() } });
     if (claimed.count !== 1) return null;
     return appendPreparedHostedMailboxEnvelopeTx({ prepared, tx });

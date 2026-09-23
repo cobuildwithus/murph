@@ -4,8 +4,7 @@ const m = vi.hoisted(() => ({ claim: vi.fn(), prepare: vi.fn(), append: vi.fn(),
 vi.mock("../src/lib/prisma", () => ({ getPrisma: () => ({ $transaction: async (fn: (tx: unknown) => unknown) => fn({ hostedConversationPoll: { updateMany: m.claim } }) }) }));
 vi.mock("../src/lib/hosted-mailbox/store", () => ({ prepareHostedMailboxEnvelopeAppend: m.prepare, appendPreparedHostedMailboxEnvelopeTx: m.append, readHostedMailboxItemByDedupeKey: m.read }));
 vi.mock("../src/lib/hosted-mailbox/runtime-access", () => ({ requireHostedRuntimeActiveAccess: m.active, hasHostedRuntimeActiveAccessForUpdateTx: m.activeTx, isHostedRuntimeInactiveAccessError: (e: Error) => e.message === "inactive" }));
-vi.mock("../src/lib/hosted-routing/assistant-notification-destination", () => ({ resolveHostedAssistantNotificationDestination: m.destination, bindHostedAssistantNotificationDestination: ({ destination }: { destination: unknown }) => destination }));
-vi.mock("../src/lib/hosted-routing/thread-route-store", () => ({ assertHostedThreadRouteEgressAuthority: m.authority }));
+vi.mock("../src/lib/hosted-routing/assistant-notification-destination", () => ({ resolveHostedAssistantNotificationDestination: m.destination, bindHostedAssistantNotificationDestination: ({ destination }: { destination: unknown }) => destination, assertHostedAssistantNotificationRouteAuthority: m.authority }));
 vi.mock("../src/lib/hosted-orchestration/signal-runtime", () => ({ signalHostedMailboxAppendRuntime: m.signal }));
 vi.mock("../src/lib/hosted-polls/completion", () => ({ readPollCompletion: m.completion }));
 vi.mock("../src/lib/hosted-polls/store", () => ({ readPollDefinition: m.definition, readPollResult: m.result }));
