@@ -94,7 +94,10 @@ Updated: 2026-09-22
   exact-record recovery, protected pending content, and ordinary archive behavior.
 - Cleanup replay: Ready for duplicate callbacks before and after results, queued
   successors, active-child drain, conversation warmth, and remaining-pass budget.
-- Broader architecture and rollout: Hold pending consultation and performance proof.
+- Architecture consultation: complete. Keep two vCPUs and first remove avoidable
+  allocation at existing lifecycle and inventory owners. Delayed admission remains
+  a proposal pending a freshness decision and coordinated Temporal proof.
+- Production rollout: Hold pending separate authorization and performance proof.
   The earlier downsizing scenario is excluded from the cost target.
 
 ## Verification
@@ -139,3 +142,60 @@ Updated: 2026-09-22
 - `pnpm --dir apps/web typecheck` (standard generation), then
   `pnpm --dir apps/web typecheck:prepared` after final fragment provenance.
 - `pnpm exec vitest run --config apps/web/vitest.config.ts --no-coverage apps/web/test/changelog-page.test.tsx`
+
+## Architecture outcome
+
+1. Keep the current two-vCPU shape. Cloudflare bills active CPU separately from
+   provisioned memory and disk, so reduce unnecessary allocated seconds first.
+2. Retire unused pristine inventory through the existing off/zero-target path,
+   subject to a separately authorized foreground latency and burst comparison.
+   Preserve foreground admission and cold fallback. A ready-slot expiry that
+   immediately refills the same target is not a capacity reduction.
+3. Measure completion-to-stop intervals after both completion corrections, plus
+   zero-work continuations and history traversal. Do not equate observed recovery
+   tails with the proportion caused by one defect.
+4. If more savings are needed, extend existing dirty-resource admission with a
+   bounded delay for known routine daily totals. A fifteen-minute ceiling is a
+   candidate product choice, not current behavior. Workouts, sleep, messages,
+   explicit refresh/connect/backfill, revocation, and unknown hints stay immediate.
+   Foreground work drains available dirty state.
+5. An urgent arrival must advance and resignal a deferred or overdue batch even
+   when it was already dirty. Derive urgency from every outstanding obligation;
+   the latest event alone cannot erase earlier urgent work. Anchor a delay bound
+   to first accepted receipt time, not provider occurrence time or the existing
+   provider-derived firstDirtyAt field. Preserve revisions, payloads, independent
+   retry/retention deadlines, and checkpoint-backed acknowledgement.
+6. Implement any deferred-admission proposal together with the current external
+   Temporal worker and replay/lost-signal/urgent-arrival proof. A second queue or
+   scheduler is unnecessary. This PR does not implement that policy.
+7. Exact per-record retention expirations are legitimate separate obligations.
+   Leave eligibility and maximum deadlines unchanged. Earlier cleanup is a
+   product contract change; shared pending-input terminality can abandon work,
+   so neither a future clock nor a terminality call is a safe read-only shortcut.
+
+For a fixed instance, model daily cost as allocated seconds multiplied by its
+provisioned RAM/disk rate, plus active CPU seconds multiplied by the CPU rate.
+Remove inventory, startup, and completion-tail time as disjoint categories;
+apply each subsequent change to the remaining workload and subtract additional
+probes, cold starts, and any longer execution. Compare equivalent traffic and
+report freshness and foreground latency with billing. These formulas establish
+a target, not a deployed percentage guarantee.
+
+## Review evidence
+
+- Architecture consultation completed with an attached full source snapshot and
+  verified GPT-6 Pro response. Parent excludes downsizing and corrects the
+  proposed deadline anchor to actual webhook receipt metadata.
+- Final round one passed on 1844c2f9806f9a671925a04c33e417a8e827aea6. Verified
+  exact attachment/head metadata, response model, completion marker, and roughly
+  seven minutes of review. No accepted findings; exact-head CI also passed.
+- The exploratory consultation separately identified completion deferrals that
+  unnecessarily retain the ordinary recheck interval. Eight composed regressions
+  reproduced it against the current candidate. Completion now prearms the existing
+  one-second recheck before its unchanged generation/health guards; a fresh expiry
+  proves idle or retains the ordinary recovery/receipt deadline. Source shrinks
+  by five lines. The 290 lifecycle/callback tests, typecheck, and guards pass;
+  round two reviews the complete five-correction candidate.
+- Attachment retrieval failed an exact-response identity check twice while
+  exact-thread export succeeded. Do not bypass that guard or claim an applied
+  downloaded patch; independently verify the recommendation at its source owner.

@@ -2135,8 +2135,12 @@ export class RunnerContainer extends Container {
     // SDK 0.3.7 consumes a scheduled callback even if it throws. Persist the
     // next safety check before health/stop awaits; uncertainty grants recovery,
     // not a new conversation lease. A proved warm receipt replaces this date.
+    // Completion gets one short recheck even if a wake changed its generation:
+    // only the later expiry may inspect the current generation and stop it.
     await this.scheduleLifecycleCheck(
-      lifecycleObservedAtMs + readRunnerContainerLifecycleReevaluationMs(this.environment),
+      lifecycleObservedAtMs + (input.trigger === "invoke-completed"
+        ? HOSTED_CONTAINER_RUNTIME_COMPLETION_TIMEOUT_MS
+        : readRunnerContainerLifecycleReevaluationMs(this.environment)),
     );
 
     if (this.lifecycleInteractionChanged(input.expectedInteractionGeneration)) {
@@ -2289,15 +2293,6 @@ export class RunnerContainer extends Container {
       return false;
     }
     if (health.activeJobCount > 0) {
-      // The response can settle before the entrypoint's completion callback
-      // releases its active count. Give that drain one short recheck; ordinary
-      // expiry retains the normal cadence if work is still active then.
-      if (input.lifecycleStagePrefix === "invoke-completed"
-        && !this.lifecycleInteractionChanged(input.expectedInteractionGeneration)) {
-        await this.scheduleLifecycleCheck(
-          Date.now() + HOSTED_CONTAINER_RUNTIME_COMPLETION_TIMEOUT_MS,
-        );
-      }
       return false;
     }
     if (this.lifecycleInteractionChanged(input.expectedInteractionGeneration)) {

@@ -5627,6 +5627,76 @@ describe("RunnerContainer", () => {
     expect(destroy).toHaveBeenCalledOnce();
   });
 
+  it.each([
+    ["before-result", "drained"], ["after-result", "drained"],
+    ["before-result", "active-child"], ["after-result", "active-child"],
+    ["before-result", "conversation-warm"], ["after-result", "conversation-warm"],
+    ["before-result", "unknown-health"], ["after-result", "unknown-health"],
+  ] as const)("rechecks an accepted wake's completion %s with %s health", async (arrival, protection) => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const response = createDeferred<Response>();
+    try {
+      const completedAt = Date.parse("2026-08-01T12:00:00.125Z");
+      vi.setSystemTime(completedAt);
+      const started = createDeferred<void>();
+      let completed = false;
+      const { container, destroy } = createContainerDouble({
+        containerFetch: vi.fn(async (url: string) => {
+          if (url.endsWith("/health")) {
+            if (completed && protection === "unknown-health") return new Response(null, { status: 503 });
+            return Response.json({
+              ...createRunnerHealthResult(),
+              activeJobCount: completed && protection === "active-child" ? 1 : 0,
+              conversationActivityReceivedAtEpochMs: completed && protection === "conversation-warm" ? completedAt : null,
+            });
+          }
+          if (url.endsWith("/internal/runtime-wake")) return new Response(null, {
+            status: 204,
+            headers: { "x-runtime-wake-accepted": "1", "x-runtime-wake-identity-checked": "1" },
+          });
+          started.resolve();
+          return await response.promise;
+        }),
+      });
+      const request = createRunnerRequest("evt_wake_drained_before_completion");
+      const invocation = container.invoke({ job: { kind: "workspace-invocation", request }, timeoutMs: 60_000, userId: request.userId });
+      await started.promise;
+      const completion = { attemptId: request.attemptId, leaseGeneration: request.leaseGeneration, userId: request.userId };
+      await expect(container.wakeRuntime(completion)).resolves.toMatchObject({ action: "woken", kind: "accepted" });
+      if (arrival === "after-result") {
+        completed = true;
+        response.resolve(Response.json(createRunnerResult()));
+        await invocation;
+      }
+      const notification = container.onRuntimeCompletionRecorded(completion);
+      completed = true;
+      response.resolve(Response.json(createRunnerResult()));
+      await Promise.all([invocation, notification]);
+      // The old completion generation cannot stop even a drained child.
+      expect(destroy).not.toHaveBeenCalled();
+      const schedules = await container.listSchedules("onActivityExpired");
+      expect(schedules).toHaveLength(1);
+      const recheckAt = schedules[0]!.time * 1_000;
+      expect(recheckAt - completedAt).toBeGreaterThanOrEqual(1_000);
+      expect(recheckAt - completedAt).toBeLessThanOrEqual(2_000);
+      vi.setSystemTime(recheckAt);
+      await container.onActivityExpired();
+      if (protection === "drained") {
+        expect(destroy).toHaveBeenCalledOnce();
+        expect(await container.listSchedules("onActivityExpired")).toEqual([]);
+      } else {
+        expect(destroy).not.toHaveBeenCalled();
+        const expectedAt = protection === "conversation-warm"
+          ? Math.ceil((completedAt + 600_000) / 1_000)
+          : (recheckAt + 60_000) / 1_000;
+        expect(await container.listSchedules("onActivityExpired")).toMatchObject([{ time: expectedAt }]);
+      }
+    } finally {
+      response.resolve(Response.json(createRunnerResult()));
+      vi.useRealTimers();
+    }
+  });
+
   it("native deadline cleanup does not depend on platform activity renewal", async () => {
     const renewActivityTimeout = vi.fn(() => { throw new Error("synthetic renewal failure"); });
     const { container, destroy } = createContainerDouble({ initialStatus: "running" });

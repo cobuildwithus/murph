@@ -899,11 +899,14 @@ result in either arrival order and then runs the same lifecycle decision used by
 single interaction generation captured when that invocation enters the
 container. A later interaction, active invocation, active child work, or
 uncertain health/stop result defers cleanup to the pre-armed SDK safety check.
-When completion cleanup has no local invocation owner but the child still reports
-active work, it schedules one short check after the one-second completion callback
-budget. That check uses the ordinary expiry path and every existing safety guard;
-if work remains active, the normal recovery interval resumes. This avoids a full
-minute of idle retention when the completion callback is the last work to drain.
+Completion cleanup prearms one short check using the one-second completion
+callback budget before checking its interaction generation or live health. A wake
+handled during the invocation can invalidate the completion generation even when
+the child later drains; only the subsequent expiry may evaluate fresh ownership
+and health. The same check covers the entrypoint callback still holding its active
+count. If work or uncertainty remains at expiry, the normal recovery interval
+resumes. A proved warm conversation replaces that check with its absolute receipt
+expiry. No stale completion gains permission to destroy a newer interaction.
 Duplicate matching completion notifications retain the pending match when a
 queued interaction makes lifecycle evaluation yield. The matching waiter retries
 the same guarded cleanup; a duplicate cannot consume the only immediate cleanup
