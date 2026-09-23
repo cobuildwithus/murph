@@ -77,6 +77,7 @@ import {
 import {
   applyCanonicalWriteBatch,
   initializeVault,
+  upsertAutomation,
   isActiveCanonicalWriteLockError,
 } from "@murphai/core";
 import { describe, expect, test, vi } from "vitest";
@@ -1432,10 +1433,29 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     const items: HostedMailboxItem[] = [];
     const importedSeqs: string[] = [];
     const yieldStates: boolean[] = [];
+    const pendingPolicy = createDeferred<never>();
+    let activePolicySignal: AbortSignal | undefined;
+    const resolveScheduledLinqRoute = vi.fn(({ signal }: { signal?: AbortSignal | null }) => {
+      if (!signal) throw new Error("Expected policy lookup cancellation signal")
+      activePolicySignal = signal;
+      signal.addEventListener("abort", () => pendingPolicy.reject(signal.reason), { once: true });
+      return pendingPolicy.promise;
+    });
 
     try {
       vi.setSystemTime(new Date(TEST_NOW));
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      await upsertAutomation({
+        continuityPolicy: "fresh",
+        instructions: "Send the scheduled reminder.",
+        now: new Date(TEST_NOW),
+        route: { channel: "linq", deliveryTarget: "synthetic-thread", identityId: null, participantId: null, threadId: null, threadIsDirect: true },
+        schedule: { kind: "dailyLocal", localTime: "00:01", timeZone: "UTC" },
+        slug: "synthetic-recurring-reminder",
+        status: "active",
+        title: "Synthetic recurring reminder",
+        vaultRoot,
+      });
 
       await runHostedWorkspaceUntilIdleOrBudget({
         checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
@@ -1470,6 +1490,11 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           );
           yieldStates.push(input.shouldYieldBackgroundMaintenance?.() ?? false);
 
+          const statusPromise = assistantEngine.getAssistantCronStatus(vaultRoot, {
+            executionContext: { hosted: { memberId: TEST_USER_ID, userEnvKeys: [], resolveScheduledLinqRoute } },
+            shouldYieldBackgroundMaintenance: input.shouldYieldBackgroundMaintenance,
+          });
+          await vi.waitFor(() => expect(activePolicySignal).toBeDefined());
           items.push(createMailboxItem({
             id: "mailbox_item_runner_delivery_barrier_late_conversation",
             laneSeq: "1",
@@ -1482,6 +1507,11 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           );
           yieldStates.push(input.shouldYieldBackgroundMaintenance?.() ?? false);
 
+          await vi.waitFor(() => expect(activePolicySignal?.aborted).toBe(true));
+          const status = await statusPromise;
+          assert.equal(status.enabledJobs, 1);
+          assert.notEqual(status.nextRunAt, null);
+          assert.equal(resolveScheduledLinqRoute.mock.calls.length, 1);
           return { progressed: false };
         },
         vaultRoot,
@@ -1492,6 +1522,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       assert.deepEqual(importedSeqs, ["1"]);
       assert.deepEqual(yieldStates, [false, false, true]);
     } finally {
+      pendingPolicy.reject(new Error("synthetic test cleanup"));
       vi.useRealTimers();
       await rm(vaultRoot, { force: true, recursive: true });
     }

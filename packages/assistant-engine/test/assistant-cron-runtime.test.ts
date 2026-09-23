@@ -10828,7 +10828,7 @@ describe('assistant cron runtime orchestration', () => {
     )
   })
 
-  it.each(['chat_opted_out', 'automation_engagement_paused'] as const)('omits recurring %s outreach wakes and restores them after inbound eligibility changes', async deliveryBlockCode => {
+  it('omits engagement-paused recurring outreach wakes and restores them after inbound eligibility changes', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-08T09:20:00.000Z'))
     const { vaultRoot } = await createRuntimeContext('assistant-cron-recipient-wake-')
@@ -10839,7 +10839,7 @@ describe('assistant cron runtime orchestration', () => {
       automation.route.channel = 'linq'
       automation.route.threadIsDirect = true
     }
-    const resolveScheduledLinqRoute = vi.fn().mockResolvedValue({ deliveryBlockCode, target: 'room-1', threadIsDirect: true })
+    const resolveScheduledLinqRoute = vi.fn().mockResolvedValue({ deliveryBlockCode: 'automation_engagement_paused', target: 'room-1', threadIsDirect: true })
     const options = { executionContext: { hosted: { memberId: 'synthetic-member', userEnvKeys: [], resolveScheduledLinqRoute } } }
     await expect(getAssistantCronStatus(vaultRoot, options)).resolves.toMatchObject({ dueJobs: 0, enabledJobs: 2, nextRunAt: null })
     expect(resolveScheduledLinqRoute).toHaveBeenCalledOnce()
@@ -10847,6 +10847,46 @@ describe('assistant cron runtime orchestration', () => {
     resolveScheduledLinqRoute.mockResolvedValue({ target: 'room-1', threadIsDirect: true })
     await expect(getAssistantCronStatus(vaultRoot, options)).resolves.toMatchObject({ nextRunAt: '2026-04-08T10:00:00.000Z' })
     expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
+  })
+
+  it.each(['before', 'during'] as const)('yields optional wake policy reads when foreground work arrives %s the lookup', async timing => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-04-08T09:20:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext('assistant-cron-wake-preemption-')
+    for (let index = 0; index < 4; index += 1) {
+      addManagedResearchAutomation({ automationId: `synthetic-outreach-${index}`, tag: 'murph-managed:weekly-health-insight', vaultRoot })
+      const automation = getVaultAutomationStore(vaultRoot)[index]!
+      automation.route.channel = 'linq'
+      automation.route.deliveryTarget = `synthetic-thread-${index}`
+    }
+    let shouldYield = timing === 'before'
+    let activeSignal: AbortSignal | undefined
+    let releaseLookup: (() => void) | undefined
+    const resolveScheduledLinqRoute = vi.fn(({ signal }: { signal?: AbortSignal | null }) => {
+      if (!signal) throw new Error("Expected policy lookup cancellation signal")
+      activeSignal = signal
+      return new Promise<never>((_resolve, reject) => {
+        releaseLookup = () => reject(new Error('synthetic policy lookup interrupted'))
+        signal.addEventListener('abort', releaseLookup, { once: true })
+      })
+    })
+    const statusPromise = getAssistantCronStatus(vaultRoot, {
+      executionContext: { hosted: { memberId: 'synthetic-member', userEnvKeys: [], resolveScheduledLinqRoute } },
+      shouldYieldBackgroundMaintenance: () => shouldYield,
+    })
+    try {
+      if (timing === 'during') {
+        await vi.waitFor(() => expect(activeSignal).toBeDefined())
+        shouldYield = true
+        await vi.waitFor(() => expect(activeSignal?.aborted).toBe(true))
+      }
+      await expect(statusPromise).resolves.toMatchObject({ enabledJobs: 4, nextRunAt: '2026-04-08T10:00:00.000Z' })
+      expect(resolveScheduledLinqRoute).toHaveBeenCalledTimes(timing === 'before' ? 0 : 1)
+      expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
+    } finally {
+      releaseLookup?.()
+      await statusPromise
+    }
   })
 
   it('bounds recipient-policy reads and retains wakes for excess distinct routes', async () => {
@@ -10868,7 +10908,7 @@ describe('assistant cron runtime orchestration', () => {
     expect(resolveScheduledLinqRoute).toHaveBeenCalledTimes(4)
   })
 
-  it.each(['transient', 'chat-critical', 'one-shot', 'telegram', 'running', 'delivery', 'retry', 'maintenance'] as const)('preserves the %s wake when recurring Linq outreach is paused', async scenario => {
+  it.each(['transient', 'chat-critical', 'chat-opted-out', 'one-shot', 'telegram', 'running', 'delivery', 'retry', 'maintenance'] as const)('preserves the %s wake when recurring Linq outreach is paused', async scenario => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-08T09:20:00.000Z'))
     const { vaultRoot } = await createRuntimeContext('assistant-cron-recipient-recovery-')
@@ -10880,6 +10920,7 @@ describe('assistant cron runtime orchestration', () => {
     const resolveScheduledLinqRoute = vi.fn().mockResolvedValue({ deliveryBlockCode: 'automation_engagement_paused', target: 'room-1', threadIsDirect: true })
     if (scenario === 'transient') resolveScheduledLinqRoute.mockRejectedValue(new Error('synthetic unavailable authority'))
     if (scenario === 'chat-critical') resolveScheduledLinqRoute.mockResolvedValue({ deliveryBlockCode: 'chat_critical', target: 'room-1', threadIsDirect: true })
+    if (scenario === 'chat-opted-out') resolveScheduledLinqRoute.mockResolvedValue({ deliveryBlockCode: 'chat_opted_out', target: 'room-1', threadIsDirect: true })
     if (scenario === 'running' || scenario === 'delivery' || scenario === 'retry') {
       vi.setSystemTime(new Date('2026-04-08T10:20:00.000Z'))
       await claimFirstCanonicalCronJob(vaultRoot)
@@ -10904,7 +10945,7 @@ describe('assistant cron runtime orchestration', () => {
       : scenario === 'maintenance' ? '2026-04-09T04:00:00.000Z'
       : '2026-04-08T10:00:00.000Z'
     expect(status.nextRunAt).toBe(expectedWake)
-    expect(resolveScheduledLinqRoute).toHaveBeenCalledTimes(['transient', 'chat-critical'].includes(scenario) ? 1 : 0)
+    expect(resolveScheduledLinqRoute).toHaveBeenCalledTimes(['transient', 'chat-critical', 'chat-opted-out'].includes(scenario) ? 1 : 0)
   })
 
   it.each(['chat_critical', 'automation_engagement_paused'] as const)('skips a scheduled Linq turn before model work when %s blocks the route', async (deliveryBlockCode) => {

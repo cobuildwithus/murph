@@ -496,6 +496,7 @@ function isIdleEnabledAssistantCronEntry(entry: RunnableAssistantCronCanonicalEn
 export async function resolveAssistantCronWakeEntries(input: {
   entries: readonly RunnableAssistantCronCanonicalEntry[]
   executionContext?: AssistantExecutionContext | null
+  shouldYieldBackgroundMaintenance?: (() => boolean) | null
   vault: string
 }): Promise<readonly RunnableAssistantCronCanonicalEntry[]> {
   const blockedCandidates = new Set(input.entries.filter((entry) =>
@@ -513,44 +514,65 @@ export async function resolveAssistantCronWakeEntries(input: {
     : input.entries
   if (!input.executionContext?.hosted?.resolveScheduledLinqRoute) return entries
 
-  // Only stable recipient gates may disarm a recurring notification. Their
-  // recovery is inbound input, which refreshes this derived projection. Keep
-  // one-shots, accepted work, silent maintenance and transient failures armed.
-  const eligibilityByTarget = new Map<string, boolean>()
-  const eligible: RunnableAssistantCronCanonicalEntry[] = []
-  for (const entry of entries) {
-    if (!isIdleEnabledAssistantCronEntry(entry) || entry.source.kind !== 'automation'
-      || entry.source.schedule.kind === 'at' || entry.job.target.channel !== 'linq'
-      || canonicalAssistantCronSourceIsBackgroundMaintenance(entry.source)) {
-      eligible.push(entry)
-      continue
-    }
-    const key = JSON.stringify(entry.job.target)
-    let allowed = eligibilityByTarget.get(key)
-    if (allowed === undefined) {
-      // Wake suppression is optional: bound new control-plane reads and leave
-      // excess routes armed instead of turning status into unbounded fanout.
-      if (eligibilityByTarget.size >= 4) {
+  return resolveAssistantCronOutreachWakeEntries({
+    entries,
+    executionContext: input.executionContext,
+    shouldYieldBackgroundMaintenance: input.shouldYieldBackgroundMaintenance,
+  })
+}
+
+async function resolveAssistantCronOutreachWakeEntries(input: {
+  entries: readonly RunnableAssistantCronCanonicalEntry[]
+  executionContext: AssistantExecutionContext
+  shouldYieldBackgroundMaintenance?: (() => boolean) | null
+}): Promise<readonly RunnableAssistantCronCanonicalEntry[]> {
+  // Inbound engagement refreshes this derived projection. Provider health and
+  // opt-out can recover without inbound, so their existing timers stay armed,
+  // as do one-shots, accepted work, silent maintenance and uncertain reads.
+  const preemption = createAssistantCronForegroundPreemption({
+    jobName: 'wake eligibility',
+    shouldYield: input.shouldYieldBackgroundMaintenance ?? null,
+  })
+  try {
+    const eligibilityByTarget = new Map<string, boolean>()
+    const eligible: RunnableAssistantCronCanonicalEntry[] = []
+    for (const entry of input.entries) {
+      if (input.shouldYieldBackgroundMaintenance?.() === true) return input.entries
+      if (!isIdleEnabledAssistantCronEntry(entry) || entry.source.kind !== 'automation'
+        || entry.source.schedule.kind === 'at' || entry.job.target.channel !== 'linq'
+        || canonicalAssistantCronSourceIsBackgroundMaintenance(entry.source)) {
         eligible.push(entry)
         continue
       }
-      allowed = true
-      try {
-        await resolveAssistantCronAuthorizedNotificationDeliveryRoute({
-          executionContext: input.executionContext,
-          signal: new AbortController().signal,
-          target: entry.job.target,
-        })
-      } catch (error) {
-        allowed = !(error instanceof AssistantCronLinqHealthPreflightBlockedError
-          && (error.code === 'ASSISTANT_LINQ_EGRESS_AUTOMATION_ENGAGEMENT_PAUSED'
-            || error.code === 'ASSISTANT_LINQ_EGRESS_CHAT_OPTED_OUT'))
+      const key = JSON.stringify(entry.job.target)
+      let allowed = eligibilityByTarget.get(key)
+      if (allowed === undefined) {
+        // Wake suppression is optional: bound new control-plane reads and leave
+        // excess routes armed instead of turning status into unbounded fanout.
+        if (eligibilityByTarget.size >= 4) {
+          eligible.push(entry)
+          continue
+        }
+        allowed = true
+        try {
+          await resolveAssistantCronAuthorizedNotificationDeliveryRoute({
+            executionContext: input.executionContext,
+            signal: preemption.signal ?? new AbortController().signal,
+            target: entry.job.target,
+          })
+        } catch (error) {
+          allowed = !(error instanceof AssistantCronLinqHealthPreflightBlockedError
+            && error.code === 'ASSISTANT_LINQ_EGRESS_AUTOMATION_ENGAGEMENT_PAUSED')
+        }
+        if (preemption.wasForegroundYielded()) return input.entries
+        eligibilityByTarget.set(key, allowed)
       }
-      eligibilityByTarget.set(key, allowed)
+      if (allowed) eligible.push(entry)
     }
-    if (allowed) eligible.push(entry)
+    return eligible
+  } finally {
+    preemption.dispose()
   }
-  return eligible
 }
 
 export function isAssistantCronBackgroundMaintenanceYieldError(

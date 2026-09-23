@@ -2,7 +2,8 @@
 
 Runtime HTTP request reductions are tracked in
 [`runtime request reduction`](exec-plans/active/2026-09-23-runtime-request-reduction.md).
-Recipient wake eligibility remains owned by `operations/imessage-deliverability.md`;
+Recipient inactivity wake suppression, foreground preemption and provider-health recovery remain owned
+by `operations/imessage-deliverability.md`;
 retry/completion and telemetry contracts remain in the hosted runtime references.
 
 Workspace callback phase, database and pool timing semantics are owned by

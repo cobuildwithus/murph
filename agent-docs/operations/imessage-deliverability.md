@@ -233,10 +233,14 @@ occurrences use their ordinary delivery path. It does not hold the system mailbo
 or another channel's scheduled work behind a member-wide blocked wake.
 
 The hosted cron wake projection uses that same authority-only preflight to omit
-idle recurring Linq notifications when engagement is paused or the chat opted
-out. It deduplicates identical targets within one projection and checks at most
+idle recurring Linq notifications when engagement is paused. It deduplicates
+identical targets within one projection and checks at most
 four distinct targets serially; excess targets and uncertain/transient policy
-reads retain their timers. One-shot reminders, running claims, accepted delivery
+reads retain their timers. Foreground work interrupts optional policy reads through
+the existing cron preemption lifetime; unchecked routes retain their wake.
+Provider opt-out and health blocks also retain timers:
+health inventory can change those gates without an inbound runtime wake.
+One-shot reminders, running claims, accepted delivery
 or retry work, other channels, and silent maintenance remain eligible. No
 canonical automation is paused or rewritten. Ordinary foreground completion
 refreshes the projection after delivery, so new engagement re-arms subsequent

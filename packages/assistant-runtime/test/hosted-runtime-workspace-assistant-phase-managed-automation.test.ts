@@ -154,6 +154,73 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("checkpoints
     );
   });
 
+  it("interrupts a stalled recipient check in the ordinary timer preflight for foreground work", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-04-27T00:00:00.000Z"));
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "hosted-cron-preflight-yield-"));
+    const actualAssistantEngine = await vi.importActual<
+      typeof import("@murphai/assistant-engine")
+    >("@murphai/assistant-engine");
+    let foregroundObserved = false;
+    let activeSignal: AbortSignal | undefined;
+    let releaseLookup: (() => void) | undefined;
+    let phasePromise: ReturnType<typeof runHostedWorkspaceAssistantPhase> | undefined;
+    try {
+      await initializeVault({ createdAt: "2026-04-27T00:00:00.000Z", vaultRoot });
+      for (let index = 0; index < 4; index += 1) {
+        await upsertAutomation({
+          continuityPolicy: "fresh",
+          instructions: "Send the scheduled reminder.",
+          now: new Date("2026-04-27T00:00:00.000Z"),
+          route: { channel: "linq", deliveryTarget: `synthetic-thread-${index}`, identityId: null, participantId: null, threadId: null, threadIsDirect: true },
+          schedule: { kind: "dailyLocal", localTime: "00:01", timeZone: "UTC" },
+          slug: `synthetic-recurring-${index}`,
+          status: "active",
+          title: "Synthetic recurring reminder",
+          vaultRoot,
+        });
+      }
+      mocks.getAssistantCronStatus.mockImplementation(actualAssistantEngine.getAssistantCronStatus);
+      const input = createPhaseInput({
+        now: () => "2026-04-27T00:00:00.000Z",
+        shouldYieldBackgroundMaintenance: () => foregroundObserved,
+        vaultRoot,
+        workspace: {
+          ...createPhaseWorkspace({ redactedStatus: {} }),
+          systemMailboxProgressGeneration: "0",
+          nextDefaultProcessingWakeAt: "2026-04-27T00:00:00.000Z",
+          nextDefaultProcessingWakeReason: "assistant",
+        },
+      });
+      const assertEngagement = vi.fn<NonNullable<typeof input.runtime.platform.effectsPort.assertLinqRecentInboundEngagement>>(
+        async (_request, options) => {
+          activeSignal = options?.signal ?? undefined;
+          return await new Promise<never>((_resolve, reject) => {
+            releaseLookup = () => reject(new Error("synthetic policy lookup interrupted"));
+            activeSignal?.addEventListener("abort", releaseLookup, { once: true });
+          });
+        },
+      );
+      input.runtime.platform.effectsPort.assertLinqRecentInboundEngagement = assertEngagement;
+      phasePromise = runHostedWorkspaceAssistantPhase(input);
+      await vi.waitFor(() => expect(activeSignal).toBeDefined());
+      // This is the foreground predicate set by the concurrent mailbox importer.
+      foregroundObserved = true;
+      await vi.waitFor(() => expect(activeSignal?.aborted).toBe(true));
+      await phasePromise;
+      expect(assertEngagement).toHaveBeenCalledOnce();
+      expect(assertEngagement.mock.calls[0]?.[0].authorityCheckOnly).toBe(true);
+      await expect(mocks.getAssistantCronStatus.mock.results[0]?.value).resolves.toMatchObject({
+        enabledJobs: 4, nextRunAt: "2026-04-27T00:01:00.000Z",
+      });
+    } finally {
+      releaseLookup?.();
+      await phasePromise;
+      vi.useRealTimers();
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
   it("runs deterministic reminder availability in the hosted background pass", async () => {
     const parentRoot = await mkdtemp(path.join(tmpdir(), "hosted-reminder-availability-"));
     const vaultRoot = path.join(parentRoot, "vault");

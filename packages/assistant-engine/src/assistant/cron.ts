@@ -506,6 +506,7 @@ export async function getAssistantCronStatus(
   const wakeEntries = await resolveAssistantCronWakeEntries({
     entries: projection.canonicalEntries,
     executionContext: options.executionContext,
+    shouldYieldBackgroundMaintenance: options.shouldYieldBackgroundMaintenance,
     vault,
   })
   const now = new Date().toISOString()

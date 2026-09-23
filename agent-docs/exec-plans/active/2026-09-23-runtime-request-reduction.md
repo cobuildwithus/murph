@@ -37,7 +37,7 @@ Use synthetic regression scenarios; retain no private diagnostic evidence here.
 ## Product UX
 
 Outcome: identical useful deliveries and silence with less background work.
-Reaches: paused and opted-out outreach, active recurring and one-shot reminders,
+Reaches: engagement-paused outreach, active recurring and one-shot reminders,
 reactivation by inbound input, silent maintenance, startup delay and recovery.
 Proof: production scheduling/transport boundaries with synthetic fixtures;
 focused real-assistant proof. Verdict: Ready after deterministic and live replay.
@@ -79,9 +79,9 @@ Record commands, results, deployment boundaries, and remaining evidence here.
 - Changelog: internal-only request reduction. Existing delivery policy and
   member-visible reminder behavior are preserved.
 
-Focused proof covers paused/opted-out and reactivated recurring outreach;
+Focused proof covers engagement-paused and reactivated recurring outreach;
 one-shot, other-channel, running, pending-delivery, retry, silent-maintenance,
-transient-policy and excess-target paths; earlier ready wakes; lost completion
+provider-health/opt-out, transient-policy and excess-target paths; earlier ready wakes; lost completion
 and stale authority; milestone batch counts and attempt validation. The hosted
 phase test proves recipient policy remains after foreground delivery.
 
@@ -112,9 +112,21 @@ the same profile passed. No credentials were copied. The missing CLI preflight
 is recorded in `.agents/friction-log/20260923093310-canonical-live-assistant/friction.md`.
 It is a proof-preparation issue, independent of the production change.
 
-Candidate: PR #3669. Parent review is complete; final ReviewGPT and required
-exact-head CI remain pending. The initial draft CI failures are explicit
-Ready-for-review guards, not test failures. Current-base merge-tree is clean.
+Candidate: PR #3669. Initial exact-head CI passed (36 successful checks, three
+skipped); the draft-only guard failures were resolved by readying the candidate.
+The corrected candidate requires round 2 review and fresh exact-head CI.
+
+Parent recovery review narrowed suppression to inactivity. Provider opt-out is
+derived from chat health; `syncHostedLinqChatHealthInventory` can replace that
+status without an inbound message or cron wake. A timer removed while opted out
+could therefore remain absent after recovery. Retain its existing timer instead
+of adding a health-to-cron signaling owner. The regression checks that opt-out
+keeps the canonical next run visible. This removes one suppression condition;
+inactivity reactivation still uses the existing foreground projection refresh.
+The new opt-out regression failed against the first candidate (missing next run)
+and passed after removing that condition. All 11 focused wake cases, the engine
+typecheck and complexity guard passed after correction. The live inactivity
+journey remains applicable: its gate and model-facing path did not change.
 
 Rollout: deploy the additive Web milestone parser before the runtime producer;
 retain that consumer until new producers retire. Old singleton/assistant-batch
@@ -122,3 +134,19 @@ producers remain compatible with the new reader. Reverse skew can drop only
 best-effort runtime telemetry. Completion uses the already-shipped settled
 command; retained containers keep their existing callback. Production request
 counts and latency still require post-deploy measurement. No deployment here.
+
+ReviewGPT round 1 reviewed `1054993a6bb8c82c27bb23e0639cd053f1ac4801`
+with verified gpt-6-pro and found one High issue: optional policy reads in the
+normal timer preflight ignored foreground yield, potentially waiting for four
+transport timeouts before admitting an inbound turn. Accepted. Forward the
+existing status yield predicate and reuse the existing cron foreground
+preemption lifetime, disposing it after projection. Abort the active read,
+stop further reads and retain ordinary wakes when foreground work arrives.
+This removes the unowned lookup lifetime without adding a cancellation owner.
+Engine before/during-yield cases, real-engine ordinary hosted timer preflight,
+and concurrent mailbox-import regression pass. The latter proves the actual
+importer predicate aborts the active policy request. No prompt or reply change.
+
+After remediation, the full engine cron suite passed (259 cases), along with
+both hosted managed-automation and workspace-runner suites (200 cases). Engine
+and runtime typechecks validate the final callback and fixture contracts.
