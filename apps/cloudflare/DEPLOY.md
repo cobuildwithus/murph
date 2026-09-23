@@ -6,6 +6,11 @@ This document covers the narrow Cloudflare deploy surface for hosted execution.
 - `apps/cloudflare` owns execution coordination, encrypted runtime blobs, the native runner container, and the public/internal execution routes described in [README.md](./README.md).
 - Private `cobuildwithus/murph-cloud` owns production/preview GitHub environments, the protected deployment workflow, and rollback operations. Public Murph retains the source, render helpers, and smoke contracts that workflow consumes, but no deploy workflow or production credentials.
 
+For supported Cloudflare API reads and historical logs, prefer `cf` using the
+[operational CLI guidance](./README.md#cli-access-for-operational-reads).
+Deployment continues through the reviewed, pinned Wrangler helpers below;
+changing diagnostic CLI preference does not migrate the deployment contract.
+
 ## What The Deploy Flow Produces
 
 `pnpm --dir apps/cloudflare deploy:artifacts` renders:

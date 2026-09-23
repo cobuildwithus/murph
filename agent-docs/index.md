@@ -521,7 +521,7 @@ is recorded in [`2026-09-18-ios-canary-deployment-continuity.md`](exec-plans/com
 | `agent-docs/exec-plans/tech-debt-tracker.md` | Current debt register with owner/priority/status. | Rolling debt tracker | Medium | 2026-03-12 |
 | `agent-docs/prompts/seam-audits/` | One-pass bespoke seam prompts governed by a shared review-only, evidence, correction, and zero-finding contract. | Seam-audit prompt library | Low | 2026-07-13 |
 | `apps/web/README.md` | Hosted Web setup, runtime ownership, build/deploy contracts, and bounded legacy phone-call deletion execution. | `apps/web/**` | Medium | 2026-09-10 |
-| `apps/cloudflare/README.md` | Hosted execution-plane overview, runtime contract, and retired member shell-hint transport. | `apps/cloudflare/**` | Medium | 2026-09-10 |
+| `apps/cloudflare/README.md` | Hosted execution-plane overview, runtime contract, scoped `cf` CLI access for operational reads, and retired member shell-hint transport. | `apps/cloudflare/**` | Medium | 2026-09-10 |
 | `apps/cloudflare/scripts/benchmark-workspace-restore.md` | Synthetic encrypted restore benchmark, measurement controls, and local/Linux limitations. | Cloudflare workspace restore | Medium | 2026-09-04 |
 | `apps/cloudflare/DEPLOY.md` | Current deployment procedure for hosted execution, consumer-first Web runtime admission, single-pool capacity, isolated artifact smoke, compatible native gradual rollout, and member shell-hint transport retirement. | Hosted deploy flow | Medium | 2026-09-10 |
 | `packages/assistant-runtime/README.md` | Headless hosted runtime, durable completion, and Browser Vault wake qualification. | `packages/assistant-runtime/**` | Medium | 2026-09-11 |

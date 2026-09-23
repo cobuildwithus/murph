@@ -598,6 +598,53 @@ The runtime always includes the minimal `assistant` env profile. Deploy automati
 
 Cloudflare keeps only the wake-payload decryption lane plus the worker-owned callback-signing key. Broad web-private-field encryption stays in `apps/web`, and the hosted runtime reaches the web control plane through the worker proxy instead of holding callback-signing material directly.
 
+## CLI access for operational reads
+
+Prefer Cloudflare's `cf` CLI for supported API reads, especially historical
+Workers and Containers logs. Wrangler remains the repository's pinned tool for
+Worker development, deployment, type generation, and live tailing. Cloudflare
+currently labels `cf` a technical preview; verify command parity before changing
+CI or deployment helpers. See [Cloudflare's CLI guidance](https://developers.cloudflare.com/agent-setup/codex/).
+
+Install the reviewed CLI version separately from the workspace dependencies:
+
+```sh
+npm install --global cf@0.11.0
+cf --version
+cf observability telemetry query --help
+cf schema observability telemetry query
+```
+
+For operator-authorized historical-log reads, use scoped OAuth authentication:
+
+```sh
+cf auth login --scopes account:read user:read workers_observability:read workers_observability:write workers_observability_telemetry:write
+```
+
+Approve the requested optional scopes in Cloudflare's consent dialog. A successful
+Wrangler login or live tail does not prove historical-query access: the
+[telemetry query API](https://developers.cloudflare.com/api/resources/workers/subresources/observability/subresources/telemetry/methods/query/)
+requires Observability permissions. Verify access with an actual bounded query;
+report HTTP 403 as an access gap rather than repeating the same Wrangler login.
+The permission's write label does not authorize production mutations.
+
+Resolve the intended account through `cf accounts list` and set
+`CLOUDFLARE_ACCOUNT_ID` for the query process. Use
+`cf observability telemetry query --body '<query-json>'` with a temporary
+`queryId`, explicit millisecond `timeframe.from` and `timeframe.to`, a small
+`limit`, and appropriate dataset/service filters. Set `dry: true` to execute
+without persisting query results; `--dry-run` only validates the command and does
+not establish access. Workers and Containers use distinct datasets, so a Worker
+service filter alone may omit container shutdown logs. Narrow each query to the
+relevant runtime and time window, and paginate or refine filters when the limit
+is reached before claiming complete coverage.
+
+Capture responses privately and project only the required timestamps, event
+labels, timings, bounded counts, and outcome codes. Never print tokens or put
+them in command arguments, copy production secrets locally, or commit raw logs,
+account/member identifiers, or incident row contents. Existing authorization and
+private deployment boundaries still apply.
+
 ## Private Operational Telemetry
 
 OpenAI Responses upgrades return the upstream `Response` and unaccepted
