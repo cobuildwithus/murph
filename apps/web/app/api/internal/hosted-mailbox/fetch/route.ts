@@ -33,120 +33,123 @@ import { getPrisma } from "@/src/lib/prisma";
 import { requireHostedRuntimeCallbackTx } from "@/src/lib/hosted-execution/runtime-owner";
 import { readHostedRuntimeCallbackAuthority } from "@/src/lib/hosted-execution/runtime-write-fence";
 
+import { runWithHostedMailboxFetchTiming } from "@/src/lib/hosted-mailbox/fetch-timing";
+
 const HOSTED_MAILBOX_FETCH_CALLBACK_BODY_LIMIT_BYTES = 16 * 1024;
 
 export async function POST(request: Request): Promise<Response> {
-  const startedAt = performance.now();
-  let previousAt = startedAt;
-  const timings: Record<string, number> = {};
-  const mark = (phase: string) => {
-    const now = performance.now();
-    timings[phase] = Math.max(0, Math.round(now - previousAt));
-    previousAt = now;
-  };
-  const handle = withJsonError(async (request: Request) => {
+  let serverTiming = "";
+  const handle = withJsonError(async (request: Request) => runWithHostedMailboxFetchTiming(request, async (timing) => {
     const userId = await requireHostedCloudflareCallbackRequest(request, {
       runtimeAuthority: "caller_transaction",
       maxBodyBytes: HOSTED_MAILBOX_FETCH_CALLBACK_BODY_LIMIT_BYTES,
     });
-    mark("auth");
+    timing.authenticated();
+    timing.start("parse");
     const prisma = getPrisma();
     const rawBody = await readOptionalJsonObject(request);
     const body = parseHostedMailboxFetchRequest(rawBody);
     const authority = readHostedRuntimeCallbackAuthority(request);
-    mark("parse");
+    timing.start("transaction_acquire");
     const { mailbox, includeGroupRunningBit } = await prisma.$transaction(async (tx) => {
-      mark("transaction_start");
-      await requireHostedRuntimeCallbackTx(tx, userId, authority ? { ...authority, userId } : null);
-      mark("fence");
-      // One fresh projection supplies access, consent and read-first allowance.
-      const memberState = await tx.hostedMember.findUnique({
-        where: { id: userId },
-        select: {
-          ...getHostedRuntimeUsageMemberSelect(),
-          assistantProviderPreference: true,
-          inferenceConnection: { select: { selected: true, revision: true } },
-        },
-      });
-      mark("member");
-      const access = await requireHostedRuntimeMailboxActiveAccess(userId, {
-        prisma: tx,
-        memberState,
-      });
-      mark("access");
-      const assistantCustomInferenceRevision = !access.isThreadContainer
-          && memberState?.inferenceConnection?.selected
-        ? memberState.inferenceConnection.revision
-        : null;
-      const fetchedAt = new Date();
-      const projection = await fetchHostedRuntimeMailboxProjection({
-        prisma: tx,
-        cursorMode: body.cursorMode ?? null,
-        lanes: body.lanes.map((laneCursor) => ({
-          importedSeq: laneCursor.importedSeq,
-          lane: laneCursor.lane,
-        })),
-        limitPerLane: body.limitPerLane,
-        now: fetchedAt,
-        userId,
-      });
-      mark("projection");
-      const conversationWorkPresent = hostedMailboxItemsRequireAiUsageAccess({
-        consumedSeqByLane: projection.consumedSeqByLane,
-        items: projection.items.map((item) => ({
-          consumedAt: item.consumedAt ?? null,
-          lane: item.lane,
-          laneSeq: item.laneSeq,
-          payloadInlineCiphertext: item.payloadInlineCiphertext ?? null,
-          payloadRef: item.payloadRef ?? null,
-        })),
-        lanes: body.lanes,
-      });
-      const usage = conversationWorkPresent
-        ? await readHostedRuntimeMailboxAiUsageAccess({
-            consumedSeqByLane: projection.consumedSeqByLane,
-            lanes: body.lanes,
-            maxSeqByLane: projection.maxSeqByLane,
-            memberState: memberState ?? undefined,
-            prisma: tx,
+      timing.start("authority");
+      try {
+        await requireHostedRuntimeCallbackTx(tx, userId, authority ? { ...authority, userId } : null);
+        timing.start("member");
+        // One fresh projection supplies access, consent and read-first allowance.
+        const memberState = await tx.hostedMember.findUnique({
+          where: { id: userId },
+          select: {
+            ...getHostedRuntimeUsageMemberSelect(),
+            assistantProviderPreference: true,
+            inferenceConnection: { select: { selected: true, revision: true } },
+          },
+        });
+        timing.start("access");
+        const access = await requireHostedRuntimeMailboxActiveAccess(userId, {
+          prisma: tx,
+          memberState,
+        });
+        const assistantCustomInferenceRevision = !access.isThreadContainer
+            && memberState?.inferenceConnection?.selected
+          ? memberState.inferenceConnection.revision
+          : null;
+        const fetchedAt = new Date();
+        timing.start("mailbox");
+        const projection = await fetchHostedRuntimeMailboxProjection({
+          prisma: tx,
+          cursorMode: body.cursorMode ?? null,
+          lanes: body.lanes.map((laneCursor) => ({
+            importedSeq: laneCursor.importedSeq,
+            lane: laneCursor.lane,
+          })),
+          limitPerLane: body.limitPerLane,
+          now: fetchedAt,
+          userId,
+        });
+        timing.start("usage");
+        const conversationWorkPresent = hostedMailboxItemsRequireAiUsageAccess({
+          consumedSeqByLane: projection.consumedSeqByLane,
+          items: projection.items.map((item) => ({
+            consumedAt: item.consumedAt ?? null,
+            lane: item.lane,
+            laneSeq: item.laneSeq,
+            payloadInlineCiphertext: item.payloadInlineCiphertext ?? null,
+            payloadRef: item.payloadRef ?? null,
+          })),
+          lanes: body.lanes,
+        });
+        const usage = conversationWorkPresent
+          ? await readHostedRuntimeMailboxAiUsageAccess({
+              consumedSeqByLane: projection.consumedSeqByLane,
+              lanes: body.lanes,
+              maxSeqByLane: projection.maxSeqByLane,
+              memberState: memberState ?? undefined,
+              prisma: tx,
+              userId,
+            })
+          : { allowed: true, runningLow: false };
+        timing.start("projection");
+        if (!usage.allowed) {
+          return { includeGroupRunningBit: false, mailbox: parseHostedMailboxFetchResponse({
+            assistantProvider: access.assistantProvider,
+            assistantCustomInferenceRevision,
+            consumedSeqByLane: body.lanes.map(({ importedSeq, lane }) => ({
+              consumedSeq: importedSeq,
+              lane,
+            })),
+            fetchedAt: fetchedAt.toISOString(),
+            items: [],
+            maxSeqByLane: body.lanes.map(({ importedSeq, lane }) => ({
+              lane,
+              maxSeq: importedSeq,
+            })),
             userId,
-          })
-        : { allowed: true, runningLow: false };
-      mark("usage");
-      if (!usage.allowed) {
-        return { includeGroupRunningBit: false, mailbox: parseHostedMailboxFetchResponse({
+          }) };
+        }
+        return { includeGroupRunningBit: conversationWorkPresent && access.isThreadContainer, mailbox: parseHostedMailboxFetchResponse({
           assistantProvider: access.assistantProvider,
           assistantCustomInferenceRevision,
-          consumedSeqByLane: body.lanes.map(({ importedSeq, lane }) => ({
-            consumedSeq: importedSeq,
-            lane,
-          })),
+          ...(usage.runningLow ? { conversationUsageStatus: "low" as const } : {}),
+          consumedSeqByLane: projection.consumedSeqByLane,
           fetchedAt: fetchedAt.toISOString(),
-          items: [],
-          maxSeqByLane: body.lanes.map(({ importedSeq, lane }) => ({
-            lane,
-            maxSeq: importedSeq,
-          })),
+          items: projection.items,
+          maxSeqByLane: projection.maxSeqByLane,
           userId,
         }) };
+      } catch (error) {
+        timing.failed();
+        throw error;
+      } finally {
+        timing.start("transaction_finish");
       }
-      return { includeGroupRunningBit: conversationWorkPresent && access.isThreadContainer, mailbox: parseHostedMailboxFetchResponse({
-        assistantProvider: access.assistantProvider,
-        assistantCustomInferenceRevision,
-        ...(usage.runningLow ? { conversationUsageStatus: "low" as const } : {}),
-        consumedSeqByLane: projection.consumedSeqByLane,
-        fetchedAt: fetchedAt.toISOString(),
-        items: projection.items,
-        maxSeqByLane: projection.maxSeqByLane,
-        userId,
-      }) };
     });
-    mark("transaction_finish");
+    timing.start("group_presentation");
     // Decrypt optional presentation only after the database transaction ends.
     const groupRunningBit = includeGroupRunningBit
       ? await readHostedActiveGroupRunningBit({ now: new Date(mailbox.fetchedAt), prisma, runtimeMemberId: userId }).catch(() => null)
       : null;
-    mark("group");
+    timing.start("ingress_context");
     const consumed = mailbox.consumedSeqByLane?.find((cursor) => cursor.lane === "conversation");
     const inlineConversationPresent = mailbox.items.some((item) =>
       item.kind === "conversation.message" && item.lane === "conversation"
@@ -156,18 +159,12 @@ export async function POST(request: Request): Promise<Response> {
       && rawBody.decodeInlinePayloads === true && inlineConversationPresent
       ? await readMailboxIngressCryptoContext({ prisma, userId }).catch(() => null)
       : null;
-    mark("crypto");
+    timing.start("serialize");
     // This signed-envelope extension ends at the Worker; the canonical parser strips it.
-    const response = jsonOk({ ...mailbox, ...(groupRunningBit ? { groupRunningBit } : {}), ...(ingressCryptoContext ? { ingressCryptoContext } : {}) });
-    mark("serialize");
-    return response;
-  });
+    return jsonOk({ ...mailbox, ...(groupRunningBit ? { groupRunningBit } : {}), ...(ingressCryptoContext ? { ingressCryptoContext } : {}) });
+  }, (value) => { serverTiming = value; }));
   const response = await handle(request);
-  timings.total = Math.max(0, Math.round(performance.now() - startedAt));
-  // Fixed internal stage names and durations only. Old Workers ignore this
-  // optional header; it adds no database operation or telemetry callback.
-  response.headers.set("server-timing", Object.entries(timings)
-    .map(([phase, duration]) => `murph_mailbox_${phase};dur=${duration}`).join(", "));
+  response.headers.set("server-timing", serverTiming);
   return response;
 }
 

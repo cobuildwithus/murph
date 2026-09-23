@@ -25,7 +25,7 @@ describe("hosted usage-credit durable product contract", () => {
       /post-settlement usage path.*never calls Stripe or waits for payment/iu,
     );
     expect(normalizedProductSpec).toMatch(
-      /Stripe event reconciliation is the only authority.*grants the \$5/iu,
+      /Stripe event reconciliation is the only authority.*grants the purchase's frozen usage value/iu,
     );
     expect(normalizedProductSpec).toContain(
       "unused credit",

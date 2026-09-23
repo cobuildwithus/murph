@@ -663,6 +663,7 @@ model HostedMember {
   inferenceConnection            HostedInferenceConnection?
   computerRuns                   HostedComputerRun[]
   computerHandoffs               HostedComputerHandoff[]
+  conversationPolls              HostedConversationPoll[]
   phoneCalls                     HostedPhoneCall[]
   physicalNotes                  HostedPhysicalNote[]
   physicalNoteRecoveries         HostedPhysicalNoteRecovery[]
@@ -2687,4 +2688,39 @@ model HostedAuthRecord {
   @@index([model, memberId, id])
   @@index([model, expiresAt, id])
   @@map("hosted_auth_record")
+}
+
+model HostedConversationPoll {
+  id                    String       @id
+  memberId              String       @map("member_id")
+  channel               String
+  conversationKey       String       @map("conversation_key")
+  providerPollKey       String?      @unique @map("provider_poll_key")
+  definitionEncrypted   String       @map("definition_encrypted")
+  resultEncrypted       String?      @map("result_encrypted")
+  dispatchedAt          DateTime?    @map("dispatched_at")
+  lastUpdateId          BigInt?      @map("last_update_id")
+  closedAt              DateTime?    @map("closed_at")
+  createdAt             DateTime     @default(now()) @map("created_at")
+  updatedAt             DateTime     @updatedAt @map("updated_at")
+  member                HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  votes                 HostedConversationPollVote[]
+
+  @@index([memberId, conversationKey, createdAt], map: "hosted_conversation_poll_conversation_idx")
+  @@index([channel, dispatchedAt])
+  @@map("hosted_conversation_poll")
+}
+
+model HostedConversationPollVote {
+  pollId                String       @map("poll_id")
+  voterKey              String       @map("voter_key")
+  voteEncrypted         String       @map("vote_encrypted")
+  lastUpdateId          BigInt       @map("last_update_id")
+  hasVote               Boolean      @map("has_vote")
+  poll                  HostedConversationPoll @relation(fields: [pollId], references: [id], onDelete: Cascade)
+
+  @@id([pollId, voterKey])
+  @@index([pollId, hasVote, voterKey], map: "hosted_conversation_poll_vote_page_idx")
+  @@map("hosted_conversation_poll_vote")
 }

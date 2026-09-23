@@ -78,7 +78,9 @@ import {
   reconcileHostedUsageReferralRewardAfterCommit,
 } from "@/src/lib/hosted-growth/usage-referral";
 import {
+  activateHostedGroupSponsorshipAuthorizationForPurchaseTx,
   admitHostedGroupSponsorshipRefillTx,
+  createHostedGroupSponsorshipAuthorizationTx,
   cancelHostedGroupSponsorshipsForPayerAccountDeletionTx,
   hasHostedGroupSponsorshipPaymentAuthorityTx,
   prepareHostedGroupSponsorshipRecoveryTx,
@@ -117,6 +119,7 @@ import {
 import {
   resolveHostedAssistantNotificationDestination,
 } from "@/src/lib/hosted-routing/assistant-notification-destination";
+import { getHostedUsageCreditOfferDefinition } from "@/src/lib/hosted-onboarding/usage-credit-offers";
 import { createPrismaClient } from "@/src/lib/prisma";
 
 const databaseUrl = process.env.DATABASE_URL?.trim() ?? "";
@@ -5625,6 +5628,119 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           releaseClient.$disconnect(),
           subscriptionClient.$disconnect(),
         ]);
+      }
+    });
+
+    it.each(["current", "legacy"] as const)(
+      "persists %s sponsorship activation and current refills under the migrated constraint",
+      async (policy) => {
+        const fixture = await createUsageCreditFixture({ crossOwner: true });
+        const now = new Date("2026-07-16T12:01:00.000Z");
+        const offer = getHostedUsageCreditOfferDefinition("usage_5_usd");
+        const grantUsdMicros = policy === "current" ? offer.grantUsdMicros : 5_000_000n;
+        const rollback = new Error("rollback sponsorship grant proof");
+        try {
+          await expect(fixture.observer.$transaction(async (tx) => {
+            await lockHostedUsageCreditBeneficiaryTx({
+              beneficiaryMemberId: fixture.beneficiaryMemberId, tx,
+            });
+            const authorization = await createHostedGroupSponsorshipAuthorizationTx({
+              beneficiaryMemberId: fixture.beneficiaryMemberId,
+              monthlyCapMinor: 1_000,
+              now,
+              payerMemberId: fixture.payerMemberId,
+              tx,
+            });
+            const original = await tx.hostedUsageCreditPurchase.delete({
+              where: { id: fixture.purchaseId },
+            });
+            // Insert catalog terms into the real migrated activation shape.
+            await tx.hostedUsageCreditPurchase.create({
+              data: {
+                ...original,
+                checkoutCancelUrl: `https://example.test/groups/fund/cancel?usageCheckout=cancel&usagePurchase=${fixture.purchaseId}`,
+                checkoutSuccessUrl: `https://example.test/groups/fund/return?usageCheckout=success&usagePurchase=${fixture.purchaseId}`,
+                checkoutRequestPolicyVersion: "hosted-usage-credit-checkout-v4",
+                cashAmountMinor: offer.cashAmountMinor,
+                cashCurrency: offer.cashCurrency,
+                grantUsdMicros,
+                groupSponsorshipAuthorizationId: authorization.authorizationId,
+                groupSponsorshipChargeOrdinal: 0,
+                groupSponsorshipPeriodStartedAt: authorization.periodStartedAt,
+                offerCode: offer.code,
+              },
+            });
+            const grant = await grantHostedUsageCreditForPurchaseTx({
+              paidAt: now, purchaseId: fixture.purchaseId, tx,
+            });
+            expect(grant).toMatchObject({ balanceUsdMicros: grantUsdMicros, granted: true });
+            await expect(activateHostedGroupSponsorshipAuthorizationForPurchaseTx({
+              paidAt: now, purchaseId: fixture.purchaseId, tx,
+            })).resolves.toBe(true);
+            await expect(grantHostedUsageCreditForPurchaseTx({
+              paidAt: now, purchaseId: fixture.purchaseId, tx,
+            })).resolves.toMatchObject({ balanceUsdMicros: grantUsdMicros, granted: false });
+
+            const admission = {
+              beneficiaryMemberId: fixture.beneficiaryMemberId,
+              capacityState: "low" as const,
+              now, tx,
+            };
+            const refill = await admitHostedGroupSponsorshipRefillTx(admission);
+            expect(refill).not.toBeNull();
+            await expect(admitHostedGroupSponsorshipRefillTx(admission)).resolves.toEqual(refill);
+            await expect(tx.hostedUsageCreditPurchase.findMany({
+              select: { cashAmountMinor: true, grantUsdMicros: true },
+              where: {
+                groupSponsorshipAuthorizationId: authorization.authorizationId,
+                groupSponsorshipChargeOrdinal: 1,
+              },
+            })).resolves.toEqual([{ cashAmountMinor: 500, grantUsdMicros: 4_000_000n }]);
+            throw rollback;
+          }, transactionOptions)).rejects.toBe(rollback);
+        } finally {
+          await cleanupUsageCreditFixture(fixture);
+        }
+      },
+    );
+
+    it.each([
+      { grantUsdMicros: 3_000_000n },
+      { cashAmountMinor: 400 },
+      { cashCurrency: "eur" },
+      { offerCode: "usage_10_usd" },
+      { groupSponsorshipChargeOrdinal: -1 },
+      { groupSponsorshipChargeOrdinal: null },
+      { groupSponsorshipPeriodStartedAt: null },
+      { groupSponsorshipAuthorizationId: null },
+    ])("rejects malformed sponsorship purchase terms: %o", async (invalidTerms) => {
+      const fixture = await createUsageCreditFixture({ crossOwner: true });
+      const now = new Date("2026-07-16T12:01:00.000Z");
+      try {
+        await expect(fixture.observer.$transaction(async (tx) => {
+          await lockHostedUsageCreditBeneficiaryTx({
+            beneficiaryMemberId: fixture.beneficiaryMemberId, tx,
+          });
+          const authorization = await createHostedGroupSponsorshipAuthorizationTx({
+            beneficiaryMemberId: fixture.beneficiaryMemberId,
+            monthlyCapMinor: 1_000,
+            now,
+            payerMemberId: fixture.payerMemberId,
+            tx,
+          });
+          await tx.hostedUsageCreditPurchase.update({
+            data: {
+              grantUsdMicros: 4_000_000n,
+              groupSponsorshipAuthorizationId: authorization.authorizationId,
+              groupSponsorshipChargeOrdinal: 0,
+              groupSponsorshipPeriodStartedAt: authorization.periodStartedAt,
+              ...invalidTerms,
+            },
+            where: { id: fixture.purchaseId },
+          });
+        }, transactionOptions)).rejects.toThrow("hosted_usage_credit_purchase_sponsorship_shape_valid");
+      } finally {
+        await cleanupUsageCreditFixture(fixture);
       }
     });
 

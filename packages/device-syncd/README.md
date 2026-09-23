@@ -527,6 +527,12 @@ inventory. Every canonical import retains its live connection-source admission
 check. The scope contains provider inventory only, never cached authorization
 or durable state.
 
+Within one full-job timeseries continuation, reuse successful inventory across
+its existing bounded daily units. Empty units share one final source-lifecycle
+fence check before returning progress; populated units still check live authority
+before each canonical import. Return, yield, or failure discards this local scope.
+Daily coverage, retry windows, and foreground yield points remain unchanged.
+
 Schedule-time extended history, including weight, keeps one active identity per
 source lifecycle and coverage generation across day boundaries. Source-first
 exact history retains its window identity. Empty weight retry roots at their

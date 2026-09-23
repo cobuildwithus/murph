@@ -27,6 +27,16 @@ shutdown. Its 12 cases use the production entrypoint and mailbox importer.
 release build/typecheck job, in addition to normal package coverage. CI policy
 tests reject a missing, conditionally skipped, or allowed-to-fail gate.
 
+Mailbox fetch phase and pool attribution are covered by
+`hosted-mailbox-fetch-timing.test.ts`, `prisma-store-client.test.ts`, and the
+opt-in local PostgreSQL suites `prisma-store-pool-timing-postgres.test.ts` and
+`hosted-runtime-callback-query-load-postgres.test.ts`. They prove lazy query
+execution remains in the collector scope, actual checkout queuing, composed
+signed-callback diagnostics and unchanged replay/fence/access rejection.
+`hosted-crypto-lazy-sdk.test.ts` rejects eager SDK evaluation while loading the
+actual route; the GCP KMS official/real-SDK suites cover deferred operation,
+concurrent first-use client reuse, integrity, cancellation and auth lifetimes.
+
 ## Current Repo Checks
 
 Background-only checkpoint timing is covered by

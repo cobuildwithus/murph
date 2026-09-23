@@ -550,6 +550,12 @@ Execution eligibility stays unchanged, and explicitly approved continuations
 retain their foreground priority. Foreground/default work must replace an
 active system-mailbox or retention owner instead of waiting for its idle
 checkpoint.
+A completed background preparation carries its existing progress evidence into
+the workspace checkpoint. A system-mailbox invocation that advances the durable
+progress generation and retains the same due device wake requests an immediate
+owner-release recheck, even without mailbox lag. Failed or unchanged passes and
+future retry wakes do not request this continuation. This recheck stays model-free
+unless independent foreground authority also requests a handoff.
 If a default invocation's live checks disprove its overdue projection and the
 next due frontier belongs to a model-free owner, the runtime first checkpoints
 the corrected projections without advancing handled-through or the system

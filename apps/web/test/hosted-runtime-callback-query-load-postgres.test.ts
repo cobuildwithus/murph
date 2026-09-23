@@ -25,6 +25,7 @@ vi.mock("@/src/lib/prisma", async (importOriginal) => ({
   },
 }));
 import { POST } from "../app/api/internal/hosted-mailbox/fetch/route";
+import { createPrismaClient } from "../src/lib/prisma";
 
 const databaseUrl = process.env.DATABASE_URL?.trim() ?? "";
 const enabled = process.env.MURPH_TEST_POSTGRES_CONCURRENCY === "1";
@@ -60,13 +61,12 @@ describe.skipIf(!enabled)("signed runtime callback SQL load", () => {
     vi.stubEnv("HOSTED_WEB_CALLBACK_SIGNING_KEY_ID", "v1");
     vi.stubEnv("HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_JWK", JSON.stringify(publicJwk));
     vi.stubEnv("HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_KEYRING_JSON", JSON.stringify({ v1: publicJwk }));
-    const signedRequest = async (userId: string, generation = "1") => {
+    const signedRequest = async (userId: string, generation = "1", timestamp = new Date().toISOString()) => {
       const url = new URL("/api/internal/hosted-mailbox/fetch", "https://web.example.test");
       addHostedExecutionRuntimeAuthority(url, { attemptId, generation, workspaceVersion: "1" });
       const payload = JSON.stringify({ cursorMode: "imported_seq", requestId: randomUUID(), limitPerLane: 10,
         lanes: [{ lane: "conversation", importedSeq: "0" }, { lane: "system", importedSeq: "0" }] });
       const nonce = randomUUID();
-      const timestamp = new Date().toISOString();
       const signature = await crypto.subtle.sign({ name: "ECDSA", hash: "SHA-256" }, keys.privateKey,
         encodeHostedExecutionSignedRequestPayload({ method: "POST", path: url.pathname, search: url.search,
           payload, nonce, timestamp, userId }));
@@ -116,6 +116,33 @@ describe.skipIf(!enabled)("signed runtime callback SQL load", () => {
       process.stdout.write(JSON.stringify({ label: "Synthetic 60 signed empty-mailbox callbacks",
         before: before.statements, after: after.statements }) + "\n");
       expect(after.statements).toBeLessThanOrEqual(before.statements / 2);
+
+      // Exercise diagnostics through the actual production client, including
+      // signature/replay persistence, pool checkout and transaction ownership.
+      const instrumented = createPrismaClient({ databaseUrl });
+      const log = vi.spyOn(console, "info").mockImplementation(() => {});
+      try {
+        database.current = instrumented;
+        const delayed = await signedRequest(owner, "1", new Date(Date.now() - 1_000).toISOString());
+        expect((await POST(delayed)).status).toBe(200);
+        const timing = log.mock.calls.find(call => call[0] === "Hosted mailbox fetch timing.")?.[1];
+        expect(timing).toMatchObject({ completed: true, failedPhase: null,
+          phaseMs: { authentication: expect.any(Number), transaction_acquire: expect.any(Number),
+            authority: expect.any(Number), mailbox: expect.any(Number), transaction_finish: expect.any(Number) } });
+        expect(timing.poolAcquisitionCount).toBeGreaterThanOrEqual(2);
+        expect(timing.dbOperationCount).toBeGreaterThanOrEqual(5);
+        expect(timing.poolBeforeAcquire[0]).toMatchObject({ idleConnections: 0, totalConnections: 0 });
+        expect(JSON.stringify(timing)).not.toContain(owner);
+        log.mockClear();
+        expect((await POST(await signedRequest(owner, "2"))).status).toBe(409);
+        const rejected = log.mock.calls.find(call => call[0] === "Hosted mailbox fetch timing.")?.[1];
+        expect(rejected).toMatchObject({ completed: false, failedPhase: "authority",
+          lastPhase: "transaction_finish" });
+      } finally {
+        log.mockRestore();
+        database.current = client;
+        await instrumented.$disconnect();
+      }
 
       // Optimized reads retain replay protection and reject a stale owner.
       const request = await signedRequest(owner);
