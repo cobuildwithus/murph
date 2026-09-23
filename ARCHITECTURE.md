@@ -1251,17 +1251,49 @@ leave an unknown receipt. List is capped at ten polls created by Murph in this
 conversation. Arbitrary provider IDs cannot select another poll. Read exposes
 provider voter identities in pages of 50 with a continuation cursor; list keeps only summaries.
 
-Linq uses its SDK's native poll create/read methods. The question is a separate
+Linq uses its SDK's native poll create/read/vote methods. The question is a separate
 idempotent text message, followed by an iMessage poll with public multiple-choice
 voting. Anonymous iMessage requests fail before sending. Reads fetch current
-counts, distinct total voters and voter handles from Linq. Telegram uses
+counts, distinct total voters and voter handles from Linq. The vote action adds or
+removes Murph's own line selection by a zero-based option index. Web resolves the
+immutable option ID from a fresh conversation-bound provider read, rechecks live
+route/access and egress policy, then submits one explicit add/remove request.
+Multiple selections are independent. Vote submission returns provider acceptance,
+not confirmed device delivery; ambiguous failures allow readback without automatic resubmission.
+No local vote tally or additional persisted state is created. Telegram bots cannot
+vote; Murph may state a preference without claiming a ballot or changing counts.
+Deploy this Web consumer before runtimes producing vote requests, and retain it
+while those runtimes remain active. Telegram uses
 single-choice `sendPoll`, with `anonymous` defaulting to true; false creates named
 voting. It stores aggregate `poll` updates and supports `stopPoll` with final
 counts. Telegram reads return the last observed snapshot and timestamp; they cannot fetch a live tally. Duplicate/older
 updates cannot overwrite newer or closed results. A bounded creation-binding race
 returns a retryable webhook response, and a final binding lookup covers a receipt
-committing between the initial and pending lookups. Votes do not wake Murph or
-send replies.
+committing between the initial and pending lookups.
+
+Poll vote events can now enqueue one ordinary `assistant.notification.requested`
+turn with the observed tally. Linq's signed `poll.vote.added` and
+`poll.vote.removed` events bind through the blinded message key on new poll
+receipts; fresh provider reads avoid replaying reordered vote deltas. Existing
+unindexed Linq polls remain manually readable. Telegram's aggregate updates
+supply its last observed tally; named answer events do not invent aggregate counts.
+The checkpoint is a unique option above half the current electorate, everyone
+having voted, or a closed Telegram poll with votes. Complete active Linq handles
+exclude Murph and departed voters from quorum calculation. Telegram uses current
+chat member count minus this bot, conservatively including any other bots; an
+unknown roster cannot establish majority or full turnout. Multiple-answer polls
+can have several popular options, and a checkpoint never closes a poll.
+
+`resultNotifiedAt` on the poll and its prepared encrypted mailbox notification
+commit in one short transaction after current access and bound thread authority
+checks. Provider/crypto work occurs outside that transaction. A compare-and-swap
+on the observed receipt rejects stale notification preparation. The permanent
+one-shot claim prevents later vote changes or webhook replays from producing
+another announcement; webhook retry recovers a failed signal to an unconsumed
+mailbox item. Existing mailbox and outbox idempotency own delivery. The assistant
+receives bounded tally context without voter identities and may stay quiet when
+the group already settled or moved on. Counts describe an observation, not an
+immutable outcome or authority for downstream actions.
 
 Named Telegram `poll_answer` updates belong to `HostedConversationPollVote`, one
 encrypted receipt per blinded voter and poll. Its own update ID guards changes and
@@ -1278,13 +1310,25 @@ The system prompt admits proactive polls only with the native tool available.
 Use concrete shared decisions on an open conversational floor; preserve direct
 answers, delegated judgment, settled decisions and human-owned exchanges. Polls
 record preferences without authorizing bookings or other downstream effects.
+Murph may join a poll with its own preference, a joke or a tie-breaker when it
+fits, without an explicit invitation; this does not require voting in every poll.
+Before current tallies, voter claims or participation nudges in an attended turn,
+Murph refreshes the poll instead of reusing earlier prose. Incomplete voter pages
+do not establish nonparticipation. Multiple selections remain one participant;
+voting and acknowledging a vote do not establish completion of the chosen activity.
 
 Deploy the additive poll migration, then Web, then the runtime tool. Existing
 runtimes remain compatible. Keep Web's poll callback while new runtimes exist;
 keep Telegram poll webhook consumption while open polls exist. Ensure a manually
 restricted Telegram webhook `allowed_updates` includes both `poll` and
 `poll_answer`. Default Telegram updates include both. After rollout, create/read a synthetic poll on each channel
-and vote/read/close on Telegram; verify no assistant turn starts for votes.
+and vote/read/close on Telegram. Apply the additive result-notification migration
+before Web. Existing runtime notification consumers accept its unchanged envelope;
+there is no new wake kind or runtime protocol. Retain the column and webhook
+handlers while tracked polls remain. Linq subscriptions must use version
+`2026-02-03` and include `poll.vote.added` and `poll.vote.removed`. Verify early
+votes stay quiet and one threshold crossing wakes the originating conversation;
+replayed votes must not produce a second announcement.
 
 ## Hosted Phone Calls
 

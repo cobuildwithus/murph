@@ -1,3 +1,4 @@
+import { buildConversationPollResultInstructions } from "@murphai/hosted-execution/conversation-polls";
 import { buildManualMealEstimationInstructions } from '../src/assistant/manual-meal-estimation.js'
 import { executeGenerateImageTool } from '../src/assistant-codex/generate-image-tool.js'
 
@@ -42182,4 +42183,196 @@ describeRealCodex('real Codex native conversation polls e2e', () => {
       }
     } finally { await rm(workingDirectory, { force: true, recursive: true }) }
   }, 720_000)
+})
+
+
+describeRealCodex('real Codex poll self vote e2e', () => {
+  it.each(['tie', 'remove', 'telegram', 'settled', 'uncertain'] as const)('poll self vote %s', async (scenario) => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-poll-vote-e2e-'))
+    const { MURPH_POLL_TOOL } = await import('../src/assistant-codex/dynamic-tools/conversation-polls.js')
+    const pollRef = 'poll_' + 'c'.repeat(32)
+    const channel = scenario === 'telegram' ? 'telegram' : 'linq'
+    const calls: Array<import('@murphai/hosted-execution/conversation-polls').ConversationPollRequest> = []
+    let submitted = false
+    try {
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions: buildAssistantSystemPrompt({
+          assistantCliContract: null, assistantKnowledgeToolsAvailable: false, assistantPollsAvailable: true,
+          channel, cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+          conversationScope: 'group', currentLocalDate: '2026-09-22',
+          currentInstant: '2026-09-22T16:00:00.000Z', currentTimeZone: 'UTC',
+          hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false, turnTrigger: null,
+        }),
+        dynamicTools: [MURPH_POLL_TOOL], env: config.env,
+        hostedToolContext: {
+          computerToolsAvailable: false, vaultFileSendAvailable: false,
+          pollTool: { request: async (request) => {
+            calls.push(request)
+            const action = request.request
+            if (action.action === 'vote') {
+              if (scenario === 'uncertain') throw new Error('Synthetic lost vote acknowledgement')
+              submitted = true
+            }
+            return { status: action.action === 'vote' ? 'vote_submitted' : 'results', polls: [{
+              pollRef, channel, question: 'Post-walk snack?',
+              options: [{ text: 'Apples', votes: 2 }, { text: 'Cinnamon buns', votes: scenario === 'remove' ? (submitted ? 2 : 3) : (submitted ? 3 : 2) }],
+              totalVoters: scenario === 'remove' ? (submitted ? 4 : 5) : (submitted ? 5 : 4),
+              anonymous: channel === 'telegram', multipleAnswers: channel === 'linq', closed: false,
+              observedAt: '2026-09-22T16:00:00.000Z', freshness: channel === 'linq' ? 'provider_read' : 'provider_update',
+            }] }
+          } },
+          currentInvocationScope: () => ({ origin: { kind: 'accepted_input', sessionId: 'synthetic-self-vote', assistantInputId: 'ain_' + 'd'.repeat(32) }, conversationScope: 'group' }),
+          currentHostedDeliveryContext: () => null, currentHostedMailboxItemIds: () => [],
+          sendVaultFile: async () => { throw new Error('No file send authorized.') },
+        },
+        model: config.model, modelProvider: config.modelProvider,
+        prompt: scenario === 'tie'
+          ? `Our snack poll ${pollRef} is deadlocked between Apples and Cinnamon buns. Murph, you have the deciding vote. Your robot heart knows which one smells better.`
+          : scenario === 'remove'
+          ? `Murph, remove your Cinnamon buns vote from our snack poll ${pollRef}. Don't replace it with anything.`
+          : scenario === 'telegram'
+          ? `Murph, cast your own vote for Cinnamon buns in our Telegram poll ${pollRef}.`
+          : scenario === 'settled'
+          ? `We closed the discussion and agreed on Apples. Leave the snack poll ${pollRef} alone. Murph, suggest one drink to bring.`
+          : `Murph, vote for Cinnamon buns in our iMessage snack poll ${pollRef}.`,
+        reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
+      })
+      process.stdout.write(JSON.stringify({ scenario: 'poll self vote ' + scenario, reply: result.finalMessage, actions: calls.map((call) => call.request) }) + '\n')
+      const votes = calls.filter((call) => call.request.action === 'vote')
+      expect(calls.every((call) => ['read', 'vote'].includes(call.request.action))).toBe(true)
+      if (scenario === 'telegram' || scenario === 'settled') {
+        expect(votes).toHaveLength(0)
+        if (scenario === 'settled') expect(calls).toHaveLength(0)
+        if (scenario === 'telegram') {
+          expect(result.finalMessage).toMatch(/Cinnamon buns/iu)
+          expect(result.finalMessage).toMatch(/can't|cannot|can’t|unable/iu)
+          expect(result.finalMessage).not.toMatch(/I(?:'ve|’ve)? (?:cast|voted)|vote (?:is |has been )?(?:cast|added|counted)/iu)
+        }
+      } else {
+        expect(votes).toHaveLength(1)
+        expect(votes[0]?.request).toEqual({ action: 'vote', pollRef, optionIndex: 1, operation: scenario === 'remove' ? 'remove' : 'add' })
+        expect(calls[0]?.request).toEqual({ action: 'read', pollRef })
+        expect(calls.filter((call) => call.request.action === 'read').length).toBeLessThanOrEqual(2)
+        if (scenario === 'uncertain') {
+          expect(result.finalMessage).toMatch(/confirm|sure|unclear|may|couldn[’']t/iu)
+          expect(result.finalMessage).not.toMatch(/I(?:'ve|’ve)? voted|broke the tie|now (?:3|three)/iu)
+        } else if (scenario === 'remove') expect(result.finalMessage).toMatch(/remov|withdraw|retract/iu)
+        else expect(result.finalMessage).toMatch(/Cinnamon buns/iu)
+      }
+    } finally { await rm(workingDirectory, { force: true, recursive: true }) }
+  }, 720_000)
+})
+
+
+describeRealCodex('real Codex poll result wake e2e', () => {
+  it.each([false, true])('poll result checkpoint settled=%s', async (settled) => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-poll-result-e2e-'))
+    const permissionHome = await materializeRealCodexHostedPermissionHome(config)
+    try {
+      await initializeVault({ timezone: 'America/New_York', vaultRoot: workingDirectory })
+      const modelTarget = createAssistantModelTarget({
+        approvalPolicy: 'never', codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND),
+        codexHome: permissionHome.codexHome, model: config.model, modelProvider: config.modelProvider,
+        provider: 'codex-cli', reasoningEffort: 'low', sandbox: 'workspace-write',
+      })
+      if (!modelTarget) throw new Error('Expected real Codex target.')
+      const events: unknown[] = []
+      const instructions = buildConversationPollResultInstructions({
+        pollRef: 'poll_' + 'a'.repeat(32), channel: 'telegram', question: 'Picnic day?',
+        options: [{ text: 'Saturday', votes: 3 }, { text: 'Sunday', votes: 1 }],
+        totalVoters: 4, anonymous: true, multipleAnswers: false, closed: false,
+        observedAt: new Date().toISOString(), freshness: 'provider_update',
+      }, { reason: 'majority', eligibleCount: 5 })
+      const result = await sendAssistantNotificationLocal({
+        actorId: null, bindingDeliveryTarget: '-100:topic:12', channel: 'telegram',
+        deliveryDispatchMode: 'queue-only', deliveryTarget: '-100:topic:12',
+        deliveryIdempotencyKey: 'synthetic-poll-result', responsePolicy: { kind: 'allow_send_or_skip' },
+        executionContext: { hosted: { defaultTarget: modelTarget, memberId: 'synthetic-group', userEnvKeys: [] } },
+        identityId: null,
+        instructions: instructions + (settled
+          ? '\n\nCurrent conversation evidence: The group already acknowledged the tally, agreed on Saturday, and moved on to discussing a movie. Murph already acknowledged Saturday too.'
+          : '\n\nCurrent conversation evidence: The group asked Murph to help choose a picnic day. No one has acknowledged the tally yet.'),
+        threadId: 'opaque-poll-conversation', threadIsDirect: false,
+        onTraceEvent: (event) => events.push(event.rawEvent),
+        turnEnvironment: { currentWorkingDirectory: workingDirectory, env: config.env },
+        turnTrigger: 'manual-deliver', vault: workingDirectory, workingDirectory,
+      })
+      expect(readCapabilityRoutingActions(events)).toEqual([])
+      const intents = await listAssistantOutboxIntents(workingDirectory)
+      const reply = result.response ?? ''
+      process.stdout.write(`[real-codex poll result checkpoint] ${JSON.stringify({ settled, reply, decision: result.decision.kind, intents: intents.length })}\n`)
+      if (settled) {
+        expect(result.decision.kind).toBe('skip')
+        expect(intents).toHaveLength(0)
+      } else {
+        expect(result.decision.kind).toBe('send_message')
+        expect(result.deliveryOutcome?.kind).toBe('queued')
+        expect(intents).toHaveLength(1)
+        expect(intents[0]).toMatchObject({ channel: 'telegram', threadIsDirect: false, explicitTarget: '-100:topic:12', status: 'pending' })
+        expect(reply).toMatch(/Saturday/iu)
+        expect(reply).not.toMatch(/closed|unanimous|everyone voted|all (?:five|5)|booked|reserved|scheduled|checkpoint|electorate|webhook/iu)
+        expect(reply.length).toBeLessThan(400)
+      }
+    } finally {
+      await removeRealCodexTemporaryPaths([workingDirectory, ...permissionHome.temporaryPaths, ...config.temporaryPaths])
+    }
+  }, 360_000)
+})
+
+describeRealCodex('real Codex poll freshness e2e', () => {
+  it('poll participation refreshes before reminders', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-poll-freshness-e2e-'))
+    const { MURPH_POLL_TOOL } = await import('../src/assistant-codex/dynamic-tools/conversation-polls.js')
+    const pollRef = 'poll_' + 'e'.repeat(32)
+    const calls: Array<import('@murphai/hosted-execution/conversation-polls').ConversationPollRequest> = []
+    try {
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions: buildAssistantSystemPrompt({
+          assistantCliContract: null, assistantKnowledgeToolsAvailable: false, assistantPollsAvailable: true,
+          channel: 'linq', cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+          conversationScope: 'group', currentLocalDate: '2026-09-22', currentInstant: '2026-09-22T16:00:00.000Z',
+          currentTimeZone: 'UTC', hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false, turnTrigger: null,
+        }),
+        dynamicTools: [MURPH_POLL_TOOL], env: config.env,
+        hostedToolContext: {
+          computerToolsAvailable: false, vaultFileSendAvailable: false,
+          pollTool: { request: async (request) => {
+            calls.push(request)
+            if (request.request.action !== 'read') throw new Error('Only a current poll read is authorized for this check.')
+            return { status: 'results', polls: [{
+              pollRef, channel: 'linq', question: 'Available meetup times?',
+              options: [{ text: 'Morning', votes: 3 }, { text: 'Afternoon', votes: 2 }, { text: 'Evening', votes: 2 }],
+              totalVoters: 5, anonymous: false, multipleAnswers: true, closed: false,
+              observedAt: '2026-09-22T16:00:00.000Z', freshness: 'provider_read',
+              voters: ['rowan@example.test', 'sage@example.test', 'finley@example.test', 'arden@example.test', 'river@example.test'].map((id, index) => ({
+                kind: 'imessage_handle' as const, id, optionIndexes: [[0, 1], [0, 2], [0], [1], [2]][index]!, observedAt: '2026-09-22T16:00:00.000Z',
+              })), voterSource: 'provider_read', nextVoterCursor: null,
+            }] }
+          } },
+          currentInvocationScope: () => ({ origin: { kind: 'accepted_input', sessionId: 'synthetic-fresh-poll', assistantInputId: 'ain_' + 'e'.repeat(32) }, conversationScope: 'group' }),
+          currentHostedDeliveryContext: () => null, currentHostedMailboxItemIds: () => [],
+          sendVaultFile: async () => { throw new Error('No file send authorized.') },
+        },
+        model: config.model, modelProvider: config.modelProvider,
+        prompt: `Conversation context: This room has five human attendees: Rowan, Sage, Finley, Arden and River, with matching example.test email handles. We are choosing a meetup time using poll ${pollRef}. An earlier result read at 15:20 showed only three participants, so two responses were missing then. Current message: Before we chase anyone, how many people are still missing from the poll?`,
+        reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
+      })
+      process.stdout.write(`[real-codex poll freshness] ${JSON.stringify({ reply: result.finalMessage, actions: calls.map((call) => call.request) })}\n`)
+      expect(calls.map((call) => call.request)).toEqual([{ action: 'read', pollRef }])
+      expect(result.finalMessage).toMatch(/(?:all\s+)?(?:five|5)\s+(?:people|participants|attendees|have|responded|voted)|everyone|nobody|no one/iu)
+      expect(result.finalMessage).not.toMatch(/(?:still|yet to|need(?:s)? to|please) vote|(?:seven|7) (?:people|participants)|completed|finished the meetup|closed/iu)
+      expect(result.finalMessage.length).toBeLessThan(400)
+    } finally {
+      await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+    }
+  }, 360_000)
 })
