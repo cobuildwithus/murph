@@ -101,6 +101,7 @@ import {
 } from '@murphai/operator-config/vault-cli-contracts'
 import {
   parsePersonalPatternVocabulary,
+  buildPersonalPatternReport,
   buildJournalView,
   readVaultRawTolerant,
   resolveMealNutritionGoals,
@@ -134,6 +135,7 @@ import {
   parseAssistantRealCodexRunArgs,
 } from '../../../scripts/run-assistant-real-codex-e2e.ts'
 import {
+  compactWarmCodexThread,
   executeCodexAppServerTurn,
   readCodexAppServerTurnFailureContext,
   resolveMurphDynamicTools,
@@ -14775,12 +14777,12 @@ describeRealCodex('real Codex Personal Patterns typed-ledger Luna high digest e2
       ].filter((pattern) => pattern.test(message))
       expect(mentionedOutcomes).toHaveLength(1)
       expect(message).toMatch(/\bHRV\b|heart.rate variability/iu)
-      expect(message).toMatch(/next (?:day|morning)|following (?:day|morning)|day after/iu)
+      expect(message).toMatch(/next[ -](?:day|morning)|following[ -](?:day|morning)|day after/iu)
       const reportsDelta = /(?:20|twenty)\s*(?:ms|milliseconds)/iu.test(message)
       const reportsMeans = /(?:70|seventy)\s*(?:ms|milliseconds)/iu.test(message)
         && /(?:50|fifty)\s*(?:ms|milliseconds)/iu.test(message)
       expect(reportsDelta || reportsMeans).toBe(true)
-      expect(message).toMatch(/without|(?:non|not)[ -]yard[ -]work|days (?:you |with )?(?:didn.t|did not|weren.t)/iu)
+      expect(message).toMatch(/without|(?:non|not|no)[ -]yard[ -]work|days (?:you |with )?(?:didn.t|did not|weren.t)/iu)
     } finally {
       await removeRealCodexTemporaryPath(workingDirectory)
       await removeRealCodexTemporaryPaths(config.temporaryPaths)
@@ -15146,7 +15148,7 @@ describeRealCodex('real Codex Journal connected account eligibility e2e', () => 
 })
 
 describeRealCodex('real Codex Journal connected calendar capture e2e', () => {
-  it('saves one private training plan and linked follow-up, publishes upcoming context and deduplicates a morning retry', async () => {
+  it.each([false, true])('vault pass recovery saves a linked calendar follow-up and deduplicates a retry (partial save: %s)', async (partialSave) => {
     const config = await resolveRealCodexE2eConfig()
     const automation = MURPH_MANAGED_AUTOMATIONS.find(
       (candidate) => candidate.slug === 'journal-connected-context-morning',
@@ -15173,6 +15175,19 @@ describeRealCodex('real Codex Journal connected calendar capture e2e', () => {
           '  state: notice-sent',
         ].join('\n'),
       })
+      if (partialSave) {
+        const saved = await upsertEvent({ vaultRoot: workingDirectory, payload: {
+          kind: 'note', noteType: 'journal-plan', source: 'import', title: 'Tennis training',
+          occurredAt: '2026-08-31T18:00:00+02:00', timeZone: 'Europe/Warsaw',
+          tags: ['planned', 'timing-timed'], note: 'Training from 18:00 to 19:00.',
+          plan: { endsAt: '2026-08-31T19:00:00+02:00', status: 'planned', lastVerifiedAt: '2026-08-31T06:00:00Z', category: 'training', accountId: 'calendar_ready' },
+        } })
+        await upsertKnowledgePage({ vault: workingDirectory, slug: 'journal-connected-context', body: [
+          JSON.stringify({ version: 1, optOuts: { global: false, accounts: [], providers: [], categories: [] }, activeAccounts: [{ id: 'calendar_ready', provider: 'googlecalendar' }] }),
+          '', '## Sources', '',
+          JSON.stringify([{ accountId: 'calendar_ready', sourceId: 'calendar_evt_tennis', eventId: saved.eventId, revision: 1 }]),
+        ].join('\n') })
+      }
       const connectedAppRequests: Array<{
         input: Record<string, unknown>
         operation: string
@@ -15361,9 +15376,11 @@ describeRealCodex('real Codex Journal connected calendar capture e2e', () => {
       expect(JSON.stringify(upcoming)).toMatch(/tennis/iu)
       expect(JSON.stringify(upcoming)).not.toMatch(/dentist|dinner|Alex/iu)
 
-      expect(journalWrites).toHaveLength(1)
-      expect(journalWrites[0]).toMatch(/tennis/iu)
-      expect(journalWrites[0]).not.toMatch(/dentist|dinner|Alex/iu)
+      expect(journalWrites).toHaveLength(partialSave ? 0 : 1)
+      if (!partialSave) {
+        expect(journalWrites[0]).toMatch(/tennis/iu)
+        expect(journalWrites[0]).not.toMatch(/dentist|dinner|Alex/iu)
+      }
       expect(JSON.stringify(savedNotes)).not.toMatch(/dentist|dinner|Alex/iu)
       expect((await listAutomations({ vaultRoot: workingDirectory })).items).toHaveLength(1)
       expect(automationRequests).toHaveLength(1)
@@ -16094,6 +16111,73 @@ describeRealCodex('real Codex Journal and Patterns help e2e', () => {
 })
 
 describeRealCodex('real Codex private Journal capture recovery e2e', () => {
+  it('vault pass recovery compacts a live conversation and preserves its task', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-live-compaction-e2e-'))
+    try {
+      const input: Omit<CodexAppServerTurnInput, 'prompt'> = {
+        approvalPolicy: 'never', codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome, model: config.model, modelProvider: 'murph-compaction-proof',
+        env: config.env, dynamicTools: [], processLifetime: 'warm',
+        configOverrides: ['model_providers.murph-compaction-proof.name="OpenAI compaction proof"', 'model_providers.murph-compaction-proof.wire_api="responses"', 'model_providers.murph-compaction-proof.requires_openai_auth=true', 'model_providers.murph-compaction-proof.supports_websockets=true', 'model_providers.murph-compaction-proof.stream_idle_timeout_ms=90000', 'model_providers.murph-compaction-proof.stream_max_retries=0'],
+        reasoningEffort: 'medium', sandbox: 'read-only', workingDirectory,
+      }
+      const first = await executeRealCodexAppServerTurn({ ...input,
+        prompt: 'Remember this task across compaction: prepare a two-day workshop plan. Its exact project code is MAPLE-482, its budget is 73 credits, and its rule is no evening sessions. No tools or files are needed. Reply only READY.',
+      })
+      const compact = await compactWarmCodexThread({ minThreadTokens: 1, timeoutMs: 120_000 })
+      expect(compact.kind).toBe('compacted')
+      const next = await executeRealCodexAppServerTurn({ ...input, resumeSessionId: first.sessionId,
+        prompt: 'What are the saved project code, budget, and scheduling constraint? Answer in one sentence without tools.',
+      })
+      expect(next.finalMessage).toContain('MAPLE-482')
+      expect(next.finalMessage).toContain('73')
+      expect(next.finalMessage).toMatch(/no evening|not.*evening|without evening/iu)
+      process.stdout.write(`[vault-pass-live-compaction] ${JSON.stringify({ model: config.model, kind: compact.kind, durationMs: compact.kind === 'compacted' ? compact.durationMs : null, continuityPreserved: true })}\n`)
+    } finally {
+      await stopWarmCodexAppServer('vault-pass-live-compaction-complete')
+      await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+    }
+  }, 360_000)
+
+  it('vault pass recovery captures actions and reported outcomes as usable Pattern evidence', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-pattern-capture-e2e-'))
+    try {
+      await initializeVault({ vaultRoot: workingDirectory, timezone: 'UTC' })
+      const binDirectory = path.join(workingDirectory, 'bin')
+      await materializeRealWorkoutVaultCli({ binDirectory, commandLogPath: path.join(workingDirectory, 'commands.log'), vaultRoot: workingDirectory })
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome, model: config.model, modelProvider: config.modelProvider,
+        developerInstructions: buildDirectConversationDeveloperInstructions(false, null, [], '2026-09-22T16:00:00Z'),
+        dynamicTools: [],
+        env: { ...config.env, PATH: `${binDirectory}:${config.env.PATH ?? ''}`, [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: resolveAssistantSkillsRoot() },
+        prompt: 'On September 20 and September 21, 2026, I meditated for ten minutes in the evening. My mood was good on September 20 and great on September 21. Today my wrist feels stiff, with no severity rating. Save these facts; I do not need advice or reminders.',
+        reasoningEffort: 'medium', sandbox: 'workspace-write', workingDirectory,
+      })
+      const vault = await readVaultRawTolerant(workingDirectory)
+      const factors = vault.events.filter(event => event.attributes.noteType === 'journal-factor')
+      expect(factors).toHaveLength(2)
+      expect(factors.every(event => event.tags.includes('happened') && event.tags.some(tag => tag.startsWith('key-')))).toBe(true)
+      expect(new Set(factors.flatMap(event => event.tags.filter(tag => tag.startsWith('key-')))).size).toBe(1)
+      const outcomes = vault.events.filter(event => event.attributes.noteType === 'journal-outcome' && event.tags.some(tag => tag.startsWith('value-')))
+      expect(outcomes).toHaveLength(2)
+      expect(outcomes.map(event => event.tags.find(tag => tag.startsWith('value-'))).sort()).toEqual(['value-good', 'value-great'])
+      const wrist = vault.events.filter(event => /wrist|stiff/iu.test(JSON.stringify(event.attributes)))
+      expect(wrist).toHaveLength(1)
+      expect(wrist[0]?.tags.some(tag => tag.startsWith('value-'))).toBe(false)
+      const report = buildPersonalPatternReport(vault, { asOf: '2026-09-22' })
+      expect(report.factors.some(factor => factor.observedDays === 2)).toBe(true)
+      expect(report.outcomes.some(outcome => outcome.id.startsWith('subjective-'))).toBe(true)
+      expect((await listAutomations({ vaultRoot: workingDirectory })).items).toEqual([])
+      process.stdout.write(`[vault-pass-capture] ${JSON.stringify({ factors: factors.length, scoredOutcomes: outcomes.length, unscoredFacts: wrist.length, reply: result.finalMessage })}\n`)
+    } finally {
+      await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+    }
+  }, 360_000)
+
   it('saves a reported symptom without its guessed cause and verifies an empty-page complaint without duplicating it', async () => {
     const config = await resolveRealCodexE2eConfig()
     const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-journal-recovery-e2e-'))

@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-22",
+  "order": 100,
+  "item": {
+    "id": "more-reliable-journal-patterns",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "More reliable Journal capture and follow-ups",
+    "summary": "Completed actions and reported feelings are saved in the forms Personal Patterns can use, and calendar plans can recover a missing check-in.",
+    "details": "Unscored symptoms stay unscored. Existing notification history and mutes are preserved, and recovery does not restart paused or completed check-ins.",
+    "relevanceTags": ["journal", "patterns", "reminders", "reliability"],
+    "sourcePullRequests": []
+  }
+}

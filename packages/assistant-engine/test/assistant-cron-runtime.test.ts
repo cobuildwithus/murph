@@ -8818,8 +8818,9 @@ describe('assistant cron runtime orchestration', () => {
 
     const updated = await getAssistantCronJob(vaultRoot, canonicalJob.jobId)
     expect(updated.state.lastRunAt).toBe('2026-04-08T13:00:00.000Z')
-    expect(updated.state.lastSucceededAt).toBe('2026-04-08T13:00:00.000Z')
-    expect(updated.state.lastError).toBeNull()
+    expect(updated.state.lastSucceededAt).toBeNull()
+    expect(updated.state.lastFailedAt).toBe('2026-04-08T13:00:00.000Z')
+    expect(updated.state.lastError).toContain('expired before delivery')
     expect(updated.state.consecutiveFailures).toBe(0)
     expect(updated.state.nextRunAt).toBe('2026-04-09T10:00:00.000Z')
     await expect(
@@ -8858,6 +8859,7 @@ describe('assistant cron runtime orchestration', () => {
         consecutiveFailures: 1,
         lastError: 'temporary send failure',
         lastFailedAt: '2026-04-08T10:30:00.000Z',
+        lastSucceededAt: '2026-04-07T10:00:05.000Z',
         pendingOccurrenceAt: '2026-04-08T10:00:00.000Z',
         retryAfterAt: '2026-04-08T10:40:00.000Z',
       },
@@ -8880,10 +8882,13 @@ describe('assistant cron runtime orchestration', () => {
 
     const updated = await getAssistantCronJob(vaultRoot, canonicalJob.jobId)
     expect(updated.state.lastRunAt).toBe('2026-04-08T11:15:00.000Z')
-    expect(updated.state.lastSucceededAt).toBe('2026-04-08T11:15:00.000Z')
-    expect(updated.state.lastError).toBeNull()
+    expect(updated.state.lastSucceededAt).toBe('2026-04-07T10:00:05.000Z')
+    expect(updated.state.lastFailedAt).toBe('2026-04-08T11:15:00.000Z')
+    expect(updated.state.lastError).toContain('expired before delivery')
     expect(updated.state.consecutiveFailures).toBe(0)
     expect(updated.state.nextRunAt).toBe('2026-04-09T10:00:00.000Z')
+    await expect(processDueAssistantCronJobsLocal({ limit: 1, vault: vaultRoot }))
+      .resolves.toEqual({ failed: 0, processed: 0, succeeded: 0 })
     await expect(
       listAssistantCronRuns({
         job: canonicalJob.jobId,
@@ -8924,8 +8929,9 @@ describe('assistant cron runtime orchestration', () => {
     expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
     const updated = await getAssistantCronJob(vaultRoot, job.jobId)
     expect(updated.state.lastRunAt).toBe('2026-04-08T10:35:00.000Z')
-    expect(updated.state.lastSucceededAt).toBe('2026-04-08T10:35:00.000Z')
-    expect(updated.state.lastError).toBeNull()
+    expect(updated.state.lastSucceededAt).toBeNull()
+    expect(updated.state.lastFailedAt).toBe('2026-04-08T10:35:00.000Z')
+    expect(updated.state.lastError).toContain('expired before delivery')
     expect(updated.state.consecutiveFailures).toBe(0)
     expect(updated.state.nextRunAt).toBe('2026-04-09T09:30:00.000Z')
     await expect(
@@ -8971,7 +8977,8 @@ describe('assistant cron runtime orchestration', () => {
     const updated = await getAssistantCronJob(vaultRoot, job.jobId)
     expect(updated.enabled).toBe(false)
     expect(updated.state.nextRunAt).toBeNull()
-    expect(updated.state.lastError).toBeNull()
+    expect(updated.state.lastError).toContain('expired before delivery')
+    expect(updated.state.lastSucceededAt).toBeNull()
     await expect(
       listAssistantCronRuns({
         job: job.jobId,

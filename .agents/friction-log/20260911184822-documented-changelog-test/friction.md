@@ -22,3 +22,7 @@ In a fresh installed worktree, run `pnpm --dir apps/web exec vitest run --config
 ## Context
 
 Both commands block the documented content-only changelog verification. Existing test-filter separator friction covers a different argument parsing failure.
+
+## Resolution
+
+The changelog README now documents fragment generation and the repository-root Vitest invocation. The corrected focused command passed during vault-pass recovery verification.

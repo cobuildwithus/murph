@@ -419,7 +419,7 @@ test("hosted Codex memory diagnostics expose only safe config metadata", () => {
 test("hosted Codex provider transport diagnostics expose only safe config metadata", () => {
   assert.deepEqual(hostedCodexProviderTransportDiagnostics("hosted-openai"), {
     codexProviderRequestMaxRetries: 4,
-    codexProviderStreamIdleTimeoutMs: 30_000,
+    codexProviderStreamIdleTimeoutMs: 90_000,
     codexProviderStreamMaxRetries: 0,
     codexProviderTransportMode: "codex-native-provider-transport",
   });
@@ -441,7 +441,7 @@ test("hosted Codex uses one WebSocket attempt before native HTTPS fallback", () 
   });
 
   assert.match(config, /^supports_websockets = true$/mu);
-  assert.match(config, /^stream_idle_timeout_ms = 30000$/mu);
+  assert.match(config, /^stream_idle_timeout_ms = 90000$/mu);
   assert.match(config, /^stream_max_retries = 0$/mu);
   assert.match(config, /^request_max_retries = 4$/mu);
 });
@@ -616,7 +616,7 @@ test("hosted Codex runtime config writes OpenAI Responses config without secret 
   assert.match(config, /env_key = "OPENAI_API_KEY"/u);
   assert.match(config, /wire_api = "responses"/u);
   assert.match(config, /^supports_websockets = true$/mu);
-  assert.match(config, /^stream_idle_timeout_ms = 30000$/mu);
+  assert.match(config, /^stream_idle_timeout_ms = 90000$/mu);
   assert.match(config, /^requires_openai_auth = false$/mu);
   assert.match(config, /^request_max_retries = 4$/mu);
   assert.match(config, /^stream_max_retries = 0$/mu);
@@ -912,7 +912,7 @@ test("hosted Codex runtime config accepts a local test-only model provider base 
   assert.match(config, /env_key = "OPENAI_API_KEY"/u);
   assert.match(config, /requires_openai_auth = false/u);
   assert.doesNotMatch(config, /^supports_websockets = true$/mu);
-  assert.match(config, /stream_idle_timeout_ms = 30000/u);
+  assert.match(config, /stream_idle_timeout_ms = 90000/u);
   assert.match(config, /request_max_retries = 4/u);
   assert.match(config, /stream_max_retries = 0/u);
   assert.doesNotMatch(config, /https:\/\/api\.openai\.com\/v1/u);
@@ -1000,7 +1000,7 @@ test("hosted Codex runtime config uses ChatGPT subscription auth in local dev", 
   assert.doesNotMatch(config, /base_url/u);
   assert.doesNotMatch(config, /env_key/u);
   assert.match(config, /^supports_websockets = true$/mu);
-  assert.match(config, /^stream_idle_timeout_ms = 30000$/mu);
+  assert.match(config, /^stream_idle_timeout_ms = 90000$/mu);
   assert.match(config, /^requires_openai_auth = true$/mu);
   assert.match(config, /^request_max_retries = 4$/mu);
   assert.match(config, /^stream_max_retries = 0$/mu);
@@ -1186,7 +1186,7 @@ test("hosted Codex runtime config preserves managed ChatGPT auth", async () => {
   assert.doesNotMatch(config, /env_key/u);
   assert.match(config, /^supports_websockets = true$/mu);
   assert.match(config, /^requires_openai_auth = true$/mu);
-  assert.match(config, /^stream_idle_timeout_ms = 30000$/mu);
+  assert.match(config, /^stream_idle_timeout_ms = 90000$/mu);
   assert.match(config, /^request_max_retries = 4$/mu);
   assert.match(config, /^stream_max_retries = 0$/mu);
   assert.doesNotMatch(config, /chatgpt-refresh-token/u);
@@ -1353,12 +1353,12 @@ test.each(["openai", "venice", "custom-inference"])(
     );
     assert.equal(operatorProvider, "hosted-openai");
     const section = readProviderConfigSection(config, "hosted-openai");
-    assert.match(section, /^stream_idle_timeout_ms = 30000$/mu);
+    assert.match(section, /^stream_idle_timeout_ms = 90000$/mu);
     assert.match(section, /^stream_max_retries = 0$/mu);
     const selectedProviderId = prepared.runtimeEnv[HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV]!;
     const selectedSection = readProviderConfigSection(config, selectedProviderId);
     const diagnostics = hostedCodexProviderTransportDiagnostics(selectedProviderId);
-    assert.equal(diagnostics.codexProviderStreamIdleTimeoutMs, provider === "openai" ? 30_000 : 90_000);
+    assert.equal(diagnostics.codexProviderStreamIdleTimeoutMs, 90_000);
     assert.equal(diagnostics.codexProviderRequestMaxRetries, provider === "custom-inference" ? 1 : 4);
     assert.match(selectedSection, new RegExp(`^stream_idle_timeout_ms = ${diagnostics.codexProviderStreamIdleTimeoutMs}$`, "mu"));
     assert.match(selectedSection, new RegExp(`^request_max_retries = ${diagnostics.codexProviderRequestMaxRetries}$`, "mu"));
@@ -1767,8 +1767,21 @@ testHostedCodexAutocompactionE2e(
   150_000,
 );
 
+testHostedCodexAutocompactionE2e(
+  "hosted compaction survives a quiet response beyond the former thirty-second window",
+  async () => {
+    await assert.rejects(
+      runHostedCodexAutocompactionE2e("managed", { idleTimeoutMs: 30_000, firstCompactionDelayMs: 35_000 }),
+      /idle timeout waiting for SSE/u,
+    );
+    await runHostedCodexAutocompactionE2e("managed", { firstCompactionDelayMs: 35_000 });
+  },
+  180_000,
+);
+
 async function runHostedCodexAutocompactionE2e(
   providerKind: "custom" | "managed",
+  options: { idleTimeoutMs?: number; firstCompactionDelayMs?: number } = {},
 ): Promise<void> {
   const workspaceRoot = await createTemporaryDirectory();
   const operatorHomeRoot = path.join(workspaceRoot, "operator-home");
@@ -1795,6 +1808,9 @@ async function runHostedCodexAutocompactionE2e(
   let expectingManualCompaction = false;
   const server = await startResponsesStubServer({
     compactionOutputKind: providerKind === "managed" ? "compaction" : "message",
+    delayBeforeStreamMs: (_body, requestIndex) =>
+      requestIndex === Math.min(...compactionRequestIndexes)
+        ? options.firstCompactionDelayMs ?? 0 : 0,
     compactionRequestIndexes,
     requestUrls,
     requests,
@@ -1879,6 +1895,12 @@ async function runHostedCodexAutocompactionE2e(
       },
     });
     const preparedConfig = await readFile(prepared.codexConfigPath, "utf8");
+    if (options.idleTimeoutMs !== undefined) {
+      await writeFile(prepared.codexConfigPath, preparedConfig.replace(
+        /^stream_idle_timeout_ms = \d+$/gmu,
+        `stream_idle_timeout_ms = ${options.idleTimeoutMs}`,
+      ));
+    }
     assert.match(
       preparedConfig,
       new RegExp(
@@ -2388,7 +2410,7 @@ test("hosted Codex config TOML omits credential values and runtime authority hea
       'base_url = "https://api.openai.com/v1"',
       'env_key = "OPENAI_API_KEY"',
       'wire_api = "responses"',
-      "stream_idle_timeout_ms = 30000",
+      "stream_idle_timeout_ms = 90000",
       "requires_openai_auth = false",
       "request_max_retries = 4",
       "stream_max_retries = 0",
@@ -2771,6 +2793,7 @@ function isRetryableTemporaryCleanupError(error: unknown): boolean {
 }
 
 async function startResponsesStubServer(input: {
+  delayBeforeStreamMs?: (body: string, requestIndex: number) => number;
   customToolCallForRequest?: (
     body: string, requestIndex: number,
   ) => { name: string; input: string } | undefined;
@@ -2804,7 +2827,7 @@ async function startResponsesStubServer(input: {
     request.on("data", (chunk) => {
       chunks.push(Buffer.from(chunk));
     });
-    request.on("end", () => {
+    request.on("end", async () => {
       const body = Buffer.concat(chunks).toString("utf8");
       const requestIndex = input.requests.length + 1;
       input.requests.push(body);
@@ -2863,6 +2886,13 @@ async function startResponsesStubServer(input: {
       };
       const parsedBody = parseJsonObject(body);
       if (parsedBody?.stream === true) {
+        const delayMs = input.delayBeforeStreamMs?.(body, requestIndex) ?? 0;
+        if (delayMs > 0) {
+          response.setHeader("content-type", "text/event-stream");
+          response.flushHeaders();
+          await sleep(delayMs);
+          if (response.destroyed) return;
+        }
         writeResponsesStubStream({
           customToolCall: input.customToolCallForRequest?.(body, requestIndex),
           outputKind: input.compactionRequestIndexes?.has(requestIndex)
@@ -3136,9 +3166,11 @@ function writeResponsesStubStream(input: {
     usage: input.usage,
   };
 
-  input.response.statusCode = 200;
-  input.response.setHeader("cache-control", "no-cache");
-  input.response.setHeader("content-type", "text/event-stream; charset=utf-8");
+  if (!input.response.headersSent) {
+    input.response.statusCode = 200;
+    input.response.setHeader("cache-control", "no-cache");
+    input.response.setHeader("content-type", "text/event-stream; charset=utf-8");
+  }
   writeResponsesStubSseEvent(input.response, "response.created", {
     response: {
       ...completedResponse,
