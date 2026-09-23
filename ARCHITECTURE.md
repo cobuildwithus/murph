@@ -1763,9 +1763,17 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   to GPT-6 Sol. Active members may select GPT-6 Sol or Luna and the existing
   GPT-5.6 Luna; GPT-5.6 Sol and GPT-6 Astra retain their premium gates.
   Saved Terra preferences now resolve to GPT-6 Sol; other explicit choices stay
-  saved, while a null preference follows the default. Persisted Terra automation
-  overrides also resolve to Sol without rewriting canonical records. Unsupported
-  inherited automation preferences remain dormant across provider changes.
+  saved, while a null preference follows the default. At scheduled execution,
+  automation pins use a reviewed OpenAI replacement map: GPT-5.6 Luna becomes
+  GPT-6 Luna, and GPT-5.6 Sol or Terra becomes GPT-6 Sol. Provider-neutral
+  envelopes and canonical records retain the authored pin; resolution happens
+  after the executing provider is known and before default reasoning is derived.
+  Explicit reasoning survives; an omitted value uses the replacement model's
+  default. Venice retains its mapped GPT-5.6 targets, explicit custom-provider
+  model IDs stay literal, and unsupported inherited managed preferences remain
+  dormant across provider changes. This adds no deploy-time scan or state write;
+  new runtime code activates replacements on the next execution. Future versions
+  require a reviewed map update, and rollback restores prior resolution.
   Venice uses GPT-5.6 Sol as its fallback and supports only its
   existing mapped models; GPT-6 Sol and Luna selection requires OpenAI. The
   common reasoning set remains `low`/`medium`/`high`/`xhigh`, with low represented

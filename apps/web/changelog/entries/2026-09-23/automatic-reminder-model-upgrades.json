@@ -1,0 +1,17 @@
+{
+  "publishedOn": "2026-09-23",
+  "order": 100,
+  "item": {
+    "id": "automatic-reminder-model-upgrades",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Existing reminders follow model upgrades",
+    "summary": "Reminders and automations saved with GPT-5.6 Luna, Sol, or Terra now use their GPT-6 replacements when they run on OpenAI.",
+    "details": "Luna moves to GPT-6 Luna; Sol and Terra move to GPT-6 Sol. Schedules and explicit reasoning settings stay intact, with no need to recreate reminders. Venice and custom-provider selections keep their existing behavior.",
+    "relevanceTags": [
+      "reminders",
+      "automations"
+    ],
+    "sourcePullRequests": []
+  }
+}

@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { buildAssistantAutomationTurnEnvelope } from '../src/assistant/automation/turn-envelope.ts'
 
 describe('assistant automation turn envelope', () => {
-  it('upgrades saved Terra automation targets in turn-scoped input', () => {
+  it('preserves saved Terra automation targets until provider-aware execution', () => {
     expect(buildAssistantAutomationTurnEnvelope({
       assistantTargetOverride: {
         model: 'gpt-5.6-terra',
@@ -13,7 +13,7 @@ describe('assistant automation turn envelope', () => {
       turnTrigger: 'automation-cron',
     })).toMatchObject({
       assistantTargetOverride: {
-        model: 'gpt-6-sol',
+        model: 'gpt-5.6-terra',
         modelProvider: 'vercel-ai-gateway',
         reasoningEffort: 'high',
       },
