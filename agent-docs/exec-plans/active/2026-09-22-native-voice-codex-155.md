@@ -1,8 +1,8 @@
-# Port native voice to Codex 0.155.1
+# Port native voice to the current stable Codex release
 
 Status: active
 Created: 2026-09-22
-Updated: 2026-09-22
+Updated: 2026-09-23
 
 ## Outcome and invariants
 
@@ -79,3 +79,53 @@ readers for any admitted work and follow the existing protected deploy workflow.
   blocked attempts took no provider actions; no auth material was copied.
 - Existing talk-with-murph release note covers the unchanged member capability.
   Production test-usage scope is awaiting clarification.
+
+## Authorized review remediation
+
+Round 4 found that an initial sideband attachment failure can abandon a created
+Public Live call after SDP has reached the browser. Parent disposition: accepted;
+the native error branch bypasses the existing close-only cleanup. The user
+resumed the fix and another review on 2026-09-23.
+
+Reuse one native same-call attachment/close operation for both initial failure
+and established transport loss. Cancellation during the failed initial join
+uses that same operation within the existing five-second shutdown deadline.
+Do not replay speech, admit delegation, create a replacement call, or invent a
+confirmed usage receipt. Regression proof controls the first handshake until
+startup completes, then tests confirmed cleanup, EOF, timeout, and cancellation.
+No new runtime state, dependency, persistence, or host lifecycle owner.
+
+The previous Linux image built successfully. Its CI route inventory needs an
+explicit disposition for one new concatenated binary string; classify only
+after tracing the pinned source. The temporary Blacksmith testbox expired;
+rebuild and composed hosted proof require a fresh task-owned testbox.
+
+## Latest stable upgrade and deletion audit
+
+The user additionally requested the latest stable CLI and removal of obsolete
+compatibility code. npm's latest tag and the official release identify 0.156.1
+at `b412ff32c417f855c2b2d1581b77058eed87c84b`. Its native Sol/Luna model
+entries are identical as parsed objects to the former supplement.
+Delete that 345-line catalog, its staging/copy/fingerprint path and obsolete
+fixture setup; retain product filtering, Astra authority, mixed Code Mode,
+Flex support and context-window validation against the bundled catalog.
+
+Upstream 0.156.1 improves private V3 transcript reconciliation but still lacks
+public Live wire support and host-managed input admission. Retain those narrow
+native deltas and the now-shared bounded cleanup operation. Preserve upstream
+provider routing, transcript tests and schemas while porting; do not introduce
+new lifetime owners. The four initial-attachment regressions reproduce against
+the prior candidate and pass after remediation on 0.155.1. Repeat relevant proof
+on 0.156.1 before the authorized fifth review.
+
+- 0.156.1 source tag/commit/tree and regenerated patch applicability pass.
+- The native API suite passes all 179 tests. Native app-server voice proof
+  passes 65/66 cases; the one failure is initialization timeout before the
+  existing-call test begins. All four new cleanup cases pass on 0.156.1.
+- Packaging/deployment tests pass 87 cases after supplement deletion; Cloudflare
+  and assistant-engine typechecks pass. Focused GPT-6 Sol reminder proof passes
+  on the installed 0.156.1 CLI with one save and the correct Telegram destination.
+- Complexity passes against the reconciled task baseline. Current main advanced
+  separately; reconcile it before final readiness instead of attributing its
+  unrelated simplifications to this candidate.
+- The exact 0.156.1 Linux source image is building on a fresh owned testbox.

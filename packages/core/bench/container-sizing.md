@@ -561,7 +561,7 @@ docker run --rm --platform linux/amd64 --network none \
   --mount "type=bind,src=$PWD/.artifacts/container-efficiency,dst=/bench,readonly" \
   --mount "type=bind,src=$PWD/scripts/container-resource-probe.mjs,dst=/resource-probe.mjs,readonly" \
   --entrypoint node \
-  ghcr.io/cobuildwithus/murph-cloudflare-runner-base:node24.14.1-codex0.155.1 \
+  ghcr.io/cobuildwithus/murph-cloudflare-runner-base:node24.14.1-codex0.156.1-live1 \
   --import /resource-probe.mjs --expose-gc /bench/context-refresh.mjs
 ```
 

@@ -1001,13 +1001,13 @@ image recipe; no manual binary installation or separate release service is neede
 
 ### Astra model catalog
 
-The native runner image has a default Luna/Terra/Sol catalog and an expanded
+The native runner image has a default GPT-6 Sol/Luna and GPT-5.6 Sol/Luna catalog and an expanded
 `.astra` catalog with `gpt-6-astra` and OpenAI Flex support. The runtime chooses
 the latter only from Web's explicit Max/OpenAI workspace authorization. Missing
 authority, Edge, group, and Venice runtimes retain the default catalog and its
 existing delegation choices. The
-pinned Codex 0.155.1 release supplies Astra natively; the image validates its
-catalog instead of synthesizing an entry from Sol. Murph supplies its own base
+pinned Codex 0.156.1 release supplies every entry natively; the image validates
+its bundled catalog without a separate launch supplement. Murph supplies its own base
 instructions for each turn.
 The Astra context window remains at most 272,000 tokens, verified while building the
 image. This bound lets allowance accounting price cumulative Codex turn and

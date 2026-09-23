@@ -1460,9 +1460,8 @@ Web exposes the native field only when its existing assistant-configuration
 resolution confirms that the current managed runtime is authorized for the
 full product-model catalog; missing authority and custom inference fail closed.
 The production image defaults to a catalog containing GPT-6 Sol and Luna plus
-GPT-5.6 Luna and Sol. CLI 0.155.1 uses its native catalog plus the exact Sol/Luna
-entries pinned in `apps/cloudflare/config/codex-gpt6-models.json` from OpenAI
-commit `49e95cc73f4eb2999b1d14f863c009168df6122b`. All GPT-6 entries retain
+GPT-5.6 Luna and Sol. CLI 0.156.1 supplies every entry from its native catalog;
+there is no separate launch-catalog supplement. All GPT-6 entries retain
 the native 272K context limit. The image fails validation for missing entries. Web separately derives Astra authority from the canonical available models
 and managed OpenAI provider; only an explicitly authorized workspace selects the
 expanded image-owned Astra catalog. Missing authority retains the four-model
@@ -2631,7 +2630,10 @@ confirm managed input ownership before the browser receives SDP. Voice events
 are consumed before another turn's transcript/event capture. Selected speech is
 explicit, and process shutdown closes native voice before terminating the CLI.
 Only native provider receipts establish confirmed closure and cumulative usage;
-the attachment itself owns no mailbox, billing ledger, or replay. The complete
+the attachment itself owns no mailbox, billing ledger, or replay. Initial sideband
+attachment failure and established transport loss share one same-call close-only
+attachment under the existing five-second deadline, including cancellation during
+the failed initial join. Cleanup never replays speech or admits delegations. The complete
 hosted journey remains a release gate for the website entry.
 The hosted voice entrypoint derives the identical process launch configuration
 used by ordinary turns. Its media thread may select the configured OpenAI provider

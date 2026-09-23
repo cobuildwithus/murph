@@ -2344,11 +2344,11 @@ pnpm --dir apps/cloudflare runner:docker:base
 ```
 
 That image is prepared in the local Docker cache under the stable GHCR tag
-`ghcr.io/cobuildwithus/murph-cloudflare-runner-base:node24.14.1-codex0.155.1-live1`,
+`ghcr.io/cobuildwithus/murph-cloudflare-runner-base:node24.14.1-codex0.156.1-live1`,
 which is also the final app-layer Dockerfile default. Using the pullable GHCR
 name avoids BuildKit treating the prepared base as a Docker Hub `library/*`
 image during local Wrangler container builds.
-The base Dockerfile builds the CLI from the checksum-pinned Codex 0.155.1 source
+The base Dockerfile builds the CLI from the checksum-pinned Codex 0.156.1 source
 with `patches/codex-public-live.patch`. It keeps the same release's bundled
 Code Mode host and sandbox resources. The patch adds public API-key Live
 compatibility, owned-session shutdown, and opt-in app-server input ownership.
@@ -2373,11 +2373,10 @@ rule. The protected deployment workflow must provide that cache before this
 patch is considered operationally ready; its current fresh-runner forced
 build would otherwise recompile Codex for each deployment.
 
-Codex CLI 0.155.1 supplies the native Astra entry. Its bundled catalog is
-supplemented with the unchanged Sol/Luna launch entries in
-`config/codex-gpt6-models.json`, pinned to OpenAI Codex commit
-`49e95cc73f4eb2999b1d14f863c009168df6122b`. The source URL is stored beside
-the entries; remove the supplement when a stable CLI bundles equivalent entries.
+Codex CLI 0.156.1 supplies native Sol, Luna and Astra entries. Its bundled
+Sol/Luna entries match the former pinned launch supplement, which is removed
+along with its bundle staging and fingerprint input. The native bundled catalog
+is the sole model-entry source.
 Terra is excluded from active catalogs; historical usage pricing remains readable. The existing standard catalog and separately
 authorized Astra catalog retain their model filtering, mixed Code Mode, Flex,
 and context-window validation. Missing product models fail the image build.

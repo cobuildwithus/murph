@@ -453,8 +453,8 @@ describe("hosted runner container image contract", () => {
       "utf8",
     );
 
-    expect(baseDockerfile).toContain("ARG CODEX_UPSTREAM_REVISION=be2951ea34f0d295ed0becf97079f92fa5f6950e");
-    expect(baseDockerfile).toContain("ARG CODEX_CLI_VERSION=0.155.1");
+    expect(baseDockerfile).toContain("ARG CODEX_UPSTREAM_REVISION=b412ff32c417f855c2b2d1581b77058eed87c84b");
+    expect(baseDockerfile).toContain("ARG CODEX_CLI_VERSION=0.156.1");
     expect(baseDockerfile).toContain("ARG NODE_VERSION=24.14.1");
     expect(baseDockerfile).toContain(
       "ARG NODE_IMAGE_DIGEST=sha256:b506e7321f176aae77317f99d67a24b272c1f09f1d10f1761f2773447d8da26c",
@@ -498,7 +498,7 @@ describe("hosted runner container image contract", () => {
     expect(baseDockerfile).toContain("COPY patches/codex-public-live.patch");
     expect(baseDockerfile).toContain("git apply --check /tmp/codex-public-live.patch");
     expect(baseDockerfile).toContain("export CODEX_BWRAP_SHA256=");
-    expect(baseDockerfile).toContain("ARG CODEX_CLI_VERSION=0.155.1");
+    expect(baseDockerfile).toContain("ARG CODEX_CLI_VERSION=0.156.1");
     expect(baseDockerfile).toContain("COPY --from=codex-package /opt/codex/ /opt/codex/");
     expect(baseDockerfile).toContain("cargo build --locked --release --target x86_64-unknown-linux-gnu --bin codex --jobs 2");
     expect(baseDockerfile).toContain("sha256sum /opt/codex/codex-resources/bwrap");
@@ -730,8 +730,8 @@ describe("hosted runner container image contract", () => {
     const { patchFilter, standardFilter, validationFilter } = readFinalImageCodexModelCatalogJqFilters(finalDockerfile);
     const stockCatalogWithoutFlex: CodexModelCatalog = {
       models: [
-        { slug: "gpt-6-sol", service_tiers: [{ id: "priority", name: "Priority" }] },
-        { slug: "gpt-6-luna", service_tiers: [{ id: "priority", name: "Priority" }] },
+        { slug: "gpt-6-sol", context_window: 272_000, service_tiers: [{ id: "priority", name: "Priority" }] },
+        { slug: "gpt-6-luna", context_window: 272_000, service_tiers: [{ id: "priority", name: "Priority" }] },
         {
           slug: "gpt-6-astra",
           context_window: 272_000,
@@ -842,7 +842,7 @@ describe("hosted runner container image contract", () => {
     }, { slurp: true }).trim()).toBe("false");
   });
 
-  it("validates the native Codex release plus pinned upstream launch entries", async () => {
+  it("validates product entries directly from the native Codex catalog", async () => {
     const finalDockerfile = await readFile(
       new URL("../../../Dockerfile.cloudflare-hosted-runner", import.meta.url),
       "utf8",
@@ -856,11 +856,13 @@ describe("hosted runner container image contract", () => {
     const nativeCatalog = parseCodexModelCatalogJson(nativeCatalogJson);
     const productCatalog = parseCodexModelCatalogJson(runJqFilter(patchFilter, nativeCatalog));
     expect(runJqFilter(validationFilter, productCatalog, { slurp: true }).trim()).toBe("true");
-    expect(readCodexModel(productCatalog, "gpt-6-astra")).toMatchObject({
-      ...readCodexModel(nativeCatalog, "gpt-6-astra"),
-      service_tiers: expect.any(Array),
-      tool_mode: "code_mode",
-    });
+    for (const slug of hostedRunnerProductModelSlugs) {
+      expect(readCodexModel(productCatalog, slug)).toMatchObject({
+        ...readCodexModel(nativeCatalog, slug),
+        service_tiers: expect.any(Array),
+        tool_mode: "code_mode",
+      });
+    }
     expect(readCodexModelSlugs(parseCodexModelCatalogJson(runJqFilter(standardFilter, productCatalog))).sort())
       .toEqual(["gpt-5.6-luna", "gpt-5.6-sol", "gpt-6-luna", "gpt-6-sol"]);
   });
@@ -1141,7 +1143,7 @@ function readFinalImageCodexModelCatalogJqFilters(dockerfile: string): {
   validationFilter: string;
 } {
   const patchMatch = new RegExp(
-    String.raw`\|\s+jq --slurpfile launch /tmp/codex-gpt6-models\.json '([^']+)'\s+\\\s*\n\s*> /tmp/murph-codex-model-catalog\.openai-flex\.json`,
+    String.raw`\|\s+jq '([^']+)'\s+\\\s*\n\s*> /tmp/murph-codex-model-catalog\.openai-flex\.json`,
     "u",
   ).exec(dockerfile);
   const validationMatch = new RegExp(
@@ -1168,7 +1170,6 @@ function runJqFilter(
 ): string {
   return execFileSync("jq", [
     ...(options.slurp === true ? ["-s"] : []),
-    "--slurpfile", "launch", fileURLToPath(new URL("../config/codex-gpt6-models.json", import.meta.url)),
     filter,
   ], {
     encoding: "utf8",
