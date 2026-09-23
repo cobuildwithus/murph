@@ -31,7 +31,8 @@ export const QUERY_PROJECTION_SCHEMA_ID = "murph.query-projection";
 // 31: Pack JSON-heavy query rows in 8 KiB pages and omit unused date indexes.
 // 32: Share identical metric payloads within each published generation.
 // 33: Retire untouched legacy Junction oxygen analytics from default queries.
-export const QUERY_PROJECTION_SQLITE_VERSION = 33;
+// 34: Share wearable JSON field dictionaries and pin search rowids for rebuild compaction.
+export const QUERY_PROJECTION_SQLITE_VERSION = 34;
 
 export interface QueryProjectionLocation {
   absolutePath: string;
@@ -162,6 +163,11 @@ function ensureWearableQueryProjectionSchema(database: DatabaseSync): void {
       value TEXT NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS query_wearable_summary_shapes (
+      shape_id INTEGER PRIMARY KEY,
+      keys_json TEXT NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS query_wearable_summaries (
       id TEXT PRIMARY KEY,
       provider_scope_key TEXT NOT NULL,
@@ -180,7 +186,9 @@ function ensureWearableQueryProjectionSchema(database: DatabaseSync): void {
 }
 
 function hasWearableQueryProjectionTables(database: DatabaseSync): boolean {
-  return tableExists(database, "query_meta") && tableExists(database, "query_wearable_summaries");
+  return tableExists(database, "query_meta")
+    && tableExists(database, "query_wearable_summaries")
+    && tableExists(database, "query_wearable_summary_shapes");
 }
 
 export function ensureQueryProjectionSchema(database: DatabaseSync): void {
@@ -264,7 +272,8 @@ export function ensureQueryProjectionSchema(database: DatabaseSync): void {
     );
 
     CREATE TABLE IF NOT EXISTS query_search_document (
-      record_id TEXT PRIMARY KEY,
+      rowid INTEGER PRIMARY KEY,
+      record_id TEXT NOT NULL UNIQUE,
       alias_ids_json TEXT NOT NULL,
       record_type TEXT NOT NULL,
       kind TEXT,
@@ -305,6 +314,7 @@ export function hasQueryProjectionTables(database: DatabaseSync): boolean {
     tableExists(database, "query_metric_payloads") &&
     tableExists(database, "query_metric_targets") &&
     tableExists(database, "query_wearable_summaries") &&
+    tableExists(database, "query_wearable_summary_shapes") &&
     tableExists(database, "query_source_manifest") &&
     tableExists(database, "query_search_document") &&
     tableExists(database, "query_search_fts")

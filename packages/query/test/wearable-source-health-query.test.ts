@@ -1,3 +1,4 @@
+import { createWearableSummaryEncoder } from "../src/projection/wearable-summary-shapes.ts";
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
@@ -469,7 +470,13 @@ test("failed global publication preserves the independently current wearable por
 test("corrupt stored activity evidence fails closed rather than falling back to raw health", async () => {
   const { root } = await fixture();
   await summarizeWearableSourceHealthRuntime(root);
-  executeSql(root, "UPDATE query_wearable_summaries SET summary_json = '{}' WHERE summary_kind = 'activity'");
+  const database = new DatabaseSync(currentQueryProjectionLocation(root).absolutePath);
+  try {
+    database.prepare("UPDATE query_wearable_summaries SET summary_json = ? WHERE summary_kind = 'activity'")
+      .run(createWearableSummaryEncoder(database)("{}"));
+  } finally {
+    database.close();
+  }
   await assert.rejects(summarizeWearableSourceHealthRuntime(root), /activity evidence/iu);
 });
 

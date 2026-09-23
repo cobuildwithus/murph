@@ -651,6 +651,16 @@ Legacy oxygen analytics retirement is tracked in
 Single device publication receipts are tracked in
 [`device receipts`](exec-plans/completed/2026-09-21-single-import-receipt.md).
 
+Closed audit archival, shared JSONL storage and further storage inspection are
+tracked in [`audit storage`](exec-plans/completed/2026-09-22-audit-storage.md);
+`packages/core/README.md` owns the archive and reader compatibility contract.
+
+Wearable field dictionaries, query compaction and combined vault storage PR
+completion are tracked in [`query storage`](exec-plans/completed/2026-09-22-query-storage.md).
+
 Worker callback preparation, HTTP-header timing, and bounded Vercel region
 attribution are tracked in
 [`mailbox latency phases`](exec-plans/completed/2026-09-22-mailbox-latency-phases.md).
+
+Preserving query-source error privacy across audit archives is tracked in
+[`audit query errors`](exec-plans/completed/2026-09-22-audit-query-errors.md).
