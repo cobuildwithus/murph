@@ -54,6 +54,7 @@ export async function runWithHostedWorkspaceReadTiming(
     return response;
   } finally {
     const totalMs = Math.round(performance.now() - startedAt);
+    const completed = response !== undefined;
     try {
       response?.headers.set("Server-Timing", Object.entries({ ...phases, total: totalMs })
         .map(([key, ms]) => `murph_workspace_${key};dur=${Math.max(0, Math.round(ms))}`).join(", "));
@@ -65,7 +66,7 @@ export async function runWithHostedWorkspaceReadTiming(
       try {
         console.info("Hosted workspace read timing.", {
           event: "hosted-workspace.read.timing",
-          completed: response !== undefined,
+          completed,
           firstRequestInModule: firstRequest,
           handlerStartedAt: new Date(handlerStartedAtMs).toISOString(),
           signedAt,
@@ -88,4 +89,3 @@ export async function runWithHostedWorkspaceReadTiming(
     }
   }
 }
-
