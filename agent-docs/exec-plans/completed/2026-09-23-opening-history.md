@@ -1,6 +1,6 @@
 # Scope opening replies to the current account
 
-Status: active
+Status: completed
 Created: 2026-09-23
 Updated: 2026-09-23
 
@@ -24,4 +24,5 @@ Outcome: recreated accounts can use the existing Web opening continuation. Reach
 
 ## Status
 
-Implementation and focused proof in progress. No production change or latency improvement claimed yet.
+Implementation and parent review complete. The PostgreSQL regression passes and a negative control without the lifecycle predicate reproduces the prior-account failure. Thirty-six instant-turn tests, ten archive render tests, Web typecheck, lint, complexity, docs drift and gardening pass. No model input or copy changes. PR #3679 owns pending exact-head CI, final ReviewGPT, managed Web deployment and production canary acceptance; no deployment or measured speedup is claimed by this implementation record.
+Completed: 2026-09-23
