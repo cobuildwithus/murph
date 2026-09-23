@@ -84,8 +84,7 @@ test("query replacement clears retired payloads for compression and preserves ro
           database.exec("DELETE FROM query_wearable_summaries");
           throw new Error("synthetic publication failure");
         }), /synthetic publication failure/u);
-        assert.equal(database.prepare("SELECT summary_json FROM query_wearable_summaries").get()?.summary_json,
-          summary.summaryJson);
+        assert.equal(readWearableSummaryRows(location).rows[0]?.summaryJson, summary.summaryJson);
         withImmediateTransaction(database, () => {
           database.exec("DELETE FROM query_wearable_summaries");
           insertWearableSummaryRows(database, [{ ...summary, summaryJson: "{}" }]);
@@ -105,7 +104,7 @@ test("query replacement clears retired payloads for compression and preserves ro
   }
 });
 
-for (const version of [29, 30, 31]) {
+for (const version of [29, 30, 31, 32, 33]) {
 test(`v${version} caches rebuild once and current SQLite bytes remain reusable after restore`, async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "murph-query-storage-upgrade-"));
   try {

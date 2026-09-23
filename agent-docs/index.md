@@ -646,3 +646,6 @@ Single device publication receipts are tracked in
 Closed audit archival, shared JSONL storage and further storage inspection are
 tracked in [`audit storage`](exec-plans/completed/2026-09-22-audit-storage.md);
 `packages/core/README.md` owns the archive and reader compatibility contract.
+
+Wearable field dictionaries, query compaction and combined vault storage PR
+completion are tracked in [`query storage`](exec-plans/active/2026-09-22-query-storage.md).

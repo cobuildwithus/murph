@@ -1,3 +1,4 @@
+import { createWearableSummaryEncoder, decodeWearableSummaryJson, readWearableSummaryShapes } from "../src/projection/wearable-summary-shapes.ts";
 import { readVaultSourceStrict } from "../src/vault-source.ts";
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
@@ -4687,6 +4688,7 @@ test("rebuildQueryProjection keeps dense provider telemetry out of default read 
       assert.equal(denseEventSearchDocumentCount.count, 0);
       assert.equal(wearableSummaryCount.count, 1);
       assert.ok(wearableSummaryRow);
+      wearableSummaryRow.summaryJson = decodeWearableSummaryJson(wearableSummaryRow.summaryJson, readWearableSummaryShapes(database));
       // Stored rows use the compact wearable summary codec: populated
       // envelopes drop the constant candidates array entirely and empty
       // envelopes collapse to null markers.
@@ -5032,7 +5034,7 @@ test("ordinary wearable reads rebuild carried v22 sparse-body projections before
         WHERE summary_kind = 'body_state' AND summary_date = '2026-05-20'
       `).get() as { id: string; summaryJson: string } | undefined;
       assert.ok(bodyRow);
-      const legacyBodySummary = JSON.parse(bodyRow.summaryJson) as Record<string, unknown>;
+      const legacyBodySummary = JSON.parse(decodeWearableSummaryJson(bodyRow.summaryJson, readWearableSummaryShapes(staleDatabase))) as Record<string, unknown>;
       for (const field of [
         "weightKg",
         "bodyFatPercentage",
@@ -5144,7 +5146,7 @@ test("ordinary wearable reads rebuild carried v22 sparse-body projections before
       assert.ok(rebuiltRow);
       const rebuiltBodySummary = parseStoredWearableSummary<Record<string, unknown>>(
         "body_state",
-        rebuiltRow.summaryJson,
+        decodeWearableSummaryJson(rebuiltRow.summaryJson, readWearableSummaryShapes(reopened)),
       );
       assert.ok(rebuiltBodySummary);
       for (const field of [
@@ -7572,8 +7574,11 @@ function rewriteStoredWearableSummaryRowsToLegacyFullForm(
     .all() as Array<{ id: string; summaryKind: StoredWearableMetricSummaryKind; summaryJson: string }>;
   const update = database.prepare("UPDATE query_wearable_summaries SET summary_json = ? WHERE id = ?");
 
+  const shapes = readWearableSummaryShapes(database);
+  const encode = createWearableSummaryEncoder(database);
   let rewritten = 0;
   for (const row of rows) {
+    row.summaryJson = decodeWearableSummaryJson(row.summaryJson, shapes);
     const expanded = parseStoredWearableSummary<Record<string, unknown>>(
       row.summaryKind,
       row.summaryJson,
@@ -7588,7 +7593,7 @@ function rewriteStoredWearableSummaryRowsToLegacyFullForm(
     }
     const legacyJson = JSON.stringify(expanded);
     if (legacyJson !== row.summaryJson) {
-      update.run(legacyJson, row.id);
+      update.run(encode(legacyJson), row.id);
       rewritten += 1;
     }
   }
@@ -7658,6 +7663,7 @@ test("rebuildQueryProjection resets stale v7 projections that still store full-f
         `)
         .get() as { summaryJson: string } | undefined;
       assert.ok(activityRow);
+      activityRow.summaryJson = decodeWearableSummaryJson(activityRow.summaryJson, readWearableSummaryShapes(reopened));
       assert.match(activityRow.summaryJson, /"steps":\{"confidence":/u);
       assert.match(activityRow.summaryJson, /"dayStrain":null/u);
       assert.doesNotMatch(activityRow.summaryJson, /"candidates":/u);
