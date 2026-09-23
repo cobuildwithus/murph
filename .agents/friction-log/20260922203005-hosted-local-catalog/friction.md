@@ -22,3 +22,5 @@ Delete the retired Nano synthesis path and its template requirement. Keep curren
 ## Context
 
 Discovered by the protected predeployment E2E gates after PR 3649; production runtime deployment was not attempted.
+
+After the catalog setup was repaired, the scheduled image-reminder journey completed with Sol and the GPT-6 pricing version, but its billing assertion still expected the GPT-5.6 pricing version. Keep the fixture's standard and Flex version assertions aligned with the selected model's published pricing contract; retain the cost and adjustment assertions.
