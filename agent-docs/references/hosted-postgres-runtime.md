@@ -89,6 +89,10 @@ Provider effects continue to require their own live authorization.
 Registered/completed receipts survive activation loss. A duplicate registration
 cannot execute the attempt twice. An uncertain launch or stop retains the exact
 target; age can schedule reconciliation but cannot authorize its replacement.
+While the existing starting fence is preserved, retry at its 30-second deadline
+instead of polling every three seconds. An independent wake can still reach a
+ready child sooner. Expiry starts the ordinary exact retirement proof; it does
+not establish stoppedness or release authority.
 
 Completion revokes ordinary effects and records completion before the adapter
 releases ownership. Reuse additionally requires the exact native completed
@@ -115,6 +119,9 @@ transactions. The hint has a two-second best-effort budget; failure leaves
 durable completion for the normal recheck. Lost responses replay the same exact
 identity and cannot retire or release a successor. Pending upload drains remain
 owned by the existing release transaction.
+Recovery from a lost completion acknowledgment uses that same settled `complete`
+command after proving the exact completed receipt and inactive fence, replacing
+the separate completion and release requests.
 
 Deploy the additive Web completion consumer before the Worker producer. The
 existing live Web protocol admission includes both early and settled command
