@@ -884,7 +884,9 @@ describe('native poll input measurement', () => {
         if (selfVote && phase === 'base') {
           // Exact input ablation against 2013c92511: only the new guidance,
           // vote description, action and its two argument properties differ.
-          developerInstructions = developerInstructions.replace(/^- You can vote yourself when it fits:.*\n/mu, '')
+          developerInstructions = developerInstructions
+            .replace(/^- You can vote yourself when it fits:.*\n/mu, '')
+            .replace(/^- Poll results are snapshots, not live context\..*\n/mu, '')
           tools = tools.map((tool) => {
             if (tool.name !== 'poll') return tool
             const schema = readRecord(structuredClone(tool.inputSchema))

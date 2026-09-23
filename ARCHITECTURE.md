@@ -1312,6 +1312,10 @@ answers, delegated judgment, settled decisions and human-owned exchanges. Polls
 record preferences without authorizing bookings or other downstream effects.
 Murph may join a poll with its own preference, a joke or a tie-breaker when it
 fits, without an explicit invitation; this does not require voting in every poll.
+Before current tallies, voter claims or participation nudges in an attended turn,
+Murph refreshes the poll instead of reusing earlier prose. Incomplete voter pages
+do not establish nonparticipation. Multiple selections remain one participant;
+voting and acknowledging a vote do not establish completion of the chosen activity.
 
 Deploy the additive poll migration, then Web, then the runtime tool. Existing
 runtimes remain compatible. Keep Web's poll callback while new runtimes exist;

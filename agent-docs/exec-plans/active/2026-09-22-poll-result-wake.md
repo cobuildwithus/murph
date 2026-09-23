@@ -42,3 +42,8 @@ Provider and encryption work stays outside database transactions. The notificati
 - Two production-notification real-Codex journeys on gpt-5.6-terra, local subscription: an unacknowledged majority queues exactly one short truthful tally reply; an already settled conversation skips with zero outbox entries. Reply review Ready. No production channel send claimed.
 - Changelog remains content-only, verified through the archive renderer and existing archive design reference. No new UI or screenshot required.
 - Deployment requires the additive nullable column before Web and appropriate Linq poll vote subscriptions. Prior self-vote Web-before-runtime order still applies. Existing generic notification consumers accept the same envelope.
+
+- Scope expanded to poll-result freshness during ordinary conversation. Add production guidance to refresh before current tally/voter/nudge claims, preserve unique participant semantics for multiple choices, and distinguish voting from activity completion. Verification uses independently synthetic planning scenarios, not private conversation reproductions.
+
+- Freshness regression proof passes: production poll guidance makes a current read before participation claims; an independent five-attendee meetup fixture returns five distinct voters despite seven selections, with no unnecessary reminder. Real-Codex reply review Ready. Assistant deterministic tests and typecheck pass.
+- Refreshed complete provider-input measurement against the original PR base: individual 150140 to 152616 UTF-8 bytes, group 140544 to 143020, each +2476. Assembled instructions +1085, tool/schema +840; exact tokenizer unavailable. The conditional poll-result notification is a newly admitted turn, not additional ordinary-turn input.

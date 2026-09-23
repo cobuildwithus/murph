@@ -41963,3 +41963,56 @@ describeRealCodex('real Codex poll result wake e2e', () => {
     }
   }, 360_000)
 })
+
+describeRealCodex('real Codex poll freshness e2e', () => {
+  it('poll participation refreshes before reminders', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-poll-freshness-e2e-'))
+    const { MURPH_POLL_TOOL } = await import('../src/assistant-codex/dynamic-tools/conversation-polls.js')
+    const pollRef = 'poll_' + 'e'.repeat(32)
+    const calls: Array<import('@murphai/hosted-execution/conversation-polls').ConversationPollRequest> = []
+    try {
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions: buildAssistantSystemPrompt({
+          assistantCliContract: null, assistantKnowledgeToolsAvailable: false, assistantPollsAvailable: true,
+          channel: 'linq', cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+          conversationScope: 'group', currentLocalDate: '2026-09-22', currentInstant: '2026-09-22T16:00:00.000Z',
+          currentTimeZone: 'UTC', hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false, turnTrigger: null,
+        }),
+        dynamicTools: [MURPH_POLL_TOOL], env: config.env,
+        hostedToolContext: {
+          computerToolsAvailable: false, vaultFileSendAvailable: false,
+          pollTool: { request: async (request) => {
+            calls.push(request)
+            if (request.request.action !== 'read') throw new Error('Only a current poll read is authorized for this check.')
+            return { status: 'results', polls: [{
+              pollRef, channel: 'linq', question: 'Available meetup times?',
+              options: [{ text: 'Morning', votes: 3 }, { text: 'Afternoon', votes: 2 }, { text: 'Evening', votes: 2 }],
+              totalVoters: 5, anonymous: false, multipleAnswers: true, closed: false,
+              observedAt: '2026-09-22T16:00:00.000Z', freshness: 'provider_read',
+              voters: ['rowan@example.test', 'sage@example.test', 'finley@example.test', 'arden@example.test', 'river@example.test'].map((id, index) => ({
+                kind: 'imessage_handle' as const, id, optionIndexes: [[0, 1], [0, 2], [0], [1], [2]][index]!, observedAt: '2026-09-22T16:00:00.000Z',
+              })), voterSource: 'provider_read', nextVoterCursor: null,
+            }] }
+          } },
+          currentInvocationScope: () => ({ origin: { kind: 'accepted_input', sessionId: 'synthetic-fresh-poll', assistantInputId: 'ain_' + 'e'.repeat(32) }, conversationScope: 'group' }),
+          currentHostedDeliveryContext: () => null, currentHostedMailboxItemIds: () => [],
+          sendVaultFile: async () => { throw new Error('No file send authorized.') },
+        },
+        model: config.model, modelProvider: config.modelProvider,
+        prompt: `Conversation context: This room has five human attendees: Rowan, Sage, Finley, Arden and River, with matching example.test email handles. We are choosing a meetup time using poll ${pollRef}. An earlier result read at 15:20 showed only three participants, so two responses were missing then. Current message: Before we chase anyone, how many people are still missing from the poll?`,
+        reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
+      })
+      process.stdout.write(`[real-codex poll freshness] ${JSON.stringify({ reply: result.finalMessage, actions: calls.map((call) => call.request) })}\n`)
+      expect(calls.map((call) => call.request)).toEqual([{ action: 'read', pollRef }])
+      expect(result.finalMessage).toMatch(/(?:all\s+)?(?:five|5)\s+(?:people|participants|attendees|have|responded|voted)|everyone|nobody|no one/iu)
+      expect(result.finalMessage).not.toMatch(/(?:still|yet to|need(?:s)? to|please) vote|(?:seven|7) (?:people|participants)|completed|finished the meetup|closed/iu)
+      expect(result.finalMessage.length).toBeLessThan(400)
+    } finally {
+      await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+    }
+  }, 360_000)
+})

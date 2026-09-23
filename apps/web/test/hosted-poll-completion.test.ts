@@ -14,6 +14,7 @@ describe("poll result checkpoint", () => {
   });
   it.each([
     { votes: [1, 0], totalVoters: 1, eligibleCount: 5, reason: null },
+    { votes: [1, 1], totalVoters: 1, eligibleCount: 2, reason: null },
     { votes: [2, 0], totalVoters: 2, eligibleCount: 4, reason: null },
     { votes: [3, 1], totalVoters: 4, eligibleCount: 5, reason: "majority" },
     { votes: [2, 2], totalVoters: 4, eligibleCount: 4, reason: "all_voted" },
