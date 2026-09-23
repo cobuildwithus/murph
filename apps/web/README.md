@@ -1412,6 +1412,31 @@ or an ephemeral preview deployment URL as a long-lived provider callback or
 webhook base. Web build validation and the browser start boundary reject a
 hostname mismatch before provider authorization begins.
 
+### Workspace read timing
+
+`GET /api/internal/hosted-workspace` records content-free
+`hosted-workspace.read.timing` diagnostics for the first request in a module,
+failed requests, and requests with at least 250 ms of handler work or verified
+signed-request age at handler entry. It measures authentication, workspace,
+assistant configuration, usage and response preparation through the existing
+Prisma operation and pool-acquisition collectors. The three reads overlap:
+their durations and the database/pool totals must not be added to request time.
+An early read failure records unfinished sibling phases without waiting for them
+or replacing the original failure.
+
+Optional `murph_workspace_*` Server-Timing fields describe completed phases and
+handler total. Signed-request age includes transport, startup and clock skew;
+first-module status is not proof of a platform cold start. Query/pool samples
+are capped at 24, with aggregate counts and durations. No request, member,
+credential, SQL parameter, row content or error prose enters this event.
+Diagnostics add no database or network work and cannot change response behavior.
+
+A processing action of `started` means a new invocation, not necessarily a new
+container. The existing container-ready event's `startMode` and
+`readinessLatencyMs` establish native warmth; a retained member target is
+considered before pristine standby allocation. A warm target still needs the
+fresh workspace, configuration and usage callback before invocation.
+
 ### Mailbox fetch timing
 
 `/api/internal/hosted-mailbox/fetch` emits one content-free

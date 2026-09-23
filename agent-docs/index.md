@@ -1,5 +1,9 @@
 # Murph Agent Docs Index
 
+Workspace callback phase, database and pool timing semantics are owned by
+`apps/web/README.md` under "Workspace read timing". Implementation and proof are
+tracked in `exec-plans/completed/2026-09-22-workspace-read-latency.md`.
+
 Bounded empty-day history traversal and retention-only archive exclusion are
 owned by `packages/device-syncd/README.md` and
 `packages/assistant-runtime/README.md`; investigation, architecture consultation,
