@@ -1,6 +1,6 @@
 # Workspace read latency and warm target attribution
 
-Status: active
+Status: completed
 Created: 2026-09-22
 Updated: 2026-09-22
 
@@ -14,8 +14,9 @@ Updated: 2026-09-22
 
 - Preserve callback auth, replay protection, fresh usage/model authority, response
   shapes and deadlines. Prove timing isolation, privacy and failure behavior.
-- Complete focused tests, typecheck, parent review, final review and exact-head CI.
-- Verify deployment and subsequent production evidence before claiming improvement.
+- Complete focused tests, typecheck, parent review and final review.
+- Keep exact-head CI and deployed observation as separate release gates;
+  this record closes implementation, not the production latency investigation.
 
 ## Scope
 
@@ -43,8 +44,9 @@ Updated: 2026-09-22
 
 1. Finish bounded lifecycle and callback diagnosis.
 2. Add request-local timing and focused proof; make only supported optimizations.
-3. Validate, review, commit and open a draft PR.
-4. Run final review concurrently with exact-head CI, then ship via the release owner.
+3. Validate, review, commit and open a draft PR. Completed as PR #3665.
+4. Run final review concurrently with exact-head CI. Review passed; CI and managed
+   production release remain tracked by the PR and release owner.
 
 ## Decisions
 
@@ -64,4 +66,12 @@ Updated: 2026-09-22
   state or dependency. Headers and logging preserve original errors and responses.
 - Production root cause below the callback boundary remains unproven. The current
   candidate is instrumentation, not a claimed latency fix; rollout enables the
-  next targeted investigation. Final review and exact-head CI are pending.
+  next targeted investigation.
+- Final ReviewGPT passed at `dd7c52da3d07520b2d90f955d11b91f063caf62a`,
+  with no qualifying bugs or material Complexity Collapse findings. It also ran
+  six independent smoke-check groups against the timing implementation.
+- Parent final review confirmed the same response/auth/concurrency contracts.
+  Closeout changes only this implementation record and its index reference;
+  runtime source and tests remain the reviewed candidate. Exact-head CI and
+  production promotion must still pass before deployment is reported complete.
+Completed: 2026-09-22

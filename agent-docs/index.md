@@ -2,7 +2,7 @@
 
 Workspace callback phase, database and pool timing semantics are owned by
 `apps/web/README.md` under "Workspace read timing". Implementation and proof are
-tracked in `exec-plans/active/2026-09-22-workspace-read-latency.md`.
+tracked in `exec-plans/completed/2026-09-22-workspace-read-latency.md`.
 
 Stable host-supplied group report labels and consented contact fallback are
 recorded in [group report labels](exec-plans/completed/2026-09-22-group-report-labels.md).
