@@ -1,6 +1,6 @@
 # Plain group report labels and PR completion
 
-Status: active
+Status: completed
 Created: 2026-09-22
 Updated: 2026-09-22
 
@@ -50,3 +50,21 @@ Updated: 2026-09-22
 - Focused shared-label/shared-read Web tests, Web and assistant typechecks,
   ESLint, real-Codex scheduled label journey, changelog rendering, complexity.
 - PR completion additionally requires current-head CI and routed ReviewGPT.
+
+## Outcome and evidence
+
+- Removed the report-only contact suffix and added cross-source duplicate-name
+  coverage. Identity, membership, consent, and contact safety checks are unchanged.
+- Focused shared-label/shared-read/changelog tests: 61 passed; after the clean
+  base merge, shared-label/shared-read/group-store/changelog tests: 146 passed.
+- Web and assistant-engine typechecks, focused ESLint, and complexity passed.
+  The existing join hotspot remains unchanged at 44; new helper maximum is 7.
+- The plain-name real-Codex scheduled journey passed before and after the base
+  merge: one shared read and one send decision with all five values correctly
+  labeled, including the plain contact name, fallback, and duplicate names.
+- Parent candidate review: Ready. No new persistence or protocol; optional
+  bounded contact work remains outside transactions and failures preserve data.
+- Draft PR #3656 contains the complete fix and evidence. This implementation
+  preparation plan is complete; external review and exact-head CI results are
+  recorded with the PR. Merge and deployment remain outside this task.
+Completed: 2026-09-22
