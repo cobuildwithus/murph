@@ -244,7 +244,7 @@ describe("production conversation canary runner", () => {
       inboundMessage({ text: reply }),
     ];
     await expect(runLinqProductionCanary(TEST_ENV)).rejects.toMatchObject({
-      name: "reply-semantics-invalid",
+      name: expect.stringMatching(/^reply-semantics-invalid; turn=3; identity_copy=(exact|different); welcome_copy=(true|false); reply_chars=\d+$/u),
     });
     expect(mocks.stop).toHaveBeenCalledOnce();
   });
@@ -257,7 +257,22 @@ describe("production conversation canary runner", () => {
       inboundMessage({ text: "Here is a sleep plan." }),
     ];
     await expect(runLinqProductionCanary(TEST_ENV)).rejects.toMatchObject({
-      name: "reply-semantics-invalid",
+      name: "reply-semantics-invalid; turn=2; identity_copy=different; welcome_copy=false; reply_chars=21",
+    });
+    expect(mocks.spaceSend).toHaveBeenCalledTimes(2);
+  });
+
+  it("distinguishes formatting drift without accepting it or exposing reply text", async () => {
+    const reply = MURPH_ASSISTANT_ONBOARDING_IDENTITY_QUESTIONS.casual.replace(" — ", ", ");
+    mocks.now = [0, 1_000, 1_000, 2_000];
+    mocks.sendResults = [true, true];
+    mocks.messages = [
+      inboundMessage({ text: MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE }),
+      inboundMessage({ text: reply }),
+    ];
+    await expect(runLinqProductionCanary(TEST_ENV)).rejects.toMatchObject({
+      name: `reply-semantics-invalid; turn=2; identity_copy=format-only; welcome_copy=false; reply_chars=${reply.length}`,
+      message: "The Linq production canary failed.",
     });
     expect(mocks.spaceSend).toHaveBeenCalledTimes(2);
   });
