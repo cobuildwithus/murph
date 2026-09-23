@@ -2691,6 +2691,7 @@ model HostedAuthRecord {
 }
 
 model HostedConversationPoll {
+  resultNotifiedAt      DateTime?    @map("result_notified_at")
   id                    String       @id
   memberId              String       @map("member_id")
   channel               String

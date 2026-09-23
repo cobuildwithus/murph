@@ -62,7 +62,7 @@ export async function callLinqPoll(input: {
   voterCursor?: string;
   options?: string[];
   messageId?: string;
-} & ({ action: "create" | "read" } | { action: "vote"; messageId: string; optionId: string; operation: "add" | "remove" })): Promise<{ messageId: string; optionIds: (string | undefined)[]; snapshot: ConversationPollSnapshot }> {
+} & ({ action: "create" | "read" } | { action: "vote"; messageId: string; optionId: string; operation: "add" | "remove" })): Promise<{ messageId: string; optionIds: (string | undefined)[]; voterHandlesByOption: string[][]; snapshot: ConversationPollSnapshot }> {
   const config = requireHostedOnboardingLinqConfig();
   try {
     const raw = await runLinqApiRequest({
@@ -84,6 +84,7 @@ export async function callLinqPoll(input: {
     return {
       messageId: result.message_id,
       optionIds: result.poll.options.map((option) => option.option_id),
+      voterHandlesByOption: result.poll.options.map((option) => option.voters.map(({ handle }) => handle)),
       snapshot: {
         pollRef: input.pollRef, channel: "linq", question: input.question,
         ...(input.action === "read" ? linqPollVoters(result.poll, input.voterCursor) : {}),

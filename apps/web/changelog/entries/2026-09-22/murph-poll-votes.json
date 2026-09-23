@@ -5,15 +5,17 @@
     "id": "murph-poll-votes",
     "kind": "feature",
     "priority": 3,
-    "title": "Murph can join the vote",
+    "title": "Murph can vote and follow up on polls",
     "summary": "Murph can cast or remove its own vote in iMessage polls it creates, including a playful pick or a tie-breaker.",
-    "details": "Murph uses its judgment about when to participate. Telegram bots cannot cast native votes, so Murph can share a preference in the chat without changing the poll count.",
+    "details": "Murph uses its judgment about when to participate. It can also notice a majority, everyone voting, or a closed Telegram poll and briefly acknowledge the result when useful. Telegram bots cannot cast native votes, so Murph can share a preference in the chat without changing the count.",
     "relevanceTags": [
       "groups",
       "imessage",
       "polls"
     ],
-    "sourcePullRequests": [3658],
+    "sourcePullRequests": [
+      3658
+    ],
     "tryIt": {
       "label": "Invite Murph to vote",
       "prompt": "Murph, vote for your favorite option in the iMessage poll you made."

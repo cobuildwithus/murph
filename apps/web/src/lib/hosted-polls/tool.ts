@@ -8,6 +8,7 @@ import {
   createHostedExternalThreadIdentityLookupKey,
   createHostedExternalThreadIdentityLookupKeyReadCandidates,
   createHostedTelegramPollLookupKey,
+  createHostedLinqMessageLookupKey,
 } from "../hosted-onboarding/contact-privacy";
 import { sendHostedLinqChatMessage } from "../hosted-onboarding/linq-client";
 import { requireHostedRuntimeActiveAccessForUpdateTx } from "../hosted-mailbox/runtime-access";
@@ -117,6 +118,7 @@ async function dispatchPoll(row: HostedConversationPoll, definition: { question:
       await sendHostedLinqChatMessage({ chatId: route.target, message: definition.question, idempotencyKey: row.id + ":question" });
       const created = await callLinqPoll({ action: "create", chatId: route.target, pollRef: row.id, ...definition });
       result = { schema: "murph.conversation-poll-result.v1", messageId: created.messageId, providerPollId: null, snapshot: created.snapshot };
+      providerPollKey = createHostedLinqMessageLookupKey(created.messageId);
     } else {
       const created = await callTelegramPoll({ action: "create", target: route.target, pollRef: row.id, ...definition });
       providerPollKey = createHostedTelegramPollLookupKey(created.providerPollId);

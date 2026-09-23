@@ -18,6 +18,7 @@ vi.mock("../src/lib/hosted-onboarding/linq-client", () => ({ sendHostedLinqChatM
 vi.mock("../src/lib/hosted-onboarding/contact-privacy", () => ({
   createHostedExternalThreadIdentityLookupKey: (input: { channel: string; threadId: string }) => input.channel + ":" + input.threadId,
   createHostedExternalThreadIdentityLookupKeyReadCandidates: (input: { channel: string; threadId: string }) => [input.channel + ":" + input.threadId],
+  createHostedLinqMessageLookupKey: (id: string) => "linq-blinded:" + id,
   createHostedTelegramPollLookupKey: (id: string) => "blinded:" + id,
 }));
 vi.mock("../src/lib/hosted-crypto/secure-box", () => ({
@@ -42,7 +43,7 @@ describe("hosted poll effects", () => {
     m.upsert.mockImplementation(async ({ create: data }: { create: Pick<HostedConversationPoll, "id" | "memberId" | "channel" | "conversationKey" | "definitionEncrypted"> }) => {
       const existing = m.rows.get(data.id);
       if (existing) return { ...existing };
-      const row = { ...data, providerPollKey: null, resultEncrypted: null, dispatchedAt: null, lastUpdateId: null, closedAt: null, createdAt: new Date(), updatedAt: new Date() };
+      const row = { ...data, providerPollKey: null, resultEncrypted: null, dispatchedAt: null, lastUpdateId: null, closedAt: null, resultNotifiedAt: null, createdAt: new Date(), updatedAt: new Date() };
       m.rows.set(row.id, row); return { ...row };
     });
     m.updateMany.mockImplementation(async ({ where, data }: { where: { id: string }; data: Partial<HostedConversationPoll> }) => {

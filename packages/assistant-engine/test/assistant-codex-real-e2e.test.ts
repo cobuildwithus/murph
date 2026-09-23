@@ -1,3 +1,4 @@
+import { buildConversationPollResultInstructions } from "@murphai/hosted-execution/conversation-polls";
 import { buildManualMealEstimationInstructions } from '../src/assistant/manual-meal-estimation.js'
 import { executeGenerateImageTool } from '../src/assistant-codex/generate-image-tool.js'
 
@@ -41904,4 +41905,61 @@ describeRealCodex('real Codex poll self vote e2e', () => {
       }
     } finally { await rm(workingDirectory, { force: true, recursive: true }) }
   }, 720_000)
+})
+
+
+describeRealCodex('real Codex poll result wake e2e', () => {
+  it.each([false, true])('poll result checkpoint settled=%s', async (settled) => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-poll-result-e2e-'))
+    const permissionHome = await materializeRealCodexHostedPermissionHome(config)
+    try {
+      await initializeVault({ timezone: 'America/New_York', vaultRoot: workingDirectory })
+      const modelTarget = createAssistantModelTarget({
+        approvalPolicy: 'never', codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND),
+        codexHome: permissionHome.codexHome, model: config.model, modelProvider: config.modelProvider,
+        provider: 'codex-cli', reasoningEffort: 'low', sandbox: 'workspace-write',
+      })
+      if (!modelTarget) throw new Error('Expected real Codex target.')
+      const events: unknown[] = []
+      const instructions = buildConversationPollResultInstructions({
+        pollRef: 'poll_' + 'a'.repeat(32), channel: 'telegram', question: 'Picnic day?',
+        options: [{ text: 'Saturday', votes: 3 }, { text: 'Sunday', votes: 1 }],
+        totalVoters: 4, anonymous: true, multipleAnswers: false, closed: false,
+        observedAt: new Date().toISOString(), freshness: 'provider_update',
+      }, { reason: 'majority', eligibleCount: 5 })
+      const result = await sendAssistantNotificationLocal({
+        actorId: null, bindingDeliveryTarget: '-100:topic:12', channel: 'telegram',
+        deliveryDispatchMode: 'queue-only', deliveryTarget: '-100:topic:12',
+        deliveryIdempotencyKey: 'synthetic-poll-result', responsePolicy: { kind: 'allow_send_or_skip' },
+        executionContext: { hosted: { defaultTarget: modelTarget, memberId: 'synthetic-group', userEnvKeys: [] } },
+        identityId: null,
+        instructions: instructions + (settled
+          ? '\n\nCurrent conversation evidence: The group already acknowledged the tally, agreed on Saturday, and moved on to discussing a movie. Murph already acknowledged Saturday too.'
+          : '\n\nCurrent conversation evidence: The group asked Murph to help choose a picnic day. No one has acknowledged the tally yet.'),
+        threadId: 'opaque-poll-conversation', threadIsDirect: false,
+        onTraceEvent: (event) => events.push(event.rawEvent),
+        turnEnvironment: { currentWorkingDirectory: workingDirectory, env: config.env },
+        turnTrigger: 'manual-deliver', vault: workingDirectory, workingDirectory,
+      })
+      expect(readCapabilityRoutingActions(events)).toEqual([])
+      const intents = await listAssistantOutboxIntents(workingDirectory)
+      const reply = result.response ?? ''
+      process.stdout.write(`[real-codex poll result checkpoint] ${JSON.stringify({ settled, reply, decision: result.decision.kind, intents: intents.length })}\n`)
+      if (settled) {
+        expect(result.decision.kind).toBe('skip')
+        expect(intents).toHaveLength(0)
+      } else {
+        expect(result.decision.kind).toBe('send_message')
+        expect(result.deliveryOutcome?.kind).toBe('queued')
+        expect(intents).toHaveLength(1)
+        expect(intents[0]).toMatchObject({ channel: 'telegram', threadIsDirect: false, explicitTarget: '-100:topic:12', status: 'pending' })
+        expect(reply).toMatch(/Saturday/iu)
+        expect(reply).not.toMatch(/closed|unanimous|everyone voted|all (?:five|5)|booked|reserved|scheduled|checkpoint|electorate|webhook/iu)
+        expect(reply.length).toBeLessThan(400)
+      }
+    } finally {
+      await removeRealCodexTemporaryPaths([workingDirectory, ...permissionHome.temporaryPaths, ...config.temporaryPaths])
+    }
+  }, 360_000)
 })

@@ -1,10 +1,12 @@
 import "server-only";
+import type { HostedConversationPoll } from "@prisma/client";
 import * as z from "@murphai/contracts/zod-runtime";
 import { getPrisma } from "../prisma";
 import { createHostedTelegramPollLookupKeyReadCandidates } from "../hosted-onboarding/contact-privacy";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { telegramPollSchema, telegramPollSnapshot } from "./provider";
-import { encryptPoll, readPollResult } from "./store";
+import { maybeNotifyPollResult } from "./notification";
+import { encryptPoll, readPollResult, type PollResult } from "./store";
 import { recordTelegramPollAnswer, telegramPollAnswerSchema } from "./votes";
 
 async function findTelegramPoll(pollId: string) {
@@ -38,14 +40,22 @@ export async function handleHostedTelegramPollWebhook(rawBody: string): Promise<
     if (answer.option_ids.some((index) => index >= previous.snapshot.options.length)) throw new TypeError("Poll answer option is out of range.");
     // Answer delivery is independent of tally delivery, including after close.
     await recordTelegramPollAnswer(row, answer, updateId);
-    return { ok: true };
+    return { ok: true as const };
   }
-  if (row.closedAt || (row.lastUpdateId !== null && row.lastUpdateId >= BigInt(updateId))) return { ok: true };
+  return updateTelegramPollTally(row, previous, poll, updateId);
+}
+
+async function updateTelegramPollTally(row: HostedConversationPoll, previous: PollResult, poll: unknown, updateId: number) {
+  if (row.closedAt || (row.lastUpdateId !== null && row.lastUpdateId >= BigInt(updateId))) {
+    await maybeNotifyPollResult(row);
+    return { ok: true as const };
+  }
   const snapshot = telegramPollSnapshot(poll, row.id, "provider_update");
   const resultEncrypted = await encryptPoll(row, "result", { ...previous, snapshot });
-  await getPrisma().hostedConversationPoll.updateMany({
+  const updated = await getPrisma().hostedConversationPoll.updateMany({
     where: { id: row.id, closedAt: null, OR: [{ lastUpdateId: null }, { lastUpdateId: { lt: BigInt(updateId) } }] },
     data: { resultEncrypted, lastUpdateId: BigInt(updateId), ...(snapshot.closed ? { closedAt: new Date() } : {}) },
   });
-  return { ok: true };
+  if (updated.count === 1) await maybeNotifyPollResult({ ...row, resultEncrypted, lastUpdateId: BigInt(updateId), closedAt: snapshot.closed ? new Date() : null });
+  return { ok: true as const };
 }
