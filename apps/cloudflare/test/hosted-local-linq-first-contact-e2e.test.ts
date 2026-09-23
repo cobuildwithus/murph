@@ -97,7 +97,7 @@ const directRetryRecoveryReplyText =
 const richLinkLostAckUrl = "https://example.test/continue/lost-ack";
 const richLinkRetryRecoveryUrl = "https://example.test/continue/recovered";
 const richLinkFallbackUrl = "https://example.test/continue/fallback";
-const productionLikeAssistantModel = "gpt-5.6-terra";
+const productionLikeAssistantModel = "gpt-6-sol";
 const localRunnerIdleTtlMs = "300000";
 const runRealInstantFirstTurn =
   process.env.MURPH_RUN_REAL_LINQ_FIRST_TURN_E2E === "1";

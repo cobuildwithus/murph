@@ -201,8 +201,6 @@ const HOSTED_LOCAL_OPENAI_FLEX_SERVICE_TIER = {
   name: "Flex",
   description: "Lower-cost flexible processing",
 } as const;
-const HOSTED_LOCAL_DEPLOY_SMOKE_MODEL_SLUG = "gpt-5.4-nano";
-const HOSTED_LOCAL_DEPLOY_SMOKE_TEMPLATE_MODEL_SLUG = "gpt-5.4-mini";
 const HOSTED_LOCAL_RUNNER_BUNDLE_MANIFEST_FILE =
   ".murph-runner-bundle-manifest.json";
 function registerHostedLocalStackLifecycle(input: {
@@ -2429,42 +2427,6 @@ function buildHostedLocalOpenAiCodexModelCatalogText(rawCatalog: string, rawLaun
         HOSTED_LOCAL_OPENAI_FLEX_SERVICE_TIER,
       ];
     targetModel.tool_mode = "code_mode";
-  }
-
-  const deploySmokeModel = catalogModels
-    .find((candidate) => candidate.slug === HOSTED_LOCAL_DEPLOY_SMOKE_MODEL_SLUG);
-  if (deploySmokeModel) {
-    Object.assign(deploySmokeModel, {
-      description: "Fast, low-cost model for deploy smoke checks.",
-      display_name: "GPT-5.4-Nano",
-      priority: 5,
-      service_tiers: [],
-      supports_parallel_tool_calls: false,
-      supports_search_tool: false,
-      // The OpenAI API rejects gpt-5.4-nano when Codex >= 0.143 sends the
-      // x-openai-internal-codex-responses-lite header.
-      use_responses_lite: false,
-    });
-  } else {
-    const templateModel = catalogModels
-      .find((candidate) => candidate.slug === HOSTED_LOCAL_DEPLOY_SMOKE_TEMPLATE_MODEL_SLUG);
-    if (!templateModel) {
-      throw new Error(
-        `Hosted local dev Codex model catalog is missing ${HOSTED_LOCAL_DEPLOY_SMOKE_TEMPLATE_MODEL_SLUG}.`,
-      );
-    }
-
-    catalogModels.push({
-      ...templateModel,
-      description: "Fast, low-cost model for deploy smoke checks.",
-      display_name: "GPT-5.4-Nano",
-      priority: 5,
-      service_tiers: [],
-      slug: HOSTED_LOCAL_DEPLOY_SMOKE_MODEL_SLUG,
-      supports_parallel_tool_calls: false,
-      supports_search_tool: false,
-      use_responses_lite: false,
-    });
   }
 
   return `${JSON.stringify(parsed, null, 2)}\n`;
