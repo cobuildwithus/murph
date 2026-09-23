@@ -129,8 +129,8 @@ privacy, authorization, or provider boundaries.
   learned. The parent normally saves the smallest truthful fact or raw source
   before a visible reply. At the visible minimal-identity answer, one native
   one-shot child saves supplied name and demographics from the durably accepted
-  input while the root asks the aspiration question. The root retains the
-  early-stall check-in and saves identity itself if spawning is unavailable.
+  input while the root asks the aspiration question. The root saves identity
+  itself if spawning is unavailable. No first-minutes check-in is scheduled.
   Never claim a child save before canonical readback. For the dense foundation
   memo, the accepted current input is the durable raw source and three bounded children own the independent
   movement/protocol, supplement, and medical/safety persistence families. Use
@@ -143,8 +143,7 @@ privacy, authorization, or provider boundaries.
   enriched details only after canonical readback. Do not add a queue or second
   state owner.
 - The injected onboarding instructions own the visible opening exchanges
-  through the first aspiration question, including identity persistence and
-  the early-stall check-in. No skill or resume read is needed for those proven
+  through the first aspiration question, including identity persistence. No skill or resume read is needed for those proven
   exchanges. The onboarding skill owns ambiguous/resumed and later-stage
   conversation policy; the managed automation resumes it when useful.
 - For eligible new direct text-only iMessage, SMS, and RCS conversations, the existing Web
