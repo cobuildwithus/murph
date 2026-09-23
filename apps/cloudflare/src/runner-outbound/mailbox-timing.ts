@@ -29,3 +29,11 @@ export function readMailboxWebTiming(response: Response): Record<string, number>
   }
   return timings;
 }
+
+/** Keep only the platform region path, never the opaque request identifier. */
+export function readMailboxVercelRegions(response: Response): { mailboxVercelRegions?: string } {
+  const header = response.headers.get("x-vercel-id");
+  if (!header || header.length > 256) return {};
+  const match = /^([a-z]{3}[1-9](?:::[a-z]{3}[1-9]){0,3})::[A-Za-z0-9-]+$/.exec(header);
+  return match ? { mailboxVercelRegions: match[1] } : {};
+}

@@ -528,9 +528,9 @@ retention; ordinary milestones remain debug. Missing rows are missing evidence.
 
 #### Stall reproduction and recovery design
 
-The credential-free `assistant-codex-websocket-stall.test.ts` fixture runs the
-pinned Codex 0.153.4 binary against a local WebSocket/SSE provider. After a
-successful warm turn, the provider keeps the socket open, receives a pong, and
+The credential-free `assistant-codex-websocket-stall.test.ts` fixture was measured
+with the then-pinned Codex 0.153.4 binary against a local WebSocket/SSE provider.
+After a successful warm turn, the provider keeps the socket open, receives a pong, and
 sends no response data. The full 90-second test measured 90,006 ms from stalled
 request to the single native HTTPS fallback. A five-second native idle setting
 measured 5,021 ms; an explicit close with the 90-second setting measured 116 ms.

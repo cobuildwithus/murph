@@ -1,4 +1,4 @@
-import { readMailboxWebTiming } from "./mailbox-timing.ts";
+import { readMailboxWebTiming, readMailboxVercelRegions } from "./mailbox-timing.ts";
 import {
   parseHostedExecutionWake,
   parseHostedMailboxFetchResponse,
@@ -232,16 +232,20 @@ export async function completeRunnerMailboxFetchResponse(input: Parameters<typeo
   body: string | undefined;
   requestStartedAt: number;
   forwardStartedAt: number;
-}): Promise<{ response: Response; timings: Record<string, number> }> {
-  const timings = {
+  webControlTiming: { prepareMs?: number; fetchHeadersMs?: number };
+}): Promise<{ response: Response; timings: Record<string, number | string> }> {
+  const timings: Record<string, number> = {
     ...readMailboxWebTiming(input.response),
     mailboxWorkerPrepareMs: Math.max(0, Math.round(input.forwardStartedAt - input.requestStartedAt)),
     mailboxWorkerWebFetchMs: Math.max(0, Math.round(performance.now() - input.forwardStartedAt)),
   };
+  if (input.webControlTiming.prepareMs !== undefined) timings.mailboxWorkerCallbackPrepareMs = input.webControlTiming.prepareMs;
+  if (input.webControlTiming.fetchHeadersMs !== undefined) timings.mailboxWorkerFetchHeadersMs = input.webControlTiming.fetchHeadersMs;
   const response = input.response.ok && input.body && JSON.parse(input.body).decodeInlinePayloads === true
     ? await decodeRunnerMailboxFetchResponse({ ...input, timings })
     : input.response;
   return { response, timings: { ...timings,
+    ...readMailboxVercelRegions(input.response),
     mailboxWorkerTotalMs: Math.max(0, Math.round(performance.now() - input.requestStartedAt)),
   } };
 }

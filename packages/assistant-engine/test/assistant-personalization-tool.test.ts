@@ -89,7 +89,7 @@ describe('assistant personalization tool', () => {
     })
     if (!request) throw new Error('Expected a personalization request.')
     const personalizationTool = { request: vi.fn(async () => ({ action: 'read' as const, result: {
-      mainPersona: 'classic' as const, model: 'gpt-5.6-terra' as const,
+      mainPersona: 'classic' as const, model: 'gpt-6-sol' as const,
       solAvailable: true, supportingPersona: null, tone: 'formal' as const, voice: 'warm' as const,
     } })) }
     const result = await executeMurphDynamicToolRequest({
@@ -219,7 +219,7 @@ describe('assistant personalization tool', () => {
         action: 'update' as const,
         result: {
           mainPersona: 'scientist' as const,
-          model: 'gpt-5.6-terra' as const,
+          model: 'gpt-6-sol' as const,
           modelChangeAppliesNextRun: false as const,
           modelUpdated: false as const,
           solAvailable: true,

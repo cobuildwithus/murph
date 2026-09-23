@@ -4,9 +4,12 @@ import {
 } from '@murphai/contracts'
 import {
   HOSTED_ASSISTANT_ASTRA_MODEL,
+  HOSTED_ASSISTANT_GPT_6_SOL_MODEL,
+  HOSTED_ASSISTANT_GPT_6_LUNA_MODEL,
   HOSTED_ASSISTANT_LUNA_MODEL,
   HOSTED_ASSISTANT_SOL_MODEL,
-  HOSTED_ASSISTANT_TERRA_MODEL,
+  HOSTED_ASSISTANT_DEFAULT_MODEL,
+  HOSTED_ASSISTANT_VENICE_PROVIDER_MODELS,
   isHostedAssistantProductModel,
   type HostedAssistantProductModel,
   type HostedAssistantReasoningEffort,
@@ -21,15 +24,17 @@ import {
 } from '@murphai/operator-config/assistant/provider-config'
 import {
   assistantCodexModelProviderRequiresModelThreadCompatibility,
+  VENICE_CODEX_MODEL_PROVIDER_ID,
 } from '@murphai/operator-config/assistant/target-runtime'
 
 import { normalizeNullableString } from '../shared.js'
 
 const AUTOMATION_DEFAULT_REASONING_BY_HOSTED_PRODUCT_MODEL = {
   [HOSTED_ASSISTANT_LUNA_MODEL]: 'high',
-  [HOSTED_ASSISTANT_TERRA_MODEL]: 'low',
   [HOSTED_ASSISTANT_SOL_MODEL]: 'low',
   [HOSTED_ASSISTANT_ASTRA_MODEL]: 'low',
+  [HOSTED_ASSISTANT_GPT_6_SOL_MODEL]: 'low',
+  [HOSTED_ASSISTANT_GPT_6_LUNA_MODEL]: 'low',
 } as const satisfies Record<
   HostedAssistantProductModel,
   HostedAssistantReasoningEffort
@@ -42,7 +47,10 @@ export function compactAutomationAssistantTargetOverride(
     return null
   }
 
-  const model = normalizeNullableString(input.model)
+  const storedModel = normalizeNullableString(input.model)
+  const model = storedModel === 'gpt-5.6-terra'
+    ? HOSTED_ASSISTANT_DEFAULT_MODEL
+    : storedModel
   const modelProvider = normalizeNullableString(input.modelProvider)
   const reasoningEffort = normalizeNullableString(input.reasoningEffort)
   const target = {
@@ -120,22 +128,16 @@ export function resolveAutomationAssistantTargetOverrideForTarget(
     !assistantCodexModelProviderRequiresModelThreadCompatibility(
       effectiveModelProvider,
     )
-  const inheritedModelSpecificProvider =
+  const suppressProductModel =
     explicitModelProvider === null &&
-    assistantCodexModelProviderRequiresModelThreadCompatibility(
-      effectiveModelProvider,
-    )
-  if (
-    !inheritedModelSpecificProvider &&
-    supportsReasoningEffort
-  ) {
+    isHostedAssistantProductModel(override.model) &&
+    (!supportsReasoningEffort ||
+      (effectiveModelProvider === VENICE_CODEX_MODEL_PROVIDER_ID &&
+        !HOSTED_ASSISTANT_VENICE_PROVIDER_MODELS[override.model]))
+  if (!suppressProductModel && supportsReasoningEffort) {
     return override
   }
 
-  const suppressProductModel =
-    inheritedModelSpecificProvider &&
-    Boolean(override.model) &&
-    isHostedAssistantProductModel(override.model)
   const model = suppressProductModel ? null : override.model ?? null
   const reasoningEffort = supportsReasoningEffort
     ? override.reasoningEffort ?? null

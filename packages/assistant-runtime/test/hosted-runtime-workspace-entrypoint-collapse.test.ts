@@ -234,7 +234,7 @@ describe("hosted workspace runtime entrypoint", () => {
         action: "update",
         result: {
           appliesAt: "next_turn",
-          availableModels: ["gpt-5.6-terra", "gpt-5.6-sol"],
+          availableModels: ["gpt-6-sol", "gpt-5.6-sol"],
           availableProviders: ["openai", "venice"],
           availableReasoningEfforts: ["low", "high"],
           configurationAvailable: true,
@@ -256,7 +256,7 @@ describe("hosted workspace runtime entrypoint", () => {
           availableReasoningEfforts: [],
           configurationAvailable: false,
           dormantSolPreference: false,
-          model: "gpt-5.6-terra",
+          model: "gpt-6-sol",
           provider: "openai",
           reasoningEffort: "low",
           requiredPlan: null,
@@ -268,12 +268,12 @@ describe("hosted workspace runtime entrypoint", () => {
         action: "update",
         result: {
           appliesAt: "next_turn",
-          availableModels: ["gpt-5.6-terra", "gpt-5.6-sol"],
+          availableModels: ["gpt-6-sol", "gpt-5.6-sol"],
           availableProviders: ["openai", "venice"],
           availableReasoningEfforts: ["low", "high"],
           configurationAvailable: true,
           dormantSolPreference: false,
-          model: "gpt-5.6-terra",
+          model: "gpt-6-sol",
           provider: "openai",
           reasoningEffort: "low",
           requiredPlan: null,
@@ -285,7 +285,7 @@ describe("hosted workspace runtime entrypoint", () => {
         action: "update",
         result: {
           appliesAt: "next_turn",
-          availableModels: ["gpt-5.6-terra", "gpt-5.6-sol"],
+          availableModels: ["gpt-6-sol", "gpt-5.6-sol"],
           availableProviders: ["openai", "venice"],
           availableReasoningEfforts: ["low", "high"],
           configurationAvailable: true,
@@ -302,7 +302,7 @@ describe("hosted workspace runtime entrypoint", () => {
         action: "update",
         result: {
           appliesAt: "next_turn",
-          availableModels: ["gpt-5.6-terra", "gpt-5.6-sol"],
+          availableModels: ["gpt-6-sol", "gpt-5.6-sol"],
           availableProviders: ["openai", "venice"],
           availableReasoningEfforts: ["low", "high"],
           configurationAvailable: true,
@@ -334,7 +334,7 @@ describe("hosted workspace runtime entrypoint", () => {
         runHostedWorkspaceRuntimeJobInProcess(
           createWorkspaceRuntimeJobInput({
             forwardedEnv: {
-              HOSTED_ASSISTANT_MODEL: "gpt-5.6-terra",
+              HOSTED_ASSISTANT_MODEL: "gpt-6-sol",
               HOSTED_ASSISTANT_REASONING_EFFORT: "low",
             },
             request: {
@@ -367,12 +367,12 @@ describe("hosted workspace runtime entrypoint", () => {
                     return {
                       action: "read",
                       result: {
-                        availableModels: ["gpt-5.6-terra", "gpt-5.6-sol"],
+                        availableModels: ["gpt-6-sol", "gpt-5.6-sol"],
                         availableProviders: ["openai", "venice"],
                         availableReasoningEfforts: ["low", "high"],
                         configurationAvailable: true,
                         dormantSolPreference: false,
-                        model: "gpt-5.6-terra",
+                        model: "gpt-6-sol",
                         provider: "openai",
                         reasoningEffort: "low",
                         solAvailable: true,
@@ -435,14 +435,14 @@ describe("hosted workspace runtime entrypoint", () => {
                 await configurationTool.request({
                   action: "update",
                   assistantInputId: `ain_${"2".repeat(32)}`,
-                  model: "gpt-5.6-terra",
+                  model: "gpt-6-sol",
                   reasoningEffort: "low",
                 });
               } else if (assistantPhaseCalls === 3) {
                 await configurationTool.request({
                   action: "update",
                   assistantInputId: `ain_${"3".repeat(32)}`,
-                  model: "gpt-5.6-terra",
+                  model: "gpt-6-sol",
                   reasoningEffort: "low",
                 });
               } else if (assistantPhaseCalls === 4) {
@@ -502,9 +502,9 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.deepEqual(observedTargets, [
         {
           forwardedEffort: "low",
-          forwardedModel: "gpt-5.6-terra",
+          forwardedModel: "gpt-6-sol",
           runtimeEffort: "low",
-          runtimeModel: "gpt-5.6-terra",
+          runtimeModel: "gpt-6-sol",
         },
         {
           forwardedEffort: "high",
@@ -520,9 +520,9 @@ describe("hosted workspace runtime entrypoint", () => {
         },
         {
           forwardedEffort: "low",
-          forwardedModel: "gpt-5.6-terra",
+          forwardedModel: "gpt-6-sol",
           runtimeEffort: "low",
-          runtimeModel: "gpt-5.6-terra",
+          runtimeModel: "gpt-6-sol",
         },
         {
           forwardedEffort: "high",

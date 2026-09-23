@@ -40,7 +40,7 @@ test("Venice egress keeps ordinary Responses tools and cache controls unchanged"
   const body = buildHostedVeniceResponsesRequestBody({
     body: encodeJson({
       input: standardInput,
-      model: "gpt-5.6-terra",
+      model: "gpt-5.6-sol",
       stream: true,
       tools: MURPH_NAMESPACE_TOOLS,
     }),
@@ -50,16 +50,15 @@ test("Venice egress keeps ordinary Responses tools and cache controls unchanged"
   assert.deepEqual(JSON.parse(body), {
     input: standardInput,
     model:
-      "openai-gpt-56-terra:include_venice_system_prompt=false&enable_web_search=off&enable_web_scraping=false",
+      "openai-gpt-56-sol:include_venice_system_prompt=false&enable_web_search=off&enable_web_scraping=false",
     stream: true,
     tools: MURPH_NAMESPACE_TOOLS,
   });
 });
 
-test("Venice egress derives every priced provider model from the shared contract", () => {
+test("Venice egress derives every active supported provider model from the shared contract", () => {
   const cases = [
     ["gpt-5.6-luna", "openai-gpt-56-luna"],
-    ["gpt-5.6-terra", "openai-gpt-56-terra"],
     ["gpt-5.6-sol", "openai-gpt-56-sol"],
   ] as const;
 
@@ -109,7 +108,7 @@ test("Venice egress restores Codex Responses Lite tools to the standard top-leve
           },
           ...standardInput,
         ],
-        model: "gpt-5.6-terra",
+        model: "gpt-5.6-sol",
         parallel_tool_calls: false,
         stream: true,
         tool_choice: "auto",
@@ -144,7 +143,7 @@ test("Venice egress restores Codex Responses Lite tools to the standard top-leve
         },
       ],
       model:
-        "openai-gpt-56-terra:include_venice_system_prompt=false&enable_web_search=off&enable_web_scraping=false",
+        "openai-gpt-56-sol:include_venice_system_prompt=false&enable_web_search=off&enable_web_scraping=false",
       parallel_tool_calls: false,
       stream: true,
       tool_choice: "auto",
@@ -326,7 +325,7 @@ test("Venice egress fails closed for malformed or conflicting Responses Lite too
     assert.equal(buildHostedVeniceResponsesRequestBody({
       body: encodeJson({
         ...request,
-        model: "gpt-5.6-terra",
+        model: "gpt-5.6-sol",
       }),
       pathnameSuffix: "/responses",
     }), null, label);
@@ -353,3 +352,11 @@ test("Venice egress admits only Codex Responses POST endpoints", () => {
   assert.equal(isAllowedHostedVeniceRequest("GET", "/responses"), false);
   assert.equal(isAllowedHostedVeniceRequest("POST", "/chat/completions"), false);
 });
+
+for (const model of ["gpt-6-sol", "gpt-6-luna", "gpt-5.6-terra"]) {
+  test(`Venice egress rejects unsupported or retired ${model}`, () => {
+    assert.equal(buildHostedVeniceResponsesRequestBody({
+      body: encodeJson({ model }), pathnameSuffix: "/responses",
+    }), null);
+  });
+}
