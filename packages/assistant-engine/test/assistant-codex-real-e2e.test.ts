@@ -9943,7 +9943,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
     try {
       const skillsRoot = path.join(workingDirectory, 'skills')
       await materializeAssistantSkill({ skillsRoot, slug: 'group-chat' })
-      const names = ['Rowan', 'Cedar (unverified owner contact)', 'Participant A7C29D4E61F0', 'River (9A3D21F065B7)', 'River (BC026DF831A9)']
+      const names = ['Rowan', 'Cedar', 'Participant A7C29D4E61F0', 'River (9A3D21F065B7)', 'River (BC026DF831A9)']
       const result = await executeRealCodexAppServerTurn({
         approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
         codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
@@ -9996,7 +9996,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
         const nextName = Math.min(afterName.length, ...names.map((other) => afterName.indexOf(other)).filter((position) => position >= 0))
         expect(afterName.slice(0, nextName)).toMatch(new RegExp(`${index + 4},?000`, 'u'))
       }
-      expect(decision.text).not.toMatch(/unnamed|unknown participant|who is|confirm.*name|member_report_|participant_report_|phone number|email address/iu)
+      expect(decision.text).not.toMatch(/unverified|owner contact|unnamed|unknown participant|who is|confirm.*name|member_report_|participant_report_|phone number|email address/iu)
     } finally {
       await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
     }

@@ -4014,8 +4014,8 @@ unbounded subscription capability.
 
 Shared-data reports populate every row's display name at the Web read boundary.
 An authorized profile projection wins. For a reportable row without that name,
-the existing owner-address-book reader may supply an explicitly unverified
-contact label after current joined membership, unsuspended health consent,
+the existing owner-address-book reader may supply a plain contact name after
+current joined membership, unsuspended health consent,
 verified phone identity, and unique phone matching are checked. This optional
 overlay admits at most 16 candidates in one membership query and one batched
 phone decryption, then invokes the existing bounded owner lookup once; no

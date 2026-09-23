@@ -258,8 +258,8 @@ to apply after cutover.
   sender attribution. A missing profile name may use the owner's already
   consented safe contact label only after live joined membership, unsuspended
   health consent, verified phone lookup-key binding, and unique matching.
-  Preserve the explicit unverified annotation; never expose the phone or use
-  the label as identity, consent, or effect authority. Disabled, revoked,
+  Render the safe contact name directly in reports; never expose the phone or
+  use the label as identity, consent, or effect authority. Disabled, revoked,
   ambiguous, failed, and overflow contact lookups leave a stable group-scoped
   pseudonym and preserve the authorized data. No contact-derived label is
   persisted by this read or copied into canonical profile memory.

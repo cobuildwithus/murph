@@ -116,7 +116,7 @@ describe("host-supplied shared participant labels", () => {
     mocks.enabled.mockReturnValue(true);
     const { input, findMany } = setup([member("a"), member("b", "Rowan")]);
     const result = await labelHostedGroupSharedMembers(input);
-    expect(result[0]?.displayName).toBe("Cedar (unverified owner contact)");
+    expect(result[0]?.displayName).toBe("Cedar");
     expect(result[1]?.displayName).toBe("Rowan");
     expect(findMany).toHaveBeenCalledOnce();
     expect(findMany).toHaveBeenCalledWith(expect.objectContaining({
@@ -130,6 +130,17 @@ describe("host-supplied shared participant labels", () => {
       phoneHandles: [phone], prisma: input.prisma });
     expect(JSON.stringify(result)).not.toContain(phone);
     expect(JSON.stringify(result)).not.toContain("synthetic-phone-ciphertext");
+    expect(JSON.stringify(result)).not.toMatch(/unverified|owner contact/iu);
+  });
+
+  it("disambiguates an owner contact that matches another member's profile name", async () => {
+    mocks.enabled.mockReturnValue(true);
+    const { input } = setup([member("a"), member("b", "Cedar")]);
+    const result = await labelHostedGroupSharedMembers(input);
+    expect(result.map(({ displayName }) => displayName)).toEqual([
+      "Cedar (FE225EF08E25)", "Cedar (DBAB49ABE0CD)",
+    ]);
+    expect(result.map(({ projections }) => projections)).toEqual(input.members.map(({ projections }) => projections));
   });
 
   it("does no contact work for named or non-reportable members", async () => {

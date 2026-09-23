@@ -27,11 +27,8 @@ export async function labelHostedGroupSharedMembers(input: {
   runtimeMemberId: string;
 }): Promise<HostedRuntimeGroupSharedMember[]> {
   const contacts = await readReportContactNames(input).catch(() => new Map<string, string>());
-  const labels = input.members.map((member) => {
-    const contact = contacts.get(member.participantId);
-    return member.displayName?.trim()
-      || (contact ? `${contact} (unverified owner contact)` : null);
-  });
+  const labels = input.members.map((member) =>
+    member.displayName?.trim() || contacts.get(member.participantId) || null);
   const digests = input.members.map((member) => createHash("sha256")
     .update(`murph.group-report-participant.v1\0${input.runtimeMemberId}\0${member.participantId}`)
     .digest("hex").toUpperCase());
