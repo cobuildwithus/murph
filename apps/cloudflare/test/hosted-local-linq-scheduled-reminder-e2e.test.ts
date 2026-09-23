@@ -90,7 +90,7 @@ const scheduledReminderMinimumRunwayMs = 5_000;
 const scheduledReminderSendWaitMs = 60_000;
 const scheduledReminderCompletionWaitMs = 60_000;
 const shutdownCheckpointBarrierWaitMs = 30_000;
-const productionLikeAssistantModel = "gpt-5.6-terra";
+const productionLikeAssistantModel = "gpt-6-sol";
 
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
 const workerPersistDirOverride = process.env.MURPH_E2E_CF_PERSIST_DIR?.trim() || null;
