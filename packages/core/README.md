@@ -27,3 +27,20 @@ new receipt is written. Earlier strict readers cannot read the new optional fiel
 a workspace containing it must stay on this reader version or newer, including
 restore and rollback. Old snapshots and old-producer receipts remain readable by
 the new bundle. Historical audits are not rewritten or reclaimed by this change.
+
+## Audit shard storage
+
+Closed audit months use verified Brotli `.jsonl.br` archives through the same
+core-owned JSONL storage implementation as event ledgers. Logical paths and audit
+records do not change. Readers enumerate archive sources, and canonical late
+appends, rollback and hosted receipt replay use decompressed content receipts.
+Independent audit replay still reconciles exact record identities when a restored
+history differs from the original append base. Conflicts and corrupt archives
+fail closed; maintenance removes interrupted duplicate copies only after exact
+byte verification. Current and future months remain plain.
+
+Hosted idle maintenance archives event, audit and integration-ingest shards under
+one existing time budget and yields to foreground work. The archive-aware readers
+and writer ship together; once audit archives exist, restoring into an older
+plain-only reader is unsupported. Query SQLite stays included in restore, and
+audit-only physical changes remain outside its source freshness manifest.

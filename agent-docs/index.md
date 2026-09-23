@@ -642,3 +642,7 @@ Legacy oxygen analytics retirement is tracked in
 
 Single device publication receipts are tracked in
 [`device receipts`](exec-plans/completed/2026-09-21-single-import-receipt.md).
+
+Closed audit archival, shared JSONL storage and further storage inspection are
+tracked in [`audit storage`](exec-plans/completed/2026-09-22-audit-storage.md);
+`packages/core/README.md` owns the archive and reader compatibility contract.

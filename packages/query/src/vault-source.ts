@@ -12,6 +12,8 @@ import {
   VAULT_QUERY_SOURCE,
 } from "@murphai/contracts";
 import {
+  listAuditShardSources,
+  readAuditShardRows,
   listEventLedgerShardSources,
   readEventLedgerShardRows,
 } from "@murphai/core";
@@ -1014,10 +1016,12 @@ async function forEachJsonlPayload(
   ) => void,
   signal?: AbortSignal,
 ): Promise<void> {
-  if (relativeDir === VAULT_LAYOUT.eventLedgerDirectory) {
-    for (const source of await listEventLedgerShardSources(vaultRoot)) {
+  if (relativeDir === VAULT_LAYOUT.eventLedgerDirectory || relativeDir === VAULT_LAYOUT.auditDirectory) {
+    const listSources = relativeDir === VAULT_LAYOUT.auditDirectory ? listAuditShardSources : listEventLedgerShardSources;
+    const readRows = relativeDir === VAULT_LAYOUT.auditDirectory ? readAuditShardRows : readEventLedgerShardRows;
+    for (const source of await listSources(vaultRoot)) {
       signal?.throwIfAborted();
-      for (const row of await readEventLedgerShardRows({
+      for (const row of await readRows({
         vaultRoot,
         relativePath: source.logicalPath,
       })) {
