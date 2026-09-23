@@ -678,7 +678,7 @@ attribution are tracked in
 [`mailbox latency phases`](exec-plans/completed/2026-09-22-mailbox-latency-phases.md).
 
 Current native voice release port and rollout proof:
-[`2026-09-22-native-voice-codex-155.md`](exec-plans/active/2026-09-22-native-voice-codex-155.md).
+[`2026-09-22-native-voice-codex-155.md`](exec-plans/completed/2026-09-22-native-voice-codex-155.md).
 
 Preserving query-source error privacy across audit archives is tracked in
 [`audit query errors`](exec-plans/completed/2026-09-22-audit-query-errors.md).

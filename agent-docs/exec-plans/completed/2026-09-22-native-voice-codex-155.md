@@ -1,6 +1,6 @@
 # Port native voice to the current stable Codex release
 
-Status: active
+Status: completed
 Created: 2026-09-22
 Updated: 2026-09-23
 
@@ -43,8 +43,9 @@ No private recordings, identities, transcripts, or production rows in artifacts.
 2. Build and test the pinned CLI; regenerate protocol fixtures and route evidence.
 3. Run focused Murph tests/typechecks and synthetic hosted voice proof.
 4. Review the candidate, push, run authorized ReviewGPT round 5 with exact-head CI.
-5. Merge and deploy only after review, CI, compatibility, and test-usage requirements
-   are resolved; validate production readiness through canonical hosted paths.
+5. Merge and deploy after review, CI and compatibility gates pass; validate
+   production readiness through canonical hosted paths. Keep personal-member
+   production calls separate until their test-usage handling is resolved.
 
 ## Usage and deployment
 
@@ -172,3 +173,66 @@ on 0.156.1 before the authorized fifth review.
   65/66 suite result remains recorded without claiming a full green rerun.
 - The reviewed private build-cache companion PR #166 is merged at
   `8cdaa121ed2e31a9514366b85331e30e09111efb`. This does not deploy voice.
+
+## Current-base reconciliation and composed replay
+
+- Current main advanced to `30d21fcfbc994d91a136a3f51f003e255a23a87a`.
+  Mergeability exposed one conflict in `workspace-assistant-phase.ts`: main
+  moved automation construction into the shared route-scoped factory. Preserve
+  that factory and its existing eligibility guard, and pass voice's unchanged
+  notification-route resolver at construction. Delete the superseded local
+  scoping helper. Parent inspected both sides; this is a mechanical combination
+  of already-reviewed behavior under the Base-Update-Only Exception.
+- Post-reconciliation runtime automation, foreground and scheduling proof passes
+  138 cases. Engine, runtime, Cloudflare and Web typechecks pass. Complexity
+  passes against current main: 85 changed source files, 98 existing hotspots.
+- Refreshed complete initial-provider-input captures are byte-identical between
+  stock and patched 0.156.1 with current production builders and GPT-6 Sol:
+  individual 31,905 tokens / 149,101 bytes; group 28,746 tokens / 132,092 bytes.
+  Both changes are zero tokens, bytes and percent. Prior measurements above
+  retain their historical pre-reconciliation scope.
+- The current Linux browser replay proves the correct vault answer, incoming
+  audio, stopped microphone, provider-confirmed closure and consumed input.
+  Its subsequent tool-activity telemetry assertion fails; usage assertions
+  after that point are not yet reached. The three-hour testbox expired after
+  this result; a fresh owned runner is rebuilding for bounded diagnostics.
+- The post-reconciliation live reminder creates exactly one reminder with the
+  correct time and Telegram destination. Its correct negated delivery wording
+  exposed an overbroad negative regex. Remove that false-positive clause while
+  retaining effect, destination and forbidden-claim assertions. Further live
+  replay attempts blocked before any provider action are recorded separately.
+
+- The corrected live reminder journey passes on GPT-6 Sol through the existing
+  development-provider lane: one save, correct schedule, one successful tool
+  action and a concise truthful Telegram destination. Reply review: Ready.
+  Subscription alternatives were unavailable before provider action; no
+  authentication material was copied. Engine typecheck passes after the
+  isolated matcher correction.
+
+- The original ten-second native app-server initialization case still times out
+  when rerun alone after restoring the unmodified test. Keep the limitation
+  explicit; neither the committed native patch nor production deadlines change.
+  The scratch source has only the documented Cargo lock-version normalization.
+
+
+## Final proof and implementation closeout
+
+- Fresh post-reconciliation Linux source rebuild, runner bundle and all four
+  native compatibility plus 29 provider route/authority cases pass with the
+  recorded source fingerprint.
+- The complete hosted browser journey passes on this rebuilt 0.156.1 image:
+  one durable conversation input, correct vault-backed spoken answer, received
+  audio, mute/unmute, microphone stopped, provider-confirmed closure, positive
+  successful tool activity without file mutation, and four trusted usage rows
+  with the expected counted cost and intervention. The successful call took
+  45.6 seconds to answer and 59.9 seconds connected in the synthetic test lane.
+  Temporary diagnostic output did not change the original assertions; its
+  failure-only branch was not entered. No production behavior changed to pass.
+- Product UX and parent candidate review: Ready. The prior telemetry failure
+  did not reproduce in the full fresh-image replay; it remains historical
+  evidence rather than a claimed diagnosed production bug.
+- Implementation, focused proof and final review are complete. Exact-head CI,
+  authorized merge, protected image publication and production deployment are
+  separate remaining release actions. This record does not claim deployment
+  or a personal production-call allowance exemption.
+Completed: 2026-09-23

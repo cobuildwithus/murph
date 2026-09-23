@@ -27203,7 +27203,7 @@ describeRealCodex('real Codex voice reminder destination e2e', () => {
       expect(reply).toMatch(/telegram/iu)
       expect(reply).toMatch(/9(?::00)?\s*(?:a\.?m\.?|in the morning)/iu)
       expect(reply).toMatch(/stretch/iu)
-      expect(reply).not.toMatch(/this (?:Telegram )?(?:conversation|chat)|keep.*call.*open|call you|during.*call|deliveryChannel|routeBinding|scheduler|projection/iu)
+      expect(reply).not.toMatch(/this (?:Telegram )?(?:conversation|chat)|keep.*call.*open|call you|deliveryChannel|routeBinding|scheduler|projection/iu)
       expect(result.runtimeIssueInputs).toEqual([])
     } finally {
       await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
