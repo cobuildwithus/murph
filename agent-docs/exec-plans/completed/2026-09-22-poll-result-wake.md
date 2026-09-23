@@ -1,6 +1,6 @@
 # Wake Murph when native polls reach a result
 
-Status: active
+Status: completed
 Created: 2026-09-22
 Updated: 2026-09-22
 
@@ -50,4 +50,9 @@ Provider and encryption work stays outside database transactions. The notificati
 
 - Final ReviewGPT round 2 accepted one original-PR defect: the notification admission used the group-only authority checker for direct destinations. After user resume, replaced it with the existing direct/group-aware notification authority owner; no new state or abstraction.
 - Composed Linq and Telegram webhook tests reproduce both direct-channel failures before the correction, then pass with the real destination resolver, binder and authority checker. They also prove replay does not append twice and changed routing or revoked access prevents admission. The focused routing/notification/migration batch passes 43 tests.
-- Corrected the migration inventory proof to include the additive poll-notification migration. An unchanged billing PostgreSQL CI shard failed; a targeted rerun is pending, with no unrelated billing change claimed.
+- Corrected the migration inventory proof to include the additive poll-notification migration. The billing PostgreSQL CI failure reproduced locally: a partial signal-runtime mock initialized cyclic consumers before replacement, escaping to a real unconfigured Temporal client. A complete boundary mock restores isolation; all 14 entitlement cases pass. No production billing change.
+
+- Final ReviewGPT round 3 passes at cc0dac3fc6ebcc40d1711a31d1e95de27b7eac0d with no remaining qualifying findings. GPT-6 Pro exact-turn/model/attachment evidence and completion marker verified; capture exceeded ten minutes. The accepted round-2 direct-authority defect is resolved with no new state or abstraction.
+- Parent final review confirms the post-review changes are isolated test-boundary correction, its Frog record and plan closure; no production behavior, schema, runtime config or implemented contract changes. Web typecheck and test ESLint pass after the billing proof correction. Existing prompt/reply journeys remain applicable unchanged.
+- Current main merge-tree is clean. Final-head CI remains the handoff gate after this completion-record commit; no merge, deployment or live channel smoke is claimed.
+Completed: 2026-09-22
