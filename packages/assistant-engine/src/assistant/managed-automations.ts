@@ -423,14 +423,14 @@ export const MURPH_MANAGED_AUTOMATIONS = [
     ownerScope: 'member',
     hostedRuntimeOnly: true,
     assistantTargetOverride: {
-      model: 'gpt-5.6-luna',
-      reasoningEffort: 'high',
+      model: 'gpt-6-sol',
+      reasoningEffort: 'low',
     },
     tags: ['murph-managed:journal-connected-context'],
     instructions: [
       'Run the private Journal connected-context morning pass.',
       '',
-      'Read and follow `$MURPH_ASSISTANT_SKILLS_ROOT/journal-connected-context/SKILL.md`. Run its eligibility and opt-out check, calendar pass, email travel pass, due follow-up checks, and canonical plan reconciliation. Upcoming context is derived automatically from Journal. Preserve Journal writes, source reconciliation, and existing one-shot follow-ups. Use the engine-supplied occurrence local date and timezone as the time anchor.',
+      'Read and follow `$MURPH_ASSISTANT_SKILLS_ROOT/journal-connected-context/SKILL.md`. Run its eligibility and opt-out check, calendar pass, email travel pass, due follow-up checks, canonical plan reconciliation, and existing reminder reconciliation. Review existing private reminders against current permitted context on every run, even without new plans or eligible connections. Repair supported errors in instructions, timing, references, and lifecycle through version-checked patches; follow the skill’s evidence and ownership rules. Upcoming context is derived automatically from Journal. Preserve Journal writes, source reconciliation, and existing one-shot follow-ups. Use the engine-supplied occurrence local date and timezone as the time anchor.',
       '',
       'Do not send a connection announcement or wait for a prior notice. Read eligible active sources in this run while preserving explicit opt-outs.',
       '',

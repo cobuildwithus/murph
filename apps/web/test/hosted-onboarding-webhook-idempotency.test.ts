@@ -156,6 +156,7 @@ vi.mock("@/src/lib/prisma", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-execution/usage-allowance", () => ({
+  hostedAiUsageMemberSelect: {},
   checkHostedAiUsageGate: mocks.checkHostedAiUsageGate,
 }));
 

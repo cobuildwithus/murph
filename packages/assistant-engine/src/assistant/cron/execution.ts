@@ -48,6 +48,7 @@ import {
 } from '../automation/shared.js'
 import {
   appendAssistantHostedDynamicContextPrompt,
+  scopeAssistantAutomationToolToRoute,
   type AssistantExecutionContext,
 } from '../execution-context.js'
 import {
@@ -74,7 +75,6 @@ import {
 import {
   runOnboardingGoalCheckinAuthorityPrecondition,
 } from '../onboarding-goal-checkin-automation.js'
-import { canSkipManagedJournalConnectedContext } from '../journal-connected-context-eligibility.js'
 import { canSkipManagedPersonalPatterns } from '../personal-patterns-eligibility.js'
 import { canSkipManagedAutomaticMealCloseout } from '../automatic-meal-closeout-eligibility.js'
 import {
@@ -917,7 +917,7 @@ export async function executeClaimedAssistantCronJob(
                 authorizedDelivery.deliveryPosture,
               ),
             })
-          const notificationExecutionContext =
+          const groupScopedExecutionContext =
             scopeAssistantCronScheduledGroupTools({
               channel: claimedJob.target.channel,
               executionContext: postureExecutionContext,
@@ -925,6 +925,12 @@ export async function executeClaimedAssistantCronJob(
               routeAuthorityVerified: !maintenanceJob,
               scheduledInvocationAuthority,
             })
+          const notificationExecutionContext = scopeAssistantCronAutomationTool({
+            executionContext: groupScopedExecutionContext,
+            target: claimedJob.target,
+            authorizedDelivery,
+            routeAuthorityVerified: !maintenanceJob,
+          })
           const assertNotificationStillAuthorized = async (
             authorityGate: AssistantCronOnboardingFollowupDiagnostic['authorityGate'],
           ): Promise<void> => {
@@ -2110,17 +2116,6 @@ async function runAssistantCronAutomationPreconditions(input: {
   if (lifecycleResult?.kind === 'skip') {
     lifecycleSkipReason = lifecycleResult.reason
   }
-  if (
-    lifecycleSkipReason === null &&
-    await canSkipManagedJournalConnectedContext({
-      automationId: input.source.automationId,
-      connectedApps: input.executionContext?.hosted?.connectedApps ?? null,
-      signal: input.signal,
-      vaultRoot: input.vault,
-    })
-  ) {
-    lifecycleSkipReason = 'Journal connected context has no connected accounts or existing ledger.'
-  }
   if (lifecycleSkipReason === null
     && input.trigger === 'scheduled' && input.consecutiveFailures === 0
     && await canSkipManagedPersonalPatterns({
@@ -2903,6 +2898,29 @@ function assistantCronExecutionDeliveryTargetProfile(input: {
   const isHostedExecution =
     normalizeNullableString(input.executionContext?.hosted?.memberId) !== null
   return isHostedExecution ? 'hosted' : 'local'
+}
+
+function scopeAssistantCronAutomationTool(input: {
+  executionContext: AssistantExecutionContext | null | undefined
+  target: AssistantCronJob['target']
+  authorizedDelivery: AssistantCronAuthorizedNotificationDelivery
+  routeAuthorityVerified: boolean
+}): AssistantExecutionContext {
+  const { route, conversationThreadId } = input.authorizedDelivery
+  const deliveryTarget = route.bindingDelivery?.target ?? route.deliveryTarget
+  return scopeAssistantAutomationToolToRoute({
+    executionContext: input.executionContext ?? { hosted: null },
+    route: input.routeAuthorityVerified && input.target.channel && deliveryTarget
+      ? {
+          channel: input.target.channel,
+          deliveryTarget,
+          identityId: input.target.identityId,
+          participantId: input.target.participantId,
+          threadId: conversationThreadId ?? input.target.threadId,
+          threadIsDirect: route.threadIsDirect,
+        }
+      : null,
+  })
 }
 
 function scopeAssistantCronScheduledGroupTools(input: {

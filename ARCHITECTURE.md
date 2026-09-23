@@ -294,7 +294,19 @@ already concise records remain unchanged. This policy uses the existing memory
 format and tool, with no schema migration or second profile store.
 
 The morning Journal connected-context automation writes canonical Journal plans.
-Their note record owns end time, planned/tentative/canceled state, verification
+It also reviews existing private reminders against current permitted canonical
+context, even without new connected plans. Existing version-checked automation
+patches repair supported instruction, timing, reference, and lifecycle mistakes;
+explicit clock-time choices, delivery audiences, and domain ownership remain
+intact. Event-relative reminders follow verified event changes; exact completed
+or canceled one-offs and verified duplicates can be archived. Correct reminders
+and recurring habits are preserved, including on retries. Source opt-outs still
+apply, and uncertain context does not authorize a mutation.
+Scheduled outdoor reminders independently resolve current member location and
+canonical travel, including recent segments after arrival leaves the upcoming
+projection. Plans remain conditional evidence. No separate reconciliation store,
+location store, or scheduler is introduced.
+Each canonical Journal plan note owns end time, planned/tentative/canceled state, verification
 time, category, and optional connected account; existing event fields own start,
 timezone, title, source identity, revision, and detailed logistics. Typed note
 creation accepts the event timezone. A repeated source identity recovers the
@@ -329,12 +341,17 @@ preserving independent follow-ups. Active connections are eligible silently,
 without connection-age or notice gates; explicit opt-outs remain controlling.
 The detailed contract is owned by `agent-docs/product-specs/journal.md`.
 
-The canonical cron lifecycle skips a managed Journal connected-context pass
-only when its ledger is genuinely missing and its complete connected-account
-inventory is empty. Existing ledgers, new accounts, unavailable ports, and
-failed reads keep the normal pass, preserving capture and due follow-ups.
-The account inventory owner rejects malformed pages instead of presenting them
-as empty. Journal, Personal Patterns, weekly digest/insight/research, monthly coaching,
+The canonical cron lifecycle admits the morning Journal pass even without a
+ledger or connected accounts: existing reminders may need repairs from
+member-supplied canonical context. The skill checks saved opt-outs before any
+connected-app call and owns source eligibility. The account inventory owner
+rejects malformed pages instead of presenting them as empty.
+Hosted foreground operations and route-authorized scheduled notifications bind
+the same automation tool through one execution-context factory. Cron supplies its
+verified delivery route before actual turn planning; the shared context has no
+ambient mutation tool. The canonical tool still owns version checks, route
+preservation, and readback. No per-job mutation allowlist or parallel repair API.
+Journal, Personal Patterns, weekly digest/insight/research, monthly coaching,
 and private memory/room-model maintenance retain
 Flex on failed-attempt retries. Ordinary reminders may retry at Standard after
 a failed Flex attempt. The provider boundary validates model and catalog support
@@ -1763,9 +1780,18 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   to GPT-6 Sol. Active members may select GPT-6 Sol or Luna and the existing
   GPT-5.6 Luna; GPT-5.6 Sol and GPT-6 Astra retain their premium gates.
   Saved Terra preferences now resolve to GPT-6 Sol; other explicit choices stay
-  saved, while a null preference follows the default. Persisted Terra automation
-  overrides also resolve to Sol without rewriting canonical records. Unsupported
-  inherited automation preferences remain dormant across provider changes.
+  saved, while a null preference follows the default. At scheduled execution,
+  automation pins use a reviewed OpenAI replacement map: GPT-5.6 Luna becomes
+  GPT-6 Luna, and GPT-5.6 Sol or Terra becomes GPT-6 Sol. Provider-neutral
+  envelopes and canonical records retain the authored pin; resolution happens
+  after the executing provider is known and before default reasoning is derived.
+  Explicit reasoning survives; an omitted value uses the replacement model's
+  default. Venice retains its supported GPT-5.6 targets; retired Terra inherits
+  the supported Venice conversation target. Explicit custom-provider model IDs
+  stay literal, and unsupported inherited managed preferences remain
+  dormant across provider changes. This adds no deploy-time scan or state write;
+  new runtime code activates replacements on the next execution. Future versions
+  require a reviewed map update, and rollback restores prior resolution.
   Venice uses GPT-5.6 Sol as its fallback and supports only its
   existing mapped models; GPT-6 Sol and Luna selection requires OpenAI. The
   common reasoning set remains `low`/`medium`/`high`/`xhigh`, with low represented
