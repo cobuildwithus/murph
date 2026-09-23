@@ -189,7 +189,7 @@ retain their durable successors instead of repeatedly reclaiming canceled work.
 
 Finite `inbox_media_retention` checkpoints run the existing transient-content
 cleanup owners and publish their next deadlines. They do not scan or compress
-unrelated canonical event or integration history; ordinary idle checkpoints
+unrelated canonical event, audit, or integration history; ordinary idle checkpoints
 remain responsible for those archives. This separation does not change content
 eligibility, protected pending work, or the maximum retention deadline.
 

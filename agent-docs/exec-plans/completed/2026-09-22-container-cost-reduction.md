@@ -1,6 +1,6 @@
 # Reduce avoidable hosted container starts and allocation cost
 
-Status: active
+Status: completed
 Created: 2026-09-22
 Updated: 2026-09-22
 
@@ -199,3 +199,38 @@ a target, not a deployed percentage guarantee.
 - Attachment retrieval failed an exact-response identity check twice while
   exact-thread export succeeded. Do not bypass that guard or claim an applied
   downloaded patch; independently verify the recommendation at its source owner.
+
+## Base reconciliation
+
+- Current main added audit-ledger compaction while this PR extracted the archive
+  stage. The parent resolved the sole source conflict by calling main's existing
+  event/audit ledger helper inside this PR's canonical archive stage. The shared
+  timeout, archive order, error behavior, and interruption return remain composed
+  from the two existing implementations. No new runtime policy was introduced.
+- The normal audit-compaction regressions and finite retention-mode exclusion
+  assertion pass together: seventy-two focused retention tests and runtime
+  typecheck passed. The parent inspected the resolution against both parents.
+- This is a behavior-preserving base reconciliation under the review loop's
+  base-update exception. It preserves the authored five corrections and current
+  main's compaction behavior. Reconciled-head CI remains a gate.
+- Against current main, the final complexity guard reduces idle-maintenance debt
+  by five (maximum thirty-eight to thirty-three); all other changed-file debt
+  stays flat. This supersedes the original-base comparison for the final PR.
+
+## Completion
+
+- Final round two passed on 35520e98ca76b899aafe013d0ada4edc91ada627 with zero
+  findings. Exact full-snapshot head, first/previous baseline, model, and response
+  identities were verified; the substantive review ran for over twenty minutes.
+- The subsequent main merge only reconciles existing implementations as described
+  above. Parent review and focused proof establish the base-update exception;
+  final explanatory documentation does not require another substantive round.
+- Five corrections are implemented. The completed architecture keeps two vCPUs,
+  prioritizes allocation efficiency, and leaves freshness/retention policy
+  changes as explicit proposals. No production mutation or deployed savings
+  claim is included.
+- Relevant focused suites and typechecks pass. The final reconciled candidate
+  includes seventy-two retention cases alongside the previously verified device,
+  mailbox, lifecycle/callback, and changelog coverage. Documentation and
+  complexity guards pass; the final pushed head remains gated by required CI.
+Completed: 2026-09-22
