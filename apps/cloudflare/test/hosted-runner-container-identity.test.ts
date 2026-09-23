@@ -9,7 +9,7 @@ import {
 import {
   HOSTED_ASSISTANT_LUNA_MODEL,
   HOSTED_ASSISTANT_SOL_MODEL,
-  HOSTED_ASSISTANT_TERRA_MODEL,
+  HOSTED_ASSISTANT_DEFAULT_MODEL,
   type HostedAssistantModelOverride,
   type HostedAssistantProviderOverride,
   type HostedAssistantReasoningEffortOverride,
@@ -259,13 +259,13 @@ describe("hosted runner container identity", () => {
   it.each([
     {
       expectedModel: HOSTED_ASSISTANT_LUNA_MODEL,
-      fleetModel: HOSTED_ASSISTANT_TERRA_MODEL,
+      fleetModel: HOSTED_ASSISTANT_DEFAULT_MODEL,
       hostedAssistantModelOverride: HOSTED_ASSISTANT_LUNA_MODEL,
       name: "applies the saved Luna choice",
     },
     {
       expectedModel: HOSTED_ASSISTANT_SOL_MODEL,
-      fleetModel: HOSTED_ASSISTANT_TERRA_MODEL,
+      fleetModel: HOSTED_ASSISTANT_DEFAULT_MODEL,
       hostedAssistantModelOverride: HOSTED_ASSISTANT_SOL_MODEL,
       name: "applies the saved Sol choice",
     },
@@ -276,8 +276,8 @@ describe("hosted runner container identity", () => {
       name: "applies the saved Sol choice independently of the platform default",
     },
     {
-      expectedModel: HOSTED_ASSISTANT_TERRA_MODEL,
-      fleetModel: HOSTED_ASSISTANT_TERRA_MODEL,
+      expectedModel: HOSTED_ASSISTANT_DEFAULT_MODEL,
+      fleetModel: HOSTED_ASSISTANT_DEFAULT_MODEL,
       hostedAssistantModelOverride: null,
       name: "preserves Terra without an override",
     },
@@ -379,7 +379,7 @@ describe("hosted runner container identity", () => {
         CF_VERSION_METADATA: {
           id: "version_1",
         },
-        HOSTED_ASSISTANT_MODEL: HOSTED_ASSISTANT_TERRA_MODEL,
+        HOSTED_ASSISTANT_MODEL: HOSTED_ASSISTANT_DEFAULT_MODEL,
         HOSTED_ASSISTANT_PROVIDER: "openai",
         HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET:
           "provider-egress-signing-secret",
@@ -420,7 +420,7 @@ describe("hosted runner container identity", () => {
         CF_VERSION_METADATA: {
           id: "version_1",
         },
-        HOSTED_ASSISTANT_MODEL: HOSTED_ASSISTANT_TERRA_MODEL,
+        HOSTED_ASSISTANT_MODEL: HOSTED_ASSISTANT_DEFAULT_MODEL,
         HOSTED_ASSISTANT_PROVIDER: "openai",
         HOSTED_ASSISTANT_REASONING_EFFORT: "low",
         HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET:
@@ -479,7 +479,7 @@ describe("hosted runner container identity", () => {
     vi.stubGlobal("fetch", fetchMock);
     const runnerRuntimeEnvSource = {
       CF_VERSION_METADATA: { id: "version_1" },
-      HOSTED_ASSISTANT_MODEL: HOSTED_ASSISTANT_TERRA_MODEL,
+      HOSTED_ASSISTANT_MODEL: HOSTED_ASSISTANT_DEFAULT_MODEL,
       HOSTED_ASSISTANT_PROVIDER: "openai",
       HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET:
         "provider-egress-signing-secret",
@@ -574,7 +574,7 @@ describe("hosted runner container identity", () => {
       platformAiUsageAllowed: true,
       runnerRuntimeEnvSource: {
         CF_VERSION_METADATA: { id: "version_1" },
-        HOSTED_ASSISTANT_MODEL: HOSTED_ASSISTANT_TERRA_MODEL,
+        HOSTED_ASSISTANT_MODEL: HOSTED_ASSISTANT_DEFAULT_MODEL,
         HOSTED_ASSISTANT_PROVIDER: "openai",
         HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET:
           "provider-egress-signing-secret",
@@ -617,7 +617,7 @@ describe("hosted runner container identity", () => {
       platformAiUsageAllowed: false,
       runnerRuntimeEnvSource: {
         CF_VERSION_METADATA: { id: "version_1" },
-        HOSTED_ASSISTANT_MODEL: HOSTED_ASSISTANT_TERRA_MODEL,
+        HOSTED_ASSISTANT_MODEL: HOSTED_ASSISTANT_DEFAULT_MODEL,
         HOSTED_ASSISTANT_PROVIDER: "openai",
         HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET:
           "provider-egress-signing-secret",
@@ -659,7 +659,7 @@ describe("hosted runner container identity", () => {
       platformAiUsageAllowed: false,
       runnerRuntimeEnvSource: {
         CF_VERSION_METADATA: { id: "version_1" },
-        HOSTED_ASSISTANT_MODEL: HOSTED_ASSISTANT_TERRA_MODEL,
+        HOSTED_ASSISTANT_MODEL: HOSTED_ASSISTANT_DEFAULT_MODEL,
         HOSTED_ASSISTANT_PROVIDER: "openai",
         HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET:
           "provider-egress-signing-secret",
@@ -711,7 +711,7 @@ describe("hosted runner container identity", () => {
       platformAiUsageAllowed: false,
       runnerRuntimeEnvSource: {
         CF_VERSION_METADATA: { id: "version_1" },
-        HOSTED_ASSISTANT_MODEL: HOSTED_ASSISTANT_TERRA_MODEL,
+        HOSTED_ASSISTANT_MODEL: HOSTED_ASSISTANT_DEFAULT_MODEL,
         HOSTED_ASSISTANT_PROVIDER: "openai",
         HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET:
           "provider-egress-signing-secret",

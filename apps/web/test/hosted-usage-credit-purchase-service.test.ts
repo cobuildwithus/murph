@@ -4434,7 +4434,7 @@ describe("createHostedUsageCreditCheckout", () => {
       cashAmountMinor: 1_000,
       cashCurrency: "usd",
       checkoutRequestPolicyVersion: "hosted-usage-credit-checkout-v5",
-      grantUsdMicros: 10_000_000n,
+      grantUsdMicros: 8_000_000n,
       offerCode: "usage_10_usd",
       payerMemberId: MEMBER_ID,
       beneficiaryMemberId: MEMBER_ID,

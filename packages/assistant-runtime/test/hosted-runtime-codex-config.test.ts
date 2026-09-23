@@ -106,11 +106,12 @@ const HOSTED_CODEX_AUTOCOMPACTION_SUMMARY_SENTINEL =
   "HOSTED_CODEX_AUTOCOMPACTION_SUMMARY_SENTINEL";
 const EXPECTED_MULTI_AGENT_USAGE_HINT = [
   "When the active route or skill contract permits delegation, proactively spawn a hosted child for genuinely bounded, self-contained background work whose result is not needed in the current reply, then reply without waiting.",
-  "Use the child to replace a later root pass, not duplicate work; skip tiny tasks whose assignment and readback cost exceeds doing them once in the root.",
+  "Use the child to replace a later root pass, not duplicate work; unless the user requests delegation, skip tiny tasks whose assignment and readback cost exceeds doing them once in the root.",
+  "For explicitly requested delegation needed to answer, use a bounded child and native wait_agent, then answer in the same turn. Keep independent onboarding saves nonblocking.",
   "Follow the active route or skill contract for the exact leaf assignment and completion proof.",
 ].join(" ");
 const EXPECTED_MULTI_AGENT_MODE_HINT =
-  "Murph bounded background delegation mode is active; reply-critical work stays in the root.";
+  "Murph bounded delegation mode is active; the root owns the final answer and waits for requested child results when needed.";
 const EXPECTED_SUBAGENT_USAGE_HINT = [
   "This hosted child is a one-shot leaf.",
   "Complete only the self-contained assignment and stop.",
@@ -2619,11 +2620,14 @@ test("hosted Codex config promotes permitted leaf delegation with native per-spa
     "When the active route or skill contract permits delegation, proactively spawn a hosted child for genuinely bounded, self-contained background work whose result is not needed in the current reply, then reply without waiting.",
   ));
   assert.ok(config.includes(
-    "Use the child to replace a later root pass, not duplicate work; skip tiny tasks",
+    "Use the child to replace a later root pass, not duplicate work; unless the user requests delegation, skip tiny tasks",
   ));
   assert.ok(config.includes(
     "Complete only the self-contained assignment and stop.",
   ));
+  assert.ok(config.includes("native wait_agent, then answer in the same turn"));
+  assert.ok(config.includes("Keep independent onboarding saves nonblocking"));
+  assert.doesNotMatch(config, /reply-critical work stays in the root/u);
   assert.match(config, /^expose_spawn_agent_model_overrides = true$/mu);
   assert.doesNotMatch(config, /^default_subagent_model/mu);
   assert.doesNotMatch(config, /^default_subagent_reasoning_effort/mu);

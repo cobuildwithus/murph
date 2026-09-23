@@ -44,7 +44,7 @@ import {
 import {
   addRunnerMailboxCryptoContextRequest,
   handleRunnerMailboxPayloadDecodeRequest,
-  decodeRunnerMailboxFetchResponse,
+  completeRunnerMailboxFetchResponse,
 } from "./mailbox-payload-decode.ts";
 import {
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH,
@@ -72,6 +72,7 @@ export async function handleRunnerWebControlRequest(input: {
   url: URL;
   userId: string;
 }): Promise<Response> {
+  const requestStartedAt = performance.now();
   const policy = readHostedRunnerWebControlPolicy({
     method: input.request.method,
     path: input.url.pathname,
@@ -132,7 +133,6 @@ export async function handleRunnerWebControlRequest(input: {
   // The allowlist above already proved each operation's HTTP method.
   const isCheckpointRequest = policy.operation === "workspace_checkpoint";
   const isUsageRecordRequest = policy.operation === "usage_recording";
-  const isBrowserVaultReplicaPublishRequest = policy.operation === "browser_vault_replica_publish";
   const isDeviceSyncRuntimeSnapshotRequest = policy.operation === "device_sync_runtime_snapshot";
   const isVaultShareDeliveryRequest = policy.operation === "vault_share_deliver";
   const vaultShareEffectDeadlineAtEpochMs = isVaultShareDeliveryRequest
@@ -222,6 +222,8 @@ export async function handleRunnerWebControlRequest(input: {
       String(vaultShareEffectDeadlineAtEpochMs),
     );
   }
+  const forwardStartedAt = performance.now();
+  const webControlTiming: { prepareMs?: number; fetchHeadersMs?: number } = {};
   const response = await forwardWithRuntimeUsageSettlement({
     env: input.env, userId: input.userId, writeAuthority, body, usageRecord: isUsageRecordRequest,
     forward: () => fetchHostedExecutionWebControlPlaneResponse({
@@ -232,6 +234,7 @@ export async function handleRunnerWebControlRequest(input: {
       body,
       boundUserId: input.userId,
       callbackSigning: input.environment.webCallbackSigning,
+      timing: webControlTiming,
       method: requestMethod,
       path: input.url.pathname,
       search: input.url.search || null,
@@ -251,6 +254,9 @@ export async function handleRunnerWebControlRequest(input: {
         : input.environment.webControlTimeoutMs,
     }),
   });
+  const mailboxResponse = policy.operation === "mailbox_fetch"
+    ? await completeRunnerMailboxFetchResponse({ ...input, response, body, requestStartedAt, forwardStartedAt, webControlTiming })
+    : null;
   const responseBodyMetadata = response.ok || isClinicalRecordsRequest
     ? {}
     : await readHostedRunnerSafeResponseBodyMetadata(response.clone());
@@ -260,6 +266,7 @@ export async function handleRunnerWebControlRequest(input: {
       contentTypePresent: response.headers.has("content-type"),
       method,
       operation: policy.operation,
+      ...mailboxResponse?.timings,
       ...responseBodyMetadata,
       ...readHostedSnapshotResponseHeaderMetadata(
         response,
@@ -282,10 +289,7 @@ export async function handleRunnerWebControlRequest(input: {
     }
   }
 
-  if (response.ok && policy.operation === "mailbox_fetch"
-    && body && JSON.parse(body).decodeInlinePayloads === true) {
-    return decodeRunnerMailboxFetchResponse({ ...input, response });
-  }
+  if (mailboxResponse) return mailboxResponse.response;
 
   if (!isVaultShareDeliveryRequest) {
     return response;

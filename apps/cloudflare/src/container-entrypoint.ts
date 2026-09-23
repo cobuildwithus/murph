@@ -1367,11 +1367,30 @@ async function startHostedContainerEntrypointCli(): Promise<void> {
     processApi: defaultHostedContainerProcessApi,
   });
 
+  // Keep V8 profiling outside the static boot closure.
+  const stopCpuProfiler = await import("./container-cpu-profiler.ts")
+    .then(({ startHostedContainerCpuProfiler }) => startHostedContainerCpuProfiler({
+      emit: emitHostedExecutionStructuredLog,
+    }))
+    .catch(() => {
+      emitHostedExecutionStructuredLog({
+        component: "container",
+        details: { lifecycleStage: "entrypoint-cpu-profiler-unavailable" },
+        message: "Hosted container CPU profiler unavailable.",
+        phase: "wake.running",
+        userId: null,
+      });
+      return () => {};
+    });
   try {
     const server = await startHostedContainerEntrypoint({ port });
-    server.once("close", stopCpuWatchdog);
+    server.once("close", () => {
+      stopCpuWatchdog();
+      stopCpuProfiler();
+    });
   } catch (error) {
     stopCpuWatchdog();
+    stopCpuProfiler();
     throw error;
   }
 }

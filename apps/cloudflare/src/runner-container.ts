@@ -81,6 +81,7 @@ import type {
 } from "./worker-contracts.ts";
 import { recordHostedRuntimeOwnerCompletion } from "./runtime-owner-completion.ts";
 import { commandHostedRuntimeOwner } from "./runtime-owner-client.ts";
+import { HOSTED_CONTAINER_RUNTIME_COMPLETION_TIMEOUT_MS } from "./container-runtime-completion.ts";
 
 import { RunnerInvocationReceiptStore, type RunnerInvocationReceipt } from "./runner-invocation-receipt.ts";
 
@@ -2313,6 +2314,15 @@ export class RunnerContainer extends Container {
       return false;
     }
     if (health.activeJobCount > 0) {
+      // The response can settle before the entrypoint's completion callback
+      // releases its active count. Give that drain one short recheck; ordinary
+      // expiry retains the normal cadence if work is still active then.
+      if (input.lifecycleStagePrefix === "invoke-completed"
+        && !this.lifecycleInteractionChanged(input.expectedInteractionGeneration)) {
+        await this.scheduleLifecycleCheck(
+          Date.now() + HOSTED_CONTAINER_RUNTIME_COMPLETION_TIMEOUT_MS,
+        );
+      }
       return false;
     }
     if (this.lifecycleInteractionChanged(input.expectedInteractionGeneration)) {

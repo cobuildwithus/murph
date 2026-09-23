@@ -1,5 +1,6 @@
 import {
   checkHostedAiUsageGate,
+  hostedAiUsageMemberSelect,
   readHostedAiUsageGate,
   resolveHostedAiUsageGate,
   type HostedAiUsageGateDecisionWithSource,
@@ -7,9 +8,29 @@ import {
 } from "../hosted-execution/usage-allowance";
 import {
   readHostedRuntimeAiAccessDecision,
+  hostedRuntimeAiMemberAccessSelect,
   type HostedRuntimeAiMemberAccessState,
 } from "../hosted-onboarding/member-access";
 import { HOSTED_STARTER_USAGE_GRANT_USD_MICROS } from "../hosted-onboarding/starter-usage";
+
+import { getPrisma } from "../prisma";
+
+// One request-local projection serves both access and read-only allowance.
+// Mutating admission still re-reads allowance under its own beneficiary lock.
+export function getHostedRuntimeUsageMemberSelect() {
+  // Construct at request time: allowance and runtime signaling already share
+  // an import cycle, so module initialization must not read their projections.
+  return {
+    ...hostedRuntimeAiMemberAccessSelect,
+    ...hostedAiUsageMemberSelect,
+    threadContainer: {
+      select: {
+        ...hostedRuntimeAiMemberAccessSelect.threadContainer.select,
+        monthlyUsageLimitUsdMicros: true,
+      },
+    },
+  } as const;
+}
 
 export type HostedRuntimeUsageGateCheck =
   | {
@@ -41,13 +62,20 @@ export async function resolveHostedRuntimeAiUsageGate(input: {
     }
 )): Promise<HostedRuntimeUsageGateCheck> {
   const now = normalizeHostedRuntimeUsageDecisionDate(input.now);
+  const prisma = input.prisma ?? getPrisma();
+  const memberState = input.memberState ?? (input.mode === "mutating"
+    ? undefined
+    : await prisma.hostedMember.findUnique({
+        select: getHostedRuntimeUsageMemberSelect(),
+        where: { id: input.userId },
+      }) ?? undefined);
   const access = await readHostedRuntimeAiAccessDecision({
     memberId: input.userId,
-    ...(input.memberState
-      ? { memberState: input.memberState }
+    ...(memberState
+      ? { memberState }
       : {}),
     now,
-    prisma: input.prisma,
+    prisma,
   });
   if (!access.allowed && access.reason === "health_data_consent_withdrawn") {
     return { status: "health_data_consent_withdrawn" };
@@ -60,11 +88,11 @@ export async function resolveHostedRuntimeAiUsageGate(input: {
       : checkHostedAiUsageGate;
   const decision = await readGate({
     memberId: input.userId,
-    ...(input.memberState
-      ? { memberState: input.memberState }
+    ...(memberState
+      ? { memberState }
       : {}),
     now,
-    prisma: input.prisma,
+    prisma,
   });
 
   if (!decision.allowed) {

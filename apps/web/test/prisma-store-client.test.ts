@@ -8,6 +8,8 @@ import {
   vi,
 } from "vitest";
 
+import type { PrismaPoolAcquisitionTiming } from "@/src/lib/prisma-operation-timing";
+
 import type { PrismaInteractiveTransactionOperation } from "@/src/lib/prisma";
 
 const mocks = vi.hoisted(() => {
@@ -1420,6 +1422,52 @@ describe("prisma module", () => {
     expect(pool.connect(callback)).toBeUndefined();
     expect(mocks.connect.mock.calls).toEqual([[], [callback]]);
     expect(mocks.connect.mock.contexts).toEqual([pool, pool]);
+  });
+
+  it("times promise and callback pool acquisition without changing results or release ownership", async () => {
+    const { createPrismaClient } = await import("@/src/lib/prisma");
+    const { runWithPrismaOperationTimings } = await import("@/src/lib/prisma-operation-timing");
+    createPrismaClient({ databaseUrl: "postgresql://example.invalid/db" });
+    const pool = mocks.poolInstances[0]!;
+    const samples: PrismaPoolAcquisitionTiming[] = [];
+    let clock = 0;
+    vi.spyOn(performance, "now").mockImplementation(() => clock);
+    const client = { connected: true };
+    const release = vi.fn();
+    const callback = vi.fn();
+    mocks.connect.mockImplementationOnce(async () => { clock = 40; return client; });
+    await runWithPrismaOperationTimings([], async () => {
+      await expect(pool.connect()).resolves.toBe(client);
+    }, samples);
+    mocks.connect.mockImplementationOnce((cb: (...args: unknown[]) => unknown) => {
+      clock = 70;
+      cb(null, client, release);
+    });
+    await runWithPrismaOperationTimings([], async () => {
+      expect(pool.connect(callback)).toBeUndefined();
+    }, samples);
+    expect(callback).toHaveBeenCalledWith(null, client, release);
+    expect(release).not.toHaveBeenCalled();
+    expect(samples.map(sample => sample.ms)).toEqual([40, 30]);
+    expect(samples[0]).toMatchObject({ idleConnections: 0, totalConnections: 0, waitingRequests: 0 });
+    expect(mocks.connect.mock.contexts).toEqual([pool, pool]);
+  });
+
+  it("preserves pool acquisition failures in both API forms", async () => {
+    const { createPrismaClient } = await import("@/src/lib/prisma");
+    const { runWithPrismaOperationTimings } = await import("@/src/lib/prisma-operation-timing");
+    createPrismaClient({ databaseUrl: "postgresql://example.invalid/db" });
+    const pool = mocks.poolInstances[0]!;
+    const failure = new Error("synthetic checkout failure");
+    const samples: PrismaPoolAcquisitionTiming[] = [];
+    const callback = vi.fn();
+    mocks.connect.mockRejectedValueOnce(failure).mockImplementationOnce((cb: (error: Error) => void) => cb(failure));
+    await runWithPrismaOperationTimings([], async () => {
+      await expect(pool.connect()).rejects.toBe(failure);
+      pool.connect(callback);
+    }, samples);
+    expect(callback).toHaveBeenCalledWith(failure);
+    expect(samples).toHaveLength(2);
   });
 
   it("throttles each pool independently", async () => {

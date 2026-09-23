@@ -1384,6 +1384,19 @@ export function getGeneratedHealthCommonsProtocolIndexReader() {
     );
   });
 
+  it("rejects a runner bundle after its launch catalog source changes", async () => {
+    const sourceFixture = await createDeployArtifactSourceFixture();
+    const catalogDir = path.join(sourceFixture.appDir, "config");
+    await mkdir(catalogDir, { recursive: true });
+    const catalogPath = path.join(catalogDir, "codex-gpt6-models.json");
+    await writeFile(catalogPath, '{"models":[]}\n');
+    const fixture = await createDeployArtifactFixture(sourceFixture);
+    await writeFile(catalogPath, '{"models":[{"slug":"gpt-6-sol"}]}\n');
+    await expect(assertPreparedRunnerBundle(fixture)).rejects.toThrow(
+      "Prepared runner bundle source fingerprint is stale",
+    );
+  });
+
   it("ignores generated package outputs when checking the source fingerprint", async () => {
     const sourceFixture = await createDeployArtifactSourceFixture({
       generatedFilesPackageName: healthCommonsPackageName,

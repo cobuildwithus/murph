@@ -87,6 +87,7 @@ async function extractClinicalEnrichmentPage({ input, work, state, now }: {
   const attemptId = randomUUID();
   const usages: FamilyUsage[] = [];
   const peers = new AbortController();
+  const deadlineAt = performance.now() + PAGE_TIMEOUT_MS;
   const signal = AbortSignal.any([input.abortSignal, peers.signal, AbortSignal.timeout(PAGE_TIMEOUT_MS)]);
   let prepared: Awaited<ReturnType<typeof prepareClinicalEnrichmentDocument>> | undefined;
   let handedOff = false;
@@ -101,7 +102,7 @@ async function extractClinicalEnrichmentPage({ input, work, state, now }: {
     signal.throwIfAborted();
     stage = "extract";
     const outputs = await extractClinicalEnrichmentFamilies({
-      input, work, prepared, signal, peers, usages,
+      input, work, prepared, signal, peers, usages, deadlineAt,
       onHandoff() { handedOff = true; },
     });
     stage = "persist";
@@ -136,13 +137,14 @@ async function extractClinicalEnrichmentPage({ input, work, state, now }: {
   }
 }
 
-async function extractClinicalEnrichmentFamilies({ input, work, prepared, signal, peers, usages, onHandoff }: {
+async function extractClinicalEnrichmentFamilies({ input, work, prepared, signal, peers, usages, deadlineAt, onHandoff }: {
   input: HostedClinicalEnrichmentInput;
   work: ExtractionWork;
   prepared: Awaited<ReturnType<typeof prepareClinicalEnrichmentDocument>>;
   signal: AbortSignal;
   peers: AbortController;
   usages: FamilyUsage[];
+  deadlineAt: number;
   onHandoff(): void;
 }) {
   const execute = input.executeExtraction ?? executeClinicalDocumentExtraction;
@@ -161,6 +163,8 @@ async function extractClinicalEnrichmentFamilies({ input, work, prepared, signal
         codexHome: input.codexHome, env: { ...input.env },
         model: input.model, modelProvider: input.modelProvider,
         workspaceRoot: input.vaultRoot, source: work.source, documentPath: work.documentPath,
+        timeZone: work.timeZone,
+        deadlineAt,
         family, extractedText: prepared.extractedText, renderedPages: prepared.renderedPages,
         scratchRoots: prepared.scratchRoots,
         onProviderUsage(event) { usages.push({ family, event }); },

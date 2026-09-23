@@ -6442,7 +6442,13 @@ describe('assistant cron runtime orchestration', () => {
       name: 'Personal Patterns',
       occurrenceAt: '2026-04-08T13:00:00.000Z',
     },
-  ])('uses Flex then Standard after a failed managed $name occurrence', async ({
+    ...[
+      [MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID, 'Weekly digest'],
+      [MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID, 'Weekly insight'],
+      [MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID, 'Weekly research'],
+      [MURPH_MONTHLY_IMPROVEMENT_COACH_AUTOMATION_ID, 'Monthly coach'],
+    ].map(([automationId, name]) => ({ automationId: automationId!, name, occurrenceAt: '2026-04-08T13:00:00.000Z' })),
+  ])('keeps Flex after a failed managed $name occurrence', async ({
     automationId,
     occurrenceAt,
   }) => {
@@ -6451,7 +6457,14 @@ describe('assistant cron runtime orchestration', () => {
     const { vaultRoot } = await createRuntimeContext(
       'assistant-cron-runtime-managed-flex-',
     )
+    await completeAssistantOnboarding({ completedAt: '2026-04-07T18:00:00.000Z',
+      reason: 'user_answered', vault: vaultRoot })
     const seed = addManagedBackgroundAutomation(vaultRoot, automationId)
+    // Exercise the production recipe at a controlled due minute; only its tier
+    // policy varies here, independent of the weekly/monthly cadence fixture.
+    getVaultAutomationStore(vaultRoot).find(record => record.automationId === automationId)!.schedule = {
+      kind: 'dailyLocal', localTime: occurrenceAt.slice(11, 16),
+    }
     const executionContext: AssistantExecutionContext = {
       hosted: {
         memberId: 'member-managed-flex',
@@ -6526,7 +6539,7 @@ describe('assistant cron runtime orchestration', () => {
           ? { assistantTargetOverride: seed.assistantTargetOverride }
           : {}),
         scheduledInvocationAuthority: { automationId, occurrenceAt },
-        serviceTier: null,
+        serviceTier: 'flex',
         turnTrigger: 'automation-cron',
       }),
     )
@@ -12033,6 +12046,102 @@ describe('assistant cron runtime orchestration', () => {
       expect(current.state.nextRunAt).toBe('2026-04-09T10:00:00.000Z')
     },
   )
+
+  it.each([
+    MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
+    MURPH_MONTHLY_IMPROVEMENT_COACH_AUTOMATION_ID,
+    MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID,
+  ])('omits onboarding-blocked research wakes and restores %s after completion', async (automationId) => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T09:20:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext('assistant-cron-onboarding-wake-')
+    addManagedResearchAutomation({ automationId, tag: 'murph-managed:weekly-health-insight', vaultRoot })
+
+    await expect(getAssistantCronStatus(vaultRoot)).resolves.toMatchObject({
+      dueJobs: 0, enabledJobs: 1, nextRunAt: null, totalJobs: 1,
+    })
+    vi.setSystemTime(new Date('2026-04-08T10:20:00.000Z'))
+    await expect(getAssistantCronStatus(vaultRoot)).resolves.toMatchObject({
+      dueJobs: 0, nextRunAt: null,
+    })
+    await completeAssistantOnboarding({ reason: 'user_answered', vault: vaultRoot })
+    await expect(getAssistantCronStatus(vaultRoot)).resolves.toMatchObject({
+      dueJobs: 1, nextRunAt: '2026-04-08T10:00:00.000Z',
+    })
+    expect(getVaultAutomationStore(vaultRoot)[0]?.status).toBe('active')
+    expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
+  })
+
+  it('keeps research wake recovery and uncertain onboarding eligible', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T10:20:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext('assistant-cron-onboarding-recovery-')
+    addManagedResearchAutomation({
+      automationId: MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
+      tag: 'murph-managed:weekly-health-insight', vaultRoot,
+    })
+    const statePath = resolveAssistantOnboardingStatePath(vaultRoot)
+    await mkdir(path.dirname(statePath), { recursive: true })
+    await writeFile(statePath, '{ invalid onboarding json', 'utf8')
+    await expect(getAssistantCronStatus(vaultRoot)).resolves.toMatchObject({
+      dueJobs: 1, nextRunAt: '2026-04-08T10:00:00.000Z',
+    })
+    await rm(statePath)
+    await claimFirstCanonicalCronJob(vaultRoot)
+    await expect(getAssistantCronStatus(vaultRoot)).resolves.toMatchObject({
+      dueJobs: 0, runningJobs: 1, nextRunAt: '2026-04-08T11:20:00.001Z',
+    })
+  })
+
+  it('keeps unrelated schedules visible when research wakes are onboarding-blocked', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T09:20:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext('assistant-cron-onboarding-independent-')
+    addManagedResearchAutomation({
+      automationId: MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
+      tag: 'murph-managed:weekly-health-insight', vaultRoot,
+    })
+    addManagedResearchAutomation({
+      automationId: 'synthetic-independent-automation',
+      tag: 'murph-managed:weekly-health-insight', vaultRoot,
+    })
+    getVaultAutomationStore(vaultRoot)[1]!.schedule = { kind: 'dailyLocal', localTime: '11:00' }
+    await expect(getAssistantCronStatus(vaultRoot)).resolves.toMatchObject({
+      dueJobs: 0, enabledJobs: 2, totalJobs: 2, nextRunAt: '2026-04-08T11:00:00.000Z',
+    })
+  })
+
+  it.each(['delivery', 'retry'] as const)('preserves accepted research %s work during onboarding', async (kind) => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T10:20:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext('assistant-cron-onboarding-accepted-')
+    const automationId = MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID
+    addManagedResearchAutomation({
+      automationId, tag: 'murph-managed:weekly-health-insight', vaultRoot,
+    })
+    await claimFirstCanonicalCronJob(vaultRoot)
+    await updateCanonicalRuntimeState(vaultRoot, automationId, (record) => ({
+      ...record,
+      state: {
+        ...record.state,
+        runningAt: null,
+        pendingDeliveryIntentId: kind === 'delivery' ? 'outbox_synthetic_accepted' : null,
+        pendingOccurrenceAt: '2026-04-08T10:00:00.000Z',
+        retryAfterAt: kind === 'retry' ? '2026-04-08T10:30:00.000Z' : null,
+      },
+    }))
+    const status = await getAssistantCronStatus(vaultRoot)
+    // Delivery work belongs to outbox; only its cron retry owns a cron timer.
+    expect(status.nextRunAt).toBe(kind === 'retry' ? '2026-04-08T10:30:00.000Z' : null)
+    expect(status.enabledJobs).toBe(1)
+    expect(status.runningJobs).toBe(0)
+    await completeAssistantOnboarding({ reason: 'user_answered', vault: vaultRoot })
+    await expect(getAssistantCronStatus(vaultRoot)).resolves.toEqual(status)
+    const runtime = await readAssistantCronCanonicalRuntimeStore(resolveAssistantStatePaths(vaultRoot))
+    expect(runtime.jobs[0]?.state.pendingDeliveryIntentId).toBe(
+      kind === 'delivery' ? 'outbox_synthetic_accepted' : null,
+    )
+  })
 
   it('runs managed research cron normally after onboarding is complete', async () => {
     vi.useFakeTimers()

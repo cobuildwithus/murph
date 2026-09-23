@@ -2947,6 +2947,24 @@
               "type": "object",
               "additionalProperties": false,
               "properties": {
+                "receipt": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "options": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "requestId": {
+                          "description": "Optional caller-supplied request id for audit correlation.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128
+                        }
+                      }
+                    }
+                  }
+                },
                 "show": {
                   "type": "object",
                   "additionalProperties": false,
@@ -8140,6 +8158,12 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
+                        "query": {
+                          "description": "Alternative to the positional query. Supply exactly one form; use search-labels-batch for several foods.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 256
+                        },
                         "limit": {
                           "description": "Maximum label matches to return. Defaults to 1.",
                           "type": "integer",

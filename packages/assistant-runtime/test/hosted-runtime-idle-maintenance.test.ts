@@ -1509,6 +1509,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       vaultRoot: "/vault",
     });
     expect(archiveClosedIntegrationIngestShards).toHaveBeenCalledOnce();
+    expect(archiveClosedIntegrationIngestShards.mock.calls[0]?.[0]?.archiveCurrentMonth).toBe(true);
     const eventSignal = archiveClosedEventLedgerShards.mock.calls[0]?.[0]?.signal;
     const integrationSignal = archiveClosedIntegrationIngestShards.mock.calls[0]?.[0]?.signal;
     expect(integrationSignal).toBe(eventSignal);

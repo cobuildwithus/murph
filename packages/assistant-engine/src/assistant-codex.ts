@@ -105,6 +105,7 @@ import {
   type AnalyzeVideoToolRuntime,
 } from './assistant-codex/analyze-video-tool.js'
 import {
+  CODEX_APP_SERVER_INTERRUPT_CLEANUP_TIMEOUT_MS,
   attachCodexAppServerProcessExitCleanup,
   attachCodexAbortListener,
   consumeCompleteLines,
@@ -262,7 +263,6 @@ function loadMurphDynamicToolRuntime(): Promise<MurphDynamicToolRuntime> {
     import('./assistant-codex/dynamic-tools.js')
   return murphDynamicToolRuntimePromise
 }
-const CODEX_APP_SERVER_INTERRUPT_CLEANUP_TIMEOUT_MS = 15_000
 const CODEX_MANAGED_ACCOUNT_LOGIN_TIMEOUT_MS = 10 * 60 * 1000
 const CODEX_MANAGED_ACCOUNT_CONFIG_OVERRIDES = [
   'model_provider="openai"',
@@ -1222,7 +1222,6 @@ class CodexAppServerProcess {
   private boundThreadId: string | null = null
   private boundThreadModel: string | null = null
   private boundThreadServiceTier: AssistantProviderServiceTier | null = null
-  private boundTurnId: string | null = null
   private cleanupProcessExitListener: () => void
   private completedTurn = false
   private lastThreadTokenUsage: CodexWarmThreadTokenUsage | null = null
@@ -1240,22 +1239,16 @@ class CodexAppServerProcess {
   // admitted since the last workspace boundary so checkpointing waits for and
   // scans all of them, including children that completed before their parent
   // reply.
-  private readonly detachedChildParentTurnIds = new Map<string, string>()
-  private readonly detachedCompletedChildThreadIds = new Set<string>()
+  private readonly detachedChildTurns = new Map<string, {
+    turnId: string | null
+    completed: boolean
+  }>()
+  private detachedChildWorkGeneration = 0
   private readonly detachedChildMessageHandlers = new Map<
     string,
     NonNullable<CodexAppServerActiveTurnBinding['onSubagentMessage']>
   >()
-  private detachedChildViolation:
-    | 'outside_root'
-    | 'reused_child'
-    | 'malformed_lifecycle'
-    | 'nested_child'
-    | 'untracked_completion'
-    | 'interacted'
-    | 'interrupted'
-    | null = null
-  private readonly detachedRootThreadIdsByTurnId = new Map<string, string>()
+  private detachedChildLifecycleMalformed = false
   private readonly detachedRootThreadIds = new Set<string>()
   private readonly pendingDetachedUsageReports = new Set<Promise<void>>()
   private stopCompleted = false
@@ -1637,13 +1630,24 @@ class CodexAppServerProcess {
     try {
       throwIfCodexBackgroundWorkWaitAborted(signal)
       this.assertBackgroundWorkProcessAvailable()
-      await this.waitForDetachedChildren(signal)
-      this.assertDetachedChildrenQuiescent()
-      await this.waitForDetachedUsageReports(signal)
-      await this.assertNoBackgroundTerminals(signal)
-      throwIfCodexBackgroundWorkWaitAborted(signal)
-      this.assertBackgroundWorkProcessAvailable()
-      this.assertDetachedChildrenQuiescent()
+      const deadline = Date.now() + CODEX_BACKGROUND_WORK_WAIT_TIMEOUT_MS
+      while (true) {
+        await this.waitForDetachedChildren(signal, deadline)
+        if (this.hasPendingDetachedChildren()) {
+          continue
+        }
+        const scannedGeneration = this.detachedChildWorkGeneration
+        await this.waitForDetachedUsageReports(signal)
+        await this.assertNoBackgroundTerminals(signal)
+        throwIfCodexBackgroundWorkWaitAborted(signal)
+        this.assertBackgroundWorkProcessAvailable()
+        this.assertDetachedChildLifecycleValid()
+        // A follow-up can start while the terminal RPCs or usage reports are
+        // settling. Wait and scan again, including newly admitted children.
+        if (scannedGeneration === this.detachedChildWorkGeneration) {
+          break
+        }
+      }
       this.clearDetachedChildBoundary()
     } catch (error) {
       if (signal?.aborted) {
@@ -1677,20 +1681,22 @@ class CodexAppServerProcess {
   }
 
   private hasPendingDetachedChildren(): boolean {
-    for (const threadId of this.detachedChildParentTurnIds.keys()) {
-      if (!this.detachedCompletedChildThreadIds.has(threadId)) {
+    for (const turn of this.detachedChildTurns.values()) {
+      if (!turn.completed) {
         return true
       }
     }
     return false
   }
 
-  private async waitForDetachedChildren(signal: AbortSignal | null): Promise<void> {
-    const deadline = Date.now() + CODEX_BACKGROUND_WORK_WAIT_TIMEOUT_MS
-    while (this.hasPendingDetachedChildren()) {
+  private async waitForDetachedChildren(
+    signal: AbortSignal | null,
+    deadline: number,
+  ): Promise<void> {
+    while (true) {
       throwIfCodexBackgroundWorkWaitAborted(signal)
       this.assertBackgroundWorkProcessAvailable()
-      this.assertDetachedChildContractSupported()
+      this.assertDetachedChildLifecycleValid()
       if (Date.now() >= deadline) {
         throw new VaultCliError(
           'ASSISTANT_CODEX_BACKGROUND_WORK_TIMEOUT',
@@ -1698,26 +1704,18 @@ class CodexAppServerProcess {
           { retryable: true },
         )
       }
+      if (!this.hasPendingDetachedChildren()) {
+        return
+      }
       await waitForCodexBackgroundWorkPoll(signal)
     }
   }
 
-  private assertDetachedChildContractSupported(): void {
-    if (this.detachedChildViolation) {
+  private assertDetachedChildLifecycleValid(): void {
+    if (this.detachedChildLifecycleMalformed) {
       throw new VaultCliError(
-        `ASSISTANT_CODEX_BACKGROUND_WORK_${this.detachedChildViolation.toUpperCase()}`,
-        `Unsupported Codex background work: ${this.detachedChildViolation}.`,
-        { retryable: true },
-      )
-    }
-  }
-
-  private assertDetachedChildrenQuiescent(): void {
-    this.assertDetachedChildContractSupported()
-    if (this.hasPendingDetachedChildren()) {
-      throw new VaultCliError(
-        'ASSISTANT_CODEX_BACKGROUND_WORK_FAILED',
-        'Detached Codex work was still active at the workspace boundary.',
+        'ASSISTANT_CODEX_BACKGROUND_WORK_MALFORMED_LIFECYCLE',
+        'Codex child turn identity could not be established before the workspace boundary.',
         { retryable: true },
       )
     }
@@ -1735,16 +1733,20 @@ class CodexAppServerProcess {
   ): Promise<void> {
     while (this.pendingDetachedUsageReports.size > 0) {
       throwIfCodexBackgroundWorkWaitAborted(signal)
-      await Promise.all([...this.pendingDetachedUsageReports])
+      await waitForCodexBackgroundWorkOperation(
+        Promise.all([...this.pendingDetachedUsageReports]),
+        signal,
+      )
     }
   }
 
   private async assertNoBackgroundTerminals(
     signal: AbortSignal | null,
   ): Promise<void> {
+    const generation = this.detachedChildWorkGeneration
     const threadIds = new Set([
       ...this.detachedRootThreadIds,
-      ...this.detachedChildParentTurnIds.keys(),
+      ...this.detachedChildTurns.keys(),
     ])
     for (const threadId of threadIds) {
       throwIfCodexBackgroundWorkWaitAborted(signal)
@@ -1759,6 +1761,9 @@ class CodexAppServerProcess {
         ),
         signal,
       )
+      if (this.detachedChildWorkGeneration !== generation) {
+        return
+      }
       if (readCodexBackgroundTerminalPresence(result)) {
         throw new VaultCliError(
           'ASSISTANT_CODEX_BACKGROUND_TERMINAL_UNSUPPORTED',
@@ -1770,96 +1775,51 @@ class CodexAppServerProcess {
   }
 
   private clearDetachedChildBoundary(): void {
-    this.boundTurnId = null
-    this.detachedChildParentTurnIds.clear()
-    this.detachedCompletedChildThreadIds.clear()
+    this.detachedChildTurns.clear()
+    this.detachedChildWorkGeneration = 0
     this.detachedChildMessageHandlers.clear()
-    this.detachedChildViolation = null
-    this.detachedRootThreadIdsByTurnId.clear()
+    this.detachedChildLifecycleMalformed = false
     this.detachedRootThreadIds.clear()
   }
 
-  private admitDetachedChild(input: {
-    parentThreadId: string
-    parentTurnId: string
-    threadId: string
-  }): void {
-    if (
-      this.detachedRootThreadIdsByTurnId.get(input.parentTurnId)
-      !== input.parentThreadId
-    ) {
-      this.detachedChildViolation ??= 'outside_root'
-      return
-    }
-
-    const existingParentTurnId = this.detachedChildParentTurnIds.get(input.threadId)
-    if (
-      existingParentTurnId !== undefined
-      && existingParentTurnId !== input.parentTurnId
-    ) {
-      this.detachedChildViolation ??= 'reused_child'
-      return
-    }
-    this.detachedChildParentTurnIds.set(input.threadId, input.parentTurnId)
-  }
-
   private observeDetachedChildLifecycle(message: CodexRpcMessage): void {
-    const activity = readCodexSubagentActivity(message)
-    if (activity) {
-      const senderThreadId = extractCodexThreadIdFromMessage(message)
-      if (activity.kind === 'malformed') {
-        this.detachedChildViolation ??= 'malformed_lifecycle'
-      } else if (activity.kind === 'started') {
-        if (
-          !senderThreadId
-          || this.detachedRootThreadIdsByTurnId.get(activity.turnId)
-            !== senderThreadId
-        ) {
-          this.detachedChildViolation ??= 'nested_child'
-        } else {
-          this.admitDetachedChild({
-            parentThreadId: senderThreadId,
-            parentTurnId: activity.turnId,
-            threadId: activity.agentThreadId,
-          })
-          if (this.activeTurn?.onSubagentMessage) {
-            this.detachedChildMessageHandlers.set(
-              activity.agentThreadId,
-              this.activeTurn.onSubagentMessage,
-            )
-          }
-        }
-      } else if (activity.kind === 'completed') {
-        const currentParentThreadId = this.detachedRootThreadIdsByTurnId.get(
-          activity.turnId,
-        )
-        // A prior turn is absent after its boundary clears, so its delayed
-        // acknowledgement is inert. A current turn must name an admitted child.
-        if (currentParentThreadId !== undefined) {
-          if (
-            senderThreadId === currentParentThreadId
-            && this.detachedChildParentTurnIds.get(activity.agentThreadId)
-              === activity.turnId
-          ) {
-            this.detachedCompletedChildThreadIds.add(activity.agentThreadId)
-          } else {
-            this.detachedChildViolation ??= 'untracked_completion'
-          }
-        }
-      } else {
-        this.detachedChildViolation ??= activity.kind
+    const childThreadId = readCodexStartedChildThreadId(message)
+    if (childThreadId && !this.detachedChildTurns.has(childThreadId)) {
+      // Spawn acknowledgement may precede the child's native turn start.
+      // Reserve it as pending, without treating ancestry or activity summaries
+      // as authority to finish work or reject a checkpoint.
+      this.detachedChildTurns.set(childThreadId, { turnId: null, completed: false })
+      this.detachedChildWorkGeneration += 1
+      if (this.activeTurn?.onSubagentMessage) {
+        this.detachedChildMessageHandlers.set(childThreadId, this.activeTurn.onSubagentMessage)
       }
     }
+    this.observeDetachedChildTurn(message)
+  }
 
-    const method = typeof message.method === 'string' ? message.method : null
-    if (!isCodexTurnCompletedMethod(method)) {
+  private observeDetachedChildTurn(message: CodexRpcMessage): void {
+    const method = readCodexEventMethod(message)
+    if (!isCodexTurnStartedMethod(method) && !isCodexTurnCompletedMethod(method)) {
       return
     }
     const threadId = extractCodexThreadIdFromMessage(message)
-    if (!threadId || this.detachedRootThreadIds.has(threadId)) {
+    if (!threadId || threadId === this.boundThreadId || this.detachedRootThreadIds.has(threadId)) {
       return
     }
-    this.detachedCompletedChildThreadIds.add(threadId)
+    const turnId = extractCodexTurnIdFromMessage(message)
+    if (!turnId) {
+      this.detachedChildLifecycleMalformed = true
+      return
+    }
+    if (isCodexTurnStartedMethod(method)) {
+      this.detachedChildTurns.set(threadId, { turnId, completed: false })
+      this.detachedChildWorkGeneration += 1
+    } else {
+      const currentTurnId = this.detachedChildTurns.get(threadId)?.turnId
+      if (currentTurnId == null || currentTurnId === turnId) {
+        this.detachedChildTurns.set(threadId, { turnId, completed: true })
+      }
+    }
   }
 
   private consumeIgnoredResponseId(id: CodexRpcId): boolean {
@@ -2053,8 +2013,8 @@ class CodexAppServerProcess {
 
   get hasUncheckpointedDetachedWork(): boolean {
     return (
-      this.detachedChildParentTurnIds.size > 0 ||
-      this.detachedChildViolation !== null
+      this.detachedChildTurns.size > 0 ||
+      this.detachedChildLifecycleMalformed
     )
   }
 
@@ -2106,13 +2066,6 @@ class CodexAppServerProcess {
     }
   }
 
-  noteBoundTurn(threadId: string, turnId: string): void {
-    this.boundThreadId = threadId
-    this.boundTurnId = turnId
-    this.detachedRootThreadIds.add(threadId)
-    this.detachedRootThreadIdsByTurnId.set(turnId, threadId)
-  }
-
   noteBoundThreadServiceTier(serviceTier: AssistantProviderServiceTier | null): void {
     this.boundThreadServiceTier = serviceTier
   }
@@ -2158,20 +2111,6 @@ class CodexAppServerProcess {
       return false
     }
 
-    if (
-      isCodexTurnStartedMethod(readCodexEventMethod(message))
-      && !this.detachedChildParentTurnIds.has(threadId)
-    ) {
-      if (this.boundThreadId && this.boundTurnId) {
-        this.admitDetachedChild({
-          parentThreadId: this.boundThreadId,
-          parentTurnId: this.boundTurnId,
-          threadId,
-        })
-      } else {
-        this.detachedChildViolation ??= 'outside_root'
-      }
-    }
     handler(message)
     return true
   }
@@ -2351,35 +2290,14 @@ function readCodexBackgroundTerminalPresence(value: unknown): boolean {
   return data.length > 0
 }
 
-function readCodexSubagentActivity(message: CodexRpcMessage): {
-  agentThreadId: string
-  kind: 'completed' | 'interacted' | 'interrupted' | 'started'
-  turnId: string
-} | { kind: 'malformed' } | null {
-  const method = typeof message.method === 'string' ? message.method : null
-  if (method !== 'item/completed') {
+function readCodexStartedChildThreadId(message: CodexRpcMessage): string | null {
+  if (message.method !== 'item/completed') {
     return null
   }
   const item = asCodexRecord(asCodexRecord(message.params)?.item)
-  if (asCodexString(item?.type) !== 'subAgentActivity') {
-    return null
-  }
-  const agentThreadId = asCodexString(item?.agentThreadId)
-  const kind = asCodexString(item?.kind)
-  const turnId = asCodexString(asCodexRecord(message.params)?.turnId)
-  if (
-    !agentThreadId
-    || !turnId
-    || (
-      kind !== 'completed'
-      && kind !== 'started'
-      && kind !== 'interacted'
-      && kind !== 'interrupted'
-    )
-  ) {
-    return { kind: 'malformed' }
-  }
-  return { agentThreadId, kind, turnId }
+  return item?.type === 'subAgentActivity' && item.kind === 'started'
+    ? asCodexString(item.agentThreadId)
+    : null
 }
 
 function throwIfCodexBackgroundWorkWaitAborted(
@@ -3413,7 +3331,9 @@ function readCodexSubagentEffectiveMetadataResult(input: {
 
   const model = readCodexNonEmptyString(result.model)
   const modelProvider = readCodexNonEmptyString(result.modelProvider)
-  const serviceTier = result.serviceTier
+  // Codex reports an explicit standard-tier selection as "default".
+  // Normalize it at the provider boundary to our existing standard-tier value.
+  const serviceTier = result.serviceTier === 'default' ? null : result.serviceTier
   if (
     !model ||
     !modelProvider ||
@@ -5894,7 +5814,7 @@ async function runCodexAppServerTurnOnProcess(
       return
     }
     if (codexThreadId) {
-      codexProcess.noteBoundTurn(codexThreadId, candidateTurnId)
+      codexProcess.noteBoundThreadId(codexThreadId)
     }
   }
 
@@ -6689,40 +6609,42 @@ function isInvalidDynamicToolRequest(
   return 'validationDigest' in request
 }
 
-function isSerializedDynamicToolRequest(
-  request: MurphDynamicToolRequest,
-): boolean {
-  return request.kind === 'automation' ||
-    request.kind === 'automation-local-at-recovery-dismissal' ||
-    request.kind === 'invalid-automation-arguments' ||
-    request.kind === 'device' ||
-    request.kind === 'generate-image' ||
-    request.kind === 'generate-voice-memo' ||
-    request.kind === 'generate-song' ||
-    request.kind === 'attach-group-challenge-response-card' ||
-    request.kind === 'attach-response-card' ||
-    request.kind === 'response-card-envelope-too-large' ||
-    request.kind === 'attach-response-media' ||
-    request.kind === 'send-vault-file' ||
-    request.kind === 'pending-vault-files-list' ||
-    request.kind === 'pending-vault-files-cancel' ||
-    request.kind === 'assistant-configuration' ||
-    request.kind === 'assistant-style' ||
-    request.kind === 'personalization' ||
-    request.kind === 'subscription' ||
-    request.kind === 'analyze-video' ||
-    (request.kind === 'group' &&
-      request.request.action === 'ask_current_sender' &&
-      request.request.mode !== 'new') ||
-    request.kind === 'react-to-message' ||
-    request.kind === 'select-reply-target' ||
-    request.kind === 'computer-open' ||
-    request.kind === 'computer-act' ||
-    request.kind === 'computer-os-control' ||
-    request.kind === 'computer-pause-for-user' ||
-    request.kind === 'computer-finish-run' ||
-    request.kind === 'invalid-computer-arguments'
+function isSerializedDynamicToolRequest(request: MurphDynamicToolRequest): boolean {
+  return serializedDynamicToolKinds.has(request.kind) ||
+    (request.kind === 'group' && request.request.action === 'ask_current_sender' && request.request.mode !== 'new')
 }
+
+const serializedDynamicToolKinds: ReadonlySet<MurphDynamicToolRequest['kind']> = new Set([
+  'poll',
+  'invalid-poll-arguments',
+  'automation',
+  'automation-local-at-recovery-dismissal',
+  'invalid-automation-arguments',
+  'device',
+  'generate-image',
+  'generate-voice-memo',
+  'generate-song',
+  'attach-group-challenge-response-card',
+  'attach-response-card',
+  'response-card-envelope-too-large',
+  'attach-response-media',
+  'send-vault-file',
+  'pending-vault-files-list',
+  'pending-vault-files-cancel',
+  'assistant-configuration',
+  'assistant-style',
+  'personalization',
+  'subscription',
+  'analyze-video',
+  'react-to-message',
+  'select-reply-target',
+  'computer-open',
+  'computer-act',
+  'computer-os-control',
+  'computer-pause-for-user',
+  'computer-finish-run',
+  'invalid-computer-arguments',
+])
 
 function isResponseAttachmentDynamicToolRequest(
   request: MurphDynamicToolRequest,
@@ -6740,7 +6662,9 @@ function isResponseAttachmentDynamicToolRequest(
 function isInvocationScopedRootToolRequest(
   request: MurphDynamicToolRequest,
 ): boolean {
-  return request.kind === 'automation' ||
+  return request.kind === 'poll' ||
+    request.kind === 'invalid-poll-arguments' ||
+    request.kind === 'automation' ||
     request.kind === 'automation-local-at-recovery-dismissal' ||
     request.kind === 'invalid-automation-arguments' ||
     request.kind === 'device' ||

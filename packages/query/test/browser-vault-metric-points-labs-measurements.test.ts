@@ -1095,7 +1095,7 @@ test("query projection rebuild stores shared event and wearable metric points in
           source_kind AS sourceKind,
           source_record_id AS sourceRecordId,
           metric_point_json AS metricPointJson
-        FROM query_metric_points
+        FROM query_metric_points JOIN query_metric_payloads USING (payload_id)
         ORDER BY metric_key ASC
       `).all() as Array<{
         biomarkerKey: string | null;

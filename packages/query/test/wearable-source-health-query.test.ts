@@ -102,7 +102,7 @@ const filterCases: WearableSummaryFilters[] = [
 ];
 
 const globalTables = [
-  "query_entities", "query_metric_points", "query_metric_targets",
+  "query_entities", "query_metric_points", "query_metric_payloads", "query_metric_targets",
   "query_source_manifest", "query_search_document", "query_search_fts",
 ] as const;
 

@@ -5,7 +5,7 @@ import {
   type CodexRealtimeSession,
   type HostedCodexAssistantVoiceInput,
 } from "@murphai/assistant-engine/assistant-runtime";
-import { HOSTED_ASSISTANT_TERRA_MODEL } from "@murphai/hosted-execution/assistant-model";
+import { HOSTED_ASSISTANT_DEFAULT_MODEL } from "@murphai/hosted-execution/assistant-model";
 import { HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV, resolveHostedVoiceModelProvider } from "./codex-runtime-env.ts";
 import { VaultCliError } from "@murphai/operator-config/vault-cli-errors";
 import { createHostedLiveUsageRecorder } from "./live-usage.ts";
@@ -215,7 +215,7 @@ export function configureHostedRuntimeVoice(
     return await startHostedCodexAssistantVoice({
       ...context,
       ...nativeInput,
-      mediaModel: HOSTED_ASSISTANT_TERRA_MODEL,
+      mediaModel: HOSTED_ASSISTANT_DEFAULT_MODEL,
       mediaModelProvider: resolveHostedVoiceModelProvider(
         context.env?.[HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV],
       ),

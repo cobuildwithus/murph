@@ -1061,7 +1061,7 @@ describe("hosted capped group sponsorship authorization", () => {
     expect(harness.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         cashAmountMinor: 500,
-        grantUsdMicros: 5_000_000n,
+        grantUsdMicros: 4_000_000n,
         groupSponsorshipChargeOrdinal: 1,
         offerCode: "usage_5_usd",
         status: HostedUsageCreditPurchaseStatus.created,

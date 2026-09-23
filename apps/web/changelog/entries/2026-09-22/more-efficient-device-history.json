@@ -1,0 +1,19 @@
+{
+  "publishedOn": "2026-09-22",
+  "order": 100,
+  "item": {
+    "id": "more-efficient-device-history",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Device history catches up with less repeated work",
+    "summary": "Large device history imports reuse repeated checks and resume promptly after saving progress.",
+    "details": "Every historical day remains covered, with current connection checks before saving data and the same priority for new readings and messages.",
+    "relevanceTags": [
+      "devices",
+      "reliability"
+    ],
+    "sourcePullRequests": [
+      3652
+    ]
+  }
+}

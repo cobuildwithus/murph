@@ -810,6 +810,28 @@ to apply after cutover.
   redirects, or client-safe connection projections. Runtime requests require a
   callback signature bound to the member plus Cloudflare's active attempt,
   lease-generation, and workspace-version fence.
+- Web may retain a bounded exception to request-lifetime plaintext root keys:
+  the crypto owner caches only successfully unwrapped ingress roots, at most
+  128 entries for a fixed, non-sliding five minutes from admission. This trades up
+  to 4 KiB of longer-lived process-owned root material for fewer KMS round trips;
+  compromise of that Web process can expose those retained keys even after the
+  originating request ends. Entries contain independent key copies, an exact
+  verified-envelope/configuration digest, provider-owner identity and expiry,
+  never cross-request member/access/routing/status decisions. Fresh metadata,
+  signature/wrap verification and locked transaction authority remain required.
+  Root rotation cannot reuse a different envelope, and revoked/deleted rows or
+  disabled signing authority cannot become readable through a warm entry.
+  Eviction and expiry overwrite owned buffers; idle timers and deadline checks
+  bound reuse, but JavaScript erasure is best effort and suspended event loops
+  cannot erase until resumed. Request masters and caller copies keep their
+  existing cleanup owners. No pending provider work or cancellation is shared.
+  This cache is local to a Web process, not the separate hosted runtime, and
+  does not change durable message encryption. KMS IAM/policy changes or key
+  disablement do **not** instantly invalidate already-unwrapped cached bytes:
+  an otherwise valid entry can avoid KMS for the remaining five-minute lifetime.
+  Urgent response must also stop/recycle affected Web processes and apply current
+  database authority
+  changes; it must not assume a provider-only change erases resident keys.
 - Hosted domain-root key rotation must be reader-first. Keep the required
   single-key authority and Cloudflare automation variables as the active
   generation while optional keyrings add only `verify_only`, `decrypt_only`,

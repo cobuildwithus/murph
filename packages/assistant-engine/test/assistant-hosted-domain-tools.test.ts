@@ -156,7 +156,7 @@ describe('hosted domain dynamic tools', () => {
       'pass an object such as {"model":"gpt-5.6-luna"}',
     )
     expect(MURPH_AUTOMATION_TOOL.description).toContain(
-      'Never pass a bare string or Luna, Terra, or Sol.',
+      'Never pass a bare string or Luna or Sol.',
     )
   })
 

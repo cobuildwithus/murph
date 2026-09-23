@@ -13,6 +13,7 @@ import {
 } from '@murphai/operator-config/assistant/codex-resume-state'
 import {
   HOSTED_CUSTOM_INFERENCE_CODEX_MODEL_PROVIDER_ID,
+  VENICE_CODEX_MODEL_PROVIDER_ID,
 } from '@murphai/operator-config/assistant/target-runtime'
 import type {
   AssistantTurnSharedPlan,
@@ -65,9 +66,46 @@ beforeEach(() => {
 })
 
 describe('automation model continuity', () => {
+  it('upgrades a persisted Terra automation preference without mutating it', () => {
+    const preference = Object.freeze({ model: 'gpt-5.6-terra' })
+    const session = createGroupSession(requireTarget('gpt-6-sol', 'low', 'openai'), null)
+    const route = resolveAssistantTurnRoute(createAutomationInput(preference), null, resolvedSession(session))
+    expect(route.providerOptions).toMatchObject({ model: 'gpt-6-sol', reasoningEffort: 'low' })
+    expect(preference.model).toBe('gpt-5.6-terra')
+  })
+
+  it.each(['gpt-6-sol', 'gpt-6-luna'])(
+    'keeps saved %s dormant through Venice retries and reactivates it on OpenAI',
+    (model) => {
+      const preference = Object.freeze({ model })
+      const veniceSession = createGroupSession(
+        requireTarget('gpt-5.6-sol', 'low', VENICE_CODEX_MODEL_PROVIDER_ID),
+        null,
+      )
+      for (const serviceTier of ['flex', null] as const) {
+        const route = resolveAssistantTurnRoute(
+          { ...createAutomationInput(preference), serviceTier },
+          null,
+          resolvedSession(veniceSession),
+        )
+        expect(route.providerOptions).toMatchObject({
+          model: 'gpt-5.6-sol',
+          modelProvider: VENICE_CODEX_MODEL_PROVIDER_ID,
+        })
+      }
+      const openaiSession = createGroupSession(requireTarget('gpt-6-sol', 'low', 'openai'), null)
+      const restored = resolveAssistantTurnRoute(
+        createAutomationInput(preference), null, resolvedSession(openaiSession),
+      )
+      expect(restored.providerOptions).toMatchObject({ model, modelProvider: 'openai' })
+      expect(preference).toEqual({ model })
+    },
+  )
+
   it.each([
     ['gpt-5.6-luna', 'high'],
-    ['gpt-5.6-terra', 'low'],
+    ['gpt-6-sol', 'low'],
+    ['gpt-6-luna', 'low'],
     ['gpt-5.6-sol', 'low'],
   ] as const)(
     'applies the canonical %s reasoning default to model-only stored overrides',

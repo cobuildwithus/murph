@@ -36,7 +36,7 @@ describe.skipIf(!audioPath)("hosted local native voice e2e", () => {
   beforeAll(async () => {
     scenario = await startHostedLocalFullStackScenario({
       additionalEnv: {
-        HOSTED_ASSISTANT_MODEL: "gpt-5.6-terra",
+        HOSTED_ASSISTANT_MODEL: "gpt-6-sol",
         HOSTED_ASSISTANT_PROVIDER: "openai",
         HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "1000",
         MURPH_DEV_SKIP_HEALTH_COMMONS_WATCH: "1",

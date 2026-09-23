@@ -1102,6 +1102,17 @@ checks use the effective default mode rather than the immutable system-mode
 invocation request. Repeated default wakes preserve the conversation quiet
 window and checkpoint interruption. Provider-authority changes and actual
 shutdown still require their existing checkpoint handoff.
+System-owned checkpoint construction also listens for foreground wakes. A
+non-system hint aborts construction before mailbox qualification; a qualified
+batch enters the same warm foreground owner, while an empty hint retries the
+dirty save. System-only hints do not interrupt it, and shutdown disables wake
+cancellation so dirty progress can publish. Interrupted construction retains
+dirty state and durability-gated effects. At exact notification preparation,
+interruption restores the token-matched pre-dispatch state before foreground
+admission, because no provider send has begun; the normal later checkpoint
+persists that reset. Once snapshot publication is sent,
+the existing acknowledgement boundary remains authoritative: adopt its result
+before servicing the wake rather than abandoning a possibly committed version.
 `assistantExecutionBlocked` remains a hard boundary: that invocation retains
 the assistant wake for a later allowed foreground owner instead of promoting
 it.
@@ -4699,6 +4710,32 @@ only: no message content, member, phone, chat, mailbox, delivery, or trace
 identifiers. The monitor is observability-only: it does not append mailbox work,
 signal Temporal, wake Cloudflare, alter usage gates, or participate in
 foreground reply ownership.
+Mailbox fetch replies carry optional fixed numeric `Server-Timing` metrics.
+The Worker's existing web-control response log copies the allowlisted values
+into `mailboxWeb*Ms`: auth, parse, transaction start, fence, member, access,
+projection, usage, transaction finish, group presentation, crypto, serialization,
+and total. Transaction start includes connection admission and BEGIN; transaction
+finish includes response projection and commit. Auth includes signature and
+replay checks. These adjacent Web phases approximately sum to the Web total.
+`mailboxWorker*Ms` separates preparation, Web fetch, response-body read, crypto
+context resolution, payload decryption, serialization, and total. Decode success
+and failure counts describe inline items only. Web total nests inside Worker
+Web fetch; do not add the two totals or call their difference pure network time.
+Web initialization before handler entry is outside the Web total.
+`mailboxWorkerCallbackPrepareMs` measures URL/header preparation and callback
+signing inside the existing Web client. `mailboxWorkerFetchHeadersMs` measures
+only its fetch call through response headers; neither field includes response
+body consumption. They subdivide, rather than replace, `mailboxWorkerWebFetchMs`.
+Cloudflare production clocks advance on I/O, so zero preparation/decrypt time
+is not proof of zero CPU cost. Compare HTTP-header wait with Web total to bound
+the remaining transport/platform time, not to claim pure network latency.
+`mailboxVercelRegions` retains only the bounded region path from `x-vercel-id`,
+never its opaque request suffix. Missing or malformed metadata is omitted.
+Web's mailbox timing owner additionally records first-module, signed-request age,
+query and pool timings; use those existing records before adding more probes.
+Missing headers are valid during rollout. No private header text, payloads,
+new request, or awaited telemetry is added.
+
 Orchestration phase telemetry is interpreted causally: direct-request routing
 ends at the Cloudflare route/auth stamps, Durable Object activation ends at
 `userRunnerEnsureStartedAtEpochMs`, stale-fence recovery is the active-wake and

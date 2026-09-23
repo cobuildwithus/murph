@@ -813,6 +813,7 @@ describe("hosted execution coverage gaps", () => {
       "./computer-use",
       "./connected-apps",
       "./contracts",
+      "./conversation-polls",
       "./dashboard-replica",
       "./env",
       "./hosted-codex-subscription-auth",
@@ -897,8 +898,9 @@ describe("hosted execution coverage gaps", () => {
       false,
     );
     expect(assistantModelModule.HOSTED_ASSISTANT_PRODUCT_MODELS).toEqual([
+      "gpt-6-sol",
+      "gpt-6-luna",
       "gpt-5.6-luna",
-      "gpt-5.6-terra",
       "gpt-5.6-sol",
       "gpt-6-astra",
     ]);
@@ -1040,6 +1042,7 @@ describe("hosted execution coverage gaps", () => {
       "HOSTED_RUNTIME_OWNER_RELEASE_IMMEDIATE_RECHECK_QUERY",
       "HOSTED_RUNTIME_PHONE_CALL_RESULT_DELIVERY_PATH",
       "HOSTED_RUNTIME_PLAN_USAGE_TOOL_PATH",
+      "HOSTED_RUNTIME_POLL_TOOL_PATH",
       "HOSTED_RUNTIME_PRODUCT_FEEDBACK_RECORD_PATH",
       "HOSTED_RUNTIME_STATUS_PATH",
       "HOSTED_RUNTIME_SUBSCRIPTION_TOOL_PATH",

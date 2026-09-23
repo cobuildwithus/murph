@@ -73,7 +73,7 @@ export type ClinicalDocumentExtractionPayload = z.infer<typeof clinicalDocumentE
 function extractionOutputSchema<TPayload extends z.ZodType>(payload: TPayload) {
   const record = z.object({
     payload,
-    // Optional only for replaying proposals frozen before date provenance existed.
+    // Old checkpoints remain readable; absent date provenance is held on apply.
     dateBasis: z.enum(["document", "source", "unknown"]).optional(),
     dateEvidence: z.string().trim().min(1).max(500).optional(),
     page: z.number().int().positive().max(100_000).optional(),
@@ -150,6 +150,9 @@ function strictProviderSchema(schema: Record<string, unknown>): Record<string, u
   const properties = schemaObject(schema.properties);
   if (schema.type === "object" && properties) {
     const required = new Set(Array.isArray(schema.required) ? schema.required : []);
+    // Fresh provider output must identify its date basis, even though old
+    // persisted proposals can still be read by the compatibility schema.
+    if (properties.dateBasis) required.add("dateBasis");
     result.properties = Object.fromEntries(Object.entries(properties).map(([key, property]) => {
       const normalized = strictProviderSchema(schemaObject(property) ?? {});
       return [key, required.has(key) ? normalized : { anyOf: [normalized, { type: "null" }] }];

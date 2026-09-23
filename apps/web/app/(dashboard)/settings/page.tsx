@@ -3,7 +3,7 @@ import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import {
   HOSTED_ASSISTANT_DEFAULT_PROVIDER,
-  HOSTED_ASSISTANT_TERRA_MODEL,
+  HOSTED_ASSISTANT_DEFAULT_MODEL,
 } from "@murphai/hosted-execution/assistant-model";
 
 import { CustomizeMurphSettings } from "@/src/components/settings/customize-murph-settings";
@@ -419,7 +419,7 @@ function renderAuthenticatedSettingsPage(input: {
           initialDormantSolPreference={
             assistant?.dormantSolPreference === true
           }
-          initialModel={assistant?.model ?? HOSTED_ASSISTANT_TERRA_MODEL}
+          initialModel={assistant?.model ?? HOSTED_ASSISTANT_DEFAULT_MODEL}
           initialProvider={
             assistant?.provider ?? HOSTED_ASSISTANT_DEFAULT_PROVIDER
           }
