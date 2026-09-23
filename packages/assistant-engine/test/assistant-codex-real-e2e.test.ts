@@ -8117,7 +8117,10 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
   it('runs a saved legacy Luna reminder on the current OpenAI model without rewriting it', async () => {
     const config = await resolveRealCodexE2eConfig()
     const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-automation-model-upgrade-e2e-'))
+    const binDirectory = path.join(workingDirectory, 'bin')
+    const commandLogPath = path.join(workingDirectory, 'commands.log')
     try {
+      await materializeRealWorkoutVaultCli({ binDirectory, commandLogPath, vaultRoot: workingDirectory })
       await initializeVault({ timezone: 'UTC', vaultRoot: workingDirectory })
       const saved = await upsertAutomation({
         assistantTargetOverride: { model: 'gpt-5.6-luna' },
@@ -8128,6 +8131,12 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
         schedule: { kind: 'dailyLocal', localTime: '18:00' },
         slug: 'synthetic-model-upgrade-reminder', status: 'active', title: 'Recycling reminder', vaultRoot: workingDirectory,
       })
+      // Prove the real canonical CLI is available before spending a live turn.
+      const readback = await execFileAsync(path.join(binDirectory, 'vault-cli'), [
+        'automation', 'show', saved.record.automationId, '--format', 'json',
+      ])
+      expect(readback.stdout).toContain(saved.record.automationId)
+      await writeFile(commandLogPath, '', 'utf8')
       const source = findCanonicalAssistantCronRecordInList(await listCanonicalAssistantCronRecords(workingDirectory), saved.record.automationId)
       if (!source || source.kind !== 'automation') throw new Error('Expected canonical reminder source.')
       const runtimeState = createAssistantCronCanonicalRuntimeRecord({ jobId: resolveCanonicalAssistantCronJobId(source), now: '2026-09-23T12:00:00.000Z' })
@@ -8150,17 +8159,27 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
         approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
         codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
         codexHome: config.codexHome, developerInstructions: buildScheduledAutomationDeveloperInstructions(),
-        dynamicTools: [], env: config.env, model: target.model, modelProvider: config.modelProvider,
-        prompt: prepared.instructions, reasoningEffort: target.reasoningEffort, sandbox: 'read-only', workingDirectory,
+        dynamicTools: [],
+        env: { ...config.env, PATH: `${binDirectory}${path.delimiter}${config.env.PATH ?? ''}` },
+        model: target.model, modelProvider: config.modelProvider,
+        prompt: prepared.instructions, reasoningEffort: target.reasoningEffort, sandbox: 'workspace-write', workingDirectory,
       })
       const decision = parseAssistantNotificationDecision(result.finalMessage)
+      process.stdout.write(`[automation-model-upgrade-live] ${JSON.stringify({ model: target.model, decision })}\n`)
       expect(decision.kind).toBe('send_message')
       const reply = JSON.stringify(decision)
       expect(reply).toMatch(/recycling bin/iu)
       expect(reply).not.toMatch(/gpt-|model upgrade|migrat|reschedul/iu)
-      expect(readCapabilityRoutingActions(result.jsonEvents)).toEqual([])
+      // A canonical read is permitted; no mutation or unrelated action is needed.
+      const commands = (await readFile(commandLogPath, 'utf8')).split('\n').filter(Boolean)
+      expect(commands.length).toBeLessThanOrEqual(1)
+      for (const command of commands) {
+        expect(normalizeRecordedVaultCommand(command)).toBe(`automation show ${saved.record.automationId}`)
+      }
+      const actions = readCapabilityRoutingActions(result.jsonEvents)
+      expect(actions).toHaveLength(commands.length)
+      for (const action of actions) expect(action).toMatchObject({ kind: 'command', ok: true })
       expect(await showAutomation({ automationId: saved.record.automationId, vaultRoot: workingDirectory })).toEqual(saved.record)
-      process.stdout.write(`[automation-model-upgrade-live] ${JSON.stringify({ model: target.model, decision })}\n`)
     } finally {
       await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
     }
