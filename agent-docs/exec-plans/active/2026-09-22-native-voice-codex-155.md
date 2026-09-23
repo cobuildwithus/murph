@@ -42,7 +42,7 @@ No private recordings, identities, transcripts, or production rows in artifacts.
 1. Reconcile current main and port source, preserving both owners' behavior.
 2. Build and test the pinned CLI; regenerate protocol fixtures and route evidence.
 3. Run focused Murph tests/typechecks and synthetic hosted voice proof.
-4. Review the candidate, push, run authorized ReviewGPT round 4 with exact-head CI.
+4. Review the candidate, push, run authorized ReviewGPT round 5 with exact-head CI.
 5. Merge and deploy only after review, CI, compatibility, and test-usage requirements
    are resolved; validate production readiness through canonical hosted paths.
 
@@ -129,3 +129,21 @@ on 0.156.1 before the authorized fifth review.
   separately; reconcile it before final readiness instead of attributing its
   unrelated simplifications to this candidate.
 - The exact 0.156.1 Linux source image is building on a fresh owned testbox.
+
+- Reconciled current main at `b7c6748810f49fec7723cb5ac7b13300cdcfeb65`.
+  Removed the remaining supplement merge from hosted-local startup and the
+  real-Codex test helper; both now consume the native bundled catalog.
+- Complete provider request parity on 0.156.1: individual 31,952 tokens and
+  149,112 bytes; group 28,943 tokens and 132,972 bytes. Stock and patched
+  normalized requests are byte-identical (zero tokens/bytes/percent delta).
+- Post-reconciliation Cloudflare voice controls pass 22 cases. Runtime/config
+  proof passes 71 cases with eight opt-in skips; the five invocation lifecycle
+  cases pass on Linux. Local timing failures under heavy load remain recorded,
+  with no production timeout changes. Engine/runtime/Cloudflare typechecks pass.
+- The app-server suite still has one ten-second initialization timeout before
+  the legacy existing-call case starts; 65 voice cases, including all new
+  cleanup and upstream transcript cases, pass. A direct isolated app-server
+  startup responds in 8.95 seconds. Exact Linux compatibility and composed
+  call proof remain completion gates.
+- Hosted-local startup proof passes 84 tests and its typecheck after removing
+  the launch merge. Post-reconciliation complexity guard passes.
