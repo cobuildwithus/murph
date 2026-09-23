@@ -454,7 +454,9 @@ describe("RunnerContainer slot lifecycle", () => {
   it("retires a stopped member slot before asynchronously clearing its assignment", async () => {
     const notification = createDeferred<HostedRuntimeOwnerResponse>();
     const recordRunnerContainerRetired = vi.spyOn(runtimeOwnerClient, "commandHostedRuntimeOwner")
-      .mockImplementation(() => notification.promise);
+      .mockImplementation(async ({ command }) => command.operation === "reconcile"
+        ? { cutover: "postgres", status: "observed", owner: null }
+        : await notification.promise);
     const h = createStandbyContainerHarness();
     const input = { claimId: createHostedStandbyClaimId(), releaseId: RELEASE_ID,
       region: HOSTED_RUNNER_REGION, slotName: h.slotName, userId: "member_123" };
@@ -477,13 +479,16 @@ describe("RunnerContainer slot lifecycle", () => {
 
   it("keeps stopped-slot recovery cheap when the retirement notification fails", async () => {
     const recordRunnerContainerRetired = vi.spyOn(runtimeOwnerClient, "commandHostedRuntimeOwner")
-      .mockRejectedValue(new Error("unavailable"));
+      .mockImplementation(async ({ command }) => {
+        if (command.operation === "reconcile") return { cutover: "postgres", status: "observed", owner: null };
+        throw new Error("unavailable");
+      });
     const h = createStandbyContainerHarness();
     await h.container.bindStandbySlot({ claimId: createHostedStandbyClaimId(), releaseId: RELEASE_ID,
       region: HOSTED_RUNNER_REGION, slotName: h.slotName, userId: "member_123" });
     await h.container.onActivityExpired();
     await h.flushWaitUntil();
-    expect(recordRunnerContainerRetired).toHaveBeenCalledOnce();
+    expect(recordRunnerContainerRetired.mock.calls.filter(([input]) => input.command.operation === "target_retired")).toHaveLength(1);
     const nativeRead = vi.spyOn(h.container, "getState").mockClear().mockRejectedValue(new Error("slow native lookup"));
     await expect(h.container.resolveRetainedStandbySlot({ currentReleaseId: RELEASE_ID,
       region: HOSTED_RUNNER_REGION, slotName: h.slotName, userId: "member_123" }))
@@ -494,7 +499,9 @@ describe("RunnerContainer slot lifecycle", () => {
 
   it("does not publish retirement after an unconfirmed native stop", async () => {
     const recordRunnerContainerRetired = vi.spyOn(runtimeOwnerClient, "commandHostedRuntimeOwner")
-      .mockResolvedValue({ cutover: "postgres", status: "updated", owner: null });
+      .mockImplementation(async ({ command }) => ({
+        cutover: "postgres", status: command.operation === "reconcile" ? "observed" : "updated", owner: null,
+      }));
     const h = createStandbyContainerHarness({
       destroy: async () => { throw new Error("platform unavailable"); },
     });
@@ -502,7 +509,7 @@ describe("RunnerContainer slot lifecycle", () => {
       region: HOSTED_RUNNER_REGION, slotName: h.slotName, userId: "member_123" });
     await h.container.onActivityExpired();
     await h.flushWaitUntil();
-    expect(recordRunnerContainerRetired).not.toHaveBeenCalled();
+    expect(recordRunnerContainerRetired.mock.calls.filter(([input]) => input.command.operation === "target_retired")).toHaveLength(0);
     await expect(h.container.readStandbySlotBinding()).resolves.toMatchObject({ state: "bound" });
   });
 
