@@ -121,7 +121,7 @@ export interface AssistantProviderFinishWithoutReplyAcceptedEvent {
  * never enter `CodexThreadIdentity`/route fingerprints or persisted session
  * target config, because tier changes must not fork thread continuity.
  */
-export type AssistantProviderServiceTier = 'flex'
+export type AssistantProviderServiceTier = 'flex' | 'priority'
 
 export interface AssistantProviderDynamicTool {
   readonly deferLoading?: boolean

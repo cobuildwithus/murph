@@ -110,6 +110,7 @@ export const HOSTED_MEMBER_ASSISTANT_MODEL_SELECT = {
     },
   },
   billingStatus: true,
+  createdAt: true,
   inferenceConnection: {
     select: {
       contextWindowTokens: true,
@@ -159,6 +160,7 @@ export interface HostedMemberAssistantModelResolution {
   dormantSolPreference: boolean;
   hostedAssistantCustomInferenceOverride?: HostedAssistantCustomInferenceOverride;
   hostedAssistantModelOverride?: HostedAssistantModelOverride;
+  hostedAssistantPriorityUntil?: string;
   hostedAssistantProviderOverride?: HostedAssistantProviderOverride;
   hostedAssistantReasoningEffortOverride?: HostedAssistantReasoningEffortOverride;
   model: HostedAssistantProductModel;
@@ -221,7 +223,16 @@ export async function readHostedMemberAssistantModelPreference(input: {
 }): Promise<HostedMemberAssistantModelResolution> {
   const member = await readHostedMemberAssistantModelState(input);
 
-  return resolveHostedMemberAssistantModel(member);
+  return {
+    ...resolveHostedMemberAssistantModel(member),
+    ...(member?.threadContainer === null && member.createdAt
+      ? {
+          hostedAssistantPriorityUntil: new Date(
+            member.createdAt.getTime() + 86_400_000,
+          ).toISOString(),
+        }
+      : {}),
+  };
 }
 
 export async function updateHostedMemberAssistantModelPreferenceTx(input: {

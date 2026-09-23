@@ -272,6 +272,7 @@ export class RuntimeInvocationPreparation {
       verifiedSlotBinding,
       commandBudget: input.commandBudget,
       hostedAssistantCustomInferenceOverride,
+      hostedAssistantPriorityUntil: workspaceRead.hostedAssistantPriorityUntil,
       hostedAssistantModelOverride:
         workspaceRead.hostedAssistantModelOverride ?? null,
       hostedAssistantProviderOverride:
@@ -371,6 +372,7 @@ export class RuntimeInvocationPreparation {
     commandBudget?: RuntimeProcessingCommandBudget;
     hostedAssistantCustomInferenceOverride:
       HostedAssistantCustomInferenceOverride | null;
+    hostedAssistantPriorityUntil?: string;
     hostedAssistantModelOverride: HostedAssistantModelOverride | null;
     hostedAssistantProviderOverride: HostedAssistantProviderOverride | null;
     hostedAssistantReasoningEffortOverride:
@@ -533,6 +535,7 @@ export class RuntimeInvocationPreparation {
       ...(preparedSnapshotRestore ? { preparedSnapshotRestore } : {}),
       request: {
         voiceCallId: input.voiceCallId,
+        hostedAssistantPriorityUntil: input.hostedAssistantPriorityUntil,
         ...(input.assistantExecutionBlocked
           ? { assistantExecutionBlocked: true as const }
           : {}),

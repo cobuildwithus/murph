@@ -45,6 +45,7 @@ import {
   type HostedVaultShareProjectionMode,
 } from "@murphai/hosted-execution/vault-share";
 import {
+  HOSTED_ASSISTANT_PRIORITY_UNTIL_ENV,
   HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV,
   isMurphAndroidAppEnabled,
   MURPH_ANDROID_APP_ENABLED_ENV,
@@ -1575,6 +1576,7 @@ function buildInitialInvocationCheckpointMetadata(
 function buildInvocationBaseRuntimeEnv(
   runtime: ReturnType<typeof normalizeHostedAssistantRuntimeConfig>,
   astraAllowed: boolean | undefined,
+  priorityUntil: string | undefined,
 ): Record<string, string> {
   const imageCodexModelCatalogJson = resolveHostedCodexModelCatalogPath({
     imageCatalogPath: process.env[HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV],
@@ -1586,6 +1588,7 @@ function buildInvocationBaseRuntimeEnv(
     ...projectHostedRuntimeTrustStoreEnv(process.env),
     ...runtime.forwardedEnv,
     ...runtime.userEnv,
+    ...(priorityUntil ? { [HOSTED_ASSISTANT_PRIORITY_UNTIL_ENV]: priorityUntil } : {}),
     ...(isMurphAndroidAppEnabled(runtime.platformEnv)
       ? { [MURPH_ANDROID_APP_ENABLED_ENV]: "1" }
       : {}),
@@ -2121,6 +2124,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
     const baseRuntimeEnv = buildInvocationBaseRuntimeEnv(
       guardedRuntime,
       workspaceRead.hostedAssistantAstraAllowed,
+      workspaceRead.hostedAssistantPriorityUntil,
     );
     const systemMailboxProcessingMode =
       input.request.processingMode === "system_mailbox";

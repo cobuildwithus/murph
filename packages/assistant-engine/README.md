@@ -453,3 +453,7 @@ harness tests exercise actual `zsh -lc` selection when zsh is installed; that
 integration case explicitly skips when the executable is absent. Portable
 profile quoting, provider-key exclusion, and caller-profile ownership remain
 covered without zsh. These tests do not start Codex or make a model request.
+
+Session preflight validates routing under the existing runtime write lock without
+preparing secret storage. Session persistence owns that directory's permission
+and symlink checks before writing a session or removing its legacy sidecar.

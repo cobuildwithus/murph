@@ -29,7 +29,7 @@ export const CANARY_RESET_TIMEOUT_MS = 300_000;
 export const CANARY_OUTCOME_WAIT_MS = HOSTED_EXECUTION_DEFAULT_RUNNER_IDLE_TTL_MS + 120_000;
 const CANARY_OUTCOME_POLL_MS = 1_000;
 const CANARY_TURNS = [
-  { prompt: "Hey Murph", stage: "welcome" },
+  { prompt: "Hey Murph let's get started with my health!", stage: "welcome" },
   { prompt: "Yes, ready.", stage: "identity-question" },
   { prompt: "My name is Robin. I am 32 and a woman.", stage: "runtime-identity" },
   {
@@ -212,7 +212,14 @@ function assertLinqProductionCanaryReply(input: {
       && input.reply === MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE
     )
   ) {
-    throwCanaryFailure("reply-semantics-invalid");
+    // Closed diagnostic categories preserve the failed assertion without logging copy.
+    const words = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/gu, " ").trim();
+    const identityCopy = isIdentityQuestion ? "exact"
+      : Object.values(MURPH_ASSISTANT_ONBOARDING_IDENTITY_QUESTIONS)
+        .some((question) => words(input.reply) === words(question)) ? "format-only" : "different";
+    throwCanaryFailure(
+      `reply-semantics-invalid; turn=${input.turn}; identity_copy=${identityCopy}; welcome_copy=${input.reply === MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE}; reply_chars=${Math.min(input.reply.length, 10000)}`,
+    );
   }
 }
 

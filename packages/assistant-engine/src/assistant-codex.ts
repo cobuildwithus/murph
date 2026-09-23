@@ -3333,12 +3333,13 @@ function readCodexSubagentEffectiveMetadataResult(input: {
   const modelProvider = readCodexNonEmptyString(result.modelProvider)
   // Codex reports an explicit standard-tier selection as "default".
   // Normalize it at the provider boundary to our existing standard-tier value.
-  const serviceTier = result.serviceTier === 'default' ? null : result.serviceTier
+  const serviceTier = result.serviceTier === 'default' ? null
+    : result.serviceTier === 'fast' ? 'priority' : result.serviceTier
   if (
     !model ||
     !modelProvider ||
     !Object.hasOwn(result, 'serviceTier') ||
-    (serviceTier !== null && serviceTier !== 'flex')
+    (serviceTier !== null && serviceTier !== 'flex' && serviceTier !== 'priority')
   ) {
     return null
   }

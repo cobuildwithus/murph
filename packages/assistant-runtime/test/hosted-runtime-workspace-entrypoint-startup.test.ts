@@ -2890,6 +2890,88 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
+  test.each([
+    { source: "workspace port", priorityUntil: "2026-09-24T12:00:00Z" },
+    { source: "prefetched null", priorityUntil: "2026-09-24T12:00:00Z" },
+    { source: "prefetched existing", priorityUntil: "2026-09-24T12:00:00Z" },
+    { source: "prefetched null", priorityUntil: undefined },
+    { source: "prefetched existing", priorityUntil: undefined },
+  ])("projects Web-owned priority from $source ($priorityUntil)", async ({ source, priorityUntil }) => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const runtimeEnvs: Readonly<Record<string, string>>[] = [];
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+
+      await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          ...(source === "workspace port" ? {} : {
+            request: {
+              hostedAssistantPriorityUntil: priorityUntil,
+              workspace: source === "prefetched null" ? null : createWorkspaceState({ version: "0" }),
+            },
+          }),
+          forwardedEnv: {
+            HOSTED_ASSISTANT_PRIORITY_UNTIL: "2099-01-01T00:00:00Z",
+          },
+          platformEnv: {
+            HOSTED_ASSISTANT_PRIORITY_UNTIL: "2099-01-01T00:00:00Z",
+          },
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            return {
+              snapshotRef: createSnapshotFixtureRef({
+                hash: snapshotInput.reason === "import" ? "5".repeat(64) : "6".repeat(64),
+                size: 512,
+              }),
+            };
+          },
+          async importItem() {
+            return { status: "imported" };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({
+              events: [],
+              items: [
+                createMailboxItem({
+                  id: "mailbox_item_entrypoint_priority",
+                  laneSeq: "1",
+                }),
+              ],
+            }),
+            workspacePort: {
+              ...createWorkspacePort({ checkpointRequests: [], events: [], workspace: null }),
+              async read() {
+                assert.equal(source, "workspace port", "Prefetched invocation must not read workspace again");
+                return {
+                  fetchedAt: TEST_NOW,
+                  hostedAssistantPriorityUntil: priorityUntil,
+                  workspace: createWorkspaceState({ version: "0" }),
+                };
+              },
+            },
+          }),
+          async runAssistantPhase(input) {
+            runtimeEnvs.push(input.runtimeEnv);
+            return {
+              progressed: false,
+              redactedStatus: {
+                hostedAssistantProgressed: false,
+              },
+            };
+          },
+          vaultRoot,
+        },
+      );
+
+      assert.equal(runtimeEnvs.length, 1);
+      assert.equal(runtimeEnvs[0]?.HOSTED_ASSISTANT_PRIORITY_UNTIL, priorityUntil);
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
   test("uses hosted Codex runtime CA env for intercepted OpenAI HTTPS requests", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];

@@ -656,6 +656,12 @@ describe("hosted runtime control contracts", () => {
       .toBeNull();
   });
 
+  it.each(["priority", "fast"])("keeps member pricing standard for the platform-funded %s boost", (serviceTier) => {
+    expect(resolveHostedAiUsageTokenPricingBasis({
+      model: "gpt-6-sol", providerName: "hosted-openai", serviceTier,
+    })).toBe("standard");
+  });
+
   it("uses OpenAI flex token pricing only for supported OpenAI flex models", () => {
     expect(resolveHostedAiUsageTokenPricingBasis({
       model: "gpt-5.6-terra",
@@ -770,6 +776,15 @@ describe("hosted runtime control contracts", () => {
     expect(() => parseHostedWorkspaceInvocationRequest({
       ...workspaceInvocationRequest, voiceCallId: "call:invalid",
     })).toThrow("Hosted voice input identity is invalid.");
+    expect(parseHostedWorkspaceInvocationRequest({
+      ...workspaceInvocationRequest,
+      hostedAssistantPriorityUntil: "2026-09-24T00:00:00Z",
+      workspace: null,
+    }).hostedAssistantPriorityUntil).toBe("2026-09-24T00:00:00Z");
+    expect(() => parseHostedWorkspaceInvocationRequest({
+      ...workspaceInvocationRequest,
+      hostedAssistantPriorityUntil: 123,
+    })).toThrow("hostedAssistantPriorityUntil");
     expect(() => parseHostedWorkspaceInvocationRequest({
       ...workspaceInvocationRequest,
       budget: {
@@ -2589,6 +2604,12 @@ describe("hosted runtime control contracts", () => {
       hostedAssistantReasoningEffortOverride: "high",
       workspace: null,
     });
+    expect(parseHostedWorkspaceReadResponse({
+      fetchedAt: "2026-09-23T00:00:00Z", hostedAssistantPriorityUntil: "2026-09-24T00:00:00Z", workspace: null,
+    }).hostedAssistantPriorityUntil).toBe("2026-09-24T00:00:00Z");
+    expect(parseHostedWorkspaceReadResponse({
+      fetchedAt: "2026-09-23T00:00:00Z", workspace: null,
+    }).hostedAssistantPriorityUntil).toBeUndefined();
     expect(() => parseHostedWorkspaceReadResponse({
       fetchedAt: "2026-04-26T00:00:02.000Z",
       hostedAssistantAstraAllowed: "true",

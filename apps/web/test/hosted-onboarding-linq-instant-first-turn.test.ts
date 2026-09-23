@@ -3,6 +3,9 @@ import { MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE, MURPH_ASSISTANT_ONBOARDING_IDEN
 import type { Response as OpenAiResponse } from "openai/resources/responses/responses";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { parseAssistantUsageRecord } from "@murphai/hosted-execution/assistant-usage";
+import { priceHostedAiUsageForAllowance } from "@/src/lib/hosted-execution/usage-allowance";
+
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 
 const mocks = vi.hoisted(() => ({
@@ -769,10 +772,17 @@ describe("hosted Linq instant first turn", () => {
     expect(mocks.recordHostedAiUsageRecords).toHaveBeenCalledWith(
       expect.objectContaining({
         usage: [expect.objectContaining({
-          tokenPricingBasis: "openai-priority",
+          tokenPricingBasis: "standard",
         })],
       }),
     );
+    const usage = parseAssistantUsageRecord(mocks.recordHostedAiUsageRecords.mock.calls[0]?.[0].usage[0]);
+    const memberPrice = priceHostedAiUsageForAllowance(usage);
+    const standardPrice = priceHostedAiUsageForAllowance({ ...usage, tokenPricingBasis: "standard" });
+    const priorityPrice = priceHostedAiUsageForAllowance({ ...usage, tokenPricingBasis: "openai-priority" });
+    expect(memberPrice.costUsdMicros).toBeGreaterThan(0n);
+    expect(memberPrice.costUsdMicros).toBe(standardPrice.costUsdMicros);
+    expect(memberPrice.costUsdMicros * 2n).toBe(priorityPrice.costUsdMicros);
     expect(mocks.prepareHostedMailboxEnvelopeAppend).toHaveBeenCalledWith(
       expect.objectContaining({
         envelope: expect.objectContaining({

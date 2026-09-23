@@ -356,6 +356,22 @@ and private memory/room-model maintenance retain
 Flex on failed-attempt retries. Ordinary reminders may retry at Standard after
 a failed Flex attempt. The provider boundary validates model and catalog support
 before selecting Flex; existing bounded failure backoff remains controlling.
+Personal managed OpenAI conversation turns request native Priority processing
+for the first 24 elapsed hours after `HostedMember.createdAt`. The existing
+member configuration query projects a derived expiry through the optional
+workspace-read field into the runtime-owned environment; member and producer
+environment overrides cannot supply it. Each provider attempt checks the expiry,
+provider and model catalog, so warm conversations return to Standard at the
+boundary. Group-container identities, custom providers, scheduled turns and
+explicit Flex requests retain their existing policy. The native per-turn tier
+reset prevents a previous Priority selection sticking to later Standard turns.
+This boost, including the Linq instant first reply and Priority child usage,
+uses Standard member allowance pricing: Murph absorbs the provider premium.
+No new database query, persisted grant, timer or provider retry is introduced.
+The Worker carries the optional expiry alongside the
+prefetched workspace in the typed invocation request; restore preserves it
+without another Web read, including when the prefetched workspace is null.
+
 Personal Patterns resolves each vault identity to a stable daily minute between
 09:00 and 16:59 local time. Existing active
 13:00 records migrate under the cron lock only after running, retrying, or
