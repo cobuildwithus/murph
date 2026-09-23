@@ -1,7 +1,13 @@
-import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { rename } from "node:fs/promises";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs/promises")>();
+  return { ...actual, rename: vi.fn(actual.rename) };
+});
 
 import {
   acquireDirectoryLock,
@@ -80,6 +86,7 @@ function createLockOptions(
 }
 
 afterEach(() => {
+  vi.clearAllMocks();
   for (const tempRoot of tempRoots.splice(0)) {
     rmSync(tempRoot, { force: true, recursive: true });
   }
@@ -183,6 +190,30 @@ describe("runtime-state locks", () => {
     }
 
     expect(existsSync(options.lockPath)).toBe(false);
+  });
+
+  it("publishes complete private metadata with the lock directory, including nested paths", async () => {
+    const tempRoot = createTempRoot();
+    const lockPath = path.join(tempRoot, ".runtime", "operations", "assistant", "state.lock");
+    const options = createLockOptions(tempRoot, {
+      lockPath,
+      metadataPath: path.join(lockPath, "nested", "owner.json"),
+    });
+    const handle = await acquireDirectoryLock(options);
+    try {
+      expect(vi.mocked(rename).mock.calls).toEqual([[expect.any(String), lockPath]]);
+      expect(JSON.parse(readFileSync(options.metadataPath, "utf8")))
+        .toEqual(options.metadata);
+      expect(statSync(lockPath).mode & 0o777).toBe(0o700);
+      expect(statSync(path.dirname(options.metadataPath)).mode & 0o777).toBe(0o700);
+      expect(statSync(options.metadataPath).mode & 0o777).toBe(0o600);
+      await expect(inspectDirectoryLock(options)).resolves.toMatchObject({
+        state: "active", metadata: options.metadata,
+      });
+    } finally {
+      await handle.release();
+    }
+    expect(existsSync(lockPath)).toBe(false);
   });
 
   it("rejects same-owner reentry for a different metadata path without cleaning the held lock", async () => {
