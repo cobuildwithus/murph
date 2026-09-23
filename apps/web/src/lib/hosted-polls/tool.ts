@@ -56,9 +56,23 @@ export async function handleHostedConversationPollTool(input: {
     await prisma.hostedConversationPoll.update({ where: { id: row.id }, data: { resultEncrypted: encrypted, closedAt: new Date() } });
     return { status: "closed", polls: [closed.snapshot] };
   }
+  if (action.action === "vote") return voteInPoll(input, route, { pollRef: row.id, question: definition.question, messageId: result.messageId });
   if (route.channel === "telegram") return { status: "results", polls: [await withTelegramPollVoters(row, result.snapshot, action.voterCursor)] };
   const fresh = await callLinqPoll({ action: "read", chatId: route.target, pollRef: row.id, question: definition.question, messageId: result.messageId, voterCursor: action.voterCursor });
   return { status: "results", polls: [fresh.snapshot] };
+}
+
+async function voteInPoll(input: Parameters<typeof handleHostedConversationPollTool>[0], route: PollRoute, poll: { pollRef: string; question: string; messageId: string }): Promise<ConversationPollResponse> {
+  const action = input.request.request;
+  if (action.action !== "vote") throw new TypeError("Expected poll vote.");
+  if (route.channel !== "linq") throw new TypeError("Telegram bots cannot vote. State a pick in text without changing the tally.");
+  const fresh = await callLinqPoll({ action: "read", chatId: route.target, ...poll });
+  const optionId = fresh.optionIds[action.optionIndex];
+  if (!optionId) throw new TypeError("Poll option is unavailable. Read the current poll before voting.");
+  const currentRoute = await authorizePollConversation(input);
+  if (currentRoute.channel !== route.channel || currentRoute.target !== route.target) throw new TypeError("Poll conversation changed.");
+  const submitted = await callLinqPoll({ action: "vote", chatId: route.target, ...poll, optionId, operation: action.operation });
+  return { status: "vote_submitted", polls: [submitted.snapshot] };
 }
 
 async function createPoll(input: { memberId: string; runtimeIdentity: HostedRuntimeIdentity | null; request: ConversationPollRequest }, route: PollRoute): Promise<ConversationPollResponse> {

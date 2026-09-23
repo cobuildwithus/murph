@@ -15,6 +15,7 @@ export const conversationPollActionSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("list") }).strict(),
   z.object({ action: z.literal("read"), pollRef, voterCursor: z.string().min(1).max(256).optional() }).strict(),
   z.object({ action: z.literal("close"), pollRef }).strict(),
+  z.object({ action: z.literal("vote"), pollRef, optionIndex: z.number().int().min(0).max(99), operation: z.enum(["add", "remove"]) }).strict(),
 ]);
 export type ConversationPollAction = z.infer<typeof conversationPollActionSchema>;
 export const conversationPollRequestSchema = z.object({
@@ -54,7 +55,7 @@ export const conversationPollSnapshotSchema = z.object({
 }).strict();
 export type ConversationPollSnapshot = z.infer<typeof conversationPollSnapshotSchema>;
 export const conversationPollResponseSchema = z.object({
-  status: z.enum(["sent", "results", "listed", "closed", "unknown"]),
+  status: z.enum(["sent", "results", "listed", "closed", "vote_submitted", "unknown"]),
   polls: z.array(conversationPollSnapshotSchema).max(10),
 }).strict();
 export type ConversationPollResponse = z.infer<typeof conversationPollResponseSchema>;

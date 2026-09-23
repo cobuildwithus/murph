@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-const mocks = vi.hoisted(() => ({ post: vi.fn(), get: vi.fn(), telegram: vi.fn() }));
+const mocks = vi.hoisted(() => ({ post: vi.fn(), get: vi.fn(), vote: vi.fn(), telegram: vi.fn() }));
 vi.mock("server-only", () => ({}));
-vi.mock("../src/lib/linq/api", () => ({ runLinqApiRequest: (input: { request: (client: unknown) => unknown }) => input.request({ chats: { polls: { create: mocks.post } }, messages: { poll: { retrieve: mocks.get } } }) }));
+vi.mock("../src/lib/linq/api", () => ({ runLinqApiRequest: (input: { request: (client: unknown) => unknown }) => input.request({ chats: { polls: { create: mocks.post } }, messages: { poll: { retrieve: mocks.get, vote: mocks.vote } } }) }));
 vi.mock("../src/lib/hosted-onboarding/runtime", () => ({ requireHostedOnboardingLinqConfig: () => ({ apiBaseUrl: "https://provider.invalid", apiToken: "synthetic" }) }));
 vi.mock("../src/lib/hosted-onboarding/telegram-client", () => ({ callHostedTelegramApi: mocks.telegram }));
 import { callLinqPoll, callTelegramPoll } from "../src/lib/hosted-polls/provider";
@@ -27,6 +27,26 @@ describe("native poll providers", () => {
   it("rejects another chat's Linq results", async () => {
     mocks.get.mockResolvedValue({ chat_id: "other", message_id: "message", poll: { options: [], total_voters: 0 } });
     await expect(callLinqPoll({ action: "read", chatId: "chat", pollRef, question: "Day?", messageId: "message" })).rejects.toThrow();
+  });
+  it.each(["add", "remove"] as const)("submits an explicit %s for the sending line and returns provider counts", async (operation) => {
+    const optionId = "00000000-0000-4000-8000-000000000002";
+    const envelope = { chat_id: "chat", message_id: "message", poll: { options: [{ option_id: optionId, text: "Sunday", voters: operation === "add" ? [{ handle: "murph@example.test" }] : [] }], total_voters: operation === "add" ? 1 : 0 } };
+    mocks.get.mockResolvedValue(envelope);
+    expect((await callLinqPoll({ action: "read", chatId: "chat", pollRef, question: "Day?", messageId: "message" })).optionIds).toEqual([optionId]);
+    mocks.vote.mockResolvedValue(envelope);
+    const result = await callLinqPoll({ action: "vote", chatId: "chat", pollRef, question: "Day?", messageId: "message", optionId, operation });
+    expect(mocks.vote).toHaveBeenCalledExactlyOnceWith("message", { option_id: optionId, operation });
+    expect(result.snapshot.totalVoters).toBe(operation === "add" ? 1 : 0);
+    expect(JSON.stringify(result.snapshot)).not.toContain(optionId);
+    expect(mocks.post).not.toHaveBeenCalled();
+  });
+  it("does not confirm failed or misrouted votes", async () => {
+    const input = { action: "vote" as const, chatId: "chat", pollRef, question: "Day?", messageId: "message", optionId: "00000000-0000-4000-8000-000000000001", operation: "add" as const };
+    mocks.vote.mockRejectedValueOnce(new Error("Lost acknowledgement"));
+    await expect(callLinqPoll(input)).rejects.toThrow("could not be confirmed");
+    mocks.vote.mockResolvedValueOnce({ chat_id: "other", message_id: "message", poll: { options: [], total_voters: 0 } });
+    await expect(callLinqPoll(input)).rejects.toThrow("could not be confirmed");
+    expect(mocks.vote).toHaveBeenCalledTimes(2);
   });
   it("preserves Telegram forum routing and sends only once", async () => {
     mocks.telegram.mockResolvedValue({ ok: true, result: { message_id: 17, chat: { id: -100 }, poll: telegramPoll } });

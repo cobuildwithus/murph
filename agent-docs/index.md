@@ -642,3 +642,6 @@ Legacy oxygen analytics retirement is tracked in
 
 Single device publication receipts are tracked in
 [`device receipts`](exec-plans/completed/2026-09-21-single-import-receipt.md).
+
+Murph’s own iMessage poll votes and Telegram spoken-pick boundary are tracked in
+[`poll participation`](exec-plans/active/2026-09-22-poll-self-vote.md).

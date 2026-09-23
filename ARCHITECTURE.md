@@ -1251,10 +1251,19 @@ leave an unknown receipt. List is capped at ten polls created by Murph in this
 conversation. Arbitrary provider IDs cannot select another poll. Read exposes
 provider voter identities in pages of 50 with a continuation cursor; list keeps only summaries.
 
-Linq uses its SDK's native poll create/read methods. The question is a separate
+Linq uses its SDK's native poll create/read/vote methods. The question is a separate
 idempotent text message, followed by an iMessage poll with public multiple-choice
 voting. Anonymous iMessage requests fail before sending. Reads fetch current
-counts, distinct total voters and voter handles from Linq. Telegram uses
+counts, distinct total voters and voter handles from Linq. The vote action adds or
+removes Murph's own line selection by a zero-based option index. Web resolves the
+immutable option ID from a fresh conversation-bound provider read, rechecks live
+route/access and egress policy, then submits one explicit add/remove request.
+Multiple selections are independent. Vote submission returns provider acceptance,
+not confirmed device delivery; ambiguous failures require readback before retry.
+No local vote tally or additional persisted state is created. Telegram bots cannot
+vote; Murph may state a preference without claiming a ballot or changing counts.
+Deploy this Web consumer before runtimes producing vote requests, and retain it
+while those runtimes remain active. Telegram uses
 single-choice `sendPoll`, with `anonymous` defaulting to true; false creates named
 voting. It stores aggregate `poll` updates and supports `stopPoll` with final
 counts. Telegram reads return the last observed snapshot and timestamp; they cannot fetch a live tally. Duplicate/older

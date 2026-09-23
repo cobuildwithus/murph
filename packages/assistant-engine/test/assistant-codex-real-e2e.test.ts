@@ -41823,3 +41823,85 @@ describeRealCodex('real Codex native conversation polls e2e', () => {
     } finally { await rm(workingDirectory, { force: true, recursive: true }) }
   }, 720_000)
 })
+
+
+describeRealCodex('real Codex poll self vote e2e', () => {
+  it.each(['tie', 'remove', 'telegram', 'settled', 'uncertain'] as const)('poll self vote %s', async (scenario) => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-poll-vote-e2e-'))
+    const { MURPH_POLL_TOOL } = await import('../src/assistant-codex/dynamic-tools/conversation-polls.js')
+    const pollRef = 'poll_' + 'c'.repeat(32)
+    const channel = scenario === 'telegram' ? 'telegram' : 'linq'
+    const calls: Array<import('@murphai/hosted-execution/conversation-polls').ConversationPollRequest> = []
+    let submitted = false
+    try {
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions: buildAssistantSystemPrompt({
+          assistantCliContract: null, assistantKnowledgeToolsAvailable: false, assistantPollsAvailable: true,
+          channel, cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+          conversationScope: 'group', currentLocalDate: '2026-09-22',
+          currentInstant: '2026-09-22T16:00:00.000Z', currentTimeZone: 'UTC',
+          hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false, turnTrigger: null,
+        }),
+        dynamicTools: [MURPH_POLL_TOOL], env: config.env,
+        hostedToolContext: {
+          computerToolsAvailable: false, vaultFileSendAvailable: false,
+          pollTool: { request: async (request) => {
+            calls.push(request)
+            const action = request.request
+            if (action.action === 'vote') {
+              if (scenario === 'uncertain') throw new Error('Synthetic lost vote acknowledgement')
+              submitted = true
+            }
+            return { status: action.action === 'vote' ? 'vote_submitted' : 'results', polls: [{
+              pollRef, channel, question: 'Post-walk snack?',
+              options: [{ text: 'Apples', votes: 2 }, { text: 'Cinnamon buns', votes: submitted && scenario !== 'remove' ? 3 : 2 }],
+              totalVoters: submitted && scenario !== 'remove' ? 5 : 4,
+              anonymous: channel === 'telegram', multipleAnswers: channel === 'linq', closed: false,
+              observedAt: '2026-09-22T16:00:00.000Z', freshness: channel === 'linq' ? 'provider_read' : 'provider_update',
+            }] }
+          } },
+          currentInvocationScope: () => ({ origin: { kind: 'accepted_input', sessionId: 'synthetic-self-vote', assistantInputId: 'ain_' + 'd'.repeat(32) }, conversationScope: 'group' }),
+          currentHostedDeliveryContext: () => null, currentHostedMailboxItemIds: () => [],
+          sendVaultFile: async () => { throw new Error('No file send authorized.') },
+        },
+        model: config.model, modelProvider: config.modelProvider,
+        prompt: scenario === 'tie'
+          ? `Our snack poll ${pollRef} is deadlocked between Apples and Cinnamon buns. Murph, you have the deciding vote. Your robot heart knows which one smells better.`
+          : scenario === 'remove'
+          ? `Murph, remove your Cinnamon buns vote from our snack poll ${pollRef}. Don't replace it with anything.`
+          : scenario === 'telegram'
+          ? `Murph, cast your own vote for Cinnamon buns in our Telegram poll ${pollRef}.`
+          : scenario === 'settled'
+          ? `We closed the discussion and agreed on Apples. Leave the snack poll ${pollRef} alone. Murph, suggest one drink to bring.`
+          : `Murph, vote for Cinnamon buns in our iMessage snack poll ${pollRef}.`,
+        reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
+      })
+      process.stdout.write(JSON.stringify({ scenario: 'poll self vote ' + scenario, reply: result.finalMessage, actions: calls.map((call) => call.request) }) + '\n')
+      const votes = calls.filter((call) => call.request.action === 'vote')
+      expect(calls.every((call) => ['read', 'vote'].includes(call.request.action))).toBe(true)
+      if (scenario === 'telegram' || scenario === 'settled') {
+        expect(votes).toHaveLength(0)
+        if (scenario === 'settled') expect(calls).toHaveLength(0)
+        if (scenario === 'telegram') {
+          expect(result.finalMessage).toMatch(/Cinnamon buns/iu)
+          expect(result.finalMessage).toMatch(/can't|cannot|can’t|unable/iu)
+          expect(result.finalMessage).not.toMatch(/I(?:'ve|’ve)? (?:cast|voted)|vote (?:is |has been )?(?:cast|added|counted)/iu)
+        }
+      } else {
+        expect(votes).toHaveLength(1)
+        expect(votes[0]?.request).toEqual({ action: 'vote', pollRef, optionIndex: 1, operation: scenario === 'remove' ? 'remove' : 'add' })
+        expect(calls[0]?.request).toEqual({ action: 'read', pollRef })
+        expect(calls.filter((call) => call.request.action === 'read').length).toBeLessThanOrEqual(2)
+        if (scenario === 'uncertain') {
+          expect(result.finalMessage).toMatch(/confirm|sure|unclear|may|couldn[’']t/iu)
+          expect(result.finalMessage).not.toMatch(/I(?:'ve|’ve)? voted|broke the tie|now (?:3|three)/iu)
+        } else if (scenario === 'remove') expect(result.finalMessage).toMatch(/remov|withdraw|retract/iu)
+        else expect(result.finalMessage).toMatch(/Cinnamon buns/iu)
+      }
+    } finally { await rm(workingDirectory, { force: true, recursive: true }) }
+  }, 720_000)
+})

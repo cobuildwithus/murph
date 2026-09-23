@@ -121,6 +121,45 @@ describe("hosted poll effects", () => {
     expect(read.polls[0]?.totalVoters).toBe(4);
     await expect(call({ action: "close", pollRef: first.polls[0]!.pollRef })).rejects.toThrow("does not support");
   });
+  it.each(["add", "remove"] as const)("resolves the scoped option and reauthorizes before %s", async (operation) => {
+    m.route.channel = "linq"; m.route.target = "chat";
+    const first = await call(create); const pollRef = first.polls[0]!.pollRef;
+    m.linq.mockClear(); m.authorize.mockClear();
+    const optionIds = ["00000000-0000-4000-8000-000000000001", "00000000-0000-4000-8000-000000000002"];
+    m.linq.mockResolvedValueOnce({ ...created(pollRef, "linq"), optionIds });
+    const response = await call({ action: "vote", pollRef, optionIndex: 1, operation });
+    expect(response.status).toBe("vote_submitted");
+    expect(m.linq).toHaveBeenCalledTimes(2);
+    expect(m.linq).toHaveBeenNthCalledWith(1, expect.objectContaining({ action: "read", chatId: "chat", messageId: "17" }));
+    expect(m.linq).toHaveBeenNthCalledWith(2, expect.objectContaining({ action: "vote", chatId: "chat", messageId: "17", optionId: optionIds[1], operation }));
+    expect(m.authorize).toHaveBeenCalledTimes(2);
+    expect(m.authorize.mock.invocationCallOrder[1]).toBeGreaterThan(m.linq.mock.invocationCallOrder[0]!);
+    expect(m.authorize.mock.invocationCallOrder[1]).toBeLessThan(m.linq.mock.invocationCallOrder[1]!);
+    expect(m.question).toHaveBeenCalledTimes(1);
+  });
+  it("rejects unsupported Telegram voting without changing counts or calling a provider", async () => {
+    const first = await call(create); m.telegram.mockClear();
+    await expect(call({ action: "vote", pollRef: first.polls[0]!.pollRef, optionIndex: 0, operation: "add" })).rejects.toThrow("Telegram bots cannot vote");
+    expect(m.telegram).not.toHaveBeenCalled(); expect(m.linq).not.toHaveBeenCalled();
+    expect((await call({ action: "list" })).polls).toEqual(first.polls);
+  });
+  it("rejects voting across conversations before provider reads", async () => {
+    m.route.channel = "linq"; const first = await call(create); m.linq.mockClear();
+    m.route.target = "other-chat";
+    await expect(call({ action: "vote", pollRef: first.polls[0]!.pollRef, optionIndex: 0, operation: "add" })).rejects.toThrow("not found");
+    expect(m.linq).not.toHaveBeenCalled();
+  });
+  it.each(["missing-option", "revoked", "changed-route", "lost-ack"])("does not claim a vote after %s", async (failure) => {
+    m.route.channel = "linq"; const first = await call(create); const pollRef = first.polls[0]!.pollRef; m.linq.mockClear();
+    m.linq.mockImplementationOnce(async () => {
+      if (failure === "revoked") m.authorize.mockRejectedValueOnce(new Error("Revoked"));
+      if (failure === "changed-route") m.route.target = "other-chat";
+      return { ...created(pollRef, "linq"), optionIds: failure === "missing-option" ? [] : ["00000000-0000-4000-8000-000000000001"] };
+    });
+    if (failure === "lost-ack") m.linq.mockRejectedValueOnce(new Error("Lost acknowledgement"));
+    await expect(call({ action: "vote", pollRef, optionIndex: 0, operation: "add" })).rejects.toThrow();
+    expect(m.linq).toHaveBeenCalledTimes(failure === "lost-ack" ? 2 : 1);
+  });
   it("stops before dispatch when live runtime admission is revoked", async () => {
     m.runtime.mockRejectedValueOnce(new Error("Stale runtime"));
     await expect(call(create)).rejects.toThrow("Stale runtime");
