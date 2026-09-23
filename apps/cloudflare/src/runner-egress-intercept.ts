@@ -97,6 +97,11 @@ import {
 } from "./runner-egress-custom-inference.ts";
 import { readHostedOpenAiImageRequest } from "./runner-egress-openai-image-request.ts";
 import {
+  HOSTED_OPENAI_LIVE_PATH, HOSTED_OPENAI_LIVE_BODY_LIMIT,
+  readHostedLiveAttachReference, isHostedLiveCreationBody,
+  createHostedLiveSessionReference, authorizeHostedLiveAttachment,
+} from "./runner-egress-openai-live.ts";
+import {
   DEFAULT_ELEVENLABS_API_BASE_URL,
   HOSTED_ELEVENLABS_MAX_BODY_BYTES,
   isAllowedElevenLabsRequest,
@@ -1445,6 +1450,9 @@ async function maybeHandleOpenAiRequest(input: {
     return null;
   }
   const { pathnameSuffix } = pathMatch;
+  const liveReference = readHostedLiveAttachReference(pathnameSuffix);
+  if (liveReference) return handleHostedLiveAttachment({ ...input, pathMatch, reference: liveReference });
+  if (pathnameSuffix === HOSTED_OPENAI_LIVE_PATH) return handleHostedLiveCreation({ ...input, pathMatch });
   if (!isAllowedOpenAiRequest(input.request, pathnameSuffix)) {
     return disallowedProviderEgress();
   }
@@ -1482,20 +1490,10 @@ async function maybeHandleOpenAiRequest(input: {
   if (bodyRead instanceof Response) return bodyRead;
   const { boundedBody, imageGenerationRequested } = bodyRead;
 
-  // An opaque socket cannot inspect later image-tool requests. Admit only
-  // accounts allowed to use that capability; native Codex falls back to HTTP
-  // for other accounts, where the ordinary per-request image check remains.
-  if (input.request.method === "GET" && pathnameSuffix === "/v1/responses") {
-    const denied = await checkHostedImageGenerationAccess({ authorization, env: input.env });
-    if (denied) {
-      return new Response("Use HTTPS Responses for this account.", { status: 426 });
-    }
-  }
-
-  if (imageGenerationRequested || pathnameSuffix === "/v1/images/generations" || pathnameSuffix === "/v1/images/edits") {
-    const denied = await checkHostedImageGenerationAccess({ authorization, env: input.env });
-    if (denied) return denied;
-  }
+  const imageDenied = await checkHostedOpenAiImageRequestAccess({
+    request: input.request, env: input.env, authorization, pathnameSuffix, imageGenerationRequested,
+  });
+  if (imageDenied) return imageDenied;
 
   const upstreamRequest = await createHostedRunnerUpstreamRequest(
     input.request,
@@ -1550,6 +1548,99 @@ async function maybeHandleOpenAiRequest(input: {
   // native Codex owns connection reuse/recovery. Accepting here would couple
   // every subsequent frame to this Worker invocation's JavaScript lifetime.
   return response;
+}
+
+async function checkHostedOpenAiImageRequestAccess(input: {
+  request: Request; env: RunnerOutboundEnvironmentSource; authorization: HostedProviderEgressAuthorization;
+  pathnameSuffix: string; imageGenerationRequested: boolean;
+}): Promise<Response | null> {
+  // An opaque Responses socket cannot inspect later image-tool requests.
+  if (input.request.method === "GET" && input.pathnameSuffix === "/v1/responses") {
+    const denied = await checkHostedImageGenerationAccess(input);
+    return denied ? new Response("Use HTTPS Responses for this account.", { status: 426 }) : null;
+  }
+  if (input.imageGenerationRequested || input.pathnameSuffix === "/v1/images/generations" || input.pathnameSuffix === "/v1/images/edits") {
+    return checkHostedImageGenerationAccess(input);
+  }
+  return null;
+}
+
+async function handleHostedLiveCreation(input: {
+  request: Request; url: URL; pathMatch: ProviderPathMatch; env: RunnerOutboundEnvironmentSource;
+  upstreamFetchImpl?: typeof fetch; userId: string | null; ctx?: HostedRunnerOutboundContext;
+}): Promise<Response> {
+  if (input.request.method !== "POST" || input.url.search) return disallowedProviderEgress();
+  const bearerCredential = readBearerCredential(input.request.headers);
+  if (!bearerCredential || !isHostedProviderEgressCredential(bearerCredential)) return disallowedProviderEgress();
+  const startedAt = Date.now();
+  const authorization = await authorizeHostedOpenAiProviderEgress({ ...input, bearerCredential });
+  if (!authorization?.authorized || !authorization.writeFence) return disallowedProviderEgress();
+  const body = await readBoundedRequestBody(input.request, HOSTED_OPENAI_LIVE_BODY_LIMIT);
+  if (body === null) return new Response("Payload Too Large", { status: 413 });
+  if (!isHostedLiveCreationBody(body)) return new Response("Invalid Live request.", { status: 400 });
+  const headers = stripHostedProviderUpstreamHeaders(input.request.headers);
+  headers.set("authorization", `Bearer ${readRequiredInterceptSecret(input.env.OPENAI_API_KEY, "OPENAI_API_KEY")}`);
+  const response = await fetchAuthorizedProviderUpstream({
+    authorization, providerKind: "openai", request: input.request, startedAt, url: input.url,
+    upstreamRequest: await createHostedRunnerUpstreamRequest(input.request, createProviderUpstreamUrl(input.url, input.pathMatch), headers, { body, redirect: "manual" }),
+    upstreamFetchImpl: input.upstreamFetchImpl,
+  });
+  if (response.status === 401 || response.status === 403) {
+    await reportOpenAiAuthorizationFailureSafely({ ctx: input.ctx, env: input.env, status: response.status });
+  }
+  return response.ok ? wrapHostedLiveCreationResponse(response, authorization.writeFence, input.env) : response;
+}
+
+async function handleHostedLiveAttachment(input: {
+  request: Request; url: URL; pathMatch: ProviderPathMatch; reference: string;
+  env: RunnerOutboundEnvironmentSource; upstreamFetchImpl?: typeof fetch; ctx?: HostedRunnerOutboundContext;
+}): Promise<Response> {
+  if (input.request.method !== "GET" || input.url.search || !isWebSocketUpgradeRequest(input.request.headers)) return disallowedProviderEgress();
+  const credential = readBearerCredential(input.request.headers);
+  if (!credential) return disallowedProviderEgress();
+  const startedAt = Date.now();
+  const resource = await authorizeHostedLiveAttachment({ credential, reference: input.reference, source: input.env });
+  if (!resource) return disallowedProviderEgress();
+  const url = new URL(createProviderUpstreamUrl(input.url, input.pathMatch));
+  url.pathname = url.pathname.replace(`/${input.reference}/attach`, `/${encodeURIComponent(resource.sessionId)}/attach`);
+  const headers = stripHostedProviderUpstreamHeaders(input.request.headers);
+  headers.set("authorization", `Bearer ${readRequiredInterceptSecret(input.env.OPENAI_API_KEY, "OPENAI_API_KEY")}`);
+  // This grants attachment only to an existing exact-owner resource, including
+  // closure after revocation. It cannot create another Live session.
+  const response = await fetchAuthorizedProviderUpstream({
+    authorization: { authorized: true, mode: "provider_egress_credential", durationMs: Date.now() - startedAt,
+      providerEgressTokenPresent: false, runtimeAuthorityHeadersPresent: false,
+      userId: resource.owner.userId, writeFence: { ...resource.owner, workspaceVersion: null } },
+    providerKind: "openai", request: input.request, startedAt, url: input.url,
+    upstreamRequest: await createHostedRunnerUpstreamRequest(input.request, url, headers, { redirect: "manual" }),
+    upstreamFetchImpl: input.upstreamFetchImpl,
+  });
+  if (response.status === 401 || response.status === 403) {
+    await reportOpenAiAuthorizationFailureSafely({ ctx: input.ctx, env: input.env, status: response.status });
+  }
+  // Leave the upgrade unaccepted; Cloudflare forwards bytes and native Codex owns frames.
+  return response;
+}
+
+async function wrapHostedLiveCreationResponse(
+  response: Response, owner: HostedProviderEgressWriteFenceMetadata, source: RunnerOutboundEnvironmentSource,
+): Promise<Response> {
+  const body = await readBoundedRequestBody(response, HOSTED_OPENAI_LIVE_BODY_LIMIT);
+  let value: unknown;
+  try { value = body === null ? null : JSON.parse(new TextDecoder().decode(body)); }
+  catch { return new Response("Live creation outcome unconfirmed.", { status: 502 }); }
+  if (!value || typeof value !== "object" || !("session" in value) || !("transport" in value)) return new Response("Live creation outcome unconfirmed.", { status: 502 });
+  const session = value.session;
+  const transport = value.transport;
+  if (!session || typeof session !== "object" || !("id" in session) || typeof session.id !== "string"
+    || session.id.length === 0 || session.id === "." || session.id === ".." || new TextEncoder().encode(session.id).byteLength > 1024
+    || !transport || typeof transport !== "object" || !("sdp" in transport) || typeof transport.sdp !== "string") {
+    return new Response("Live creation outcome unconfirmed.", { status: 502 });
+  }
+  return Response.json({
+    session: { id: await createHostedLiveSessionReference(session.id, owner, source) },
+    transport: { type: "webrtc", sdp: transport.sdp },
+  }, { status: response.status });
 }
 
 async function maybeHandleVeniceRequest(input: {

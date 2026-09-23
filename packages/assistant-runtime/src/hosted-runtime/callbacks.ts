@@ -2208,7 +2208,7 @@ export async function drainHostedPreparedAssistantDeliveries(input: {
   onBackgroundDeliveryYield?: (input: {
     yieldedEffectCount: number;
   }) => void;
-  platform?: Pick<HostedRuntimePlatform, "logPort"> | null;
+  platform?: Pick<HostedRuntimePlatform, "logPort" | "voicePort"> | null;
   platformEnv?: Readonly<Record<string, string>>;
   preparedDispatches?: readonly HostedAssistantDeliveryPreparedDispatch[] | null;
   providerFetch?: typeof fetch | null;
@@ -3322,7 +3322,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
   shouldYieldBackgroundDelivery: (() => boolean) | null;
   linqEnv: NodeJS.ProcessEnv;
   linqDeliveryContexts: readonly HostedAssistantLinqDeliveryContext[];
-  platform: Pick<HostedRuntimePlatform, "logPort"> | null;
+  platform: Pick<HostedRuntimePlatform, "logPort" | "voicePort"> | null;
   preparedDispatch: HostedAssistantDeliveryPreparedDispatch | null;
   telegramEnv: NodeJS.ProcessEnv;
   telegramVoiceMemoEnv: NodeJS.ProcessEnv;
@@ -3441,6 +3441,19 @@ async function deliverHostedPreparedAssistantDelivery(input: {
       trackMessageVolumeReceipt:
         input.effectsPort.recordOutboundMessageVolumeReceipt !== undefined,
       dependencies: {
+        sendVoice: async (request) => {
+          const voicePort = input.platform?.voicePort;
+          if (!voicePort) {
+            throw Object.assign(new VaultCliError(
+              "ASSISTANT_VOICE_DELIVERY_UNAVAILABLE",
+              "The accepted voice call is no longer available.",
+            ), { deliveryMayHaveSucceeded: false, retryable: false });
+          }
+          await assertHostedDeliveryCanEnterProvider(input);
+          providerDispatchEntered = true;
+          await voicePort.speak(request);
+          await assertHostedDeliveryLiveNow(input);
+        },
         sendEmail: async (request) => {
           if (request.targetKind === "participant") {
             throw new VaultCliError(

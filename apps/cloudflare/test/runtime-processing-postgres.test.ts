@@ -183,8 +183,8 @@ describe("Postgres runtime orchestration", () => {
   it("wakes the exact live owner and forwards foreground promotion in place", async () => {
     const { source, container } = harness();
     vi.mocked(commandHostedRuntimeOwner).mockResolvedValue(response(owner({ processingMode: "system_mailbox" })));
-    expect(await ensurePostgresRuntimeProcessing(source, request)).toMatchObject({ kind: "runtime_processing_accepted", action: "woken", runtimeAttemptId: "attempt-a" });
-    expect(container.ensureProcessing).toHaveBeenCalledWith(expect.objectContaining({ activeRuntime: expect.objectContaining({ attemptId: "attempt-a", leaseGeneration: "1", requestedProcessingMode: "default" }) }));
+    expect(await ensurePostgresRuntimeProcessing(source, { ...request, voiceCallId: "call-synthetic" })).toMatchObject({ kind: "runtime_processing_accepted", action: "woken", runtimeAttemptId: "attempt-a" });
+    expect(container.ensureProcessing).toHaveBeenCalledWith(expect.objectContaining({ activeRuntime: expect.objectContaining({ attemptId: "attempt-a", leaseGeneration: "1", requestedProcessingMode: "default", voiceCallId: "call-synthetic" }) }));
     expect(container.readSupervisedInvocation).not.toHaveBeenCalled();
     expect(container.readActiveRuntimeUserFence).not.toHaveBeenCalled();
     expect(container.startSupervisedInvocation).not.toHaveBeenCalled();

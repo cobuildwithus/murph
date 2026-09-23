@@ -28,6 +28,20 @@ import {
 type ObservedRequest = { init?: RequestInit; url: string };
 
 describe("createCloudflareHostedControlClient", () => {
+  it("sends a member-bound voice control with the exact offer and runtime fence", async () => {
+    const fetchImpl = vi.fn(async () => createJsonResponse({ kind: "connected", sdp: "v=0\r\nanswer" }));
+    const client = createCloudflareHostedControlClient({
+      baseUrl: "https://runner.example.test", fetchImpl: fetchImpl as typeof fetch, getBearerToken: async () => "token-synthetic",
+    });
+    const request = { action: "connect" as const, callId: "call-synthetic", attemptId: "attempt-synthetic",
+      leaseGeneration: "3", sdp: "v=0\r\noffer" };
+    expect(await client.controlVoice({ userId: "member-synthetic", request })).toEqual({ kind: "connected", sdp: "v=0\r\nanswer" });
+    const [url, init] = vi.mocked(fetchImpl as typeof fetch).mock.calls[0]!;
+    expect(url).toBe("https://runner.example.test/internal/users/member-synthetic/runtime/voice");
+    expect(JSON.parse(String(init?.body))).toEqual(request);
+    expect(new Headers(init?.headers).get("authorization")).toBe("Bearer token-synthetic");
+    expect(new Headers(init?.headers).get("x-hosted-execution-user-id")).toBe("member-synthetic");
+  });
   afterEach(() => {
     vi.useRealTimers();
   });
@@ -39,6 +53,7 @@ describe("createCloudflareHostedControlClient", () => {
     });
 
     expect(Object.keys(client).sort()).toEqual([
+      "controlVoice",
       "createBrowserVaultExportSession",
       "createBrowserVaultSession",
       "createEnvironmentRealtimeCall",
@@ -326,6 +341,7 @@ describe("createCloudflareHostedControlClient", () => {
         commandTimeoutMs: 25_000,
         onTiming,
         orchestrationAttemptId: "web-ingress-attempt-test",
+        voiceCallId: "call-synthetic",
         signal: abortController.signal,
         userId: "user_123",
       })).resolves.toEqual({
@@ -344,6 +360,7 @@ describe("createCloudflareHostedControlClient", () => {
     expect(init.method).toBe("POST");
     expect(init.body).toBe(JSON.stringify({
       orchestrationAttemptId: "web-ingress-attempt-test",
+      voiceCallId: "call-synthetic",
     }));
     const headers = new Headers(init.headers);
     expect(headers.get("authorization")).toBe("Bearer token-123");

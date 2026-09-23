@@ -297,6 +297,7 @@ import {
   type HostedRuntimeWakeCandidate,
   type HostedSystemMailboxWakeCandidate,
 } from "./hosted-runtime/wake-candidates.ts";
+import { configureHostedRuntimeVoice, type HostedRuntimeVoice } from "./hosted-runtime/voice-call.ts";
 import {
   consumePendingRuntimeWakeUnlessShuttingDown,
   createCoalescingRuntimeWakeSignal,
@@ -821,6 +822,7 @@ function isHostedInitialBootstrapPending(input: {
 }
 
 export interface HostedWorkspaceRuntimeJobOptions {
+  voice?: HostedRuntimeVoice | null;
   createCheckpointSnapshot: HostedWorkspaceSnapshotCheckpointBuilder;
   importItem: HostedMailboxImporter<HostedWorkspaceRuntimeJobImportContext>;
   platform: HostedRuntimePlatform;
@@ -1783,6 +1785,13 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       codexProcessPreparationStart = Promise.resolve(null);
     }
   };
+  const settleInvocationCodexProcess = async (): Promise<void> => {
+    try {
+      await options.voice?.close();
+    } finally {
+      await settleCodexProcessPreparation();
+    }
+  };
   let latestCheckpointSnapshotCleanForWarmReuse = false;
   const createAbortGuardedCheckpointSnapshot: HostedWorkspaceSnapshotCheckpointBuilder =
     async (snapshotInput, context) => {
@@ -2405,6 +2414,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       : null;
     const runnerPlatform = {
       ...guardedRuntime.platform,
+      voicePort: options.voice,
       ...(invocationAssistantConfigurationToolPort
         ? { assistantConfigurationToolPort: invocationAssistantConfigurationToolPort }
         : {}),
@@ -2466,59 +2476,55 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       vaultRoot: restored.vaultRoot,
       workspace: activeWorkspace,
     };
-    let hostedCodexRuntime: Awaited<
-      ReturnType<typeof prepareHostedCodexRuntimeEnvironment>
-    > | null = null;
-    const prepareInvocationCodexRuntime = async (): Promise<
-      NonNullable<typeof hostedCodexRuntime>
-    > => {
-      if (hostedCodexRuntime) {
-        return hostedCodexRuntime;
-      }
-      emitPhaseLog({
-        details: {
-          runtimeEnvKeyCount: Object.keys(baseRuntimeEnv).length,
-          voiceMemoElevenLabsApiKeyConfigured:
-            hasHostedRuntimeEnvValue(baseRuntimeEnv, "ELEVENLABS_API_KEY"),
-          voiceMemoElevenLabsModelConfigured:
-            hasHostedRuntimeEnvValue(baseRuntimeEnv, "MURPH_ELEVENLABS_MODEL_ID"),
-          voiceMemoElevenLabsVoiceConfigured:
-            hasHostedRuntimeEnvValue(baseRuntimeEnv, "MURPH_ELEVENLABS_VOICE_ID"),
-        },
-        input,
-        requestId,
-        stage: "codex.prepare",
-        status: "start",
-      });
-      const preparedCodexRuntime = await prepareHostedCodexRuntimeEnvironment({
-        operatorHomeRoot: restored.operatorHomeRoot,
-        runtimeEnv: baseRuntimeEnv,
-      });
-      hostedCodexRuntime = preparedCodexRuntime;
-      invocationRuntimeEnv = preparedCodexRuntime.runtimeEnv;
-      emitPhaseLog({
-        details: {
-          codexEffectiveModelProviderId:
-            preparedCodexRuntime.runtimeEnv[HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV] ?? null,
-          ...HOSTED_CODEX_OPERATOR_MEMORY_DIAGNOSTICS,
-          ...hostedCodexProviderTransportDiagnostics(
-            preparedCodexRuntime.runtimeEnv[HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV] ?? "",
-          ),
-          runtimeEnvKeyCount: Object.keys(preparedCodexRuntime.runtimeEnv).length,
-          voiceMemoElevenLabsApiKeyConfigured:
-            hasHostedRuntimeEnvValue(preparedCodexRuntime.runtimeEnv, "ELEVENLABS_API_KEY"),
-          voiceMemoElevenLabsModelConfigured:
-            hasHostedRuntimeEnvValue(preparedCodexRuntime.runtimeEnv, "MURPH_ELEVENLABS_MODEL_ID"),
-          voiceMemoElevenLabsVoiceConfigured:
-            hasHostedRuntimeEnvValue(preparedCodexRuntime.runtimeEnv, "MURPH_ELEVENLABS_VOICE_ID"),
-        },
-        input,
-        requestId,
-        stage: "codex.prepare",
-        status: "done",
-      });
-      return preparedCodexRuntime;
-    };
+    type InvocationCodexRuntime = Awaited<ReturnType<typeof prepareHostedCodexRuntimeEnvironment>>;
+    let hostedCodexRuntime: InvocationCodexRuntime | null = null;
+    let codexRuntimePreparation: Promise<InvocationCodexRuntime> | null = null;
+    const prepareInvocationCodexRuntime = (): Promise<InvocationCodexRuntime> =>
+      codexRuntimePreparation ??= (async () => {
+        emitPhaseLog({
+          details: {
+            runtimeEnvKeyCount: Object.keys(baseRuntimeEnv).length,
+            voiceMemoElevenLabsApiKeyConfigured:
+              hasHostedRuntimeEnvValue(baseRuntimeEnv, "ELEVENLABS_API_KEY"),
+            voiceMemoElevenLabsModelConfigured:
+              hasHostedRuntimeEnvValue(baseRuntimeEnv, "MURPH_ELEVENLABS_MODEL_ID"),
+            voiceMemoElevenLabsVoiceConfigured:
+              hasHostedRuntimeEnvValue(baseRuntimeEnv, "MURPH_ELEVENLABS_VOICE_ID"),
+          },
+          input,
+          requestId,
+          stage: "codex.prepare",
+          status: "start",
+        });
+        const preparedCodexRuntime = await prepareHostedCodexRuntimeEnvironment({
+          operatorHomeRoot: restored.operatorHomeRoot,
+          runtimeEnv: baseRuntimeEnv,
+        });
+        hostedCodexRuntime = preparedCodexRuntime;
+        invocationRuntimeEnv = preparedCodexRuntime.runtimeEnv;
+        emitPhaseLog({
+          details: {
+            codexEffectiveModelProviderId:
+              preparedCodexRuntime.runtimeEnv[HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV] ?? null,
+            ...HOSTED_CODEX_OPERATOR_MEMORY_DIAGNOSTICS,
+            ...hostedCodexProviderTransportDiagnostics(
+              preparedCodexRuntime.runtimeEnv[HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV] ?? "",
+            ),
+            runtimeEnvKeyCount: Object.keys(preparedCodexRuntime.runtimeEnv).length,
+            voiceMemoElevenLabsApiKeyConfigured:
+              hasHostedRuntimeEnvValue(preparedCodexRuntime.runtimeEnv, "ELEVENLABS_API_KEY"),
+            voiceMemoElevenLabsModelConfigured:
+              hasHostedRuntimeEnvValue(preparedCodexRuntime.runtimeEnv, "MURPH_ELEVENLABS_MODEL_ID"),
+            voiceMemoElevenLabsVoiceConfigured:
+              hasHostedRuntimeEnvValue(preparedCodexRuntime.runtimeEnv, "MURPH_ELEVENLABS_VOICE_ID"),
+          },
+          input,
+          requestId,
+          stage: "codex.prepare",
+          status: "done",
+        });
+        return preparedCodexRuntime;
+      })();
     let initialAssistantBootstrap: HostedAssistantBootstrapResult | null = null;
     if (!systemMailboxProcessingMode) {
       hostedCodexRuntime = await prepareInvocationCodexRuntime();
@@ -2533,6 +2539,29 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         runtimeEnv: hostedCodexRuntime.runtimeEnv,
       });
     }
+    configureHostedRuntimeVoice(options.voice, async () => {
+      assertRuntimeNotAborted();
+      const prepared = await prepareInvocationCodexRuntime();
+      const target = await readHostedAssistantExecutionDefaultTarget({
+        assistantBootstrap: initialAssistantBootstrap,
+        homeDirectory: restored.operatorHomeRoot,
+        runtimeEnv: prepared.runtimeEnv,
+      });
+      if (!target) throw new Error("The hosted voice backing assistant is not ready.");
+      const turnEnvironment = createHostedAssistantTurnEnvironment({
+        operatorHomeRoot: restored.operatorHomeRoot,
+        runtimeEnv: prepared.runtimeEnv,
+        vaultRoot: restored.vaultRoot,
+      });
+      return {
+        env: turnEnvironment.env,
+        target,
+        workingDirectory: restored.vaultRoot,
+        signal: options.shutdownSignal
+          ? AbortSignal.any([runtimeAbortController.signal, options.shutdownSignal])
+          : runtimeAbortController.signal,
+      };
+    });
     assertRuntimeNotAborted();
     const initialMailboxImportPlan = resolveHostedInitialMailboxImportPlan({
       vaultRoot: restored.vaultRoot,
@@ -6084,6 +6113,9 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         ): void => {
           if (
             !runtimeOwnerHandoffRequested
+            // A live/reserved call is foreground work. Routine mailbox follow-up
+            // may checkpoint in place; only explicit owner/policy changes end it.
+            && options.voice?.isHoldingRuntime() !== true
             && !foregroundWorkPending
             && pendingDurableCheckpointEffects.length === 0
             && readyDurableCheckpointEffects.length === 0
@@ -6591,6 +6623,48 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           wakeAtMs,
         };
       };
+      const voiceMayRetainRuntime = (): boolean =>
+        !runtimeOwnerHandoffRequested && !mailboxBudgetExhausted()
+        && !options.shutdownSignal?.aborted && !runtimeAbortController.signal.aborted
+        && options.voice?.isHoldingRuntime() === true;
+      const mayFinishRuntime = (): boolean => {
+        if (runtimeStateDirty || voiceMayRetainRuntime()) return false;
+        options.voice?.stopAccepting();
+        return true;
+      };
+      const prepareNextRuntimeCheckpoint = async (): Promise<boolean> => {
+        while (!runtimeStateDirty && voiceMayRetainRuntime()) {
+          const waited = await waitForHostedRuntimeDirtyWindow({
+            idleCheckpointStartByMs: Date.now() + runnerIdleTtlMs,
+            projectedAssistantWakeAtMs: null,
+            runtimeAbortSignal: runtimeAbortController.signal,
+            runtimeWakeSignal: options.runtimeWakeSignal ?? null,
+            shutdownSignal: options.shutdownSignal ?? null,
+          });
+          if (waited.kind === "external_wake") {
+            const latencySeed = createHostedRuntimeWakeLatencySeed(waited.notification);
+            if (latencySeed?.requestedProcessingMode) {
+              await runPreCheckpointConversationWake(latencySeed);
+            } else {
+              await runForegroundPass({ latencySeed, requestIdKind: "idle-wake" });
+            }
+            if (!runtimeStateDirty) await drainCleanDurableCheckpointEffects();
+          }
+        }
+        if (!runtimeStateDirty) {
+          // Voice may have outlived the initial foreground pass. Quiesce the
+          // same owners as the ordinary clean return before reading dirtiness.
+          options.voice?.stopAccepting();
+          await closeDetachedAssistantAskBeforeWorkspaceRelease();
+          await workspaceSystemWork.quiesce();
+        }
+        return runtimeStateDirty;
+      };
+      const prepareInvocationRelease = async (): Promise<void> => {
+        if (voiceMayRetainRuntime()) return;
+        options.voice?.stopAccepting();
+        await closeDetachedAssistantAskBeforeWorkspaceRelease();
+      };
       const finishCleanRuntimeInvocation = async () => {
         assertRuntimeNotAborted();
         // Mailbox post-checkpoint effects are backed by the restored durable
@@ -6699,8 +6773,8 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           && finishInput.mayRunPostCheckpointWork
           ? createHostedBrowserVaultRefreshTimeoutRetryWakeCandidate()
           : null;
-        await closeDetachedAssistantAskBeforeWorkspaceRelease();
-        if (runtimeStateDirty) {
+        await prepareInvocationRelease();
+        if (!mayFinishRuntime()) {
           return null;
         }
         const committedDefaultWakeKey = buildHostedRuntimeWakeKey({
@@ -6838,7 +6912,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
             withholdVaultShareDependentEffects: cleanVaultShareProjectionIncomplete,
           });
         }
-        if (!runtimeStateDirty) {
+        if (mayFinishRuntime()) {
           // Closing is terminal for this invocation. Do it at the clean-return
           // decision point so a just-claimed request is requeued and included in
           // the same checkpoint loop before the restored workspace is released.
@@ -7424,7 +7498,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       };
 
       await prepareInitialForegroundState();
-      while (runtimeStateDirty) {
+      while (await prepareNextRuntimeCheckpoint()) {
         const initialCheckpointWakeLatencySeed = pendingCheckpointWakeLatencySeed;
         pendingCheckpointWakeLatencySeed = null;
         const preparedCheckpointAttempt = await prepareDirtyRuntimeCheckpointAttempt(
@@ -7849,7 +7923,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       await drainOwnedVaultShareProjection();
     } finally {
       try {
-        await settleCodexProcessPreparation();
+        await settleInvocationCodexProcess();
       } finally {
         try {
           await systemWork?.quiesce();

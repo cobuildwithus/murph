@@ -164,7 +164,7 @@ describe('assistant codex runtime', () => {
       env: { PATH: '/custom/bin' },
       workingDirectory,
     }
-    await Promise.all([
+    const [preparation] = await Promise.all([
       preinitializeCodexAppServer(launchInput),
       preinitializeCodexAppServer(launchInput),
     ])
@@ -193,6 +193,13 @@ describe('assistant codex runtime', () => {
       await new Promise((resolve) => setTimeout(resolve, 0))
     }
     expect(claimed).toBe(true)
+    await preparation?.cancelPending()
+    await expect(stopWarmCodexAppServer('claimed-initialization')).rejects.toMatchObject({
+      code: 'ASSISTANT_CODEX_APP_SERVER_BUSY',
+      context: { retryable: true },
+    })
+    await expect(preinitializeCodexAppServer(launchInput)).resolves.toBeNull()
+    expect(process.kill).not.toHaveBeenCalled()
     expect(codexMocks.spawn).toHaveBeenCalledTimes(1)
     expect(readWrittenRpcMessages(child).map((message) => message.method))
       .toEqual(['initialize'])
@@ -3045,7 +3052,7 @@ describe('assistant codex runtime', () => {
     })
   })
 
-  it('accepts legacy thread compacted completion after compact rpc success', async () => {
+  it('accepts legacy compaction completion in the same stdout batch as its RPC response', async () => {
     const workingDirectory = await createTempDir('assistant-codex-compact-legacy-completion-work-')
     const codexHome = await createTempDir('assistant-codex-compact-legacy-completion-home-')
     const threadId = 'thread-compact-legacy-completion'
@@ -3104,13 +3111,14 @@ describe('assistant codex runtime', () => {
           child.stdout.write(jsonLine({ id: barrier.id, result: {} }))
           const compact = await waitForRpcMethod(child, 'thread/compact/start')
           expect(asRecord(compact.params)).toEqual({ threadId })
-          child.stdout.write(jsonLine({ id: compact.id, result: {} }))
-          child.stdout.write(jsonLine({
-            method: 'thread/compacted',
-            params: {
-              threadId,
-            },
-          }))
+          // Legacy completion has no item id and cannot be buffered before
+          // acceptance. The response observer must run within this batch.
+          child.stdout.write(
+            jsonLine({ id: compact.id, result: {} }) + jsonLine({
+              method: 'thread/compacted',
+              params: { threadId },
+            }),
+          )
         })()
       })
 

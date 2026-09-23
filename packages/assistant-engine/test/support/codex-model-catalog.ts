@@ -2,7 +2,6 @@ import { execFile, execFileSync } from 'node:child_process'
 import { readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { promisify } from 'node:util'
-import { fileURLToPath } from 'node:url'
 
 const execFileAsync = promisify(execFile)
 
@@ -17,11 +16,10 @@ export async function writeHostedOpenAiMixedModeModelCatalogJson(input: {
     maxBuffer: 10 * 1024 * 1024,
   })
   const dockerfile = await readFile(new URL('../../../../Dockerfile.cloudflare-hosted-runner', import.meta.url), 'utf8')
-  const patchFilter = /\| jq --slurpfile launch \/tmp\/codex-gpt6-models\.json '([^']+)'/u.exec(dockerfile)?.[1]
+  const patchFilter = /\| jq '([^']+)'/u.exec(dockerfile)?.[1]
   const standardFilter = /&& jq '([^']+)' \/tmp\/murph-codex-model-catalog\.openai-flex\.json/u.exec(dockerfile)?.[1]
   if (!patchFilter || !standardFilter) throw new Error('Image catalog filters are missing.')
   const catalogJson = execFileSync('jq', [
-    '--slurpfile', 'launch', fileURLToPath(new URL('../../../../apps/cloudflare/config/codex-gpt6-models.json', import.meta.url)),
     [
       input.astraAllowed ? patchFilter : `${patchFilter} | ${standardFilter}`,
       ...(input.toolMode ? ['.models |= map(.tool_mode = "code_mode_only")'] : []),

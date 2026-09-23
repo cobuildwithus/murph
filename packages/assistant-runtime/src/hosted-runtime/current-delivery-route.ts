@@ -1,3 +1,5 @@
+import type { AutomationRoute } from "@murphai/contracts";
+import type { HostedExecutionAssistantNotificationRoute } from "@murphai/hosted-execution";
 import {
   conversationRefFromAssistantInputConversation,
   type AssistantInputConversationRef,
@@ -85,5 +87,21 @@ export function readHostedAssistantInputCurrentDeliveryRoute(input: {
         ? { threadIsDirect: input.conversation.threadIsDirect }
         : {}
     ),
+  };
+}
+
+export function buildHostedNotificationAutomationRoute(
+  route: HostedExecutionAssistantNotificationRoute,
+): AutomationRoute {
+  const delivery = route.delivery;
+  return {
+    channel: route.channel,
+    deliverySource: delivery.source ?? null,
+    deliveryTarget: delivery.kind === "participant" ? null : delivery.target,
+    identityId: route.identityId,
+    participantId: delivery.kind === "participant" ? delivery.target : null,
+    threadId: route.channel === "linq" ? null
+      : route.threadId ?? (delivery.kind === "thread" ? delivery.target : null),
+    threadIsDirect: route.threadIsDirect,
   };
 }

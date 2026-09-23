@@ -356,6 +356,7 @@ test("hosted runtime launch spec owns semantic env split and runtime config", ()
       },
       deviceSync: null,
       managedAutoReplyChannels: [
+        { capabilityReady: true, channel: "voice" },
         {
           capabilityReady: true,
           channel: "email",

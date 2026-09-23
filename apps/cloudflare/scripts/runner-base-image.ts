@@ -25,11 +25,15 @@ export interface RunnerBaseImagePreparationResult {
 }
 
 export async function computeRunnerBaseImageSourceFingerprint(): Promise<string> {
-  const dockerfile = await readFile(runnerBaseDockerfile);
-  return createHash("sha256")
-    .update("Dockerfile.cloudflare-hosted-runner-base\0")
-    .update(dockerfile)
-    .digest("hex");
+  const hash = createHash("sha256");
+  for (const source of [
+    "Dockerfile.cloudflare-hosted-runner-base",
+    "patches/codex-public-live.patch",
+  ]) {
+    const content = await readFile(path.join(repoRoot, source));
+    hash.update(`${source}\0${content.length}\0`).update(content);
+  }
+  return hash.digest("hex");
 }
 
 export function readRunnerBaseImageFingerprint(

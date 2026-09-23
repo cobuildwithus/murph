@@ -839,6 +839,7 @@ describe("hosted execution coverage gaps", () => {
       "./subscription",
       "./temporal-env",
       "./vault-share",
+      "./voice-control",
       "./workspace-snapshot-store",
       "./workspace-snapshot-v2",
     ]);
@@ -1033,6 +1034,7 @@ describe("hosted execution coverage gaps", () => {
       "HOSTED_RUNTIME_MAILBOX_FETCH_PATH",
       "HOSTED_RUNTIME_MAILBOX_PAYLOAD_FETCH_PATH",
       "HOSTED_RUNTIME_MEMBER_ACTION_OUTCOME_PATH",
+      "HOSTED_RUNTIME_MEMBER_NOTIFICATION_ROUTE_PATH",
       "HOSTED_RUNTIME_OPERATOR_TASK_CONTROL_PATH",
       "HOSTED_RUNTIME_OUTBOUND_MESSAGE_VOLUME_RECEIPT_PATH",
       "HOSTED_RUNTIME_OWNER_RELEASED_PATH",
@@ -1050,6 +1052,7 @@ describe("hosted execution coverage gaps", () => {
       "HOSTED_RUNTIME_VAULT_SHARE_DELIVER_CONTINUATION_FIELD",
       "HOSTED_RUNTIME_VAULT_SHARE_DELIVER_CONTINUATION_MAX_LENGTH",
       "HOSTED_RUNTIME_VAULT_SHARE_DELIVER_PATH",
+      "HOSTED_RUNTIME_VOICE_INPUT_PATH",
       "HOSTED_RUNTIME_WORKSPACE_CHECKPOINT_PATH",
       "HOSTED_RUNTIME_WORKSPACE_PATH",
       "buildHostedRuntimeOwnerReleaseSearch",

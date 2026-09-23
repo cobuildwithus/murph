@@ -60,6 +60,9 @@
       "@murphai/hosted-execution/auth": [
         "./packages/hosted-execution/src/auth.ts"
       ],
+      "@murphai/hosted-execution/voice-control": [
+        "./packages/hosted-execution/src/voice-control.ts"
+      ],
       "@murphai/hosted-execution/assistant-identifiers": [
         "./packages/hosted-execution/src/assistant-identifiers.ts"
       ],

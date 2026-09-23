@@ -133,6 +133,18 @@ import {
   type CodexTokenUsageBreakdown,
 } from './assistant-codex/app-server-protocol.js'
 import {
+  CodexRealtimeBinding,
+  isCodexRealtimeNotification,
+  type CodexRealtimeOptions,
+  type CodexRealtimeSession,
+} from './assistant-codex/realtime.js'
+export type {
+  CodexRealtimeClosure,
+  CodexRealtimeInput,
+  CodexRealtimeOptions,
+  CodexRealtimeSession,
+} from './assistant-codex/realtime.js'
+import {
   collectCodexCompactionResponseUsage,
   type CodexCompactionResponseUsage,
 } from './assistant-codex/compaction-usage.js'
@@ -273,7 +285,6 @@ const CODEX_APP_SERVER_STARTUP_STDERR_MAX_LENGTH = 16_384
 type CodexAppServerProcessState =
   | 'idle'
   | 'reserved'
-  | 'running'
   | 'stopped'
   | 'stopping'
 
@@ -336,6 +347,7 @@ type CodexAppServerActiveTurnBinding = {
   onError(error: Error): void
   onFramingError(line: string): void
   onParsedMessage(message: CodexRpcMessage): void
+  onRpcResponse(message: CodexRpcMessage, method: string | null): void
   onSubagentMessage?(message: CodexRpcMessage): void
   onStderrLine(line: string): void
   onStderrText(text: string): void
@@ -576,6 +588,33 @@ export interface CodexAppServerPreinitializeInput
 
 export interface CodexAppServerPreinitialization {
   cancelPending(): Promise<void>
+}
+
+export interface CodexAppServerRealtimeInput extends CodexAppServerLaunchInput, CodexRealtimeOptions {
+  model?: string | null
+  modelProvider?: string | null
+}
+
+/** The native media thread has no Murph tools; accepted work uses the ordinary turn path. */
+export async function startCodexAppServerRealtime(
+  input: CodexAppServerRealtimeInput,
+): Promise<CodexRealtimeSession> {
+  const prepared = await prepareCodexAppServerProcessInput(input)
+  // Media attachment is process setup, not an ordinary turn. Keep lifecycle
+  // operations behind the existing slot lock until startup settles; a checkpoint
+  // must wait here instead of mistaking negotiation for an in-flight host turn.
+  return await withWarmCodexSlotLock(async () => {
+    const existing = warmCodexProcess?.canShareForLaunch(prepared.launchKey)
+      ? warmCodexProcess
+      : null
+    const processInstance = existing ?? await claimWarmCodexProcess(prepared)
+    try {
+      await processInstance.initialize()
+      return await processInstance.startRealtime({ ...input, workingDirectory: prepared.workingDirectory })
+    } finally {
+      if (!existing) processInstance.releaseReservation()
+    }
+  })
 }
 
 export interface CodexAppServerTurnFailureContext {
@@ -1178,6 +1217,7 @@ class CodexAppServerProcess {
   readonly startedAt = Date.now()
 
   private activeTurn: CodexAppServerActiveTurnBinding | null = null
+  private realtime: CodexRealtimeBinding | null = null
   private boundThreadGroupConversation = false
   private boundThreadId: string | null = null
   private boundThreadModel: string | null = null
@@ -1212,6 +1252,8 @@ class CodexAppServerProcess {
   private readonly detachedRootThreadIds = new Set<string>()
   private readonly pendingDetachedUsageReports = new Set<Promise<void>>()
   private stopCompleted = false
+  // Reservation owns occupancy until release, including the gap before the
+  // caller can construct its callbacks. Binding does not change occupancy.
   private state: CodexAppServerProcessState = 'idle'
   private stderrBuffer = ''
   private startupStderr = ''
@@ -1307,7 +1349,7 @@ class CodexAppServerProcess {
   }
 
   get hasInFlightTurn(): boolean {
-    return this.state === 'reserved' || this.state === 'running'
+    return this.state === 'reserved'
   }
 
   get isStopped(): boolean {
@@ -1327,10 +1369,14 @@ class CodexAppServerProcess {
   }
 
   canClaimForLaunch(launchKey: string): boolean {
+    return this.state === 'idle' && this.canShareForLaunch(launchKey)
+  }
+
+  canShareForLaunch(launchKey: string): boolean {
     return (
       this.launchKey === launchKey &&
       !this.poisoned &&
-      this.state === 'idle' &&
+      (this.state === 'idle' || this.state === 'reserved') &&
       this.child.exitCode === null &&
       this.child.signalCode === null
     )
@@ -1355,7 +1401,6 @@ class CodexAppServerProcess {
   reserveTurn(): void {
     if (
       this.state !== 'idle' ||
-      this.activeTurn ||
       this.poisoned ||
       this.child.exitCode !== null ||
       this.child.signalCode !== null
@@ -1369,7 +1414,7 @@ class CodexAppServerProcess {
   bindTurn(binding: CodexAppServerActiveTurnBinding): void {
     this.throwStartupFailure()
     if (
-      (this.state !== 'idle' && this.state !== 'reserved') ||
+      this.state !== 'reserved' ||
       this.activeTurn ||
       this.poisoned ||
       this.child.exitCode !== null ||
@@ -1379,7 +1424,6 @@ class CodexAppServerProcess {
     }
 
     this.activeTurn = binding
-    this.state = 'running'
   }
 
   releaseTurn(binding: CodexAppServerActiveTurnBinding): void {
@@ -1388,7 +1432,7 @@ class CodexAppServerProcess {
     }
 
     this.activeTurn = null
-    if (this.state === 'running') {
+    if (this.state === 'reserved') {
       this.state = 'idle'
     }
   }
@@ -1396,6 +1440,40 @@ class CodexAppServerProcess {
   releaseReservation(): void {
     if (this.state === 'reserved' && !this.activeTurn) {
       this.state = 'idle'
+    }
+  }
+
+  async startRealtime(input: CodexAppServerRealtimeInput): Promise<CodexRealtimeSession> {
+    if (this.realtime) throw this.buildBusyError('A native voice session is already attached.')
+    const result = readCodexRecord(await this.sendRequestWithTimeout({
+      method: 'thread/start',
+      params: {
+        cwd: input.workingDirectory,
+        model: input.model ?? null,
+        modelProvider: input.modelProvider ?? null,
+        approvalPolicy: 'never',
+        sandbox: 'read-only',
+        dynamicTools: [],
+        ephemeral: true,
+        config: { 'features.realtime_conversation': true },
+      },
+      timeoutLabel: 'voice thread',
+      timeoutMs: 30_000,
+    }))
+    const threadId = readCodexNonEmptyString(readCodexRecord(result?.thread)?.id)
+    if (!threadId) throw new Error('Native voice thread did not return an identity.')
+    const binding = new CodexRealtimeBinding(threadId, input, (method, params) => this.sendRequestWithTimeout({
+      method, params, timeoutLabel: method, timeoutMs: 30_000,
+    }))
+    this.realtime = binding
+    void binding.closed.then(() => {
+      if (this.realtime === binding) this.realtime = null
+    })
+    try {
+      return await binding.start()
+    } catch (error) {
+      await binding.close()
+      throw error
     }
   }
 
@@ -1407,7 +1485,7 @@ class CodexAppServerProcess {
       message,
       {
         retryable: true,
-        state: this.state,
+        state: this.state === 'reserved' && this.activeTurn ? 'running' : this.state,
       },
     )
   }
@@ -1744,7 +1822,7 @@ class CodexAppServerProcess {
     }
   }
 
-  consumeIgnoredResponseId(id: CodexRpcId): boolean {
+  private consumeIgnoredResponseId(id: CodexRpcId): boolean {
     return this.ignoredResponseIds.delete(id)
   }
 
@@ -1779,6 +1857,8 @@ class CodexAppServerProcess {
     this.endReason ??= resolveCodexAppServerEndReason(reason)
     this.normalShutdown = true
     this.state = 'stopping'
+    // The process owns native media shutdown as well as backing-turn teardown.
+    await this.realtime?.close()
     this.rejectPending(
       new VaultCliError(
         'ASSISTANT_CODEX_APP_SERVER_STOPPED',
@@ -1881,6 +1961,7 @@ class CodexAppServerProcess {
         stderr: this.startupStderr,
       })
     this.stdinFailure = failure
+    this.realtime?.processClosed()
     this.poisoned = true
     if (!this.initialized) {
       this.startupFailure ??= failure
@@ -1893,6 +1974,7 @@ class CodexAppServerProcess {
   }
 
   private handleProcessError(error: Error): void {
+    this.realtime?.processClosed()
     const failure = normalizeCodexStartupFailure({
       codexCommand: this.codexCommand,
       error,
@@ -1997,19 +2079,6 @@ class CodexAppServerProcess {
   }
 
   private handleIdleServerMessage(message: CodexRpcMessage): void {
-    const responseId = readCodexRpcResponseId(message)
-    if (responseId !== null) {
-      const resolved = resolvePendingCodexRpcRequest({
-        message,
-        pendingRequests: this.pendingRequests,
-        responseId,
-      })
-      if (resolved === 'unknown_response_id') {
-        this.consumeIgnoredResponseId(responseId)
-      }
-      return
-    }
-
     const requestId = readCodexRpcServerRequestId(message)
     if (requestId === null) {
       return
@@ -2023,10 +2092,6 @@ class CodexAppServerProcess {
   }
 
   private routeSubagentMessage(message: CodexRpcMessage): boolean {
-    if (readCodexRpcResponseId(message) !== null) {
-      return false
-    }
-
     const threadId = extractCodexThreadIdFromMessage(message)
     if (!threadId || this.detachedRootThreadIds.has(threadId)) {
       return false
@@ -2052,6 +2117,11 @@ class CodexAppServerProcess {
 
   private handleStdoutLine(line: string): void {
     const parsed = tryParseJsonLine(line)
+    // Voice notifications are not another turn's transcript or tool stream.
+    if (parsed.ok && isCodexRealtimeNotification(parsed.value)) {
+      this.realtime?.handle(parsed.value)
+      return
+    }
     if (!parsed.ok || (parsed.value.method !== 'rawResponseItem/completed'
       && parsed.value.method !== 'rawResponse/completed')) {
       this.activeTurn?.onStdoutText(`${line}\n`)
@@ -2059,6 +2129,22 @@ class CodexAppServerProcess {
     if (parsed.ok) {
       this.observeDetachedChildLifecycle(parsed.value)
       this.observeThreadTokenUsage(parsed.value)
+      const responseId = readCodexRpcResponseId(parsed.value)
+      if (responseId !== null) {
+        const pending = this.pendingRequests.get(responseId)
+        const resolved = resolvePendingCodexRpcRequest({
+          message: parsed.value,
+          pendingRequests: this.pendingRequests,
+          responseId,
+        })
+        if (resolved !== 'unknown_response_id' || !this.consumeIgnoredResponseId(responseId)) {
+          // Promise continuations run after this stdout batch. Keep turn-id
+          // establishment and compaction acceptance synchronous before the next
+          // notification or server request, even though RPC resolution is shared.
+          this.activeTurn?.onRpcResponse(parsed.value, pending?.method ?? null)
+        }
+        return
+      }
       if (this.routeSubagentMessage(parsed.value)) {
         return
       }
@@ -2094,6 +2180,7 @@ class CodexAppServerProcess {
       this.handleStdoutLine(this.stdoutBuffer)
     }
     this.stdoutBuffer = ''
+    this.realtime?.processClosed()
 
     if (!this.normalShutdown) {
       this.poisoned = true
@@ -2344,39 +2431,44 @@ async function getOrStartWarmCodexProcess(
   if (warmCodexWorkspaceBoundaryActive) {
     throw buildWarmCodexWorkspaceBoundaryBusyError()
   }
-  const launchKey = input.launchKey
-  return await withWarmCodexSlotLock(async () => {
-    const previousProcess = warmCodexProcess
-    if (previousProcess) {
-      if (previousProcess.canClaimForLaunch(launchKey)) {
-        previousProcess.reserveTurn()
-        return previousProcess
-      }
-      if (previousProcess.hasInFlightTurn) {
-        throw previousProcess.buildBusyError(
-          'Codex app-server process is already serving a turn.',
-        )
-      }
-      const processExited =
-        previousProcess.child.exitCode !== null ||
-        previousProcess.child.signalCode !== null
-      const stopReason = processExited
-        ? 'process-exited'
-        : previousProcess.launchKey !== launchKey
-          ? 'launch-identity-changed'
-          : 'process-unhealthy'
-      await previousProcess.stop(stopReason)
-    }
+  return await withWarmCodexSlotLock(() => claimWarmCodexProcess(input))
+}
 
-    const processInstance = new CodexAppServerProcess({
-      ...input,
-      coldStartReason:
-        previousProcess?.nextColdStartReason ?? 'node-process-first-use',
-    })
-    warmCodexProcess = processInstance
-    processInstance.reserveTurn()
-    return processInstance
+/** Caller holds the warm slot lock through selection and reservation. */
+async function claimWarmCodexProcess(
+  input: CodexAppServerProcessInput,
+): Promise<CodexAppServerProcess> {
+  const launchKey = input.launchKey
+  const previousProcess = warmCodexProcess
+  if (previousProcess) {
+    if (previousProcess.canClaimForLaunch(launchKey)) {
+      previousProcess.reserveTurn()
+      return previousProcess
+    }
+    if (previousProcess.hasInFlightTurn) {
+      throw previousProcess.buildBusyError(
+        'Codex app-server process is already serving a turn.',
+      )
+    }
+    const processExited =
+      previousProcess.child.exitCode !== null ||
+      previousProcess.child.signalCode !== null
+    const stopReason = processExited
+      ? 'process-exited'
+      : previousProcess.launchKey !== launchKey
+        ? 'launch-identity-changed'
+        : 'process-unhealthy'
+    await previousProcess.stop(stopReason)
+  }
+
+  const processInstance = new CodexAppServerProcess({
+    ...input,
+    coldStartReason:
+      previousProcess?.nextColdStartReason ?? 'node-process-first-use',
   })
+  warmCodexProcess = processInstance
+  processInstance.reserveTurn()
+  return processInstance
 }
 
 async function stopExactUnclaimedWarmCodexProcess(
@@ -2694,29 +2786,18 @@ export async function executeCodexManagedAccountOperation(
       rejectCompletion(error)
       rejectAccountUpdate(error)
     },
-    onParsedMessage(message) {
-      const responseId = readCodexRpcResponseId(message)
-      if (responseId !== null) {
-        const resolved = resolvePendingCodexRpcRequest({
-          message,
-          pendingRequests: processInstance.pendingRequests,
-          responseId,
-        })
-        if (
-          resolved === 'unknown_response_id'
-          && !processInstance.consumeIgnoredResponseId(responseId)
-        ) {
-          const error = new VaultCliError(
-            'ASSISTANT_CODEX_APP_SERVER_PROTOCOL_ERROR',
-            'Codex app-server returned an unexpected response during account authentication.',
-            { retryable: false },
-          )
-          rejectCompletion(error)
-          rejectAccountUpdate(error)
-        }
-        return
+    onRpcResponse(_message, method) {
+      if (method === null) {
+        const error = new VaultCliError(
+          'ASSISTANT_CODEX_APP_SERVER_PROTOCOL_ERROR',
+          'Codex app-server returned an unexpected response during account authentication.',
+          { retryable: false },
+        )
+        rejectCompletion(error)
+        rejectAccountUpdate(error)
       }
-
+    },
+    onParsedMessage(message) {
       const requestId = readCodexRpcServerRequestId(message)
       if (requestId !== null) {
         denyUnsupportedCodexServerRequest({
@@ -3054,31 +3135,15 @@ export async function compactWarmCodexThread(input: {
     onClose: () => settleCompaction('process_exit'),
     onError: () => settleCompaction('rpc_error'),
     onFramingError: () => settleCompaction('rpc_error'),
-    onParsedMessage: (message) => {
-      const responseId = readCodexRpcResponseId(message)
-      if (responseId !== null) {
-        const pending = processInstance.pendingRequests.get(responseId)
-        const resolveResult = resolvePendingCodexRpcRequest({
-          message,
-          pendingRequests: processInstance.pendingRequests,
-          responseId,
-        })
-        if (resolveResult === 'unknown_response_id') {
-          processInstance.consumeIgnoredResponseId(responseId)
+    onRpcResponse(message, method) {
+      if (method === 'thread/compact/start' && !message.error) {
+        compactRequestAccepted = true
+        if (compactCompletionBuffered) {
+          settleCompaction('compacted')
         }
-        if (
-          resolveResult !== 'unknown_response_id' &&
-          pending?.method === 'thread/compact/start' &&
-          !message.error
-        ) {
-          compactRequestAccepted = true
-          if (compactCompletionBuffered) {
-            settleCompaction('compacted')
-          }
-        }
-        return
       }
-
+    },
+    onParsedMessage: (message) => {
       const requestId = readCodexRpcServerRequestId(message)
       if (requestId !== null) {
         rejectCodexServerRequest({
@@ -5754,39 +5819,30 @@ async function runCodexAppServerTurnOnProcess(
     }
   }
 
-  function handleParsedMessage(message: CodexRpcMessage): void {
-    const responseId = readCodexRpcResponseId(message)
-    if (responseId !== null) {
-      const pending = codexProcess.pendingRequests.get(responseId)
-      const resolveResult = resolvePendingCodexRpcRequest({
-        message,
-        pendingRequests: codexProcess.pendingRequests,
-        responseId,
-      })
-      if (resolveResult === 'unknown_response_id') {
-        codexProcess.consumeIgnoredResponseId(responseId)
-        return
-      }
-      acceptJsonEvent(message)
-      if (message.error) {
-        return
-      }
-      if (pending?.method === 'turn/start') {
-        if (
-          codexProviderRequestStartedAtMs !== null &&
-          codexTimingTurnStartAckElapsedMs === null
-        ) {
-          codexTimingTurnStartAckElapsedMs = Math.max(
-            0,
-            Date.now() - codexProviderRequestStartedAtMs,
-          )
-        }
-        const resultTurnId = extractCodexTurnIdFromResult(message.result)
-        acceptTurnId(resultTurnId)
-      }
+  function handleRpcResponse(message: CodexRpcMessage, method: string | null): void {
+    if (method === null) {
       return
     }
+    acceptJsonEvent(message)
+    if (message.error) {
+      return
+    }
+    if (method === 'turn/start') {
+      if (
+        codexProviderRequestStartedAtMs !== null &&
+        codexTimingTurnStartAckElapsedMs === null
+      ) {
+        codexTimingTurnStartAckElapsedMs = Math.max(
+          0,
+          Date.now() - codexProviderRequestStartedAtMs,
+        )
+      }
+      const resultTurnId = extractCodexTurnIdFromResult(message.result)
+      acceptTurnId(resultTurnId)
+    }
+  }
 
+  function handleParsedMessage(message: CodexRpcMessage): void {
     const messageTurnId = extractCodexTurnIdFromMessage(message)
     const method = readCodexEventMethod(message)
     const requestId = readCodexRpcServerRequestId(message)
@@ -6073,6 +6129,7 @@ async function runCodexAppServerTurnOnProcess(
       )
     },
     onParsedMessage: handleParsedMessage,
+    onRpcResponse: handleRpcResponse,
     onSubagentMessage(message) {
       const threadId = extractCodexThreadIdFromMessage(message)
       if (threadId) {

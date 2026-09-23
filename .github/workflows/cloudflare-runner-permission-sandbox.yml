@@ -7,6 +7,7 @@ on:
       - ".github/workflows/cloudflare-runner-permission-sandbox.yml"
       - "Dockerfile.cloudflare-hosted-runner"
       - "Dockerfile.cloudflare-hosted-runner-base"
+      - "patches/codex-public-live.patch"
       - "apps/cloudflare/package.json"
       - "apps/cloudflare/scripts/runner-base-image*"
       - "apps/cloudflare/scripts/runner-bundle/**"
@@ -29,6 +30,7 @@ on:
       - ".github/workflows/cloudflare-runner-permission-sandbox.yml"
       - "Dockerfile.cloudflare-hosted-runner"
       - "Dockerfile.cloudflare-hosted-runner-base"
+      - "patches/codex-public-live.patch"
       - "apps/cloudflare/package.json"
       - "apps/cloudflare/scripts/runner-base-image*"
       - "apps/cloudflare/scripts/runner-bundle/**"
@@ -57,7 +59,7 @@ jobs:
   runner-permission-sandbox:
     name: Runner permission sandbox gate
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 90
     env:
       MURPH_RUNNER_BUNDLE_BUILD_CONCURRENCY: "4"
     steps:
@@ -88,6 +90,20 @@ jobs:
 
       - name: Prepare runner base image
         run: pnpm --dir apps/cloudflare runner:docker:base
+
+      - name: Extract the deployed Codex package for compatibility proof
+        run: |
+          image=$(node --input-type=module -e 'import { hostedLocalRunnerBaseImageTag } from "./apps/cloudflare/scripts/runner-base-image-contract.ts"; process.stdout.write(hostedLocalRunnerBaseImageTag)')
+          container=$(docker create "$image")
+          trap 'docker rm "$container" >/dev/null' EXIT
+          mkdir -p "$RUNNER_TEMP/murph-codex"
+          docker cp "$container:/usr/local/lib/murph-codex/." "$RUNNER_TEMP/murph-codex/"
+          echo "MURPH_TEST_CODEX_COMMAND=$RUNNER_TEMP/murph-codex/bin/codex" >> "$GITHUB_ENV"
+
+      - name: Prove deployed Codex native Live and provider compatibility
+        run: |
+          pnpm --dir packages/assistant-engine exec vitest run --config vitest.config.ts test/assistant-codex-native-voice.test.ts --no-coverage
+          pnpm exec vitest run --config apps/cloudflare/vitest.config.ts apps/cloudflare/test/codex-openai-egress-conformance.test.ts apps/cloudflare/test/runner-egress-openai-live.test.ts --no-coverage
 
       - name: Allow capability-bearing nested user namespaces
         run: |

@@ -3991,6 +3991,8 @@ export interface HostedWorkspaceInvocationBudget {
 }
 
 export interface HostedWorkspaceInvocationRequest {
+  /** Ephemeral reservation only; SDP never enters an invocation job. */
+  voiceCallId?: string;
   hostedAssistantPriorityUntil?: string;
   assistantExecutionBlocked?: true;
   attemptId: string;

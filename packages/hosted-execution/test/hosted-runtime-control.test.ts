@@ -766,6 +766,17 @@ describe("hosted runtime control contracts", () => {
       workspaceInvocationRequest,
     );
     expect(parseHostedWorkspaceInvocationRequest({
+      ...workspaceInvocationRequest, voiceCallId: "call-synthetic",
+    }).voiceCallId).toBe("call-synthetic");
+    for (const processingMode of ["system_mailbox", "inbox_media_retention"]) {
+      expect(() => parseHostedWorkspaceInvocationRequest({
+        ...workspaceInvocationRequest, voiceCallId: "call-synthetic", processingMode,
+      })).toThrow("Voice reservation requires default processing mode.");
+    }
+    expect(() => parseHostedWorkspaceInvocationRequest({
+      ...workspaceInvocationRequest, voiceCallId: "call:invalid",
+    })).toThrow("Hosted voice input identity is invalid.");
+    expect(parseHostedWorkspaceInvocationRequest({
       ...workspaceInvocationRequest,
       hostedAssistantPriorityUntil: "2026-09-24T00:00:00Z",
       workspace: null,

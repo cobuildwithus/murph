@@ -114,6 +114,7 @@ const wrapperCases = [
       'openAssistantConversation',
       'getAssistantStatus',
       'prepareHostedCodexAssistantProcess',
+      'startHostedCodexAssistantVoice',
       'redactAssistantStateString',
     ],
   ],
