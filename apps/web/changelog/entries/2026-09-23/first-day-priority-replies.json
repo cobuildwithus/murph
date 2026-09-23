@@ -1,0 +1,17 @@
+{
+  "publishedOn": "2026-09-23",
+  "order": 100,
+  "item": {
+    "id": "first-day-priority-replies",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Priority replies on your first day",
+    "summary": "Murph gives your personal conversations priority processing during your first 24 hours, at no extra cost.",
+    "details": "Available with supported OpenAI models through Murph. The boost uses your normal AI allowance rate and ends automatically after your first day. Custom providers keep their existing processing.",
+    "relevanceTags": [
+      "onboarding",
+      "performance"
+    ],
+    "sourcePullRequests": []
+  }
+}

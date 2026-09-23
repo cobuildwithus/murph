@@ -10,6 +10,7 @@ import {
   resolveAssistantUsageCredentialSource,
 } from '@murphai/hosted-execution/assistant-usage'
 import {
+  resolveAssistantCodexUsageProviderName,
   HOSTED_CUSTOM_INFERENCE_CODEX_MODEL_PROVIDER_ID,
   HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID,
   HOSTED_LOCAL_TEST_VENICE_CODEX_MODEL_PROVIDER_ID,
@@ -19,8 +20,10 @@ import {
   MURPH_MEMBER_READ_PERMISSION_PROFILE,
   MURPH_MEMBER_WORKSPACE_PERMISSION_PROFILE,
 } from '@murphai/hosted-execution/assistant-permissions'
+import { HOSTED_ASSISTANT_PRIORITY_UNTIL_ENV } from '@murphai/hosted-execution/env'
+import { isHostedAiUsageOpenAiTokenPricingProviderName } from '@murphai/hosted-execution/runtime-control'
 import {
-  hasHostedCodexModelCatalogFlexTier,
+  hasHostedCodexModelCatalogServiceTier,
 } from '../assistant-codex/config.js'
 import {
   executeCodexAssistantTurnAttemptFromInput,
@@ -764,8 +767,7 @@ function buildCodexAttemptProviderInput(
   const attemptEnv = attemptPlan.routePlan.cliEnv
   const serviceTier = resolveCodexAttemptServiceTier({
     env: attemptEnv,
-    executionContext: executionPlan.executionContext,
-    requestedServiceTier: executionPlan.input.serviceTier ?? null,
+    executionPlan,
     routeModel: attemptPlan.route.providerOptions.model ?? null,
     routeModelProvider: attemptPlan.route.providerOptions.modelProvider ?? null,
   })
@@ -802,7 +804,7 @@ function buildCodexAttemptProviderInput(
             : attemptPlan.route.providerOptions.sandbox,
     },
     turn: {
-      abortSignal: serviceTier
+      abortSignal: serviceTier === 'flex'
         ? composeAssistantProviderFlexDeadlineSignal(executionPlan.input.abortSignal)
         : executionPlan.input.abortSignal,
       analyzeVideoTurnState: input.analyzeVideoTurnState ?? null,
@@ -1053,29 +1055,47 @@ function countBucket(value: number):
 
 function resolveCodexAttemptServiceTier(input: {
   env: NodeJS.ProcessEnv
-  executionContext: AssistantCodexTurnExecutionPlan['executionContext']
-  requestedServiceTier: AssistantProviderServiceTier | null
+  executionPlan: AssistantCodexTurnExecutionPlan
   routeModel: string | null
   routeModelProvider: string | null
 }): AssistantProviderServiceTier | null {
-  if (input.requestedServiceTier === null) {
+  const { executionContext, input: turn, profile } = input.executionPlan
+  const requestedServiceTier = turn.serviceTier ?? null
+  if (!executionContext?.hosted) {
     return null
   }
-  if (!input.executionContext?.hosted) {
+  const priorityUntil = Date.parse(input.env[HOSTED_ASSISTANT_PRIORITY_UNTIL_ENV] ?? '')
+  const remainingMs = priorityUntil - Date.now()
+  if (requestedServiceTier === null
+    && profile.promptProfile === 'conversation'
+    && turn.turnTrigger !== 'automation-cron'
+    && !turn.scheduledOccurrenceAt
+    && !turn.maintenanceProfile
+    && remainingMs > 0 && remainingMs <= 86_400_000
+    && isHostedAiUsageOpenAiTokenPricingProviderName(
+      resolveAssistantCodexUsageProviderName(input.routeModelProvider),
+    )
+    && hasHostedCodexModelCatalogServiceTier({
+      env: input.env, model: input.routeModel, serviceTier: 'priority',
+    })) {
+    return 'priority'
+  }
+  if (requestedServiceTier === null) {
     return null
   }
   if (resolveCodexAssistantProviderTokenPricingBasis({
     model: input.routeModel,
     modelProvider: input.routeModelProvider,
-    serviceTier: input.requestedServiceTier,
+    serviceTier: requestedServiceTier,
   }) !== 'openai-flex') {
     return null
   }
-  return hasHostedCodexModelCatalogFlexTier({
+  return hasHostedCodexModelCatalogServiceTier({
+    serviceTier: 'flex',
     env: input.env,
     model: input.routeModel,
   })
-    ? input.requestedServiceTier
+    ? requestedServiceTier
     : null
 }
 

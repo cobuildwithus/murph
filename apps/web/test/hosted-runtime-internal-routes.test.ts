@@ -2367,10 +2367,10 @@ describe("hosted runtime internal web routes", () => {
     _name, plan, familyPlan, group, provider, astraAllowed,
   ) => {
     process.env.HOSTED_VENICE_ENABLED = "1";
-    const { resolveHostedMemberAssistantModel } = await vi.importActual<
+    const { readHostedMemberAssistantModelPreference } = await vi.importActual<
       typeof import("@/src/lib/hosted-onboarding/assistant-model-preference")
     >("@/src/lib/hosted-onboarding/assistant-model-preference");
-    const configuration = resolveHostedMemberAssistantModel({
+    const member = {
       accountGroupMemberships: familyPlan ? [{
         group: { billingStatus: "active", suspendedAt: null },
         planCode: familyPlan,
@@ -2380,10 +2380,15 @@ describe("hosted runtime internal web routes", () => {
       assistantProviderPreference: provider,
       assistantReasoningEffortPreference: null,
       billingRef: plan ? { currentBillingPhase: "paid", currentBillingPlanCode: plan } : null,
+      createdAt: new Date("2026-09-23T12:00:00Z"),
       billingStatus: familyPlan ? "not_started" : "active",
       inferenceConnection: null,
       suspendedAt: null,
       threadContainer: group ? { memberId: "synthetic_group_member" } : null,
+    };
+    const configuration = await readHostedMemberAssistantModelPreference({
+      memberId: "member_onboarding",
+      prisma: { hostedMember: { findUnique: vi.fn().mockResolvedValue(member) } },
     });
     mocks.readHostedMemberAssistantModelPreference.mockResolvedValueOnce(configuration);
     const response = await workspaceRoute.GET(new Request(
@@ -2392,6 +2397,8 @@ describe("hosted runtime internal web routes", () => {
     expect(response.status).toBe(200);
     const workspace = parseHostedWorkspaceReadResponse(await response.json());
     expect(workspace.hostedAssistantAstraAllowed).toBe(astraAllowed);
+    expect(workspace.hostedAssistantPriorityUntil).toBe(!group && provider === "openai"
+      ? "2026-09-24T12:00:00.000Z" : undefined);
     expect(workspace.hostedAssistantSubagentModelOverridesAllowed).toBe(!["individual Pulse", "Family Pulse"].includes(_name));
   });
 
