@@ -1,6 +1,6 @@
 # Restore scheduled context and pattern capture reliability
 
-Status: active
+Status: completed
 Created: 2026-09-22
 Updated: 2026-09-22
 
@@ -71,5 +71,11 @@ Updated: 2026-09-22
 - Awaiting the member identifier needed to select the hosted vault safely. Existing Ops authentication works, but no hosted mutation or provider refresh has been submitted without an exact target.
 - Missing original source files cannot be reconstructed from absent bytes. Current hosted existence/recovery still needs that target.
 - Code is locally verified, not deployed. Longer stream silence can delay transport fallback; the existing 120-second idle-maintenance budget can still interrupt a very slow fallback. No claim of eliminating provider stalls is made.
-- No PR or push was requested. Keep this plan active with the scoped local candidate commit. External ReviewGPT, exact-head CI, deployment, and post-deployment verification remain release gates.
-- Product UX: local/replay proof Ready; live-vault rollout Hold pending target and release verification. Changelog: updated, with source PR attribution pending PR creation.
+- The user authorized PR creation and ReviewGPT completion. Implementation and isolated replay are complete; PR #3661 carries the release review and exact-head CI evidence. Deployment and live-vault repair remain separate, unperformed follow-ups.
+- Product UX: local/replay proof Ready; live-vault rollout Hold pending target and release verification. Changelog: updated, with source PR attribution is #3661.
+
+## Completion boundary
+
+- Closed for implementation and private replay. Exact-head CI and ReviewGPT results are recorded on PR #3661. No claim of hosted repair, deployment, GPT-6 availability, or recovery of absent source bytes is made.
+- Complete native-provider request measurement with identical synthetic direct/group fixtures passed. Individual decoded bytes: 145704 base, 146883 head; group: 136112 for both. Exact target tokenization remains unavailable and is reported as a limitation.
+Completed: 2026-09-22
