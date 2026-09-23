@@ -229,9 +229,15 @@ Repair every supported mismatch through the existing automation inspect and
 version-checked patch path, not just location. This includes stale activity,
 preparation, equipment, venue, wording, dates, timezone assumptions, and references.
 Update event-relative timing when the underlying event moves, preserving the
-member's requested offset. Fix a schedule that contradicts an explicit current
-member request. Preserve an explicitly chosen clock time unless the member changed
-it; a calendar conflict or inferred preference alone does not authorize moving it.
+member's requested offset. Calculate the due instant with timezone-aware code
+from the canonical timestamp and its explicit offset (`Z` means UTC), applying the
+requested interval once. For a one-shot, convert that instant into the event's
+IANA timezone for `schedule.localAt`; use the rules for that date, never an assumed UTC
+offset. Check the returned `occurrenceProjection.nextOccurrenceAt` against the
+calculated instant before considering the timing repaired. Fix a schedule that
+contradicts an explicit current member request. Preserve an explicitly chosen
+clock time unless the member changed it; a calendar conflict or inferred preference
+alone does not authorize moving it.
 Archive obsolete one-off reminders when that exact task or event is confirmed
 completed, canceled, or superseded. Completion of one occurrence never retires a
 recurring habit. Remove only verified duplicates of the same purpose, occurrence,
@@ -240,10 +246,13 @@ reminder. Similar titles alone do not establish duplication.
 
 Keep changing facts in their canonical owners. Replace a permanently embedded
 incidental assumption with instructions to resolve current context at execution;
-for outdoor reminders, use the `connected-apps` location policy and then weather.
-Preserve an explicitly fixed destination or venue unless that destination itself
-was corrected. Do not copy the new itinerary into every reminder or create another
-location store. The reminder still resolves location if this morning pass fails.
+for outdoor reminders, refer to the `connected-apps` location policy and then
+weather. Make the smallest instruction edit, preserving the original activity and
+delivery
+conditions. Reuse that policy instead of copying its procedure or adding new
+weather-based suppression rules. Preserve an explicitly fixed destination or venue
+unless that destination itself was corrected. Do not copy the new itinerary into
+every reminder or create another location store. The reminder still resolves location if this morning pass fails.
 
 Patch only fields justified by current evidence. Preserve delivery route, audience,
 identity, and all unrelated fields. Use the owning support/clinical skill for

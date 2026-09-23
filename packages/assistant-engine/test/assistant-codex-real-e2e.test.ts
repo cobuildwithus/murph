@@ -15831,12 +15831,19 @@ describeRealCodex('real Codex Journal connected email travel capture e2e', () =>
       const savedNotes = (await readVaultRawTolerant(workingDirectory)).events.filter(event => event.kind === 'note')
       expect(savedNotes).toHaveLength(1)
       const upcoming = await refreshJournalTestContext(workingDirectory, '2026-08-31T06:00:00Z')
-      expect(upcoming.entries).toHaveLength(1)
+      expect(upcoming.entries, JSON.stringify({
+        notes: savedNotes,
+        ledger: (await getKnowledgePage({ vault: workingDirectory, slug: 'journal-connected-context' })).page.body,
+      })).toHaveLength(1)
       expect(upcoming.entries[0]?.eventId).toBe(savedNotes[0]?.entityId)
       const upcomingText = JSON.stringify(upcoming)
       expect(upcomingText).toMatch(/Lisbon/iu)
       expect(upcomingText).toMatch(/Warsaw/iu)
-      expect(upcomingText).toMatch(/2026-09-12/u)
+      const trip = upcoming.entries[0]!
+      expect(trip.timeZone).toBeTruthy()
+      expect(new Intl.DateTimeFormat('en-CA', {
+        timeZone: trip.timeZone!, year: 'numeric', month: '2-digit', day: '2-digit',
+      }).format(new Date(trip.startsAt))).toBe('2026-09-12')
       expect(upcomingText).toMatch(/2026-09-15|September 15|15 Sep(?:tember)?/iu)
       expect(upcomingText).not.toMatch(/ZX9Q|HTL-4431|1200|Rua Example/iu)
       expect(await readAssistantContextSnapshotPrompt({ vaultRoot: workingDirectory, now: new Date('2026-08-31T06:00:00Z') })).toContain('Lisbon')

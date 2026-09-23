@@ -423,8 +423,8 @@ export const MURPH_MANAGED_AUTOMATIONS = [
     ownerScope: 'member',
     hostedRuntimeOnly: true,
     assistantTargetOverride: {
-      model: 'gpt-5.6-luna',
-      reasoningEffort: 'high',
+      model: 'gpt-5.6-terra',
+      reasoningEffort: 'low',
     },
     tags: ['murph-managed:journal-connected-context'],
     instructions: [

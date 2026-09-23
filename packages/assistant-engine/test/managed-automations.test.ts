@@ -1785,7 +1785,7 @@ describe('applyMurphManagedAutomations', () => {
     expect(managedAutomationMocks.records.get(morning.automationId)?.status).toBe('active')
   })
 
-  it('defines one hosted morning Journal context pass on Luna high', () => {
+  it('defines one hosted morning Journal context pass on Terra low', () => {
     const morning = MURPH_MANAGED_AUTOMATIONS.find(
       (seed) =>
         seed.automationId ===
@@ -1799,8 +1799,8 @@ describe('applyMurphManagedAutomations', () => {
 
     expect(morning).toMatchObject({
       assistantTargetOverride: {
-        model: 'gpt-5.6-luna',
-        reasoningEffort: 'high',
+        model: 'gpt-5.6-terra',
+        reasoningEffort: 'low',
       },
       hostedRuntimeOnly: true,
       schedule: { kind: 'dailyLocal', localTime: '08:00' },
@@ -1819,10 +1819,10 @@ describe('applyMurphManagedAutomations', () => {
     { label: 'absent override', override: undefined },
     { label: 'inherited member model', override: null },
     {
-      label: 'previous explicit model',
-      override: { model: 'gpt-5.6-sol', reasoningEffort: 'high' },
+      label: 'previous Luna model',
+      override: { model: 'gpt-5.6-luna', reasoningEffort: 'high' },
     },
-  ])('reconciles Journal $label to Luna without changing other jobs or reading member preferences', async ({ override }) => {
+  ])('reconciles Journal $label to Terra without changing other jobs or reading member preferences', async ({ override }) => {
     const options = {
       defaultRoute,
       now: new Date('2026-09-01T12:00:00.000Z'),
@@ -1833,13 +1833,13 @@ describe('applyMurphManagedAutomations', () => {
       vaultRoot,
     }
     const journalIds = [MURPH_JOURNAL_CONNECTED_CONTEXT_MORNING_AUTOMATION_ID]
-    const lunaOverride = { model: 'gpt-5.6-luna', reasoningEffort: 'high' }
+    const morningOverride = { model: 'gpt-5.6-terra', reasoningEffort: 'low' }
 
     await applyMurphManagedAutomations(options)
     for (const automationId of journalIds) {
       const record = managedAutomationMocks.records.get(automationId)
       if (!record) throw new Error('Expected the managed Journal automation')
-      expect(record.assistantTargetOverride).toEqual(lunaOverride)
+      expect(record.assistantTargetOverride).toEqual(morningOverride)
       managedAutomationMocks.records.set(automationId, {
         ...record,
         assistantTargetOverride: override,
@@ -1864,7 +1864,7 @@ describe('applyMurphManagedAutomations', () => {
     for (const automationId of journalIds) {
       const record = expectedRecords.get(automationId)
       if (!record) throw new Error('Expected the managed Journal automation')
-      record.assistantTargetOverride = lunaOverride
+      record.assistantTargetOverride = morningOverride
     }
     managedAutomationMocks.upsertAutomation.mockClear()
     managedAutomationMocks.patchAutomation.mockClear()

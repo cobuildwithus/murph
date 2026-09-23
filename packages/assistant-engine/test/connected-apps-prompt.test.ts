@@ -32,6 +32,9 @@ describe('connected-apps skill and system-prompt coverage', () => {
       'existing automation inspect and version-checked patch path, not just location',
       'Update event-relative timing when the underlying event moves',
       "preserving the member's requested offset",
+      'Calculate the due instant with timezone-aware code',
+      'canonical timestamp and its explicit offset (`Z` means UTC)',
+      'Check the returned `occurrenceProjection.nextOccurrenceAt` against the calculated instant',
       'Fix a schedule that contradicts an explicit current member request',
       'Preserve an explicitly chosen clock time unless the member changed it',
       'Completion of one occurrence never retires a recurring habit',
@@ -44,6 +47,8 @@ describe('connected-apps skill and system-prompt coverage', () => {
       'Already correct reminders need no write',
       'Repairs stay silent and create no extra follow-up or notification',
       'Do not copy the new itinerary into every reminder',
+      'Make the smallest instruction edit, preserving the original activity and delivery conditions',
+      'Reuse that policy instead of copying its procedure or adding new weather-based suppression rules',
       'Continue existing reminder reconciliation using only permitted member-supplied canonical context',
       'including reminder repair and automatic context projection',
     ]) expect(skill).toContain(text)

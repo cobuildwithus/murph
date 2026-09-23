@@ -126,7 +126,8 @@ or trip, and calendar check-ins one hour after a timed event ends. Date-only
 all-day plans never infer an overnight check-in from a midnight boundary. Routine Journal
 writes and upcoming-context refreshes stay silent.
 
-The morning pass uses `gpt-5.6-luna` with high reasoning effort. Ordinary managed
+The morning pass uses `gpt-5.6-terra` with low reasoning effort for contextual
+reconciliation of existing reminders as well as connected plans. Ordinary managed
 reconciliation archives the fixed afternoon automation without removing its
 Journal records or standalone follow-ups. Existing paused/archived morning records
 retain their status; active records converge to the current recipe.
