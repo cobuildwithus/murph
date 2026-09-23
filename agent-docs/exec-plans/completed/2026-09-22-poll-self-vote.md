@@ -20,7 +20,7 @@ Entry: current iMessage or Telegram conversation. Affected: participating group 
 - [x] Deterministic schema, scoped read/write, revocation, unsupported-channel and failure proof.
 - [x] Focused real-Codex journeys and reply review.
 - [x] Relevant tests, typechecks, parent review, changelog and complexity guard.
-- [ ] Required external review and final completion evidence.
+- [x] Required external review and final local completion evidence.
 
 Live production messaging is not part of synthetic verification. Changelog describes iMessage voting and Telegram's distinct limitation.
 
@@ -37,3 +37,12 @@ Existing Frog entries cover the documented changelog test working directory and 
 Live recovery initially repeated an uncertain vote after readback. The owning tool description and failure reply now prohibit automatic resubmission; deterministic recovery proof passes and the exact live case is rerunning. Removal fixture now models the removed ballot in its returned counts. Full native/deferred/code-only contract selection passes (16 tests). Worker typecheck passes.
 
 Final local evidence: five isolated real-Codex journeys pass on gpt-5.6-terra through a local subscription. Tie-breaker and removal each submit one vote; Telegram and settled decisions submit none; uncertain acknowledgement submits once and may read back without resubmitting or claiming success. Every synthetic reply reviewed: Ready. Web, Worker, engine and hosted-execution typechecks pass; focused contract capture and full native/deferred/code-only tool-contract selection pass. Changelog entry references PR #3658. Parent candidate review confirms native own-line effects, unchanged old actions, provider limits, signed current-conversation authority, no fake Telegram tally, and consumer-first rollout. Final external review and exact-head CI remain pending on PR #3658.
+
+## Final review and handoff
+
+Round 1 ReviewGPT passed on 7f26b795365dfed827594b7bb2301888fb8316da with no qualifying Critical/High finding or material Complexity Collapse. Eragon selected and verified gpt-6-pro; exact accepted turn, guarded full snapshot, response identity, minimum 180-second marked-response gate and REVIEW_COMPLETE marker validated. Parent read the full result and accepts the source-based audit. The first browser lane could not start, so the same round used an available lane; no finding was discarded. Parent final diff/privacy review passes. The only later change archives this plan and updates its index link; production code is unchanged.
+
+Implementation and local proof are complete. PR #3658 owns the final exact-head CI result and remains the deployment handoff. Final CI is still running at archival time; do not treat this historical plan as evidence of a deployment or a live channel smoke. Deploy Web before the runtime, then test native iMessage add/remove and truthful Telegram fallback.
+Status: completed
+Updated: 2026-09-22
+Completed: 2026-09-22
