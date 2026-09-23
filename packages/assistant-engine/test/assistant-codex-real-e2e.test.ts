@@ -102,6 +102,7 @@ import {
 } from '@murphai/operator-config/vault-cli-contracts'
 import {
   parsePersonalPatternVocabulary,
+  buildPersonalPatternReport,
   buildJournalView,
   readVaultRawTolerant,
   resolveMealNutritionGoals,
@@ -135,6 +136,7 @@ import {
   parseAssistantRealCodexRunArgs,
 } from '../../../scripts/run-assistant-real-codex-e2e.ts'
 import {
+  compactWarmCodexThread,
   executeCodexAppServerTurn,
   readCodexAppServerTurnFailureContext,
   resolveMurphDynamicTools,
@@ -168,6 +170,7 @@ import {
   MURPH_GENERATE_IMAGE_TOOL,
   MURPH_GROUP_CHAT_TOOL,
   MURPH_GROUP_DATA_TOOL,
+  MURPH_GROUP_EMAIL_TOOL,
   MURPH_GROUP_MEMBERSHIP_TOOL,
   MURPH_GROUP_SHARED_READ_TOOL,
   MURPH_GROUP_USAGE_TOOL,
@@ -651,7 +654,7 @@ afterAll(() => {
     )
   }
 })
-const DEFAULT_REAL_CODEX_MODEL = 'gpt-5.6-terra'
+const DEFAULT_REAL_CODEX_MODEL = 'gpt-6-sol'
 const REAL_CODEX_HOSTED_CONFIG_OVERRIDES = [
   'allow_login_shell=false',
   'features.plugins=false',
@@ -1412,18 +1415,19 @@ describeRealCodex('real Codex voice memo attachment evidence e2e', () => {
   )
 })
 
-describeRealCodex('real Codex Astra configuration e2e', () => {
-  it('saves Astra exactly once for the next Edge query', async () => {
+describeRealCodex('real Codex GPT-6 configuration e2e', () => {
+  it.each(['astra', 'sol', 'luna'] as const)('saves GPT-6 %s exactly once for the next query', async (variant) => {
+    const selectedModel = `gpt-6-${variant}` as const
     const config = await resolveRealCodexE2eConfig()
     const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-astra-selection-'))
     const updates: unknown[] = []
     const snapshot: import('@murphai/hosted-execution/runtime-control').HostedRuntimeAssistantConfigurationSnapshot = {
-      availableModels: ['gpt-5.6-luna', 'gpt-5.6-terra', 'gpt-5.6-sol', 'gpt-6-astra'],
+      availableModels: ['gpt-6-sol', 'gpt-6-luna', 'gpt-5.6-luna', 'gpt-5.6-sol', 'gpt-6-astra'],
       availableProviders: ['openai'] as const,
       availableReasoningEfforts: ['low', 'medium', 'high', 'xhigh'] as const,
       configurationAvailable: true,
       dormantSolPreference: false,
-      model: 'gpt-5.6-terra' as const,
+      model: 'gpt-5.6-luna' as const,
       provider: 'openai' as const,
       reasoningEffort: 'low' as const,
       solAvailable: true,
@@ -1449,7 +1453,7 @@ describeRealCodex('real Codex Astra configuration e2e', () => {
           },
           computerToolsAvailable: false,
           currentAssistantInputId: () => 'ain_00000000000000000000000000000061',
-          currentAssistantTarget: () => ({ model: 'gpt-5.6-terra', provider: 'openai', reasoningEffort: 'low' }),
+          currentAssistantTarget: () => ({ model: 'gpt-6-sol', provider: 'openai', reasoningEffort: 'low' }),
           currentHostedDeliveryContext: () => null,
           currentHostedMailboxItemIds: () => [],
           sendVaultFile: async () => ({ filename: 'unused', status: 'denied' }),
@@ -1457,15 +1461,15 @@ describeRealCodex('real Codex Astra configuration e2e', () => {
         },
         model: config.model,
         modelProvider: config.modelProvider,
-        prompt: 'I am on the paid Edge plan. Please use GPT-6 Astra for my future queries. Keep my provider and reasoning settings as they are.',
+        prompt: `I am on the paid Edge plan. Please use GPT-6 ${variant} for my future queries. Keep my provider and reasoning settings as they are.`,
         reasoningEffort: 'low',
         sandbox: 'workspace-write',
         vaultRoot: workingDirectory,
         workingDirectory,
       })
-      process.stdout.write(`[astra-selection-e2e] ${JSON.stringify({ reply: result.finalMessage, updates: updates.length })}\n`)
-      expect(updates).toEqual([{ action: 'update', assistantInputId: 'ain_00000000000000000000000000000061', model: 'gpt-6-astra' }])
-      expect(result.finalMessage).toMatch(/Astra/iu)
+      process.stdout.write(`[gpt6-selection-e2e] ${JSON.stringify({ model: selectedModel, reply: result.finalMessage, updates: updates.length })}\n`)
+      expect(updates).toEqual([{ action: 'update', assistantInputId: 'ain_00000000000000000000000000000061', model: selectedModel }])
+      expect(result.finalMessage).toMatch(new RegExp(variant, 'iu'))
       expect(result.finalMessage).toMatch(/next|future|going forward/iu)
       expect(result.finalMessage).not.toMatch(/upgrade|payment|cannot|unable/iu)
       expect(readCapabilityRoutingActions(result.jsonEvents).filter((action) => action.kind === 'command')).toEqual([])
@@ -2776,7 +2780,7 @@ describe('real Codex live fixture contracts', () => {
   }, 120_000)
 
   it('uses production Responses websocket configuration for canonical provider journeys', () => {
-    const toml = buildRealCodexConfigToml({ apiKeyEnv: 'OPENAI_API_KEY', model: 'gpt-5.6-terra', modelProvider: 'openai-env', productionTransport: true })
+    const toml = buildRealCodexConfigToml({ apiKeyEnv: 'OPENAI_API_KEY', model: 'gpt-6-sol', modelProvider: 'openai-env', productionTransport: true })
     expect(toml).toContain('wire_api = "responses"')
     expect(toml).toContain('supports_websockets = true')
     expect(toml).toContain(`base_url = "${OPENAI_CODEX_MODEL_PROVIDER_CONFIG.baseUrl}"`)
@@ -2784,7 +2788,7 @@ describe('real Codex live fixture contracts', () => {
     expect(toml.split('[model_providers.')[0]).not.toContain('OPENAI_API_KEY')
   })
   it('executes canonical gate CLI commands and rejects an unknown command without a model', async () => {
-    const fixture = await createCanonicalLiveFixture({ codexHome: null, env: { PATH: process.env.PATH }, model: 'gpt-5.6-terra', modelProvider: 'openai-env' })
+    const fixture = await createCanonicalLiveFixture({ codexHome: null, env: { PATH: process.env.PATH }, model: 'gpt-6-sol', modelProvider: 'openai-env' })
     try {
       const codex = await execFileAsync(fixture.codexCommand, ['-c', 'default_permissions="murph-member-read"', 'features', 'list'], { env: fixture.env, timeout: 60_000 })
       expect(codex.stdout.trim()).not.toBe('')
@@ -6299,7 +6303,7 @@ describeRealCodex('real Codex preference source e2e', () => {
           personalizationTool: {
             async request(request, authority) {
               if (request.action === 'read') return { action: 'read', result: {
-                mainPersona: 'classic', model: 'gpt-5.6-terra', solAvailable: true,
+                mainPersona: 'classic', model: 'gpt-6-sol', solAvailable: true,
                 supportingPersona: null, tone: 'casual', voice: 'warm',
               } }
               writes.push({ request, authority })
@@ -6320,7 +6324,7 @@ describeRealCodex('real Codex preference source e2e', () => {
               expect(authority).toMatchObject({ assistantInputId: later })
               expect(request).toEqual({ action: 'update', tone: 'formal' })
               return { action: 'update', result: {
-                mainPersona: 'classic', model: 'gpt-5.6-terra',
+                mainPersona: 'classic', model: 'gpt-6-sol',
                 modelChangeAppliesNextRun: false, modelUpdated: false, solAvailable: true,
                 status: 'saved', supportingPersona: null, tone: 'formal', voice: 'warm',
               } }
@@ -8958,7 +8962,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
                         action: 'read',
                         result: {
                           mainPersona: 'classic',
-                          model: 'gpt-5.6-terra',
+                          model: 'gpt-6-sol',
                           solAvailable: true,
                           supportingPersona: null,
                           tone: 'casual',
@@ -8971,7 +8975,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
                         action: 'update',
                         result: {
                           mainPersona: 'classic',
-                          model: 'gpt-5.6-terra',
+                          model: 'gpt-6-sol',
                           modelChangeAppliesNextRun: false,
                           modelUpdated: false,
                           solAvailable: true,
@@ -9936,6 +9940,159 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
     },
     720_000,
   )
+
+  it('prepares a sparse multi-metric group email despite batch label differences', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-email-label-batches-e2e-'))
+    const reads: AssistantHostedGroupSharedReadRequest[] = []
+    const effects: string[] = []
+    let emailText = ''
+    try {
+      const scopes = [
+        { projectionKind: 'steps-days.v0' as const }, { projectionKind: 'sleep-duration-days.v0' as const },
+        { projectionKind: 'hrv-days.v0' as const }, { projectionKind: 'workouts.v0' as const },
+      ]
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome, env: config.env,
+        developerInstructions: buildAssistantSystemPrompt({
+          assistantCliContract: null, onboardingGuidance: false, modelBehaviorProfile: 'gpt5-agentic',
+          assistantHostedGroupToolSurface: 'families', channel: 'linq',
+          cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+          conversationScope: 'group', hostedRuntime: true,
+          currentLocalDate: '2026-09-20', currentTimeZone: 'America/New_York',
+          turnTrigger: 'automation-cron', scheduledOccurrenceAt: '2026-09-20T13:00:00.000Z',
+        }),
+        dynamicTools: [MURPH_GROUP_DATA_TOOL, MURPH_GROUP_EMAIL_TOOL],
+        groupConversation: true,
+        hostedToolContext: {
+          computerToolsAvailable: false, currentHostedDeliveryContext: () => null,
+          currentHostedMailboxItemIds: () => [],
+          currentScheduledAutomationAuthority: () => ({
+            automationId: 'automation_report', occurrenceAt: '2026-09-20T13:00:00.000Z',
+          }),
+          groupEmailEffect: { request: async (request) => {
+            effects.push(request.action)
+            if (request.action === 'send_email') {
+              emailText = request.text ?? request.html
+              return { action: 'send_email', result: { status: 'accepted', participantCount: 2,
+                skippedNoEmailMemberIds: [], deliveryId: 'delivery_report' } }
+            }
+            return { action: 'prepare_email', result: { status: 'ok',
+              authorizationProof: 'a'.repeat(64), groupId: 'group_report', missingEmailParticipants: [],
+              participants: [0, 1].map((index) => ({ memberId: `member_report_${index}`, hasEmail: true,
+                authorizedShares: scopes.map((scope) => ({
+                  projectionScopeKey: scope.projectionKind, shareId: `share_${index}_${scope.projectionKind}`,
+                })),
+              })),
+            } }
+          } },
+          groupSharedReader: { request: async (request) => {
+            reads.push(request)
+            const hasSteps = request.projectionScopes.some((scope) => scope.projectionKind === 'steps-days.v0')
+            return { status: 'ok', requestedProjectionScopeKeys: request.projectionScopes.map((scope) => scope.projectionKind),
+              members: ['Cedar', 'Rowan'].map((name, index) => ({
+                displayName: hasSteps ? name : `Participant ${index === 0 ? 'A7C29D4E61F0' : 'BC026DF831A9'}`,
+                participantId: `participant_report_${index}`, memberId: `member_report_${index}`, currentTurnHandles: [],
+                projections: request.projectionScopes.map((projectionScope) => ({
+                  projectionScope, projectionScopeKey: projectionScope.projectionKind, grantStatus: 'granted',
+                  dataStatus: projectionScope.projectionKind === 'steps-days.v0' ? 'available' : 'missing',
+                  records: projectionScope.projectionKind === 'steps-days.v0' ? [{
+                    recordKey: '2026-09-19', occurredAt: '2026-09-19T00:00:00.000Z',
+                    data: { date: '2026-09-19', metricKey: 'steps', value: 4000 + index * 1000, unit: 'count' },
+                  }] : [],
+                })),
+              })),
+            } satisfies AssistantHostedGroupSharedReadResponse
+          } },
+          sendVaultFile: async () => { throw new Error('File sending is unavailable in this synthetic journey.') },
+          vaultFileSendAvailable: false,
+        },
+        model: config.model, modelProvider: config.modelProvider,
+        prompt: 'Scheduled automation: prepare and queue the group email for September 19. Read steps-days.v0, sleep-duration-days.v0, hrv-days.v0, and workouts.v0 together with audience group_email. Include every member, report available values, and say when a metric has no shared records.',
+        reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
+      })
+      process.stdout.write(`[email-label-batches-e2e] ${JSON.stringify({ effects, reads, emailText, reply: result.finalMessage })}\n`)
+      expect(effects).toEqual(['prepare_email', 'send_email'])
+      expect(reads).toHaveLength(2)
+      expect(reads.flatMap((read) => read.projectionScopes).map((scope) => scope.projectionKind).sort())
+        .toEqual(scopes.map((scope) => scope.projectionKind).sort())
+      expect(emailText).toMatch(/Cedar[\s\S]*4,?000/u)
+      expect(emailText).toMatch(/Rowan[\s\S]*5,?000/u)
+      expect(emailText).toMatch(/no (?:shared )?(?:data|records)|unavailable|not (?:shared|available)/iu)
+      expect(emailText).not.toMatch(/unverified|member_report_|participant_report_|authorizationProof/iu)
+    } finally {
+      await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+    }
+  }, 360_000)
+
+
+  it('labels every scheduled shared row using host names and stable participant fallbacks', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-group-report-labels-e2e-'))
+    const requests: AssistantHostedGroupSharedReadRequest[] = []
+    try {
+      const skillsRoot = path.join(workingDirectory, 'skills')
+      await materializeAssistantSkill({ skillsRoot, slug: 'group-chat' })
+      const names = ['Rowan', 'Cedar', 'Participant A7C29D4E61F0', 'River (9A3D21F065B7)', 'River (BC026DF831A9)']
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions: buildAssistantSystemPrompt({
+          assistantCliContract: null, onboardingGuidance: false, modelBehaviorProfile: 'gpt5-agentic',
+          assistantHostedGroupToolSurface: 'shared_read', channel: 'linq',
+          cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+          conversationScope: 'group', hostedRuntime: true,
+          currentLocalDate: '2026-09-20', currentTimeZone: 'America/New_York',
+          turnTrigger: 'automation-cron', scheduledOccurrenceAt: '2026-09-20T13:00:00.000Z',
+        }),
+        dynamicTools: [MURPH_GROUP_SHARED_READ_TOOL],
+        env: { ...config.env, [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot },
+        groupConversation: true,
+        hostedToolContext: {
+          computerToolsAvailable: false, currentHostedDeliveryContext: () => null,
+          currentHostedMailboxItemIds: () => [],
+          groupSharedReader: { request: async (request) => {
+            requests.push(request)
+            return {
+              status: 'ok', requestedProjectionScopeKeys: ['steps-days.v0'],
+              members: names.map((displayName, index) => ({
+                displayName, participantId: `participant_report_${index}`,
+                memberId: `member_report_${index}`, currentTurnHandles: [],
+                projections: [{
+                  projectionScope: { projectionKind: 'steps-days.v0' }, projectionScopeKey: 'steps-days.v0',
+                  grantStatus: 'granted', dataStatus: 'available',
+                  records: [{ recordKey: '2026-09-19', occurredAt: '2026-09-19T00:00:00.000Z',
+                    data: { date: '2026-09-19', metricKey: 'steps', value: 4000 + index * 1000, unit: 'count' } }],
+                }],
+              })),
+            } satisfies AssistantHostedGroupSharedReadResponse
+          } },
+          sendVaultFile: async () => { throw new Error('File sending is unavailable in this synthetic journey.') },
+          vaultFileSendAvailable: false,
+        },
+        model: config.model, modelProvider: config.modelProvider,
+        prompt: 'Scheduled group automation: daily steps summary. Report every participant’s shared steps for September 19, 2026 in one concise text update. There is no current sender.',
+        reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
+      })
+      const decision = parseAssistantNotificationDecision(result.finalMessage)
+      process.stdout.write(`[group-report-labels-e2e] ${JSON.stringify({ decision, requests })}\n`)
+      expect(requests).toEqual([{ projectionScopes: [{ projectionKind: 'steps-days.v0' }] }])
+      expect(decision.kind).toBe('send_message')
+      if (decision.kind !== 'send_message') throw new Error('Expected the scheduled report.')
+      for (const [index, name] of names.entries()) {
+        expect(decision.text).toContain(name)
+        const afterName = decision.text.slice(decision.text.indexOf(name) + name.length)
+        const nextName = Math.min(afterName.length, ...names.map((other) => afterName.indexOf(other)).filter((position) => position >= 0))
+        expect(afterName.slice(0, nextName)).toMatch(new RegExp(`${index + 4},?000`, 'u'))
+      }
+      expect(decision.text).not.toMatch(/unverified|owner contact|unnamed|unknown participant|who is|confirm.*name|member_report_|participant_report_|phone number|email address/iu)
+    } finally {
+      await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+    }
+  }, 360_000)
 
   it('reports sparse 90-day history from an already-active metric grant after following date pages', async () => {
     const config = await resolveRealCodexE2eConfig()
@@ -13446,7 +13603,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
 describeRealCodex('real Codex generated-music fallback e2e', () => {
   it('shared schema: honors the canonical song limit in a subscription Terra code-only journey', async () => {
     const config = await resolveRealCodexE2eConfig({
-      sourceEnv: { ...process.env, MURPH_REAL_CODEX_AUTH: 'subscription', MURPH_REAL_CODEX_MODEL: 'gpt-5.6-terra' },
+      sourceEnv: { ...process.env, MURPH_REAL_CODEX_AUTH: 'subscription', MURPH_REAL_CODEX_MODEL: 'gpt-6-sol' },
     })
     const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-shared-schema-song-'))
     const isolatedHomePaths: string[] = []
@@ -14776,12 +14933,12 @@ describeRealCodex('real Codex Personal Patterns typed-ledger Luna high digest e2
       ].filter((pattern) => pattern.test(message))
       expect(mentionedOutcomes).toHaveLength(1)
       expect(message).toMatch(/\bHRV\b|heart.rate variability/iu)
-      expect(message).toMatch(/next (?:day|morning)|following (?:day|morning)|day after/iu)
+      expect(message).toMatch(/next[ -](?:day|morning)|following[ -](?:day|morning)|day after/iu)
       const reportsDelta = /(?:20|twenty)\s*(?:ms|milliseconds)/iu.test(message)
       const reportsMeans = /(?:70|seventy)\s*(?:ms|milliseconds)/iu.test(message)
         && /(?:50|fifty)\s*(?:ms|milliseconds)/iu.test(message)
       expect(reportsDelta || reportsMeans).toBe(true)
-      expect(message).toMatch(/without|(?:non|not)[ -]yard[ -]work|days (?:you |with )?(?:didn.t|did not|weren.t)/iu)
+      expect(message).toMatch(/without|(?:non|not|no)[ -]yard[ -]work|days (?:you |with )?(?:didn.t|did not|weren.t)/iu)
     } finally {
       await removeRealCodexTemporaryPath(workingDirectory)
       await removeRealCodexTemporaryPaths(config.temporaryPaths)
@@ -15147,7 +15304,7 @@ describeRealCodex('real Codex Journal connected account eligibility e2e', () => 
 })
 
 describeRealCodex('real Codex Journal connected calendar capture e2e', () => {
-  it('saves one private training plan and linked follow-up, publishes upcoming context and deduplicates a morning retry', async () => {
+  it.each([false, true])('vault pass recovery saves a linked calendar follow-up and deduplicates a retry (partial save: %s)', async (partialSave) => {
     const config = await resolveRealCodexE2eConfig()
     const automation = MURPH_MANAGED_AUTOMATIONS.find(
       (candidate) => candidate.slug === 'journal-connected-context-morning',
@@ -15174,6 +15331,19 @@ describeRealCodex('real Codex Journal connected calendar capture e2e', () => {
           '  state: notice-sent',
         ].join('\n'),
       })
+      if (partialSave) {
+        const saved = await upsertEvent({ vaultRoot: workingDirectory, payload: {
+          kind: 'note', noteType: 'journal-plan', source: 'import', title: 'Tennis training',
+          occurredAt: '2026-08-31T18:00:00+02:00', timeZone: 'Europe/Warsaw',
+          tags: ['planned', 'timing-timed'], note: 'Training from 18:00 to 19:00.',
+          plan: { endsAt: '2026-08-31T19:00:00+02:00', status: 'planned', lastVerifiedAt: '2026-08-31T06:00:00Z', category: 'training', accountId: 'calendar_ready' },
+        } })
+        await upsertKnowledgePage({ vault: workingDirectory, slug: 'journal-connected-context', body: [
+          JSON.stringify({ version: 1, optOuts: { global: false, accounts: [], providers: [], categories: [] }, activeAccounts: [{ id: 'calendar_ready', provider: 'googlecalendar' }] }),
+          '', '## Sources', '',
+          JSON.stringify([{ accountId: 'calendar_ready', sourceId: 'calendar_evt_tennis', eventId: saved.eventId, revision: 1 }]),
+        ].join('\n') })
+      }
       const connectedAppRequests: Array<{
         input: Record<string, unknown>
         operation: string
@@ -15362,9 +15532,11 @@ describeRealCodex('real Codex Journal connected calendar capture e2e', () => {
       expect(JSON.stringify(upcoming)).toMatch(/tennis/iu)
       expect(JSON.stringify(upcoming)).not.toMatch(/dentist|dinner|Alex/iu)
 
-      expect(journalWrites).toHaveLength(1)
-      expect(journalWrites[0]).toMatch(/tennis/iu)
-      expect(journalWrites[0]).not.toMatch(/dentist|dinner|Alex/iu)
+      expect(journalWrites).toHaveLength(partialSave ? 0 : 1)
+      if (!partialSave) {
+        expect(journalWrites[0]).toMatch(/tennis/iu)
+        expect(journalWrites[0]).not.toMatch(/dentist|dinner|Alex/iu)
+      }
       expect(JSON.stringify(savedNotes)).not.toMatch(/dentist|dinner|Alex/iu)
       expect((await listAutomations({ vaultRoot: workingDirectory })).items).toHaveLength(1)
       expect(automationRequests).toHaveLength(1)
@@ -16151,6 +16323,73 @@ describeRealCodex('real Codex Journal and Patterns help e2e', () => {
 })
 
 describeRealCodex('real Codex private Journal capture recovery e2e', () => {
+  it('vault pass recovery compacts a live conversation and preserves its task', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-live-compaction-e2e-'))
+    try {
+      const input: Omit<CodexAppServerTurnInput, 'prompt'> = {
+        approvalPolicy: 'never', codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome, model: config.model, modelProvider: 'murph-compaction-proof',
+        env: config.env, dynamicTools: [], processLifetime: 'warm',
+        configOverrides: ['model_providers.murph-compaction-proof.name="OpenAI compaction proof"', 'model_providers.murph-compaction-proof.wire_api="responses"', 'model_providers.murph-compaction-proof.requires_openai_auth=true', 'model_providers.murph-compaction-proof.supports_websockets=true', 'model_providers.murph-compaction-proof.stream_idle_timeout_ms=90000', 'model_providers.murph-compaction-proof.stream_max_retries=0'],
+        reasoningEffort: 'medium', sandbox: 'read-only', workingDirectory,
+      }
+      const first = await executeRealCodexAppServerTurn({ ...input,
+        prompt: 'Remember this task across compaction: prepare a two-day workshop plan. Its exact project code is MAPLE-482, its budget is 73 credits, and its rule is no evening sessions. No tools or files are needed. Reply only READY.',
+      })
+      const compact = await compactWarmCodexThread({ minThreadTokens: 1, timeoutMs: 120_000 })
+      expect(compact.kind).toBe('compacted')
+      const next = await executeRealCodexAppServerTurn({ ...input, resumeSessionId: first.sessionId,
+        prompt: 'What are the saved project code, budget, and scheduling constraint? Answer in one sentence without tools.',
+      })
+      expect(next.finalMessage).toContain('MAPLE-482')
+      expect(next.finalMessage).toContain('73')
+      expect(next.finalMessage).toMatch(/no evening|not.*evening|without evening/iu)
+      process.stdout.write(`[vault-pass-live-compaction] ${JSON.stringify({ model: config.model, kind: compact.kind, durationMs: compact.kind === 'compacted' ? compact.durationMs : null, continuityPreserved: true })}\n`)
+    } finally {
+      await stopWarmCodexAppServer('vault-pass-live-compaction-complete')
+      await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+    }
+  }, 360_000)
+
+  it('vault pass recovery captures actions and reported outcomes as usable Pattern evidence', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-pattern-capture-e2e-'))
+    try {
+      await initializeVault({ vaultRoot: workingDirectory, timezone: 'UTC' })
+      const binDirectory = path.join(workingDirectory, 'bin')
+      await materializeRealWorkoutVaultCli({ binDirectory, commandLogPath: path.join(workingDirectory, 'commands.log'), vaultRoot: workingDirectory })
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome, model: config.model, modelProvider: config.modelProvider,
+        developerInstructions: buildDirectConversationDeveloperInstructions(false, null, [], '2026-09-22T16:00:00Z'),
+        dynamicTools: [],
+        env: { ...config.env, PATH: `${binDirectory}:${config.env.PATH ?? ''}`, [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: resolveAssistantSkillsRoot() },
+        prompt: 'On September 20 and September 21, 2026, I meditated for ten minutes in the evening. My mood was good on September 20 and great on September 21. Today my wrist feels stiff, with no severity rating. Save these facts; I do not need advice or reminders.',
+        reasoningEffort: 'medium', sandbox: 'workspace-write', workingDirectory,
+      })
+      const vault = await readVaultRawTolerant(workingDirectory)
+      const factors = vault.events.filter(event => event.attributes.noteType === 'journal-factor')
+      expect(factors).toHaveLength(2)
+      expect(factors.every(event => event.tags.includes('happened') && event.tags.some(tag => tag.startsWith('key-')))).toBe(true)
+      expect(new Set(factors.flatMap(event => event.tags.filter(tag => tag.startsWith('key-')))).size).toBe(1)
+      const outcomes = vault.events.filter(event => event.attributes.noteType === 'journal-outcome' && event.tags.some(tag => tag.startsWith('value-')))
+      expect(outcomes).toHaveLength(2)
+      expect(outcomes.map(event => event.tags.find(tag => tag.startsWith('value-'))).sort()).toEqual(['value-good', 'value-great'])
+      const wrist = vault.events.filter(event => /wrist|stiff/iu.test(JSON.stringify(event.attributes)))
+      expect(wrist).toHaveLength(1)
+      expect(wrist[0]?.tags.some(tag => tag.startsWith('value-'))).toBe(false)
+      const report = buildPersonalPatternReport(vault, { asOf: '2026-09-22' })
+      expect(report.factors.some(factor => factor.observedDays === 2)).toBe(true)
+      expect(report.outcomes.some(outcome => outcome.id.startsWith('subjective-'))).toBe(true)
+      expect((await listAutomations({ vaultRoot: workingDirectory })).items).toEqual([])
+      process.stdout.write(`[vault-pass-capture] ${JSON.stringify({ factors: factors.length, scoredOutcomes: outcomes.length, unscoredFacts: wrist.length, reply: result.finalMessage })}\n`)
+    } finally {
+      await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+    }
+  }, 360_000)
+
   it('saves a reported symptom without its guessed cause and verifies an empty-page complaint without duplicating it', async () => {
     const config = await resolveRealCodexE2eConfig()
     const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-journal-recovery-e2e-'))
@@ -26645,7 +26884,7 @@ describeRealCodex('real Codex personalization schema e2e', () => {
     const snapshot = {
       mainPersona: 'classic' as const, supportingPersona: null,
       tone: 'casual' as const, voice: 'classic' as const,
-      model: 'gpt-5.6-terra' as const, solAvailable: true,
+      model: 'gpt-6-sol' as const, solAvailable: true,
     }
     try {
       const codexCommand = normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? 'codex'
@@ -27396,7 +27635,7 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
             },
             vaultFileSendAvailable: false,
           },
-          model: 'gpt-5.6-terra',
+          model: 'gpt-6-sol',
           modelProvider: config.modelProvider,
           prompt: [
             `My knee rehabilitation condition is saved as ${conditionId}.`,
@@ -27498,7 +27737,7 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
           entityId: conditionId,
           entityKind: 'condition',
         }])
-        expect(['gpt-5.6-luna', 'gpt-5.6-terra']).toContain(
+        expect(['gpt-5.6-luna', 'gpt-6-sol']).toContain(
           savedRequest.assistantTargetOverride?.model,
         )
         if (savedRequest.schedule.kind === 'dailyLocal') {
@@ -28601,7 +28840,7 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
         /recovery/iu,
         /decid|recommend|train|recover/iu,
       ],
-      expectedModel: 'gpt-5.6-terra',
+      expectedModel: 'gpt-6-sol',
       expectedScheduleKind: 'recurring',
       occurrenceProjection: { status: 'pending' as const },
       prompt: [
@@ -29650,13 +29889,13 @@ describe('real Codex app-server cache usage e2e harness', () => {
   it('writes provider-key config without embedding the provider key value', () => {
     const configToml = buildRealCodexConfigToml({
       apiKeyEnv: 'PROVIDER_AUTH',
-      model: 'gpt-5.6-terra',
+      model: 'gpt-6-sol',
       modelProvider: OPENAI_ENV_MODEL_PROVIDER,
     })
     const hostedPermissionConfigToml = buildRealCodexHostedPermissionConfigToml({
       codexHome: null,
       env: {},
-      model: 'gpt-5.6-terra',
+      model: 'gpt-6-sol',
       modelProvider: OPENAI_ENV_MODEL_PROVIDER,
       providerApiKeyEnv: 'PROVIDER_AUTH',
       temporaryPaths: [],
@@ -29665,7 +29904,7 @@ describe('real Codex app-server cache usage e2e harness', () => {
       buildRealCodexHostedPermissionConfigToml({
         codexHome: null,
         env: {},
-        model: 'gpt-5.6-terra',
+        model: 'gpt-6-sol',
         modelProvider: OPENAI_SUBSCRIPTION_MODEL_PROVIDER,
         providerApiKeyEnv: null,
         temporaryPaths: [],

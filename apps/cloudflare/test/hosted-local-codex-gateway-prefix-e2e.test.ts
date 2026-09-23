@@ -23,7 +23,7 @@ import {
 } from "./helpers/hosted-local-linq-support.js";
 
 const linqWebhookSecret = "linq-local-webhook-secret";
-const productionLikeAssistantModel = "gpt-5.6-terra";
+const productionLikeAssistantModel = "gpt-6-sol";
 const userId = `member_local_codex_gateway_prefix_${Date.now()}`;
 const linqChatId = `chat_local_codex_gateway_prefix_${Date.now()}`;
 const cacheablePrefixFloor = 8_000;

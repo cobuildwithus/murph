@@ -194,6 +194,22 @@ export async function readHostedMemberIdentityPhoneNumber(
   });
 }
 
+export async function readHostedMemberIdentityPhoneNumberBatch(
+  identities: readonly Pick<HostedMemberIdentity, "memberId" | "phoneNumberEncrypted">[],
+  prisma?: HostedWebEncryptionPrismaClient,
+  signal?: AbortSignal,
+): Promise<Array<string | null>> {
+  return decryptHostedWebNullableFields({
+    entries: identities.map((identity) => ({
+      field: HOSTED_MEMBER_IDENTITY_PHONE_NUMBER_FIELD,
+      memberId: identity.memberId,
+      value: identity.phoneNumberEncrypted,
+    })),
+    prisma,
+    signal,
+  });
+}
+
 export async function readHostedMemberIdentityPhoneNumbers(
   identity: Pick<
     HostedMemberIdentity,

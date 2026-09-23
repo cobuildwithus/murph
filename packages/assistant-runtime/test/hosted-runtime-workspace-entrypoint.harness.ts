@@ -947,12 +947,12 @@ function createPlatform(input: {
   > = {
     async request(request) {
       const snapshot: HostedRuntimeAssistantConfigurationSnapshot = {
-        availableModels: ["gpt-5.6-luna", "gpt-5.6-terra"],
+        availableModels: ["gpt-5.6-luna", "gpt-6-sol"],
         availableProviders: ["openai", "venice"],
         availableReasoningEfforts: ["low", "medium", "high", "xhigh"],
         configurationAvailable: true,
         dormantSolPreference: false,
-        model: "gpt-5.6-terra",
+        model: "gpt-6-sol",
         provider: "openai",
         reasoningEffort: "low",
         solAvailable: false,
@@ -2096,10 +2096,10 @@ function createAssistantUsageRecord(
     rawUsageJsonHash: null,
     reasoningTokens: null,
     reportingUserId: null,
-    requestedModel: "gpt-5.6-terra",
+    requestedModel: "gpt-6-sol",
     routeId: "primary",
     schema: ASSISTANT_USAGE_SCHEMA,
-    servedModel: "gpt-5.6-terra",
+    servedModel: "gpt-6-sol",
     sessionId: "asst_entrypoint_usage",
     stripeMeterSource: "murph",
     surface: null,

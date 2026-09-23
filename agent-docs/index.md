@@ -1,5 +1,13 @@
 # Murph Agent Docs Index
 
+Stable host-supplied group report labels and consented contact fallback are
+recorded in [group report labels](exec-plans/completed/2026-09-22-group-report-labels.md).
+The presentation and privacy contracts remain owned by ARCHITECTURE.md and SECURITY.md.
+Plain contact-name presentation and PR preparation are tracked in
+[report label follow-up](exec-plans/completed/2026-09-22-group-report-labels-pr.md).
+The [email batch follow-up](exec-plans/completed/2026-09-22-group-report-email-batches.md)
+preserves one naming snapshot across sparse shared-data reads.
+
 Automation database load, daily scheduling, and Flex retry work:
 [`2026-09-21-automation-query-load.md`](exec-plans/completed/2026-09-21-automation-query-load.md).
 
@@ -391,7 +399,7 @@ is recorded in [`2026-09-18-ios-canary-deployment-continuity.md`](exec-plans/com
 | `agent-docs/product-specs/hosted-plan-usage.md` | Hosted billing/current-state spec. | Hosted billing/current-state spec | High | 2026-08-18 |
 | `agent-docs/product-specs/hosted-group-member-plan.md` | Private $3.50 Core subscription for confirmed hosted-group members. | Hosted billing/product spec | High | 2026-08-25 |
 | `agent-docs/product-specs/labs-discovery.md` | Private conversational Labs discovery and retired browser entrypoints. | Hosted Labs product spec | High | 2026-07-16 |
-| `agent-docs/product-specs/hosted-usage-topups.md` | Hosted billing/product spec. | Hosted billing/product spec | High | 2026-08-26 |
+| `agent-docs/product-specs/hosted-usage-topups.md` | Hosted billing/product spec, including 80% top-up usage grants, preserved historical purchase terms, and migration-first sponsorship compatibility. | Hosted billing/product spec | High | 2026-09-22 |
 | `agent-docs/product-specs/hosted-usage-referrals.md` | Hosted growth/product spec. | Hosted growth/product spec | High | 2026-08-10 |
 | `agent-docs/product-specs/physical-notes.md` | Hosted physical-note product spec. | Hosted physical-note product spec | High | 2026-08-21 |
 | `agent-docs/product-specs/hosted-support-escalation.md` | Hosted support product spec. | Hosted support product spec | High | 2026-08-05 |
@@ -461,7 +469,7 @@ is recorded in [`2026-09-18-ios-canary-deployment-continuity.md`](exec-plans/com
 | `agent-docs/operations/product-ux.md` | Product UX workflow. | Product UX workflow | High | 2026-08-31 |
 | `agent-docs/operations/live-provider-canaries.md` | Fresh native, Linq, Stripe and Garmin provider outcomes; bounded Linq observation retries, GitHub dispatch, protected execution, exact receipts and cross-repository rollout. | Live provider proof | High | 2026-09-19 |
 | `agent-docs/operations/native-android-hosted-e2e.md` | Native Android verification operations. | Native Android verification operations | High | 2026-09-01 |
-| `agent-docs/operations/verification-and-runtime.md` | Verification ownership by delivery path, Draft-before-push readiness, CI compiler memory and production-build proof, independent worktree build outputs, verified remote-tracking base refresh, authorized base reconciliation with bounded conflict resolution, Temporal integration build/process-shard proof, remote browser health readiness, wearable browser failure evidence captured before cleanup, and HTTP/destination validation before persisted connection assertions. Wearable production Web preparation, stage forwarding, numeric host progress, and bounded Actions notice retention, with Vercel initial typecheck budget ownership. | Verification policy | High | 2026-09-12 |
+| `agent-docs/operations/verification-and-runtime.md` | Verification ownership by delivery path, Draft-before-push readiness, CI compiler memory and production-build proof, independent worktree build outputs, verified remote-tracking base refresh, authorized base reconciliation with bounded conflict resolution, Temporal integration build/process-shard proof, remote browser health readiness, wearable browser failure evidence captured before cleanup, and HTTP/destination validation before persisted connection assertions. Wearable production Web preparation, stage forwarding, numeric host progress, and bounded Actions notice retention, with Vercel initial typecheck budget ownership and case-insensitive APT numeric-policy verification. | Verification policy | High | 2026-09-22 |
 | `agent-docs/operations/database-transaction-starvation-audit.md` | Database critical-section reliability. | Database critical-section reliability | High | 2026-08-09 |
 | `agent-docs/operations/typescript-verification-performance.md` | Verification performance policy. | Verification performance policy | Medium | 2026-07-29 |
 | `agent-docs/operations/completion-workflow.md` | Parent-owned completion evidence, final ReviewGPT eligibility and recovery before the first valid review, verified-base mergeability, and Draft-before-push ordering; specialist passes are retired. | Completion workflow | High | 2026-09-11 |
@@ -513,7 +521,7 @@ is recorded in [`2026-09-18-ios-canary-deployment-continuity.md`](exec-plans/com
 | `agent-docs/exec-plans/tech-debt-tracker.md` | Current debt register with owner/priority/status. | Rolling debt tracker | Medium | 2026-03-12 |
 | `agent-docs/prompts/seam-audits/` | One-pass bespoke seam prompts governed by a shared review-only, evidence, correction, and zero-finding contract. | Seam-audit prompt library | Low | 2026-07-13 |
 | `apps/web/README.md` | Hosted Web setup, runtime ownership, build/deploy contracts, and bounded legacy phone-call deletion execution. | `apps/web/**` | Medium | 2026-09-10 |
-| `apps/cloudflare/README.md` | Hosted execution-plane overview, runtime contract, and retired member shell-hint transport. | `apps/cloudflare/**` | Medium | 2026-09-10 |
+| `apps/cloudflare/README.md` | Hosted execution-plane overview, runtime contract, scoped `cf` CLI access for operational reads, and retired member shell-hint transport. | `apps/cloudflare/**` | Medium | 2026-09-10 |
 | `apps/cloudflare/scripts/benchmark-workspace-restore.md` | Synthetic encrypted restore benchmark, measurement controls, and local/Linux limitations. | Cloudflare workspace restore | Medium | 2026-09-04 |
 | `apps/cloudflare/DEPLOY.md` | Current deployment procedure for hosted execution, consumer-first Web runtime admission, single-pool capacity, isolated artifact smoke, compatible native gradual rollout, and member shell-hint transport retirement. | Hosted deploy flow | Medium | 2026-09-10 |
 | `packages/assistant-runtime/README.md` | Headless hosted runtime, durable completion, and Browser Vault wake qualification. | `packages/assistant-runtime/**` | Medium | 2026-09-11 |
@@ -537,6 +545,10 @@ The admission and runtime launch reduction is recorded in
 
 Five-minute ingress cache retention and member isolation proof are tracked in
 [`ingress cache retention`](exec-plans/completed/2026-09-21-ingress-cache-five-minutes.md).
+
+Mailbox callback phase diagnostics and lazy Google SDK loading are owned by
+`apps/web/README.md` under "Mailbox fetch timing". Implementation evidence is
+tracked in `exec-plans/completed/2026-09-21-mailbox-fetch-startup.md`.
 
 ## Conventions
 
@@ -638,3 +650,7 @@ Legacy oxygen analytics retirement is tracked in
 
 Single device publication receipts are tracked in
 [`device receipts`](exec-plans/completed/2026-09-21-single-import-receipt.md).
+
+Worker callback preparation, HTTP-header timing, and bounded Vercel region
+attribution are tracked in
+[`mailbox latency phases`](exec-plans/completed/2026-09-22-mailbox-latency-phases.md).

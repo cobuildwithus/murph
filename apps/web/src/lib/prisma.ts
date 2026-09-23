@@ -9,6 +9,7 @@ import { assertHostedWebDatabaseUrlConfigured } from "./hosted-web/database-env"
 import {
   isPrismaOperationTimingActive,
   recordPrismaOperationTiming,
+  startPrismaPoolAcquisitionTiming,
 } from "./prisma-operation-timing";
 import { installHostedWebWarningFilters } from "./process-warnings";
 
@@ -222,8 +223,24 @@ function createPrismaPool(input: CreatePrismaClientInput): PgPool {
   // Forward both pg callback and promise forms without changing their lifetime.
   pool.connect = new Proxy(pool.connect, {
     apply(connect, receiver, args) {
-      reportDatabasePoolPressure(pool, poolMax, readDatabasePoolSnapshot(pool));
-      return Reflect.apply(connect, receiver, args);
+      const snapshot = readDatabasePoolSnapshot(pool);
+      reportDatabasePoolPressure(pool, poolMax, snapshot);
+      const record = startPrismaPoolAcquisitionTiming(snapshot);
+      if (!record) return Reflect.apply(connect, receiver, args);
+      const callback = args[0];
+      if (typeof callback === "function") {
+        return Reflect.apply(connect, receiver, [function (this: unknown, ...result: unknown[]) {
+          record();
+          return Reflect.apply(callback, this, result);
+        }]);
+      }
+      try {
+        const pending: Promise<unknown> = Reflect.apply(connect, receiver, args);
+        return pending.finally(record);
+      } catch (error) {
+        record();
+        throw error;
+      }
     },
   });
   attachDatabasePool(pool);

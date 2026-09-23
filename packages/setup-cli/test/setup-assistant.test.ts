@@ -497,7 +497,7 @@ test('setup assistant resolver handles skip, Codex cloud, and Codex OSS', async 
   assert.equal(defaultCodex.modelProvider, null)
   assert.equal(
     defaultCodex.detail,
-    'Use Codex with gpt-5.6-terra. An explicit Codex home is configured; path redacted in CLI output. Detected Team account from local Codex credentials.',
+    'Use Codex with gpt-6-sol. An explicit Codex home is configured; path redacted in CLI output. Detected Team account from local Codex credentials.',
   )
 
   const codex = await resolver.resolve({

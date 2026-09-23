@@ -5,7 +5,17 @@ export interface PrismaOperationTiming {
   ms: number;
 }
 
-const prismaOperationTimingStorage = new AsyncLocalStorage<PrismaOperationTiming[]>();
+export interface PrismaPoolAcquisitionTiming {
+  ms: number;
+  idleConnections: number;
+  totalConnections: number;
+  waitingRequests: number;
+}
+
+const prismaOperationTimingStorage = new AsyncLocalStorage<{
+  operations: PrismaOperationTiming[];
+  poolAcquisitions?: PrismaPoolAcquisitionTiming[];
+}>();
 
 /**
  * Runs the callback with the given array active as the Prisma
@@ -16,14 +26,27 @@ const prismaOperationTimingStorage = new AsyncLocalStorage<PrismaOperationTiming
 export async function runWithPrismaOperationTimings<TResult>(
   operations: PrismaOperationTiming[],
   run: () => Promise<TResult>,
+  poolAcquisitions?: PrismaPoolAcquisitionTiming[],
 ): Promise<TResult> {
-  return prismaOperationTimingStorage.run(operations, run);
+  // Prisma promises are lazy thenables: await inside the scope so a callback
+  // returning a query directly starts its driver work under this collector.
+  return prismaOperationTimingStorage.run({ operations, poolAcquisitions }, async () => await run());
 }
 
 export function recordPrismaOperationTiming(key: string, ms: number): void {
-  prismaOperationTimingStorage.getStore()?.push({ key, ms });
+  prismaOperationTimingStorage.getStore()?.operations.push({ key, ms });
 }
 
 export function isPrismaOperationTimingActive(): boolean {
   return prismaOperationTimingStorage.getStore() !== undefined;
+}
+
+/** Capture the requesting scope before pg dispatches a callback from its pool. */
+export function startPrismaPoolAcquisitionTiming(
+  snapshot: Omit<PrismaPoolAcquisitionTiming, "ms">,
+): (() => void) | null {
+  const samples = prismaOperationTimingStorage.getStore()?.poolAcquisitions;
+  if (!samples) return null;
+  const startedAt = performance.now();
+  return () => { samples.push({ ...snapshot, ms: performance.now() - startedAt }); };
 }

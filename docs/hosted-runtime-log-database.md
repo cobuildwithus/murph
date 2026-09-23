@@ -528,9 +528,9 @@ retention; ordinary milestones remain debug. Missing rows are missing evidence.
 
 #### Stall reproduction and recovery design
 
-The credential-free `assistant-codex-websocket-stall.test.ts` fixture runs the
-pinned Codex 0.153.4 binary against a local WebSocket/SSE provider. After a
-successful warm turn, the provider keeps the socket open, receives a pong, and
+The credential-free `assistant-codex-websocket-stall.test.ts` fixture was measured
+with the then-pinned Codex 0.153.4 binary against a local WebSocket/SSE provider.
+After a successful warm turn, the provider keeps the socket open, receives a pong, and
 sends no response data. The full 90-second test measured 90,006 ms from stalled
 request to the single native HTTPS fallback. A five-second native idle setting
 measured 5,021 ms; an explicit close with the 90-second setting measured 116 ms.
@@ -578,12 +578,16 @@ still fires after the first-frame guard has been cancelled. Ping/pong similarly
 proves a responsive transport peer, not inference;
 Murph's Worker relay also separates the client and upstream transport legs.
 
-The current hosted policy uses a provisional 30-second native stream-idle
-timeout for OpenAI, including its HTTPS fallback and operator requests. Child
+The current hosted policy uses a 90-second native stream-idle timeout for
+OpenAI, including its HTTPS fallback and operator requests. Streaming native
+compaction shares this window: the former 30-second setting could repeatedly
+abort a healthy HTTP 200 stream before replacement history arrived. A native
+regression reproduces that failure with 35 seconds of compaction silence and
+verifies successful compaction and preserved task state with the current window. Child
 requests and streaming compaction inherit the same provider configuration.
 Native Codex also uses this knob for WebSocket sends; it does not replace the
 separate connection and HTTP request budgets.
-Venice and custom inference retain 90 seconds. `codex.prepare` reports the
+Venice and custom inference also use 90 seconds. `codex.prepare` reports the
 selected provider's idle timeout and request/stream retry limits. Native Codex
 still owns the single WebSocket attempt and HTTPS fallback; request retries,
 Murph cancellation, accepted work, and delivery ownership are unchanged.

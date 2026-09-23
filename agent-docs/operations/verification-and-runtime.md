@@ -149,7 +149,8 @@ enables Git deployment only for `main`.
 For changes to the shared Playwright Chromium install wrapper or any workflow
 that calls it, run `bash -n scripts/install-playwright-chromium.sh` and the
 focused `scripts/install-playwright-chromium.test.ts` Vitest file. The test owns
-the loaded APT policy, one-shot Playwright status, Ubuntu caller inventory, and
+the loaded APT policy (including preserved key casing and rejected wrong numeric
+values), one-shot Playwright status, Ubuntu caller inventory, and
 overall step-timeout contract; exact-head Actions then prove the wrapper on the
 GitHub-hosted Ubuntu runner.
 

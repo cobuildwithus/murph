@@ -50,7 +50,10 @@ other legacy metadata if necessary. `providers` uses `googlecalendar`, `gmail`, 
 slugs. Each source mapping records `accountId`, `sourceId`, `eventId`, and the
 canonical `revision` last written by this capture. Several aliases can share one
 canonical event. Save through `knowledge upsert --slug journal-connected-context
---body '<JSON>'`; read it back. Keep this active control ledger compact.
+--body '<JSON>'`; read it back. Keep this active control ledger compact. Account baselines, source ids, and
+capture progress belong here, never in member memory. A historical memory
+claim that capture has not started is not an opt-out; respect explicit member
+preferences and the current negative controls above.
 
 After listing connections, replace `activeAccounts` with the supported active
 accounts before capturing plans. Disconnected accounts then stop contributing
@@ -109,6 +112,16 @@ evidence already resolves the event. Do not defer this write to a later
 connected-context pass. Use `schedule.kind=at` with `schedule.localAt.date`,
 `schedule.localAt.time`, and the event's IANA timezone. Do not use raw
 `schedule.at`. One event gets one check-in.
+
+For every eligible ongoing or future timed plan, also reconcile its linked
+follow-up even when the plan and source mapping already exist and have not
+changed. Read matching automations including paused and archived history. A
+prior pass may have saved the plan and ledger before scheduling failed. If no
+linked follow-up exists and end plus one hour is still in the future, save the
+missing check-in now. Reuse an existing check-in; never reactivate a paused,
+canceled, completed, or member-disabled one. Do not create a catch-up question
+for a past check-in time. Apply source/category opt-outs first, exclude canceled
+and all-day plans, and deduplicate aliases by the canonical plan/trip id.
 
 ## Email travel pass
 

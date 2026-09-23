@@ -608,6 +608,18 @@ const HOSTED_AI_USAGE_ALLOWANCE_OPENAI_MODEL_PRICES: Record<
   HostedAiUsageAllowancePricedModel,
   HostedAiUsageAllowanceModelPrice
 > = {
+  "gpt-6-sol": {
+    cachedInputUsdMicrosPerMillionTokens: 200_000n,
+    cacheWriteUsdMicrosPerMillionTokens: 2_500_000n,
+    inputUsdMicrosPerMillionTokens: 2_000_000n,
+    outputUsdMicrosPerMillionTokens: 10_000_000n,
+  },
+  "gpt-6-luna": {
+    cachedInputUsdMicrosPerMillionTokens: 10_000n,
+    cacheWriteUsdMicrosPerMillionTokens: 125_000n,
+    inputUsdMicrosPerMillionTokens: 100_000n,
+    outputUsdMicrosPerMillionTokens: 500_000n,
+  },
   "gpt-6-astra": {
     cachedInputUsdMicrosPerMillionTokens: 1_000_000n,
     cacheWriteUsdMicrosPerMillionTokens: 12_500_000n,
@@ -677,7 +689,28 @@ const HOSTED_AI_USAGE_ALLOWANCE_GPT_56_TOKEN_PRICING_BASES = {
   },
 } as const;
 
+const HOSTED_AI_USAGE_ALLOWANCE_GPT_6_SOL_LUNA_TOKEN_PRICING_BASES = {
+  standard: {
+    ...HOSTED_AI_USAGE_ALLOWANCE_GPT_56_TOKEN_PRICING_BASES.standard,
+    requiredProviderKind: "openai",
+    pricingSource: "https://developers.openai.com/api/docs/pricing",
+    pricingVersion: "openai-api-pricing-2026-09-22-gpt-6-sol-luna-standard",
+  },
+  "openai-flex": {
+    ...HOSTED_AI_USAGE_ALLOWANCE_GPT_56_TOKEN_PRICING_BASES["openai-flex"],
+    pricingSource: "https://developers.openai.com/api/docs/pricing",
+    pricingVersion: "openai-api-pricing-2026-09-22-gpt-6-sol-luna-openai-flex",
+  },
+  "openai-priority": {
+    ...HOSTED_AI_USAGE_ALLOWANCE_GPT_56_TOKEN_PRICING_BASES["openai-priority"],
+    pricingSource: "https://developers.openai.com/api/docs/pricing",
+    pricingVersion: "openai-api-pricing-2026-09-22-gpt-6-sol-luna-openai-priority",
+  },
+} as const;
+
 const HOSTED_AI_USAGE_ALLOWANCE_MODEL_TOKEN_PRICING_BASES = {
+  "gpt-6-sol": HOSTED_AI_USAGE_ALLOWANCE_GPT_6_SOL_LUNA_TOKEN_PRICING_BASES,
+  "gpt-6-luna": HOSTED_AI_USAGE_ALLOWANCE_GPT_6_SOL_LUNA_TOKEN_PRICING_BASES,
   "gpt-6-astra": {
     "openai-flex": {
       ...HOSTED_AI_USAGE_ALLOWANCE_GPT_56_TOKEN_PRICING_BASES["openai-flex"],
@@ -3709,12 +3742,12 @@ function resolveHostedAiUsageAllowanceModelPrices(input: {
   if (!prices) {
     throw new TypeError("Hosted AI usage allowance pricing is missing for the provider model.");
   }
-  // Hosted Codex caps Astra context at 272K (validated in the runner catalog).
+  // Hosted Codex caps GPT-6 context at 272K (validated in the runner catalog).
   // Its turn deltas sum multiple requests; cumulative input is not context size.
   const cumulativeCodexUsage = input.record.usageExtractionSourcePath
     ?.endsWith("tokenUsage.total.delta") === true;
   // Exact individual requests above 272K pay long-context rates in every bucket.
-  if (input.model === "gpt-6-astra" && !cumulativeCodexUsage
+  if (input.model.startsWith("gpt-6-") && !cumulativeCodexUsage
       && normalizeTokenCount(input.record.inputTokens) > 272_000n) {
     return {
       cachedInputUsdMicrosPerMillionTokens: prices.cachedInputUsdMicrosPerMillionTokens * 2n,

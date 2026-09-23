@@ -666,7 +666,8 @@ describe('assistant execution prompt contract', () => {
     expect(directPrompt).toContain('hypothetical questions are not events')
     expect(directPrompt).toContain('use `note` when none fits')
     expect(directPrompt).toContain('start one workout')
-    expect(directPrompt).toContain('Check at 13:00 local')
+    expect(directPrompt).toContain("member's assigned local schedule")
+    expect(directPrompt).not.toContain('Check at 13:00 local')
     expect(directPrompt).toContain(
       'vault-cli wearables patterns --date <local-date> --format json',
     )
@@ -2245,7 +2246,10 @@ describe('assistant system prompt cache stability', () => {
     // Meal skill routing adds 300 characters to prevent preflight discovery.
     // Complete direct/group input measurements and five focused Terra journeys
     // cover the cost and behavior; retain the existing 41-character margin.
-    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(74_511)
+    // Pattern-ready Journal tags add 1,178 characters. Complete native-provider
+    // direct/group captures and live Sol capture/query proof cover this cost;
+    // retain the previous margin without changing the unchanged group surface.
+    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(75_689)
   })
 
   it('passes the injected CLI contract through byte-for-byte at the stable-route tail', () => {

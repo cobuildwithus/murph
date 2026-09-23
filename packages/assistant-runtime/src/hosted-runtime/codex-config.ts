@@ -101,16 +101,11 @@ const HOSTED_CODEX_PROVIDER_REQUEST_MAX_RETRIES = 4;
 // HTTPS. Repeating the full idle window here can outlive the enclosing hosted
 // attempt and make Codex's native transport fallback unreachable.
 const HOSTED_CODEX_PROVIDER_STREAM_MAX_RETRIES = 0;
-// Bound OpenAI data-stream silence, not total reasoning or local tool time.
-// Other providers retain their prior window until separately measured.
-function hostedCodexProviderStreamIdleTimeoutMs(providerId: string): number {
-  return providerId === OPENAI_CODEX_MODEL_PROVIDER_CONFIG.id
-    || providerId === HOSTED_CODEX_OPENAI_MODEL_PROVIDER_ID
-    || providerId === HOSTED_CHATGPT_OPENAI_CODEX_MODEL_PROVIDER_ID
-    || providerId === HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID
-    ? 30_000
-    : 90_000;
-}
+// Native Responses compaction shares this window with ordinary sampling and
+// can be silent while producing its replacement history. A 30-second window
+// can abort valid slow compactions. Keep retries owned by Codex
+// and retain the existing outer attempt/idle-maintenance wall-clock bounds.
+const HOSTED_CODEX_PROVIDER_STREAM_IDLE_TIMEOUT_MS = 90_000;
 const HOSTED_CODEX_NATIVE_MEMORY_CONFIG = {
   featureEnabled: false,
   generateMemories: false,
@@ -129,7 +124,7 @@ export function hostedCodexProviderTransportDiagnostics(providerId: string) {
   return {
     codexProviderRequestMaxRetries: providerId === HOSTED_CUSTOM_INFERENCE_CODEX_MODEL_PROVIDER_ID
       ? 1 : HOSTED_CODEX_PROVIDER_REQUEST_MAX_RETRIES,
-    codexProviderStreamIdleTimeoutMs: hostedCodexProviderStreamIdleTimeoutMs(providerId),
+    codexProviderStreamIdleTimeoutMs: HOSTED_CODEX_PROVIDER_STREAM_IDLE_TIMEOUT_MS,
     codexProviderStreamMaxRetries: HOSTED_CODEX_PROVIDER_STREAM_MAX_RETRIES,
     codexProviderTransportMode: "codex-native-provider-transport",
   } as const;

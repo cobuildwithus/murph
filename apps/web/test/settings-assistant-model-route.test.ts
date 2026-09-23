@@ -75,7 +75,7 @@ describe("assistant model settings route", () => {
       dormantSolPreference: false,
       effectiveProviderUpdated: false,
       hostedAssistantProviderOverride: "venice",
-      model: "gpt-5.6-terra",
+      model: "gpt-5.6-sol",
       provider: "venice",
       solAvailable: true,
       updated: true,
@@ -88,7 +88,7 @@ describe("assistant model settings route", () => {
     delete process.env.HOSTED_VENICE_ENABLED;
   });
 
-  it.each(["gpt-5.6-sol", "gpt-6-astra"])("persists validated %s without a mailbox wake", async (model) => {
+  it.each(["gpt-6-sol", "gpt-6-luna", "gpt-5.6-sol", "gpt-6-astra"])("persists validated %s without a mailbox wake", async (model) => {
     mocks.updateHostedMemberAssistantConfigurationTx.mockResolvedValueOnce({
       dormantSolPreference: false,
       hostedAssistantModelOverride: model,
@@ -124,26 +124,26 @@ describe("assistant model settings route", () => {
     expect(mocks.signalHostedRuntimeWakeRuntime).not.toHaveBeenCalled();
   });
 
-  it("persists Venice alongside the same Terra product model", async () => {
+  it("persists Venice alongside the same legacy Sol product model", async () => {
     process.env.HOSTED_VENICE_ENABLED = "1";
     mocks.updateHostedMemberAssistantConfigurationTx.mockResolvedValueOnce({
       dormantSolPreference: false,
       effectiveProviderUpdated: true,
       hostedAssistantProviderOverride: "venice",
-      model: "gpt-5.6-terra",
+      model: "gpt-5.6-sol",
       provider: "venice",
       solAvailable: true,
       updated: true,
     });
     const response = await route.POST(jsonRequest({
-      model: "gpt-5.6-terra",
+      model: "gpt-5.6-sol",
       provider: "venice",
     }));
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
       dormantSolPreference: false,
-      model: "gpt-5.6-terra",
+      model: "gpt-5.6-sol",
       ok: true,
       provider: "venice",
       solAvailable: true,
@@ -151,7 +151,7 @@ describe("assistant model settings route", () => {
     });
     expect(mocks.updateHostedMemberAssistantConfigurationTx).toHaveBeenCalledWith({
       memberId: "member_edge",
-      model: "gpt-5.6-terra",
+      model: "gpt-5.6-sol",
       prisma: { tx: true },
       provider: "venice",
     });
@@ -163,7 +163,7 @@ describe("assistant model settings route", () => {
       dormantSolPreference: true,
       effectiveProviderUpdated: true,
       hostedAssistantProviderOverride: "venice",
-      model: "gpt-5.6-terra",
+      model: "gpt-5.6-sol",
       provider: "venice",
       solAvailable: false,
       updated: true,
@@ -176,7 +176,7 @@ describe("assistant model settings route", () => {
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
       dormantSolPreference: true,
-      model: "gpt-5.6-terra",
+      model: "gpt-5.6-sol",
       ok: true,
       provider: "venice",
       solAvailable: false,
@@ -198,7 +198,7 @@ describe("assistant model settings route", () => {
       }),
     );
     const response = await route.POST(jsonRequest({
-      model: "gpt-5.6-terra",
+      model: "gpt-5.6-sol",
       provider: "venice",
     }));
 
@@ -216,20 +216,20 @@ describe("assistant model settings route", () => {
       dormantSolPreference: false,
       effectiveProviderUpdated: false,
       hostedAssistantProviderOverride: "venice",
-      model: "gpt-5.6-terra",
+      model: "gpt-5.6-sol",
       provider: "openai",
       solAvailable: true,
       updated: false,
     });
 
     const response = await route.POST(jsonRequest({
-      model: "gpt-5.6-terra",
+      model: "gpt-5.6-sol",
     }));
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
       dormantSolPreference: false,
-      model: "gpt-5.6-terra",
+      model: "gpt-5.6-sol",
       ok: true,
       provider: "openai",
       solAvailable: true,
@@ -264,7 +264,7 @@ describe("assistant model settings route", () => {
 
   it("rejects invalid, missing, and extra request fields before persistence", async () => {
     const invalidModelResponse = await route.POST(jsonRequest({
-      model: "retired-model",
+      model: "gpt-5.6-terra",
     }));
     expect(invalidModelResponse.status).toBe(400);
     await expect(invalidModelResponse.json()).resolves.toMatchObject({
@@ -282,7 +282,7 @@ describe("assistant model settings route", () => {
     });
 
     const extraFieldResponse = await route.POST(jsonRequest({
-      model: "gpt-5.6-terra",
+      model: "gpt-5.6-sol",
       unexpected: true,
     }));
     expect(extraFieldResponse.status).toBe(400);
@@ -293,7 +293,7 @@ describe("assistant model settings route", () => {
     });
 
     const invalidProviderResponse = await route.POST(jsonRequest({
-      model: "gpt-5.6-terra",
+      model: "gpt-5.6-sol",
       provider: "unknown",
     }));
     expect(invalidProviderResponse.status).toBe(400);
