@@ -6669,8 +6669,8 @@ export function parseHostedRuntimeLatencyTraceBatchRequest(
   }
   return { events: events.map((value) => {
     const event = parseHostedRuntimeLatencyTraceEvent(value);
-    if (event.type !== "assistant_milestone") {
-      throw new TypeError("Hosted runtime latency batches require assistant milestones.");
+    if (event.type !== "assistant_milestone" && event.type !== "runtime_milestone") {
+      throw new TypeError("Hosted runtime latency batches require milestone events.");
     }
     return event;
   }) };

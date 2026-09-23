@@ -1740,55 +1740,7 @@ export async function runHostedWorkspaceAssistantPhase(
           }
           return { ...authority, threadIsDirect: result.threadIsDirect };
         },
-        resolveScheduledLinqRoute: async ({
-          fromPhoneNumber,
-          homeRouteFallbackAllowed,
-          signal,
-          target,
-          targetKind,
-        }) => {
-          const assertEngagement =
-            input.runtime.platform.effectsPort.assertLinqRecentInboundEngagement;
-          if (!assertEngagement) {
-            throw new VaultCliError(
-              "ASSISTANT_LINQ_ENGAGEMENT_ASSERT_UNAVAILABLE",
-              "Hosted Linq delivery requires an egress authority assertion before provider work.",
-              { retryable: true },
-            );
-          }
-          const authority = await assertEngagement({
-            authorityCheckOnly: true,
-            ...(fromPhoneNumber ? { fromPhoneNumber } : {}),
-            homeRouteFallbackAllowed,
-            target,
-            targetKind,
-          }, { signal });
-          const resolvedRoute = authority?.resolvedRoute;
-          if (
-            !resolvedRoute
-            || resolvedRoute.targetKind !== "thread"
-            || typeof resolvedRoute.threadIsDirect !== "boolean"
-          ) {
-            throw new VaultCliError(
-              "ASSISTANT_LINQ_AUDIENCE_AUTHORITY_UNAVAILABLE",
-              "Hosted Linq delivery requires direct or group authority before provider work.",
-              { retryable: true },
-            );
-          }
-          const conversationThreadId =
-            resolvedRoute.conversationThreadId?.trim() ?? "";
-          return {
-            ...(conversationThreadId ? { conversationThreadId } : {}),
-            ...(authority.deliveryBlockCode
-              ? { deliveryBlockCode: authority.deliveryBlockCode }
-              : {}),
-            ...(authority.deliveryPosture
-              ? { deliveryPosture: authority.deliveryPosture }
-              : {}),
-            target: resolvedRoute.target,
-            threadIsDirect: resolvedRoute.threadIsDirect,
-          };
-        },
+        resolveScheduledLinqRoute: createHostedScheduledLinqRouteResolver(input),
         ...(usageRecorder ? { usageRecorder } : {}),
         userEnvKeys: Object.keys(input.runtime.userEnv),
       },
@@ -8617,10 +8569,71 @@ async function hasDueHostedAssistantCronJob(
   return (cronStatus?.dueJobs ?? 0) > 0;
 }
 
+function createHostedScheduledLinqRouteResolver(
+  input: HostedWorkspaceRuntimeAssistantPhaseInput,
+): NonNullable<NonNullable<AssistantExecutionContext["hosted"]>["resolveScheduledLinqRoute"]> {
+  return async ({
+    fromPhoneNumber,
+    homeRouteFallbackAllowed,
+    signal,
+    target,
+    targetKind,
+  }) => {
+    const assertEngagement =
+      input.runtime.platform.effectsPort.assertLinqRecentInboundEngagement;
+    if (!assertEngagement) {
+      throw new VaultCliError(
+        "ASSISTANT_LINQ_ENGAGEMENT_ASSERT_UNAVAILABLE",
+        "Hosted Linq delivery requires an egress authority assertion before provider work.",
+        { retryable: true },
+      );
+    }
+    const authority = await assertEngagement({
+      authorityCheckOnly: true,
+      ...(fromPhoneNumber ? { fromPhoneNumber } : {}),
+      homeRouteFallbackAllowed,
+      target,
+      targetKind,
+    }, { signal });
+    const resolvedRoute = authority?.resolvedRoute;
+    if (
+      !resolvedRoute
+      || resolvedRoute.targetKind !== "thread"
+      || typeof resolvedRoute.threadIsDirect !== "boolean"
+    ) {
+      throw new VaultCliError(
+        "ASSISTANT_LINQ_AUDIENCE_AUTHORITY_UNAVAILABLE",
+        "Hosted Linq delivery requires direct or group authority before provider work.",
+        { retryable: true },
+      );
+    }
+    const conversationThreadId =
+      resolvedRoute.conversationThreadId?.trim() ?? "";
+    return {
+      ...(conversationThreadId ? { conversationThreadId } : {}),
+      ...(authority.deliveryBlockCode
+        ? { deliveryBlockCode: authority.deliveryBlockCode }
+        : {}),
+      ...(authority.deliveryPosture
+        ? { deliveryPosture: authority.deliveryPosture }
+        : {}),
+      target: resolvedRoute.target,
+      threadIsDirect: resolvedRoute.threadIsDirect,
+    };
+  };
+}
+
 function buildHostedAssistantCronStatusOptions(
   phaseInput: HostedWorkspaceRuntimeAssistantPhaseInput,
 ): AssistantCronStatusOptions {
   return {
+    executionContext: {
+      hosted: {
+        memberId: phaseInput.request.userId,
+        userEnvKeys: [],
+        resolveScheduledLinqRoute: createHostedScheduledLinqRouteResolver(phaseInput),
+      },
+    },
     shouldYieldBackgroundMaintenance:
       phaseInput.shouldYieldBackgroundMaintenance ?? null,
     turnEnvironment: createHostedAssistantTurnEnvironment({

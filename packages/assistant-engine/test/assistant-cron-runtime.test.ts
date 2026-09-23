@@ -10828,6 +10828,85 @@ describe('assistant cron runtime orchestration', () => {
     )
   })
 
+  it.each(['chat_opted_out', 'automation_engagement_paused'] as const)('omits recurring %s outreach wakes and restores them after inbound eligibility changes', async deliveryBlockCode => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T09:20:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext('assistant-cron-recipient-wake-')
+    for (const automationId of ['synthetic-outreach-a', 'synthetic-outreach-b']) {
+      addManagedResearchAutomation({ automationId, tag: 'murph-managed:weekly-health-insight', vaultRoot })
+    }
+    for (const automation of getVaultAutomationStore(vaultRoot)) {
+      automation.route.channel = 'linq'
+      automation.route.threadIsDirect = true
+    }
+    const resolveScheduledLinqRoute = vi.fn().mockResolvedValue({ deliveryBlockCode, target: 'room-1', threadIsDirect: true })
+    const options = { executionContext: { hosted: { memberId: 'synthetic-member', userEnvKeys: [], resolveScheduledLinqRoute } } }
+    await expect(getAssistantCronStatus(vaultRoot, options)).resolves.toMatchObject({ dueJobs: 0, enabledJobs: 2, nextRunAt: null })
+    expect(resolveScheduledLinqRoute).toHaveBeenCalledOnce()
+    expect(getVaultAutomationStore(vaultRoot).every(automation => automation.status === 'active')).toBe(true)
+    resolveScheduledLinqRoute.mockResolvedValue({ target: 'room-1', threadIsDirect: true })
+    await expect(getAssistantCronStatus(vaultRoot, options)).resolves.toMatchObject({ nextRunAt: '2026-04-08T10:00:00.000Z' })
+    expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
+  })
+
+  it('bounds recipient-policy reads and retains wakes for excess distinct routes', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T09:20:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext('assistant-cron-recipient-bound-')
+    for (let index = 0; index < 5; index += 1) {
+      addManagedResearchAutomation({ automationId: `synthetic-outreach-${index}`, tag: 'murph-managed:weekly-health-insight', vaultRoot })
+      const automation = getVaultAutomationStore(vaultRoot)[index]!
+      automation.route.channel = 'linq'
+      automation.route.deliveryTarget = `synthetic-thread-${index}`
+    }
+    const resolveScheduledLinqRoute = vi.fn().mockResolvedValue({ deliveryBlockCode: 'automation_engagement_paused', target: 'synthetic-thread', threadIsDirect: true })
+    const status = await getAssistantCronStatus(vaultRoot, {
+      executionContext: { hosted: { memberId: 'synthetic-member', userEnvKeys: [], resolveScheduledLinqRoute } },
+    })
+    expect(status.nextRunAt).toBe('2026-04-08T10:00:00.000Z')
+    expect(status.enabledJobs).toBe(5)
+    expect(resolveScheduledLinqRoute).toHaveBeenCalledTimes(4)
+  })
+
+  it.each(['transient', 'chat-critical', 'one-shot', 'telegram', 'running', 'delivery', 'retry', 'maintenance'] as const)('preserves the %s wake when recurring Linq outreach is paused', async scenario => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T09:20:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext('assistant-cron-recipient-recovery-')
+    if (scenario === 'maintenance') addGroupRoomModelConsolidationAutomation(vaultRoot)
+    else addManagedResearchAutomation({ automationId: 'synthetic-outreach', tag: 'murph-managed:weekly-health-insight', vaultRoot })
+    const automation = getVaultAutomationStore(vaultRoot)[0]!
+    if (scenario !== 'telegram') automation.route.channel = 'linq'
+    if (scenario === 'one-shot') automation.schedule = { kind: 'at', at: '2026-04-08T10:00:00.000Z' }
+    const resolveScheduledLinqRoute = vi.fn().mockResolvedValue({ deliveryBlockCode: 'automation_engagement_paused', target: 'room-1', threadIsDirect: true })
+    if (scenario === 'transient') resolveScheduledLinqRoute.mockRejectedValue(new Error('synthetic unavailable authority'))
+    if (scenario === 'chat-critical') resolveScheduledLinqRoute.mockResolvedValue({ deliveryBlockCode: 'chat_critical', target: 'room-1', threadIsDirect: true })
+    if (scenario === 'running' || scenario === 'delivery' || scenario === 'retry') {
+      vi.setSystemTime(new Date('2026-04-08T10:20:00.000Z'))
+      await claimFirstCanonicalCronJob(vaultRoot)
+    }
+    if (scenario === 'delivery' || scenario === 'retry') {
+      await updateCanonicalRuntimeState(vaultRoot, automation.automationId, record => ({
+        ...record,
+        state: {
+          ...record.state, runningAt: null,
+          pendingDeliveryIntentId: scenario === 'delivery' ? 'outbox_synthetic_accepted' : null,
+          pendingOccurrenceAt: '2026-04-08T10:00:00.000Z',
+          retryAfterAt: scenario === 'retry' ? '2026-04-08T10:30:00.000Z' : null,
+        },
+      }))
+    }
+    const status = await getAssistantCronStatus(vaultRoot, {
+      executionContext: { hosted: { memberId: 'synthetic-member', userEnvKeys: [], resolveScheduledLinqRoute } },
+    })
+    const expectedWake = scenario === 'running' ? '2026-04-08T11:20:00.001Z'
+      : scenario === 'delivery' ? null
+      : scenario === 'retry' ? '2026-04-08T10:30:00.000Z'
+      : scenario === 'maintenance' ? '2026-04-09T04:00:00.000Z'
+      : '2026-04-08T10:00:00.000Z'
+    expect(status.nextRunAt).toBe(expectedWake)
+    expect(resolveScheduledLinqRoute).toHaveBeenCalledTimes(['transient', 'chat-critical'].includes(scenario) ? 1 : 0)
+  })
+
   it.each(['chat_critical', 'automation_engagement_paused'] as const)('skips a scheduled Linq turn before model work when %s blocks the route', async (deliveryBlockCode) => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-08T10:20:00.000Z'))

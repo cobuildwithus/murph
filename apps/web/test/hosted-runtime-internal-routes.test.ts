@@ -255,6 +255,24 @@ describe("hosted runtime internal web routes", () => {
     } finally { releaseFirst(); error.mockRestore(); }
   });
 
+  it.each([false, true])("records runtime milestone batches with the existing attempt fence (mismatch=%s)", async mismatch => {
+    const ok = { matchedCount: 1, recorded: true, unmatchedCount: 0 };
+    mocks.recordHostedIngressRuntimeMilestone.mockResolvedValue(ok);
+    const events = ["email", "linq", "telegram"].map(source => ({
+      type: "runtime_milestone", source, at: FIXED_NOW,
+      runtimeAttemptId: mismatch && source === "telegram" ? "other-attempt" : "attempt_routes_1",
+      milestone: "checkpoint_publication_expected_by",
+    }));
+    const response = await runtimeLatencyRoute.POST(jsonRequest("/api/internal/hosted-runtime/latency", { events }, runtimeWriteFenceHeaders()));
+    expect(response.status).toBe(mismatch ? 401 : 200);
+    expect(mocks.recordHostedIngressRuntimeMilestone).toHaveBeenCalledTimes(mismatch ? 0 : 3);
+    if (!mismatch) {
+      expect(await response.json()).toEqual({ results: [ok, ok, ok] });
+      expect(mocks.recordHostedIngressRuntimeMilestone.mock.calls.map(([event]) => event.source)).toEqual(["email", "linq", "telegram"]);
+    }
+    expect(mocks.recordHostedIngressAssistantMilestone).not.toHaveBeenCalled();
+  });
+
   it.each(["fence", "event", "count", "empty", "ambiguous"])("rejects invalid milestone batches before any persistence: %s", async invalid => {
     const event = { type: "assistant_milestone", source: "linq", runtimeAttemptId: "attempt_routes_1",
       assistantInputIds: ["synthetic-input"], milestone: "first_codex_output_observed", at: FIXED_NOW };

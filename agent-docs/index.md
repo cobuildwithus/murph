@@ -1,5 +1,10 @@
 # Murph Agent Docs Index
 
+Runtime HTTP request reductions are tracked in
+[`runtime request reduction`](exec-plans/active/2026-09-23-runtime-request-reduction.md).
+Recipient wake eligibility remains owned by `operations/imessage-deliverability.md`;
+retry/completion and telemetry contracts remain in the hosted runtime references.
+
 Workspace callback phase, database and pool timing semantics are owned by
 `apps/web/README.md` under "Workspace read timing". Implementation and proof are
 tracked in `exec-plans/completed/2026-09-22-workspace-read-latency.md`.

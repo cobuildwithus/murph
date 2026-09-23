@@ -232,6 +232,16 @@ does not automatically replay the failed intent; later eligible scheduled
 occurrences use their ordinary delivery path. It does not hold the system mailbox
 or another channel's scheduled work behind a member-wide blocked wake.
 
+The hosted cron wake projection uses that same authority-only preflight to omit
+idle recurring Linq notifications when engagement is paused or the chat opted
+out. It deduplicates identical targets within one projection and checks at most
+four distinct targets serially; excess targets and uncertain/transient policy
+reads retain their timers. One-shot reminders, running claims, accepted delivery
+or retry work, other channels, and silent maintenance remain eligible. No
+canonical automation is paused or rewritten. Ordinary foreground completion
+refreshes the projection after delivery, so new engagement re-arms subsequent
+occurrences through the existing wake owner.
+
 The policy keeps `hosted_linq_daily_state` and the existing 28-day window.
 Accepted meal captures and Telegram/email conversations retain their existing
 qualification as explicit member engagement, including consumed or

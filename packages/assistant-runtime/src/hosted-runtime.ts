@@ -12,11 +12,9 @@ import {
 
 import {
   HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_PHASE_KEYS,
-  HOSTED_INGRESS_LATENCY_SOURCES,
   type HostedIngressLatencySource,
   type HostedRuntimeAssistantConfigurationSnapshot,
   type HostedRuntimeLatencyPhaseBreakdown,
-  type HostedRuntimeLatencyTraceMilestone,
   type HostedRuntimeLatencyTraceStagedMilestones,
   type HostedRuntimeOrchestrationLatencyDiagnostics,
   type HostedRuntimeRedactedJson,
@@ -125,6 +123,7 @@ import {
 } from "./hosted-runtime/turn-input.ts";
 import {
   recordHostedAssistantMilestonesBestEffort,
+  recordHostedRuntimeLatencyMilestoneBestEffort,
   guardHostedRuntimeLatencyTracePort,
 } from "./hosted-runtime/assistant-latency-trace.ts";
 import {
@@ -1400,39 +1399,6 @@ function isHostedRuntimeCheckpointSupersededByWorkspaceProgress(
       return true;
     case "after_web_checkpoint":
       return false;
-  }
-}
-
-function recordHostedRuntimeLatencyMilestoneBestEffort(input: {
-  at: string;
-  latencyTracePort?: HostedRuntimePlatform["latencyTracePort"] | null;
-  milestone: HostedRuntimeLatencyTraceMilestone;
-  runtimeAttemptId: string;
-}): void {
-  if (!input.latencyTracePort) {
-    return;
-  }
-
-  const sources: readonly HostedIngressLatencySource[] =
-    input.milestone === "checkpoint_publication_expected_by"
-      ? HOSTED_INGRESS_LATENCY_SOURCES
-      : ["linq"];
-  for (const source of sources) {
-    try {
-      void input.latencyTracePort.record({
-        event: {
-          at: input.at,
-          milestone: input.milestone,
-          runtimeAttemptId: input.runtimeAttemptId,
-          source,
-          type: "runtime_milestone",
-        },
-      }).catch(() => {
-        // Latency traces are diagnostic-only and must not affect runtime progress.
-      });
-    } catch {
-      // Latency traces are diagnostic-only and must not affect runtime progress.
-    }
   }
 }
 

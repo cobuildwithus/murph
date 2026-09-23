@@ -631,6 +631,7 @@ describeRealCodex('real model canonical production journeys', () => {
     finally { await removeRealCodexTemporaryPaths(config.temporaryPaths) }
   }, 600_000)
   it('real model canonical reminder create fire and cancel', async () => {
+    // Includes recipient wake suppression and reactivation for the model-created schedule.
     const config = await resolveRealCodexE2eConfig({ productionTransport: true })
     try { await runCanonicalReminderJourney({ ...config, onProviderRequestStarted: recordCanonicalProviderRequest }) }
     finally { await removeRealCodexTemporaryPaths(config.temporaryPaths) }

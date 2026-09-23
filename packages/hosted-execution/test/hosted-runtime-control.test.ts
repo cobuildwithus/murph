@@ -3203,6 +3203,11 @@ it("keeps bounded milestone batches additive to the deployed singleton wire cont
   const events = Array.from({ length: 8 }, () => event);
   expect(parseHostedRuntimeLatencyTraceBatchRequest({ events })).toEqual({ events });
   expect(parseHostedRuntimeLatencyTraceRequest({ event })).toEqual({ event });
+  const runtimeEvents = ["email", "linq", "telegram"].map(source => ({
+    type: "runtime_milestone", source, runtimeAttemptId: "synthetic-attempt",
+    at: event.at, milestone: "checkpoint_publication_expected_by",
+  }));
+  expect(parseHostedRuntimeLatencyTraceBatchRequest({ events: runtimeEvents })).toEqual({ events: runtimeEvents });
   expect(() => parseHostedRuntimeLatencyTraceRequest({ events })).toThrow();
   for (const payload of [{ events: [] }, { events: [...events, event] }, { events, event },
     { events: [{ ...event, type: "runtime_milestone" }] }, { events: [{ ...event, privateText: "synthetic" }] }]) {
