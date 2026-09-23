@@ -12,6 +12,8 @@
       "reminders",
       "automations"
     ],
-    "sourcePullRequests": []
+    "sourcePullRequests": [
+      3670
+    ]
   }
 }

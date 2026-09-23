@@ -22,12 +22,18 @@ Runtime-only activation after GPT-6-capable catalog and allowance readers are de
 - [x] Add the production-derived scheduled journey and prove ordinary conversation-target continuity.
 - [ ] Obtain live reply proof: all available local subscription homes are blocked before provider action.
 - [x] Update architecture/changelog, review the complete diff, run typecheck and complexity.
-- [ ] Open the reviewable draft PR and close the implementation plan with the verification hold recorded.
+- [x] Open [PR #3670](https://github.com/cobuildwithus/murph/pull/3670) as draft and close the implementation plan with the verification hold recorded.
 - [ ] Release gates remain pending: live reply proof, final ReviewGPT, and green required exact-head CI.
 
 ## Evidence
-Six new regressions failed before the implementation. The final focused automation lane passes 50 tests across model selection, continuity, fresh-session routing, and envelope construction. Assistant Engine typecheck, `pnpm complexity:diff` (maximum 20, no hotspots), and `pnpm docs:drift` pass. Changelog generation and its 10 page tests pass.
+Six new regressions failed before the implementation. The final focused automation lane passes 50 tests across model selection, continuity, fresh-session routing, and envelope construction. Assistant Engine typecheck, `pnpm complexity:diff` (maximum 20, no hotspots), and `pnpm docs:drift` pass. Changelog generation and its 10 page tests pass. The adjacent onboarding first-personal-read lane also passes all 10 tests; reasoning-only overrides continue inheriting the selected target.
 
 Live command: `pnpm test:assistant:live -- --test "runs a saved legacy Luna reminder on the current OpenAI model without rewriting it" --model gpt-6-luna`. Auth class: local subscription. The default home and all nine available alternate homes failed before provider action (quota, authentication, or startup failure). No real reply was produced; Product UX verdict is Hold. Do not count the scenario as passed. The authored live test compiles and remains opt-in.
 
 No production deployment or canonical record mutation is part of this PR task. The implementation is reviewable, but final external review and required CI are pending while the direct proof hold remains open.
+
+## Handoff
+Implementation is complete in draft PR #3670. The external verification hold is intentionally unresolved: rerun the recorded focused Luna journey when local subscription access is available, inspect its actual reply, then continue final ReviewGPT and required exact-head CI before readiness. No merge or deployment was performed for this task.
+Status: completed
+Updated: 2026-09-23
+Completed: 2026-09-23
