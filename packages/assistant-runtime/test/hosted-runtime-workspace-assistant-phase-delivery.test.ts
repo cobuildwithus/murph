@@ -2413,12 +2413,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
   });
 
   it("fast-dispatches idempotent active nudge delivery before the runner checkpoint", async () => {
-    const input = createPhaseInput({ importedCount: 1, now: () => "2026-05-08T16:00:00.000Z" });
-    const assertEngagement = vi.fn().mockResolvedValue({
-      deliveryBlockCode: "automation_engagement_paused",
-      resolvedRoute: { target: "synthetic-thread", targetKind: "thread", threadIsDirect: true },
-    });
-    input.runtime.platform.effectsPort.assertLinqRecentInboundEngagement = assertEngagement;
     mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
       assistantAutomationProgressed: true,
       deviceSyncProcessed: 0,
@@ -2452,11 +2446,13 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
       },
     ]);
 
-    const result = await runHostedWorkspaceAssistantPhase(input);
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 1,
+      now: () => "2026-05-08T16:00:00.000Z",
+    }));
 
     expect(result.afterCheckpoint).toEqual(expect.any(Function));
     expect(mocks.getAssistantCronStatus).not.toHaveBeenCalled();
-    expect(assertEngagement).not.toHaveBeenCalled();
     await expect(result.afterCheckpoint?.()).resolves.toBeNull();
     expect(result.checkpointReason).toBe("outbox_receipt");
     expect(result.redactedStatus).toEqual(expect.objectContaining({
@@ -2472,14 +2468,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
     expect(mocks.getAssistantCronStatus).toHaveBeenCalledTimes(1);
     expect(mocks.drainHostedPreparedAssistantDeliveries.mock.invocationCallOrder[0])
       .toBeLessThan(mocks.getAssistantCronStatus.mock.invocationCallOrder[0]!);
-    const resolveRoute = mocks.getAssistantCronStatus.mock.lastCall?.[1].executionContext.hosted.resolveScheduledLinqRoute;
-    const signal = new AbortController().signal;
-    await expect(resolveRoute({ target: "synthetic-thread", targetKind: "thread", signal })).resolves.toEqual({
-      deliveryBlockCode: "automation_engagement_paused", target: "synthetic-thread", threadIsDirect: true,
-    });
-    expect(assertEngagement).toHaveBeenCalledWith({
-      authorityCheckOnly: true, homeRouteFallbackAllowed: undefined, target: "synthetic-thread", targetKind: "thread",
-    }, { signal });
   });
 
   it.each([

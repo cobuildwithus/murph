@@ -193,7 +193,6 @@ export async function runCanonicalReminderJourney(config: CanonicalLiveConfig): 
     assert.equal(reminder.route.threadId ?? reminder.route.deliveryTarget, THREAD_ID)
     assert.ok(await fixture.commandCount() > 0, 'The model must create the reminder through the shipped CLI.')
     const scheduledModels: (string | null)[] = []
-    let outreachPaused = true
     const executionContext = { hosted: { memberId: 'canonical-live-synthetic-member', userEnvKeys: [], defaultTarget: createAssistantModelTarget({
       provider: 'codex-cli', model: config.model, modelProvider: config.modelProvider,
       codexCommand: fixture.codexCommand, codexHome: fixture.codexHome,
@@ -205,18 +204,10 @@ export async function runCanonicalReminderJourney(config: CanonicalLiveConfig): 
       // External route metadata comes from the synthetic transport boundary.
       // The production scheduler still validates and binds that exact route.
       assert.equal(input.target, THREAD_ID)
-      return { target: THREAD_ID, conversationThreadId: THREAD_ID, threadIsDirect: true,
-        ...(outreachPaused ? { deliveryBlockCode: 'automation_engagement_paused' as const } : {}) }
+      return { target: THREAD_ID, conversationThreadId: THREAD_ID, threadIsDirect: true }
     } } }
     const job = await getAssistantCronJob(fixture.vault, reminder.automationId)
     assert.ok(job.state.nextRunAt)
-    const paused = await getAssistantCronStatus(fixture.vault, { executionContext })
-    assert.equal(paused.nextRunAt, null)
-    assert.equal(paused.enabledJobs, 1)
-    assert.equal(scheduledModels.length, 0)
-    assert.equal((await listAssistantOutboxIntents(fixture.vault)).length, 0)
-    outreachPaused = false
-    assert.equal((await getAssistantCronStatus(fixture.vault, { executionContext })).nextRunAt, job.state.nextRunAt)
     const waitMs = new Date(job.state.nextRunAt).getTime() - Date.now() + 100
     assert.ok(waitMs < 70_000, 'An every-minute reminder must become due within one minute.')
     if (waitMs > 0) await new Promise((resolve) => setTimeout(resolve, waitMs))

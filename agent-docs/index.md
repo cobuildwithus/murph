@@ -2,9 +2,8 @@
 
 Runtime HTTP request reductions are tracked in
 [`runtime request reduction`](exec-plans/active/2026-09-23-runtime-request-reduction.md).
-Recipient inactivity wake suppression, foreground preemption and provider-health recovery remain owned
-by `operations/imessage-deliverability.md`;
-retry/completion and telemetry contracts remain in the hosted runtime references.
+Retry/completion and telemetry contracts remain in the hosted runtime references.
+Reminder timers retain their existing recovery behavior.
 
 Workspace callback phase, database and pool timing semantics are owned by
 `apps/web/README.md` under "Workspace read timing". Implementation and proof are
