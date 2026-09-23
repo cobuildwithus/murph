@@ -121,10 +121,11 @@ function retryProcessing(ctx: { diagnostics: RuntimeProcessingDiagnostics }, rea
   | "cutover_blocked" | "missing_container_binding"
   | "claim_blocked" | "retirement_pending" | "completion_unconfirmed" | "starting_fence_preserved"
   | "processing_mode_conflict" | "wake_unconfirmed" | "container_not_ready"
-  | "command_budget_exhausted" | "container_rpc_timeout"
+  | "command_budget_exhausted" | "container_rpc_timeout",
+  retryAtEpochMs = Date.now() + 3_000,
 ): HostedRuntimeEnsureProcessingResponse {
   ctx.diagnostics.details.runtimeProcessingRetryReason = reason;
-  return { kind: "retry_later", retryAt: new Date(Date.now() + 3_000).toISOString() };
+  return { kind: "retry_later", retryAt: new Date(retryAtEpochMs).toISOString() };
 }
 function acceptedProcessing(ctx: ProcessingContext, owner: HostedRuntimeOwnerSnapshot, action: "started" | "woken" | "already_running"): HostedRuntimeEnsureProcessingResponse {
   return { kind: "runtime_processing_accepted", action, runtimeAttemptId: requireIdentity(owner).attemptId,
@@ -164,7 +165,10 @@ async function reconcileExistingRuntime(ctx: ProcessingContext, owner: HostedRun
   }
   if (wake) return wake;
   // Age decides when to attempt retirement; it never proves stoppedness.
-  if (owner.phase === "starting" && owner.startedAt && Date.now() - Date.parse(owner.startedAt) < 30_000) return retryProcessing(ctx, "starting_fence_preserved");
+  const startingDeadline = owner.startedAt ? Date.parse(owner.startedAt) + 30_000 : 0;
+  if (owner.phase === "starting" && startingDeadline > Date.now()) {
+    return retryProcessing(ctx, "starting_fence_preserved", startingDeadline);
+  }
   await retireRuntime(ctx, owner);
   return retryProcessing(ctx, "retirement_pending");
 }

@@ -387,6 +387,19 @@ describe("Postgres runtime orchestration", () => {
     expect(container.retireStandbySlot).not.toHaveBeenCalled();
   });
 
+  it("retains recovery when the settled completion command rejects the old owner", async () => {
+    const { source, container } = harness();
+    container.ensureProcessing.mockResolvedValue({ kind: "start-required", reason: "no-active-child" });
+    container.readSupervisedInvocation.mockResolvedValue({ attemptId: "attempt-a", generation: "1", state: "completed", immediateRecheckRequested: false });
+    vi.mocked(commandHostedRuntimeOwner).mockResolvedValue(response(owner()));
+    vi.mocked(recordHostedRuntimeOwnerCompletion).mockResolvedValueOnce(false);
+    expect(await ensurePostgresRuntimeProcessing(source, request)).toMatchObject({ kind: "retry_later" });
+    expect(commandHostedRuntimeOwner).toHaveBeenCalledTimes(2);
+    expect(recordHostedRuntimeOwnerCompletion).toHaveBeenCalledOnce();
+    expect(container.startSupervisedInvocation).not.toHaveBeenCalled();
+    expect(container.retireStandbySlot).not.toHaveBeenCalled();
+  });
+
   it("retires retention work before replacing it with foreground work", async () => {
     const { source, container, binding } = harness();
     vi.mocked(commandHostedRuntimeOwner).mockResolvedValueOnce(response(owner({ processingMode: "inbox_media_retention" })))
@@ -407,6 +420,23 @@ describe("Postgres runtime orchestration", () => {
     expect(container.ensureProcessing).not.toHaveBeenCalled();
     expect(commandHostedRuntimeOwner).toHaveBeenCalledTimes(1);
     expect(container.retireStandbySlot).not.toHaveBeenCalled();
+  });
+
+  it("waits for the preserved startup deadline and still accepts an earlier ready wake", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-01T00:00:05Z"));
+    const { source, container } = harness();
+    const starting = owner({ phase: "starting", workspaceVersion: null, startedAt: "2026-01-01T00:00:00Z" });
+    vi.mocked(commandHostedRuntimeOwner).mockResolvedValue(response(starting));
+    expect(await ensurePostgresRuntimeProcessing(source, request)).toEqual({
+      kind: "retry_later", retryAt: "2026-01-01T00:00:30.000Z",
+    });
+    expect(container.retireStandbySlot).not.toHaveBeenCalled();
+    expect(container.startSupervisedInvocation).not.toHaveBeenCalled();
+    vi.setSystemTime(new Date("2026-01-01T00:00:12Z"));
+    vi.mocked(commandHostedRuntimeOwner).mockResolvedValue(response(owner()));
+    expect(await ensurePostgresRuntimeProcessing(source, request)).toMatchObject({ kind: "runtime_processing_accepted", action: "woken" });
+    expect(container.ensureProcessing).toHaveBeenCalledOnce();
   });
 
   it("fences an expired unacknowledged launch through exact native retirement before releasing it", async () => {
@@ -442,7 +472,8 @@ describe("Postgres runtime orchestration", () => {
     vi.mocked(commandHostedRuntimeOwner).mockResolvedValueOnce(response(owner({ attemptId: "attempt-b", generation: "2", phase: "starting", workspaceVersion: null }), "claimed"))
       .mockResolvedValue(response(owner({ attemptId: "attempt-b", generation: "2" }), "updated"));
     expect(await ensurePostgresRuntimeProcessing(source, { ...request, ...(state === "web-admitted" ? { admission } : {}) })).toMatchObject({ kind: "runtime_processing_accepted", runtimeAttemptId: "attempt-b" });
-    expect(recordHostedRuntimeOwnerCompletion).toHaveBeenCalledWith(expect.objectContaining({ attemptId: "attempt-a", result: { immediateRecheckRequested: true } }));
+    expect(recordHostedRuntimeOwnerCompletion).toHaveBeenCalledWith(expect.objectContaining({ attemptId: "attempt-a", settledRunnerContainerName: target, result: { immediateRecheckRequested: true } }));
+    expect(vi.mocked(commandHostedRuntimeOwner).mock.calls.some(([input]) => input.command.operation === "release_completed")).toBe(false);
     expect(container.resolveRetainedStandbySlot).toHaveBeenCalled();
     expect(container.bindStandbySlot).not.toHaveBeenCalled();
     expect(container.retireStandbySlot).not.toHaveBeenCalled();
