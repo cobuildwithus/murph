@@ -1785,7 +1785,7 @@ describe('applyMurphManagedAutomations', () => {
     expect(managedAutomationMocks.records.get(morning.automationId)?.status).toBe('active')
   })
 
-  it('defines one hosted morning Journal context pass on Terra low', () => {
+  it('defines one hosted morning Journal context pass on GPT-6 Sol low', () => {
     const morning = MURPH_MANAGED_AUTOMATIONS.find(
       (seed) =>
         seed.automationId ===
@@ -1799,7 +1799,7 @@ describe('applyMurphManagedAutomations', () => {
 
     expect(morning).toMatchObject({
       assistantTargetOverride: {
-        model: 'gpt-5.6-terra',
+        model: 'gpt-6-sol',
         reasoningEffort: 'low',
       },
       hostedRuntimeOnly: true,
@@ -1822,7 +1822,7 @@ describe('applyMurphManagedAutomations', () => {
       label: 'previous Luna model',
       override: { model: 'gpt-5.6-luna', reasoningEffort: 'high' },
     },
-  ])('reconciles Journal $label to Terra without changing other jobs or reading member preferences', async ({ override }) => {
+  ])('reconciles Journal $label to GPT-6 Sol without changing other jobs or reading member preferences', async ({ override }) => {
     const options = {
       defaultRoute,
       now: new Date('2026-09-01T12:00:00.000Z'),
@@ -1833,7 +1833,7 @@ describe('applyMurphManagedAutomations', () => {
       vaultRoot,
     }
     const journalIds = [MURPH_JOURNAL_CONNECTED_CONTEXT_MORNING_AUTOMATION_ID]
-    const morningOverride = { model: 'gpt-5.6-terra', reasoningEffort: 'low' }
+    const morningOverride = { model: 'gpt-6-sol', reasoningEffort: 'low' }
 
     await applyMurphManagedAutomations(options)
     for (const automationId of journalIds) {
