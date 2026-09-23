@@ -143,6 +143,22 @@ describe("hosted member assistant model preference", () => {
     expect(resolveHostedMemberAssistantProvider(member)).toBe("openai");
   });
 
+  it.each([false, true])("derives the first-day expiry only for personal signup (group=%s)", async (group) => {
+    mocks.findUniqueHostedMember.mockResolvedValue({
+      ...buildMemberState({ assistantModelPreference: null,
+        ...(group ? { threadContainerMemberId: "group_test" } : {}) }),
+      createdAt: new Date("2026-09-23T23:30:00Z"),
+    });
+    const result = await readHostedMemberAssistantModelPreference({
+      memberId: "member_test", prisma: createReadClient(),
+    });
+    expect(result.hostedAssistantPriorityUntil).toBe(group ? undefined : "2026-09-24T23:30:00.000Z");
+    expect(mocks.findUniqueHostedMember).toHaveBeenCalledTimes(1);
+    expect(mocks.findUniqueHostedMember).toHaveBeenCalledWith(expect.objectContaining({
+      select: expect.objectContaining({ createdAt: true }),
+    }));
+  });
+
   it.each([false, true])("retires stored Terra selections for personal and group conversations (group=%s)", async (group) => {
     mocks.findUniqueHostedMember.mockResolvedValue(buildMemberState({
       assistantModelPreference: "gpt-5.6-terra",
