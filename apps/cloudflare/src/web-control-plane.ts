@@ -62,7 +62,9 @@ export async function fetchHostedExecutionWebControlPlaneResponse(input: {
   search?: string | null;
   signal?: AbortSignal | null;
   timeoutMs: number | null;
+  timing?: { prepareMs?: number; fetchHeadersMs?: number };
 }): Promise<Response> {
+  const startedAt = performance.now();
   const fetchImpl = normalizeCloudflareWorkerFetch(input.fetchImpl);
   const targetUrl = new URL(
     input.path.replace(/^\/+/u, ""),
@@ -116,7 +118,9 @@ export async function fetchHostedExecutionWebControlPlaneResponse(input: {
     }
   }
 
-  return fetchImpl(targetUrl.toString(), {
+  const fetchStartedAt = performance.now();
+  if (input.timing) input.timing.prepareMs = Math.max(0, Math.round(fetchStartedAt - startedAt));
+  const response = await fetchImpl(targetUrl.toString(), {
     ...(input.body === undefined ? {} : { body: input.body }),
     headers,
     method: input.method,
@@ -127,6 +131,8 @@ export async function fetchHostedExecutionWebControlPlaneResponse(input: {
         : undefined
     ),
   });
+  if (input.timing) input.timing.fetchHeadersMs = Math.max(0, Math.round(performance.now() - fetchStartedAt));
+  return response;
 }
 
 // Diagnostic categories only, after native Headers normalization. Never retain raw values.

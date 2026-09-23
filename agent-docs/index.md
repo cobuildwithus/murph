@@ -642,3 +642,7 @@ Legacy oxygen analytics retirement is tracked in
 
 Single device publication receipts are tracked in
 [`device receipts`](exec-plans/completed/2026-09-21-single-import-receipt.md).
+
+Worker callback preparation, HTTP-header timing, and bounded Vercel region
+attribution are tracked in
+[`mailbox latency phases`](exec-plans/completed/2026-09-22-mailbox-latency-phases.md).
