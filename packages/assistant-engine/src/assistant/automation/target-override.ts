@@ -158,7 +158,8 @@ export function resolveAutomationAssistantTargetOverrideForTarget(
       override.model === 'gpt-5.6-terra') &&
     (!supportsReasoningEffort ||
       (effectiveModelProvider === VENICE_CODEX_MODEL_PROVIDER_ID &&
-        !HOSTED_ASSISTANT_VENICE_PROVIDER_MODELS[override.model]))
+        (!isHostedAssistantProductModel(override.model) ||
+          !HOSTED_ASSISTANT_VENICE_PROVIDER_MODELS[override.model])))
   if (!suppressProductModel && supportsReasoningEffort) {
     return override
   }
@@ -169,8 +170,8 @@ export function resolveAutomationAssistantTargetOverrideForTarget(
     : null
 
   return compactAssistantProviderConfigInput({
-    ...(model ? { model } : {}),
-    ...(explicitModelProvider ? { modelProvider: explicitModelProvider } : {}),
-    ...(reasoningEffort ? { reasoningEffort } : {}),
+    model,
+    modelProvider: explicitModelProvider,
+    reasoningEffort,
   })
 }

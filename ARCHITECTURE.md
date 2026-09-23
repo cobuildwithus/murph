@@ -1769,8 +1769,9 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   envelopes and canonical records retain the authored pin; resolution happens
   after the executing provider is known and before default reasoning is derived.
   Explicit reasoning survives; an omitted value uses the replacement model's
-  default. Venice retains its mapped GPT-5.6 targets, explicit custom-provider
-  model IDs stay literal, and unsupported inherited managed preferences remain
+  default. Venice retains its supported GPT-5.6 targets; retired Terra inherits
+  the supported Venice conversation target. Explicit custom-provider model IDs
+  stay literal, and unsupported inherited managed preferences remain
   dormant across provider changes. This adds no deploy-time scan or state write;
   new runtime code activates replacements on the next execution. Future versions
   require a reviewed map update, and rollback restores prior resolution.

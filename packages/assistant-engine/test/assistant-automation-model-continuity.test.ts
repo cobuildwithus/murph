@@ -95,7 +95,7 @@ describe('automation model continuity', () => {
     expect(envelope.scheduledOccurrenceAt).toBe('2026-09-23T15:00:00.000Z')
   })
 
-  it.each(['gpt-5.6-luna', 'gpt-5.6-sol', 'gpt-5.6-terra'])(
+  it.each(['gpt-5.6-luna', 'gpt-5.6-sol'])(
     'keeps the saved %s provider choice usable on Venice',
     (model) => {
       const preference = Object.freeze({ model, reasoningEffort: 'medium' })
@@ -156,31 +156,43 @@ describe('automation model continuity', () => {
     expect(preference.model).toBe('gpt-5.6-terra')
   })
 
-  it.each(['gpt-6-sol', 'gpt-6-luna'])(
+  it.each([
+    ['gpt-6-sol', 'gpt-6-sol'],
+    ['gpt-6-luna', 'gpt-6-luna'],
+    ['gpt-5.6-terra', 'gpt-6-sol'],
+  ])(
     'keeps saved %s dormant through Venice retries and reactivates it on OpenAI',
-    (model) => {
-      const preference = Object.freeze({ model })
+    (model, openaiModel) => {
+      const preference = Object.freeze({ model, reasoningEffort: 'medium' })
+      const envelope = buildAssistantAutomationTurnEnvelope({
+        assistantTargetOverride: preference,
+        scheduledOccurrenceAt: '2026-09-23T15:00:00.000Z',
+        turnTrigger: 'automation-cron',
+      })
       const veniceSession = createGroupSession(
         requireTarget('gpt-5.6-sol', 'low', VENICE_CODEX_MODEL_PROVIDER_ID),
         null,
       )
       for (const serviceTier of ['flex', null] as const) {
         const route = resolveAssistantTurnRoute(
-          { ...createAutomationInput(preference), serviceTier },
+          { ...createAutomationInput(preference), ...envelope, serviceTier },
           null,
           resolvedSession(veniceSession),
         )
         expect(route.providerOptions).toMatchObject({
           model: 'gpt-5.6-sol',
           modelProvider: VENICE_CODEX_MODEL_PROVIDER_ID,
+          reasoningEffort: 'medium',
         })
       }
       const openaiSession = createGroupSession(requireTarget('gpt-6-sol', 'low', 'openai'), null)
       const restored = resolveAssistantTurnRoute(
-        createAutomationInput(preference), null, resolvedSession(openaiSession),
+        { ...createAutomationInput(preference), ...envelope }, null, resolvedSession(openaiSession),
       )
-      expect(restored.providerOptions).toMatchObject({ model, modelProvider: 'openai' })
-      expect(preference).toEqual({ model })
+      expect(restored.providerOptions).toMatchObject({ model: openaiModel, modelProvider: 'openai', reasoningEffort: 'medium' })
+      expect(preference).toEqual({ model, reasoningEffort: 'medium' })
+      expect(envelope.assistantTargetOverride).toEqual(preference)
+      expect(envelope.scheduledOccurrenceAt).toBe('2026-09-23T15:00:00.000Z')
     },
   )
 
