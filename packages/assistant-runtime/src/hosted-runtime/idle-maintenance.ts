@@ -15,6 +15,7 @@ import {
 import {
   normalizeHostedAiUsageAllowancePricedModelId,
   resolveHostedAiUsageTokenPricingBasis,
+  type HostedWorkspaceInvocationProcessingMode,
 } from "@murphai/hosted-execution/runtime-control";
 import {
   resolveAssistantCodexUsageProviderName,
@@ -116,6 +117,7 @@ export async function runHostedIdleCheckpointMaintenance(input: {
   memberId: string;
   model: string | null;
   pendingWork: boolean;
+  processingMode?: HostedWorkspaceInvocationProcessingMode;
   persistGeneratedImageRetention?: (<T>(write: () => Promise<T>) => Promise<T>) | null;
   protectedAttachmentIds?: readonly string[];
   protectedCaptureIds?: readonly string[];
@@ -304,48 +306,14 @@ export async function runHostedIdleCheckpointMaintenance(input: {
         retentionWake,
       );
     }
-    if (input.vaultRoot) {
-      const archiveSignal = AbortSignal.any([
-        abortController.signal,
-        AbortSignal.timeout(HOSTED_IDLE_ARCHIVE_TIMEOUT_MS),
-      ]);
-      await archiveClosedLedgersDuringIdle({
-        vaultRoot: input.vaultRoot,
+    // Finite content-retention wakes must not rescan unrelated canonical
+    // history. Ordinary idle checkpoints remain the archive owner.
+    if (input.vaultRoot && input.processingMode !== "inbox_media_retention") {
+      await archiveHostedIdleCanonicalHistory({
         memberId: input.memberId,
-        signal: archiveSignal,
+        signal: abortController.signal,
+        vaultRoot: input.vaultRoot,
       });
-      if (!archiveSignal.aborted) {
-        try {
-          const archiveResult = await archiveClosedIntegrationIngestShards({
-            archiveCurrentMonth: true,
-            signal: archiveSignal,
-            vaultRoot: input.vaultRoot,
-          });
-          if (
-            archiveResult.archivedShardCount > 0
-            || archiveResult.repairedShardCount > 0
-            || archiveResult.blockedShardCount > 0
-          ) {
-            emitIntegrationIngestArchiveLog({
-              memberId: input.memberId,
-              result: archiveResult,
-            });
-          }
-        } catch (error) {
-          if (abortController.signal.aborted) {
-            return buildInterruptedMaintenanceOutcome({
-              retentionWake,
-              shutdownSignal: input.shutdownSignal,
-              vaultRoot: input.vaultRoot,
-              wakeInterrupted,
-            });
-          }
-          emitIntegrationIngestArchiveFailureLog({
-            error,
-            memberId: input.memberId,
-          });
-        }
-      }
     }
     if (abortController.signal.aborted) {
       return buildInterruptedMaintenanceOutcome({
@@ -425,6 +393,40 @@ export async function runHostedIdleCheckpointMaintenance(input: {
     input.shutdownSignal?.removeEventListener("abort", onShutdownAbort);
     wakeWatchAbort.abort();
     await wakeWatch;
+  }
+}
+
+async function archiveHostedIdleCanonicalHistory(input: {
+  memberId: string;
+  signal: AbortSignal;
+  vaultRoot: string;
+}): Promise<void> {
+  const archiveSignal = AbortSignal.any([
+    input.signal,
+    AbortSignal.timeout(HOSTED_IDLE_ARCHIVE_TIMEOUT_MS),
+  ]);
+  await archiveClosedLedgersDuringIdle({
+    vaultRoot: input.vaultRoot,
+    memberId: input.memberId,
+    signal: archiveSignal,
+  });
+  if (archiveSignal.aborted) return;
+  try {
+    const archiveResult = await archiveClosedIntegrationIngestShards({
+      archiveCurrentMonth: true,
+      signal: archiveSignal,
+      vaultRoot: input.vaultRoot,
+    });
+    if (
+      archiveResult.archivedShardCount > 0
+      || archiveResult.repairedShardCount > 0
+      || archiveResult.blockedShardCount > 0
+    ) {
+      emitIntegrationIngestArchiveLog({ memberId: input.memberId, result: archiveResult });
+    }
+  } catch (error) {
+    if (input.signal.aborted) return;
+    emitIntegrationIngestArchiveFailureLog({ error, memberId: input.memberId });
   }
 }
 

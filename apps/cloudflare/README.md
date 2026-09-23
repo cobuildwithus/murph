@@ -178,6 +178,30 @@ identity for recovery. New allocations do not create either legacy target shape.
 Deployment uses one total fleet budget and an explicit temporary reservation for
 the legacy standby application; see [deployment migration](DEPLOY.md#unified-fleet-migration-and-rollback).
 
+When evaluating cost, separate pristine inventory from member-bound execution.
+A container instance can wait unbound before a member claims it; attributing its
+entire daily bill to that member overstates their execution time. Correlate the
+instance's billing intervals with the exact attempt's admission and completion,
+and keep boundary intervals and unmatched usage explicitly unassigned. Use
+Cloudflare's `containersUsageAdaptiveGroups` for billing estimates and
+`containersMetricsAdaptiveGroups` for application resource behavior; the latter
+excludes platform overhead. See the [metrics contract](https://developers.cloudflare.com/analytics/graphql-api/tutorials/querying-container-metrics/).
+
+Fixed ready inventory incurs reserved memory and disk charges even without
+foreground demand. Its allocation budget is approximately `target × 24` hours per
+day, plus replacement/preparation overlap. `off`, or a target of zero, uses the
+existing safe inventory retirement and cold-allocation path; it does not delay
+device webhook admission. Evaluate foreground cold-start latency before changing
+that production policy. Expiring slots while retaining the same fixed target
+merely triggers replacement, rather than reducing reserved capacity.
+
+For sizing comparisons, calculate active CPU seconds separately from allocated
+GiB-seconds and GB-seconds using [current pricing](https://developers.cloudflare.com/containers/platform/pricing/).
+The current cost-reduction work preserves two vCPUs. Custom sizing must satisfy Cloudflare's [instance constraints](https://developers.cloudflare.com/containers/platform/limits/),
+including the minimum memory per vCPU. Re-measure useful-work duration and tail
+latency when reducing CPU; low average utilization alone does not establish an
+equivalent runtime. Configuration or simulated savings are not deployed savings.
+
 Hosted assistant delivery recovery comes from the encrypted local runtime outbox state inside the workspace checkpoint plus web-owned hosted-runtime logs/status.
 The runner container sends runtime internal Worker requests to normal virtual hosts such as `results.worker`, `runner-control.worker`, and `web-control.worker`. Cloudflare Container outbound interception routes those requests back into Worker-owned handlers, using the runtime write-fence headers as authority. After returning a successful invocation result, the container entrypoint clears the invocation's wake and abort pointers and cleans request transport, then sends the exact result, attempt, and generation through `runner-control.worker` to the Postgres runtime owner. Active work remains counted until that completion callback settles, preserving admission and shutdown-drain fencing. Web applies the existing exact completion compare-and-swap, so an activation reset cannot strand a completed write fence and a successor cannot race a process that still reports busy. The ordinary outer result remains the normal completion path; the one-second best-effort receipt logs `recorded` or `not_recorded` and never changes that result. No recovery queue, alarm, poller, persisted promise, or second state owner is added.
 Shared runtime ports cannot supply raw Web-control methods or paths. They must use a branded route descriptor from the same registry that derives the Worker proxy allowlist; bounded query-bearing and device-connect variants can only bind to an already-registered pathname. Cloudflare typecheck rejects an unregistered caller at compile time, and the Node route-contract suite enumerates the registry to prove each exact method/path is allowed while the opposite method and path variants remain blocked.
@@ -922,11 +946,14 @@ result in either arrival order and then runs the same lifecycle decision used by
 single interaction generation captured when that invocation enters the
 container. A later interaction, active invocation, active child work, or
 uncertain health/stop result defers cleanup to the pre-armed SDK safety check.
-When completion cleanup has no local invocation owner but the child still reports
-active work, it schedules one short check after the one-second completion callback
-budget. That check uses the ordinary expiry path and every existing safety guard;
-if work remains active, the normal recovery interval resumes. This avoids a full
-minute of idle retention when the completion callback is the last work to drain.
+Completion cleanup prearms one short check using the one-second completion
+callback budget before checking its interaction generation or live health. A wake
+handled during the invocation can invalidate the completion generation even when
+the child later drains; only the subsequent expiry may evaluate fresh ownership
+and health. The same check covers the entrypoint callback still holding its active
+count. If work or uncertainty remains at expiry, the normal recovery interval
+resumes. A proved warm conversation replaces that check with its absolute receipt
+expiry. No stale completion gains permission to destroy a newer interaction.
 A valid receipt within the ten-minute window schedules its absolute expiry.
 Missing receipt metadata grants no idle warmth; the active-work count still
 protects old children during rollout. A missing completion notification or DO

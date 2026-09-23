@@ -1495,6 +1495,48 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     expect(archiveClosedIntegrationIngestShards).not.toHaveBeenCalled();
   });
 
+  it.each([undefined, "default", "system_mailbox", "inbox_media_retention"] as const)(
+    "retains every content cleanup and limits unrelated archives for %s processing",
+    async (processingMode) => {
+      const nextWakeAt = "2026-10-01T12:00:00.000Z";
+      runInboxTextRetention.mockResolvedValue({
+        expiredCaptures: 1,
+        hasMoreEligibleCaptures: false,
+        legacyCapturesSkipped: 0,
+        nextEligibleAt: nextWakeAt,
+      });
+      const outcome = await runHostedIdleCheckpointMaintenance({
+        credentialSource: "platform",
+        memberId: "member_retention_scope",
+        model: null,
+        pendingWork: false,
+        processingMode,
+        providerName: null,
+        recordUsage: null,
+        resolveAssistantSessionId: null,
+        shutdownSignal: null,
+        vaultRoot: "/synthetic-vault",
+        wakeSignal: null,
+      });
+      expect(outcome).toMatchObject({ nextWakeAt, nextWakeReason: "inbox_media_retention" });
+      for (const cleanup of [
+        runHostedPendingAssistantInputContentRetention,
+        runAssistantTranscriptContentRetention,
+        runInboxMediaRetention,
+        runGeneratedImageCaptureRetention,
+        runInboxEnvelopeMigration,
+        runInboxTextRetention,
+      ]) {
+        expect(cleanup).toHaveBeenCalledOnce();
+      }
+      const expectedArchiveCalls = processingMode === "inbox_media_retention" ? 0 : 1;
+      expect(archiveClosedEventLedgerShards).toHaveBeenCalledTimes(expectedArchiveCalls);
+      expect(archiveClosedAuditShards).toHaveBeenCalledTimes(expectedArchiveCalls);
+      expect(archiveClosedIntegrationIngestShards).toHaveBeenCalledTimes(expectedArchiveCalls);
+      expect(compactWarmCodexThread).not.toHaveBeenCalled();
+    },
+  );
+
   it("archives closed event and integration shards only on a true idle checkpoint", async () => {
     compactWarmCodexThread.mockResolvedValue({
       kind: "skipped",

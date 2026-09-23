@@ -1015,10 +1015,14 @@ function remainingHostedDeviceSyncDenseRawRetentionDeadlineMs(
   timeoutMs: number | null,
 ): number {
   const elapsedMs = Math.max(0, Date.now() - startedAtMs);
-  const passRelativeTimeoutMs = timeoutMs === null
+  // Retention has its own stage budget inside the remaining device-pass budget.
+  // Earlier provider work must not manufacture a retention continuation.
+  return timeoutMs === null
     ? HOSTED_DEVICE_SYNC_DENSE_RAW_RETENTION_TIMEOUT_MS
-    : Math.min(timeoutMs, HOSTED_DEVICE_SYNC_DENSE_RAW_RETENTION_TIMEOUT_MS);
-  return Math.max(0, passRelativeTimeoutMs - elapsedMs);
+    : Math.min(
+        HOSTED_DEVICE_SYNC_DENSE_RAW_RETENTION_TIMEOUT_MS,
+        Math.max(0, timeoutMs - elapsedMs),
+      );
 }
 
 async function drainHostedDeviceSyncWorker(input: {

@@ -2794,6 +2794,53 @@ test("date-mode history and reconcile keep provider days atomic across UTC midni
   }
 });
 
+test("empty sparse history shares bounded jobs while preserving populated and foreground boundaries", async () => {
+  for (const scenario of ["empty", "populated", "foreground"] as const) {
+    const requests: TimeseriesRequest[] = [];
+    const importedSnapshots: unknown[] = [];
+    const provider = createProvider({
+      requests,
+      historicalPullState: { resource: "body_temperature", status: "success" },
+      providerState: {
+        resourceAvailability: { body_temperature: true },
+        status: "connected",
+      },
+      timeseriesResources: ["body_temperature"],
+      timeseriesRecords: scenario === "populated" ? {
+        body_temperature: [{ timestamp: "2026-05-24T08:00:00.000Z", value: 36.6, unit: "c" }],
+      } : {},
+    });
+    const job = withHistoricalFixtureDays(
+      createScheduledResourceJob(provider, "body_temperature"), 20,
+    );
+    const context = createJobContext({
+      importedSnapshots,
+      ...(scenario === "foreground" ? { shouldYield: () => requests.length >= 3 } : {}),
+    });
+    const first = await requireValue(provider.jobExecutor).executeJob(context, toJobRecord(job, 1));
+    const continuation = findResourceJob(first.scheduledJobs ?? [], "body_temperature");
+    const expectedDays = scenario === "empty" ? 16 : 3;
+    assert.equal(requests.length, expectedDays, scenario);
+    assert.equal(continuation.dedupeKey, job.dedupeKey, scenario);
+    assert.equal(continuation.payload?.windowStart,
+      new Date(Date.parse(String(job.payload?.windowStart)) + expectedDays * 86_400_000).toISOString(), scenario);
+    assert.equal(continuation.payload?.windowEnd, job.payload?.windowEnd, scenario);
+    assert.equal(importedSnapshots.length, scenario === "populated" ? 1 : 0, scenario);
+    if (scenario === "populated") {
+      const imported = requireValue(junctionProviderAdapter.parseSnapshot)(importedSnapshots[0]);
+      assert.equal(imported.windowStart, "2026-05-24T00:00:00.000Z");
+      assert.equal(imported.windowEnd, "2026-05-25T00:00:00.000Z");
+    }
+    assertHistoryCoverage(first.metadataPatch, "omron", "body_temperature", false);
+    if (scenario === "empty") {
+      const last = await requireValue(provider.jobExecutor).executeJob(context, toJobRecord(continuation, 2));
+      assert.equal(requests.length, 20);
+      assert.equal(last.scheduledJobs?.length ?? 0, 0);
+      assertHistoryCoverage(last.metadataPatch, "omron", "body_temperature");
+    }
+  }
+});
+
 test("sparse history waits for upstream pull success beyond the empty retry ladder", async () => {
   const readinessDecisions: string[] = [];
   const recordHistoricalPullReadiness = (readiness: string): void => {
@@ -3022,7 +3069,7 @@ test("successful upstream pull with no sparse rows completes after one scan", as
     resource: "caffeine",
   });
 
-  assert.equal(completed.executionCount, 2);
+  assert.equal(completed.executionCount, 1);
   assert.equal(requests.length, 2);
   assertHistoryCoverage(completed.result.metadataPatch, "omron", "caffeine");
 });
@@ -3061,7 +3108,7 @@ test("unavailable upstream status cannot certify zero-row sparse history", async
   });
   const retry = findResourceJob(first.result.scheduledJobs ?? [], "caffeine");
 
-  assert.equal(first.executionCount, 2);
+  assert.equal(first.executionCount, 1);
   assert.equal(requests.length, 2);
   assertHistoryCoverage(first.result.metadataPatch, "omron", "caffeine", false);
   assert.equal(retry.availableAt, "2026-06-12T12:00:00.000Z");
@@ -3320,7 +3367,7 @@ test("not_pulled skips frozen history but catches a queued migration up to curre
       startingIndex: 3,
     });
 
-    assert.equal(completed.executionCount, 34);
+    assert.equal(completed.executionCount, 3);
     assert.equal(requests.length, 34);
     assert.equal(requests[0]?.start, "2026-06-11");
     assert.equal(requests.at(-1)?.end, "2026-07-14");

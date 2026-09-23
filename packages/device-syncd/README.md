@@ -316,7 +316,11 @@ and `weight`—always starts with an explicit 180-day window independent of both
 the generic timeseries window and `summaryBackfillDays`. The existing
 source-scoped sparse-history jobs fetch policy-sized one-day chunks, serialize
 per account, and record terminal coverage in compact
-connection metadata; they do not add another queue or lifecycle. Blood pressure
+connection metadata; they do not add another queue or lifecycle. Confirmed-empty
+date-query history windows share a job up to the existing sixteen-unit budget.
+Every provider day is still fetched, and foreground yield is checked before each
+fetch. The first populated date retains its original import window and ends that
+job's segment; a continuation resumes after the completed prefix. Blood pressure
 keeps exact per-reading completion, and note history keeps complete-fetch
 semantics. All extended timeseries completion shares one fixed-width,
 source-by-resource matrix in an existing blood-pressure or note metadata slot.

@@ -2126,7 +2126,9 @@ export class RunnerContainer extends Container {
       // SDK 0.3.7 consumes a scheduled callback even if it throws. Persist
       // recovery before external reads; uncertainty grants no conversation lease.
       await this.scheduleLifecycleCheck(
-        Date.now() + readRunnerContainerLifecycleReevaluationMs(this.environment),
+        Date.now() + (input.trigger === "invoke-completed"
+          ? HOSTED_CONTAINER_RUNTIME_COMPLETION_TIMEOUT_MS
+          : readRunnerContainerLifecycleReevaluationMs(this.environment)),
       );
       return !this.lifecycleInteractionChanged(input.expectedInteractionGeneration);
     }, { blockPointerlessWake: false });
@@ -2294,15 +2296,6 @@ export class RunnerContainer extends Container {
       return false;
     }
     if (health.activeJobCount > 0) {
-      // The response can settle before the entrypoint's completion callback
-      // releases its active count. Give that drain one short recheck; ordinary
-      // expiry retains the normal cadence if work is still active then.
-      if (input.lifecycleStagePrefix === "invoke-completed"
-        && !this.lifecycleInteractionChanged(input.expectedInteractionGeneration)) {
-        await this.scheduleLifecycleCheck(
-          Date.now() + HOSTED_CONTAINER_RUNTIME_COMPLETION_TIMEOUT_MS,
-        );
-      }
       return false;
     }
     if (this.lifecycleInteractionChanged(input.expectedInteractionGeneration)) {
