@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { brotliCompressSync } from "node:zlib";
 
 import { VAULT_LAYOUT } from "@murphai/contracts";
 import { initializeVault } from "@murphai/core";
@@ -25,7 +26,7 @@ afterEach(async () => {
   ));
 });
 
-test("query source failures identify a safe vault-relative line without echoing content", async () => {
+test.each(["plain", "brotli"] as const)("query source failures identify a safe vault-relative line without echoing content (%s)", async (storage) => {
   const { parentRoot, vaultRoot } = await createTempVaultContext(
     "murph-query-source-invalid-",
   );
@@ -35,10 +36,11 @@ test("query source failures identify a safe vault-relative line without echoing 
     "2026",
     "invalid.jsonl",
   );
-  const sourcePath = path.join(vaultRoot, relativePath);
+  const sourcePath = path.join(vaultRoot, `${relativePath}${storage === "brotli" ? ".br" : ""}`);
   await mkdir(path.dirname(sourcePath), { recursive: true });
-  const malformedSource = "\nprivate-query-source-marker {not-json}\n";
-  await writeFile(sourcePath, malformedSource, "utf8");
+  const malformedSource = Buffer.from("\nprivate-query-source-marker {not-json}\n");
+  const storedBytes = storage === "brotli" ? brotliCompressSync(malformedSource) : malformedSource;
+  await writeFile(sourcePath, storedBytes);
 
   const cli = Cli.create("vault-cli", {
     description: "query source recovery test cli",
@@ -67,7 +69,7 @@ test("query source failures identify a safe vault-relative line without echoing 
     JSON.stringify(result.envelope),
     new RegExp(parentRoot.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"),
   );
-  assert.equal(await readFile(sourcePath, "utf8"), malformedSource);
+  assert.deepEqual(await readFile(sourcePath), storedBytes);
 });
 
 test("service-backed Query failures preserve terminal unsupported-format recovery without writing", async () => {

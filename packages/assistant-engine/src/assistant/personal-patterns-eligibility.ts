@@ -10,8 +10,10 @@ const resultSchema = z.object({
   outcomeId: identifier,
   comparisonBasis: z.enum(['confirmed_absence', 'unobserved_baseline']),
   lagDays: z.union([z.literal(0), z.literal(1)]),
-  lastSeenGrade: z.enum(['A', 'B', 'C', 'D', 'E']),
-  firstSharedDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u).nullable(),
+  // Older model-written rows omitted these fields. Preserve their identity and
+  // mutes, but an unknown grade must never prove a graded result was reviewed.
+  lastSeenGrade: z.enum(['A', 'B', 'C', 'D', 'E']).nullable().default(null),
+  firstSharedDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u).nullable().default(null),
   muted: z.boolean(),
 }).strict()
 
@@ -99,4 +101,3 @@ export async function canSkipManagedPersonalPatterns(input: {
     return false
   }
 }
-

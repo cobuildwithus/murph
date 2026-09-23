@@ -7,8 +7,8 @@ import {
 } from "../src/deploy-smoke-live-model.ts";
 
 describe("deploy live model turn smoke", () => {
-  it("uses Terra for the bounded live deploy smoke", () => {
-    expect(DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL).toBe("gpt-6-sol");
+  it("uses Luna for the bounded live deploy smoke", () => {
+    expect(DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL).toBe("gpt-6-luna");
   });
 
   it("reads only the top-level OpenAI Responses model", () => {
@@ -21,7 +21,7 @@ describe("deploy live model turn smoke", () => {
     )).toBe(DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL);
 
     expect(readDeployLiveModelTurnSmokeOpenAiModel(
-      JSON.stringify({ model: "gpt-smoke-mismatch" }),
+      JSON.stringify({ model: "gpt-6-sol" }),
     )).toBeNull();
     expect(readDeployLiveModelTurnSmokeOpenAiModel(
       JSON.stringify({ model: ` ${DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL} ` }),

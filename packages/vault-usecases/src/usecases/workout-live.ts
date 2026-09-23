@@ -1,4 +1,6 @@
 import {
+  eventRecordSchema,
+  eventRevisionFromLifecycle,
   type WorkoutLiveApplyMemberActionV1,
   type WorkoutLiveSnapshotMemberActionResultV1,
   type WorkoutLiveSnapshotMemberActionV1,
@@ -22,7 +24,7 @@ import {
   hasAmbiguousWorkoutActionExerciseCoordinates,
   workoutActionBindingMatchesCurrentState,
 } from '@murphai/operator-config/workout-action-binding'
-import { encodeWorkoutSessionSnapshotAppCardUrl } from '@murphai/operator-config/assistant-response-cards'
+import { buildWorkoutSessionAppCardEnvelopeV6, type WorkoutSessionAppCardEnvelopeV6 } from '@murphai/contracts'
 
 import { showWorkoutFormat } from './workout-format.js'
 import {
@@ -35,6 +37,7 @@ import {
   type ApplyLiveWorkoutMemberActionResult,
   type AddLiveWorkoutExerciseInput,
   type ClearLiveWorkoutSetInput,
+  type RemoveLiveWorkoutExerciseInput,
   type FinishLiveWorkoutInput,
   type LogLiveWorkoutSetInput,
   type StartLiveWorkoutExerciseInput,
@@ -78,7 +81,7 @@ export async function readLiveWorkoutCardEditor(input: {
   const shown = await resolveLiveWorkout({
     vault: input.vault,
     workoutId: input.workoutId,
-  }, { requireOpen: true })
+  })
   const workout = parseShownWorkout(shown)
   assertTargetableLiveWorkout(workout)
   return buildLiveWorkoutCardEditor({
@@ -108,23 +111,23 @@ export async function readLiveWorkoutCardSnapshot(input: {
   if (targets.length !== 1) {
     return { reason: 'workout_changed', status: 'rejected' }
   }
-  const cardUrl = buildLiveWorkoutMemberActionCardUrl({
+  const card = buildLiveWorkoutMemberActionCard({
     presentation: input.action.presentation,
     shown: targets[0]!,
   })
-  if (cardUrl === null) {
+  if (card === null) {
     return { reason: 'workout_changed', status: 'rejected' }
   }
   return {
-    result: { cardUrl, kind: 'workout.live.snapshot', version: 1 },
+    result: { card, kind: 'workout.live.snapshot', version: 1 },
     status: 'unchanged',
   }
 }
 
-function buildLiveWorkoutMemberActionCardUrl(input: {
+function buildLiveWorkoutMemberActionCard(input: {
   presentation: WorkoutSessionPresentationV1
   shown: WorkoutShowResult
-}): string | null {
+}): WorkoutSessionAppCardEnvelopeV6 | null {
   try {
     const snapshot = buildLiveWorkoutCardSnapshot({
       presentation: input.presentation.workout,
@@ -133,9 +136,9 @@ function buildLiveWorkoutMemberActionCardUrl(input: {
     })
     if (snapshot === null) return null
 
-    return encodeWorkoutSessionSnapshotAppCardUrl({
+    return buildWorkoutSessionAppCardEnvelopeV6({
       ...input.presentation,
-      ...(snapshot.editor === null ? {} : { editor: snapshot.editor }),
+      editor: snapshot.editor,
       workout: snapshot.workout,
     })
   } catch {
@@ -151,14 +154,14 @@ function buildLiveWorkoutApplySuccess(input: {
   if (input.action.presentation === undefined) {
     return { status: input.status }
   }
-  const cardUrl = buildLiveWorkoutMemberActionCardUrl({
+  const card = buildLiveWorkoutMemberActionCard({
     presentation: input.action.presentation,
     shown: input.shown,
   })
-  return cardUrl === null
+  return card === null
     ? { status: input.status }
     : {
-        result: { cardUrl, kind: 'workout.live.apply', version: 1 },
+        result: { card, kind: 'workout.live.apply', version: 1 },
         status: input.status,
       }
 }
@@ -220,9 +223,6 @@ async function applyLiveWorkoutMemberActionWithLockHeld(
         shown,
         status: 'unchanged',
       })
-    }
-    if (!isOpenLiveWorkout(workout)) {
-      return { reason: 'workout_changed', status: 'rejected' }
     }
     assertTargetableLiveWorkout(workout)
     acceptedAt = normalizeWorkoutTimestamp(input.acceptedAt, 'acceptedAt')
@@ -373,14 +373,14 @@ async function applyLiveWorkoutMemberActionWithLockHeld(
   if (!parsed.success) {
     return { reason: 'workout_changed', status: 'rejected' }
   }
-  const endedAt = resolveObservedWorkoutEndBoundary({
+  const endedAt = workout.endedAt === undefined ? resolveObservedWorkoutEndBoundary({
     afterExercises: parsed.data.exercises,
     appendedExtraSet: newSetMutations.some((mutation) => mutation.result !== null),
     beforeExercises,
     completedPendingSet,
     observedAt: acceptedAt,
     workout,
-  })
+  }) : undefined
   const changed = JSON.stringify(parsed.data.exercises)
       !== JSON.stringify(workout.exercises)
     || endedAt !== undefined
@@ -1086,6 +1086,29 @@ async function logLiveWorkoutSetWithLockHeld(
   return updateLiveWorkoutExercises(shown, workout, exercises, {
     ...(endedAt === undefined ? {} : { endedAt }),
     observedAt,
+  })
+}
+
+export async function removeLiveWorkoutExercise(input: RemoveLiveWorkoutExerciseInput) {
+  if (!Number.isInteger(input.expectedRevision) || input.expectedRevision < 1) {
+    throw new VaultCliError('invalid_option', 'Expected revision must be a positive integer.')
+  }
+  return withLiveWorkoutMutationLock(input.vault, input.workoutId, async () => {
+    const shown = await resolveLiveWorkout(input)
+    const event = eventRecordSchema.safeParse(shown.entity.data)
+    if (!event.success) {
+      throw new VaultCliError('contract_invalid', 'The workout does not contain a valid canonical event.')
+    }
+    if (eventRevisionFromLifecycle(event.data.lifecycle) !== input.expectedRevision) {
+      throw new VaultCliError('conflict', 'The workout changed. Read it again before removing the exercise.')
+    }
+    const workout = parseShownWorkout(shown)
+    assertTargetableLiveWorkout(workout)
+    const index = resolveExerciseIndex(workout.exercises, input)
+    const exercises = workout.exercises.filter((_, position) => position !== index)
+    return updateLiveWorkoutExercises(shown, workout, exercises, {
+      observedAt: new Date().toISOString(),
+    })
   })
 }
 

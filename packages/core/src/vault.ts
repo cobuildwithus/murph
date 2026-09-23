@@ -1,3 +1,4 @@
+import { listAuditShardPaths } from "./audit-storage.ts";
 import path from "node:path";
 import { isDeepStrictEqual } from "node:util";
 
@@ -498,7 +499,9 @@ async function validateJsonlFamily({
 }: ValidateJsonlFamilyInput): Promise<ValidationIssue[]> {
   const jsonlFiles = relativeDirectory === VAULT_LAYOUT.eventLedgerDirectory
     ? await listEventLedgerShardPaths(vaultRoot)
-    : await walkVaultFiles(vaultRoot, relativeDirectory, { extension: ".jsonl" });
+    : relativeDirectory === VAULT_LAYOUT.auditDirectory
+      ? await listAuditShardPaths(vaultRoot)
+      : await walkVaultFiles(vaultRoot, relativeDirectory, { extension: ".jsonl" });
   const issues: ValidationIssue[] = [];
 
   for (const relativePath of jsonlFiles) {

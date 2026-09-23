@@ -15,15 +15,16 @@ index: metric points without a biomarker key remain queryable but occupy no
 biomarker-index entries. Writable query connections enable SQLite
 `secure_delete` so table replacement clears obsolete payload bytes instead of
 carrying previous generations into compressed workspace snapshots. This adds
-no vacuum pass or work to fresh read-only queries. The complete query database
+no work to fresh read-only queries. The complete query database
 and its required sidecars remain eligible for encrypted checkpoint/restore;
 canonical source manifests still decide whether a restored cache is fresh.
+Malformed plain or archived audit JSONL retains the safe query-source error contract:
+logical vault-relative path and line number, without storage parser causes or
+source content.
 Version 31 creates query databases with 8 KiB pages to reduce overflow-page
 waste for JSON-heavy rows. The four standalone entity/search date indexes are
 omitted: existing date predicates use `COALESCE`/`substr`, while lexical search
-uses FTS rowids. Family/kind, metric, and wearable range indexes remain. No
-in-place vacuum changes existing files; the version reset creates the new
-layout. Runtime SQLite stores outside query retain their default page size.
+uses FTS rowids. Family/kind, metric, and wearable range indexes remain. The version reset creates this page-size layout. Runtime SQLite stores outside query retain their default page size.
 Version 32 stores identical compact metric payloads once per full publication in
 `query_metric_payloads`; metric rows retain their indexed scalars and reference
 payloads by integer key. The existing metric query joins the payload table, using
@@ -39,6 +40,19 @@ revisions remain visible conservatively because they can contain member edits.
 Ordinary oxygen readings and v2 temporal features are unchanged. Restored older
 query stores rebuild once under this policy; the complete query database remains
 part of workspace restore.
+
+Version 34 shares ordered JSON field-name dictionaries across wearable summary
+rows in `query_wearable_summary_shapes`. Tagged object/array values preserve all
+summary facts and internal composition evidence; public summary JSON is unchanged.
+Replacement clears rows and dictionaries in the same transaction. Readers load
+both under one read transaction, including when a writer publishes concurrently.
+Full rebuilds run SQLite `VACUUM` after publication, while holding the existing
+canonical writer lock, to reclaim pages and improve snapshot compression. Search
+documents use an explicit integer primary rowid so compaction preserves their
+external-content FTS references. SQLite owns compaction's atomic write; a failed
+compaction leaves the committed projection usable. It can temporarily require up
+to twice the database size in free space. Fresh queries and wearable-only rebuilds
+do not compact; restored caches still include both SQLite rows and dictionaries.
 
 Older runners reject the new cache version and rebuild derived state through
 the existing reset path; the canonical format and query results do not change.

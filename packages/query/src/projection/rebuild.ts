@@ -147,6 +147,12 @@ export async function rebuildQueryProjectionFromCanonicalSource(
           return builtAt;
         });
 
+        // Full rebuilds already replace the global tables. Repack once here,
+        // after commit and under the canonical writer lock. Fresh reads and
+        // wearable-only publications never pay this cost. Explicit search
+        // INTEGER PRIMARY KEY rowids keep the external-content FTS links stable.
+        database.exec("VACUUM");
+
         return {
           dbPath: location.dbPath,
           exists: true,
@@ -231,7 +237,10 @@ function replaceWearableProjection(
   rows: readonly QueryWearableSummaryRow[],
   manifest: readonly QuerySourceManifestEntry[],
 ): void {
-  database.exec("DELETE FROM query_wearable_summaries");
+  database.exec(`
+    DELETE FROM query_wearable_summaries;
+    DELETE FROM query_wearable_summary_shapes;
+  `);
   insertWearableSummaryRows(database, rows);
   writeWearableSourceManifest(database, manifest);
 }

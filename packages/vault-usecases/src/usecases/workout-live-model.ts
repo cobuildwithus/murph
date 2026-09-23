@@ -89,6 +89,12 @@ export interface LogLiveWorkoutSetInput
   addedWeightKg?: number
 }
 
+export interface RemoveLiveWorkoutExerciseInput
+  extends LiveWorkoutLookupInput,
+    LiveWorkoutExerciseLookup {
+  expectedRevision: number
+}
+
 export interface ClearLiveWorkoutSetInput
   extends LiveWorkoutLookupInput,
     LiveWorkoutExerciseLookup {
@@ -177,11 +183,8 @@ export function buildLiveWorkoutCardEditor(input: {
   editor: WorkoutSessionEditorProjectionV1
   workout: WorkoutSessionDetailV1
 } | null {
-  if (!isOpenLiveWorkout(input.workout) || input.presentation.state !== 'active') {
-    return null
-  }
   const snapshot = buildLiveWorkoutCardSnapshot(input)
-  if (snapshot === null) return null
+  if (snapshot === null || input.presentation.state !== snapshot.workout.state) return null
   const presentationMatchesLoggedState = snapshot.workout.exercises.every(
     (exercise, exerciseIndex) => exercise.sets.every((set, setIndex) =>
       (set.status === 'completed')
@@ -192,9 +195,7 @@ export function buildLiveWorkoutCardEditor(input: {
     ),
   )
   if (!presentationMatchesLoggedState) return null
-  return snapshot.editor
-    ? { editor: snapshot.editor, workout: snapshot.workout }
-    : null
+  return snapshot
 }
 
 export function buildLiveWorkoutCardSnapshot(input: {
@@ -202,7 +203,7 @@ export function buildLiveWorkoutCardSnapshot(input: {
   workout: WorkoutSession
   workoutId: string
 }): {
-  editor: WorkoutSessionEditorProjectionV1 | null
+  editor: WorkoutSessionEditorProjectionV1
   workout: WorkoutSessionDetailV1
 } | null {
   if (
@@ -212,8 +213,7 @@ export function buildLiveWorkoutCardSnapshot(input: {
     return null
   }
   const active = isOpenLiveWorkout(input.workout)
-  const editorEligible = active
-    && !hasAmbiguousWorkoutActionExerciseCoordinates(input.workout)
+  if (hasAmbiguousWorkoutActionExerciseCoordinates(input.workout)) return null
   const exercises = input.workout.exercises
     .slice()
     .sort((left, right) => left.order - right.order)
@@ -296,20 +296,12 @@ export function buildLiveWorkoutCardSnapshot(input: {
   }
 
   return {
-    editor: editorEligible
-      ? {
-          actionBinding: deriveWorkoutActionBinding(
-            input.workoutId,
-            input.workout,
-          ),
-          exercises: editorExercises,
-          setRemovalBinding: deriveWorkoutSetRemovalBinding(
-            input.workoutId,
-            exercises,
-          ),
-          version: 1,
-        }
-      : null,
+    editor: {
+      actionBinding: deriveWorkoutActionBinding(input.workoutId, input.workout),
+      exercises: editorExercises,
+      setRemovalBinding: deriveWorkoutSetRemovalBinding(input.workoutId, exercises),
+      version: 1,
+    },
     workout: {
       exercises: presentationExercises,
       state: active ? 'active' : 'completed',

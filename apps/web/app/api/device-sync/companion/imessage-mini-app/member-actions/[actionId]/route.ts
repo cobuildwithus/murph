@@ -5,6 +5,7 @@ import { PrismaHostedAgentSessionStore } from "@/src/lib/device-sync/prisma-stor
 import { withJsonError } from "@/src/lib/device-sync/settings-http";
 import { assertActiveHostedMemberAccessAllowed } from "@/src/lib/hosted-onboarding/member-access";
 import { IMessageMiniAppService } from "@/src/lib/imessage-mini-app/service";
+import { projectIMessageMemberActionStatus } from "@/src/lib/imessage-mini-app/member-action-result";
 import { assertHostedHistoricalLaunchConsentGranted } from "@/src/lib/legal/consent";
 import { readMemberActionStatus } from "@/src/lib/member-actions/outcome";
 import { getPrisma } from "@/src/lib/prisma";
@@ -40,9 +41,13 @@ export const GET = withJsonError(async (
     prisma,
   });
 
-  return Response.json(await readMemberActionStatus({
+  const status = await readMemberActionStatus({
     actionId,
     memberId: credential.userId,
     prisma,
-  }));
+  });
+  return Response.json(projectIMessageMemberActionStatus(
+    status,
+    request.headers.get("X-Murph-Workout-Card-Format"),
+  ), { headers: { "Cache-Control": "private, no-store", Vary: "X-Murph-Workout-Card-Format" } });
 });

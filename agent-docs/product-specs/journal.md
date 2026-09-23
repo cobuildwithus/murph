@@ -74,6 +74,14 @@ The supported note types are:
 - `journal-outcome` for a reported feeling or result;
 - `journal-plan` for a future intention.
 
+Factor and context notes use a stable `key-*` tag and explicit `happened` or
+`did-not-happen` evidence. Subjective outcomes use a stable `key-*` plus a
+`value-*` containing a reported 0–10 score or a supported reported level.
+Numeric ratings and verbal levels use distinct outcome keys so their different
+scales are never combined. Unscored symptoms and relative changes remain Journal facts without fabricated
+scores; the Patterns reader cannot use them as scored outcomes. Completed
+actions are factors, not subjective outcomes. Missing reports remain unknown.
+
 Murph does not announce routine saves. It asks a private question only when an
 important fact is unclear. A clear correction from the member wins. If a plan
 did not happen, Murph removes the plan and can save an explicit absence for the
