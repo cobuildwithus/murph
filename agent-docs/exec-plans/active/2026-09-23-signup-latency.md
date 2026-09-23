@@ -33,3 +33,5 @@ Provider timing is stochastic. A local run cannot prove hosted delivery latency.
 - Credential-free real App Server request capture, identical synthetic direct/group fixtures with the shipped GPT-6 Sol catalog: direct input 160,733 to 158,553 UTF-8 bytes (-2,180; -1.36%); group input unchanged at 140,618 bytes. All provider fields except transport cache identity included. Exact model tokenizer unavailable, so no token count is claimed. Temporary capture fixture removed after proof.
 - Local real-model journey attempted on all available subscription profiles; no successful model response. Failures were authentication, unavailable-provider, or startup timeout before action. Live UX verdict remains Hold.
 - Canary failure classification is isolated in a separate diagnostic PR; it does not weaken the exact-copy assertion or change production replies.
+
+- Draft PR #3673 preserves the implementation for review. Its narrow release note describes the removed nudge without claiming a measured speedup. No UI renderer changes or visual are needed for this copy-only note.
