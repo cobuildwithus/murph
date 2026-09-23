@@ -123,3 +123,19 @@ Updated: 2026-09-22
   Frog report and fails discovery; no duplicate report was created.
 - Parent diff/privacy checks and documentation drift passed. The complexity
   guard reduces idle-maintenance debt by ten with other changed-file debt flat.
+- Web typecheck passed after standard generated inputs; the final changelog
+  fragment with this PR provenance passed all ten archive tests.
+
+### Focused command inventory
+
+- `pnpm --dir packages/device-syncd exec vitest run --config vitest.config.ts test/junction-blood-pressure-backfill.test.ts test/junction-provider-history.test.ts test/junction-provider-history-recovery.test.ts test/junction-provider-historical-fanout.test.ts --no-coverage`
+- `pnpm --dir packages/assistant-runtime exec vitest run --config vitest.config.ts test/hosted-runtime-maintenance.test.ts test/hosted-runtime-mailbox-state.test.ts --no-coverage`
+- The runtime idle-maintenance and workspace-entrypoint-retention suites cover
+  the finite content-retention correction; the container and runtime-callback
+  suites cover completion cleanup.
+- `pnpm --dir packages/device-syncd typecheck`
+- `pnpm --dir packages/assistant-runtime typecheck`
+- `pnpm --dir apps/cloudflare typecheck`
+- `pnpm --dir apps/web typecheck` (standard generation), then
+  `pnpm --dir apps/web typecheck:prepared` after final fragment provenance.
+- `pnpm exec vitest run --config apps/web/vitest.config.ts --no-coverage apps/web/test/changelog-page.test.tsx`
