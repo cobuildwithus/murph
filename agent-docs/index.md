@@ -676,3 +676,7 @@ attribution are tracked in
 
 Preserving query-source error privacy across audit archives is tracked in
 [`audit query errors`](exec-plans/completed/2026-09-22-audit-query-errors.md).
+
+Mailbox dependency loading and joined sponsorship allowance reads are tracked in
+[`mailbox read path`](exec-plans/completed/2026-09-23-mailbox-read-path.md).
+The current read contract is owned by `apps/web/README.md`.

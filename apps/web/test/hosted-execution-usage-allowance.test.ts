@@ -22,6 +22,11 @@ const usageCreditMocks = vi.hoisted(() => ({
   settleHostedUsageCreditForUsageTx: vi.fn(),
 }));
 
+// An allowance read must not initialize Family billing, email or signaling workflows.
+vi.mock("@/src/lib/hosted-onboarding/family-plan", () => {
+  throw new Error("Allowance reads must not load the Family mutation workflow.");
+});
+
 vi.mock("@/src/lib/hosted-execution/usage-credits", () => ({
   settleHostedUsageCreditForUsageTx:
     usageCreditMocks.settleHostedUsageCreditForUsageTx,
@@ -4221,6 +4226,8 @@ describe("readHostedAiUsageGate", () => {
     expect(prisma.hostedAiUsagePeriod.update).not.toHaveBeenCalled();
     expect(prisma.$executeRaw).not.toHaveBeenCalled();
     expect(prisma.$queryRaw).not.toHaveBeenCalled();
+    expect(prisma.hostedAccountGroupMembership.findFirst).toHaveBeenCalledTimes(1);
+    expect(prisma.hostedAccountGroupBillingRef.findUnique).not.toHaveBeenCalled();
   });
 
   it("keeps direct paid billing periods for Family-sponsored members", async () => {
@@ -5061,6 +5068,12 @@ function createAllowanceTx(input: {
       findFirst: vi.fn(async () => input.familyAccessActive
         ? {
             group: {
+              billingRef: {
+                currentBillingPlanCode: input.familyBillingPlanCode ?? "launch_family_monthly",
+                currentBillingPhase: "paid",
+                currentPeriodEnd: familyPeriodEnd,
+                currentPeriodStart: familyPeriodStart,
+              },
               billingStatus: HostedBillingStatus.active,
               id: "hbag_family",
               ownerMemberId: "member_owner",
@@ -5332,6 +5345,12 @@ function createGatePrisma(input: {
       findFirst: vi.fn(async () => input.familyAccessActive
         ? {
             group: {
+              billingRef: {
+                currentBillingPlanCode: input.familyBillingPlanCode ?? "launch_family_monthly",
+                currentBillingPhase: "paid",
+                currentPeriodEnd: familyPeriodEnd,
+                currentPeriodStart: familyPeriodStart,
+              },
               billingStatus: HostedBillingStatus.active,
               id: "hbag_family",
               ownerMemberId: "member_owner",

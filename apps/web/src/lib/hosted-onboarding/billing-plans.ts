@@ -15,6 +15,8 @@ export {
   type HostedPlanCode,
 };
 
+export const HOSTED_FAMILY_BILLING_PLAN_CODE = "launch_family_monthly" as const;
+
 export const HOSTED_BILLING_PLAN_CODES = [
   "launch_monthly",
   "launch_edge_monthly",
