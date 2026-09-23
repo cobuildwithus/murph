@@ -1,4 +1,4 @@
-import { cp, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { copyFile, cp, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import {
@@ -120,6 +120,12 @@ export async function stageHostedRunnerRuntimeArtifact(
       force: true,
       recursive: true,
     },
+  );
+
+  await mkdir(path.join(bundleDir, "config"), { recursive: true });
+  await copyFile(
+    path.join(input.appDir, "config", "codex-gpt6-models.json"),
+    path.join(bundleDir, "config", "codex-gpt6-models.json"),
   );
 
   await writeFile(

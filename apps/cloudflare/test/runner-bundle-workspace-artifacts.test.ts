@@ -214,7 +214,18 @@ describe("runner bundle runtime artifact staging", () => {
       "utf8",
     );
 
+    await mkdir(path.join(appDir, "config"), { recursive: true });
+    await writeFile(
+      path.join(appDir, "config", "codex-gpt6-models.json"),
+      '{"models":[{"slug":"gpt-6-sol"}]}\n',
+    );
+
     await stageHostedRunnerRuntimeArtifact(bundleDir, { appDir });
+
+    expect(await readFile(
+      path.join(bundleDir, "config", "codex-gpt6-models.json"),
+      "utf8",
+    )).toBe('{"models":[{"slug":"gpt-6-sol"}]}\n');
 
     const stagedPackageJson = JSON.parse(
       await readFile(path.join(bundleDir, "package.json"), "utf8"),
@@ -278,10 +289,21 @@ describe("runner bundle runtime artifact staging", () => {
       "utf8",
     );
 
+    await mkdir(path.join(appDir, "config"), { recursive: true });
+    await writeFile(
+      path.join(appDir, "config", "codex-gpt6-models.json"),
+      '{"models":[{"slug":"gpt-6-sol"}]}\n',
+    );
+
     await stageHostedRunnerRuntimeArtifact(bundleDir, {
       appDir,
       bundleOnlyDependencyNames: [],
     });
+
+    expect(await readFile(
+      path.join(bundleDir, "config", "codex-gpt6-models.json"),
+      "utf8",
+    )).toBe('{"models":[{"slug":"gpt-6-sol"}]}\n');
 
     const stagedPackageJson = JSON.parse(
       await readFile(path.join(bundleDir, "package.json"), "utf8"),

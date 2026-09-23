@@ -49,7 +49,6 @@ describe('hosted automation model selection', () => {
     'gpt-6-sol',
     'gpt-6-luna',
     'gpt-5.6-luna',
-    'gpt-5.6-terra',
     'gpt-5.6-sol',
   ] as const)(
     'persists the declarative %s preference without freezing derived reasoning',
@@ -142,14 +141,14 @@ describe('hosted automation model selection', () => {
     expect(preserved.request).not.toHaveProperty('assistantTargetOverride')
 
     const replaced = readPatchRequest({
-      model: 'gpt-5.6-terra',
+      model: 'gpt-6-sol',
     })
     expect(replaced).toMatchObject({
       kind: 'automation',
       request: {
         action: 'patch',
         assistantTargetOverride: {
-          model: 'gpt-5.6-terra',
+          model: 'gpt-6-sol',
         },
         lookup: 'burpee-reminder',
       },
@@ -195,6 +194,7 @@ describe('hosted automation model selection', () => {
   it.each([
     { model: 'gpt-5.6-luna', modelProvider: 'venice' },
     { model: 'not-a-product-model' },
+    { model: 'gpt-5.6-terra' },
     { model: 'gpt-5.6-luna', reasoningEffort: 'ultra' },
     {},
   ])('rejects unsupported hosted target override %j', (assistantTargetOverride) => {

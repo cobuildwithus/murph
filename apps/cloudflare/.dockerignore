@@ -4,5 +4,3 @@
 !.deploy/runner-bundle/**
 !.deploy/runner-smoke-bundle/
 !.deploy/runner-smoke-bundle/**
-!config/
-!config/codex-gpt6-models.json

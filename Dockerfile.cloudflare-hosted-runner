@@ -33,7 +33,7 @@ USER root
 ENV MURPH_HOSTED_CODEX_MODEL_CATALOG_JSON="/usr/local/share/murph/codex-model-catalog.openai-flex.json"
 
 # Supplement 0.155.1 with the exact launch entries from the pinned OpenAI catalog.
-COPY --chown=root:root config/codex-gpt6-models.json /tmp/codex-gpt6-models.json
+COPY --from=runner-app-permissions --chown=root:root /app/config/codex-gpt6-models.json /tmp/codex-gpt6-models.json
 RUN mkdir -p /usr/local/share/murph \
   && chmod a-w /app \
   && chmod a+rX /app \

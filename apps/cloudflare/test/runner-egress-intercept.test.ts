@@ -3369,7 +3369,7 @@ describe("hostedRunnerIntercept", () => {
       new Request("https://api.venice.ai/api/v1/responses", {
         body: JSON.stringify({
           input: "hello",
-          model: "gpt-5.6-terra",
+          model: "gpt-5.6-sol",
           stream: true,
         }),
         headers: {
@@ -3400,7 +3400,7 @@ describe("hostedRunnerIntercept", () => {
     await expect(forwardedRequest.json()).resolves.toEqual({
       input: "hello",
       model:
-        "openai-gpt-56-terra:include_venice_system_prompt=false&enable_web_search=off&enable_web_scraping=false",
+        "openai-gpt-56-sol:include_venice_system_prompt=false&enable_web_search=off&enable_web_scraping=false",
       stream: true,
     });
   });
@@ -3494,7 +3494,7 @@ describe("hostedRunnerIntercept", () => {
             },
             ...standardInput,
           ],
-          model: "gpt-5.6-terra",
+          model: "gpt-5.6-sol",
           parallel_tool_calls: false,
           stream: true,
           tool_choice: "auto",
@@ -3527,7 +3527,7 @@ describe("hostedRunnerIntercept", () => {
         standardInput[1],
       ],
       model:
-        "openai-gpt-56-terra:include_venice_system_prompt=false&enable_web_search=off&enable_web_scraping=false",
+        "openai-gpt-56-sol:include_venice_system_prompt=false&enable_web_search=off&enable_web_scraping=false",
       parallel_tool_calls: false,
       stream: true,
       tool_choice: "auto",

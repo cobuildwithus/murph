@@ -1695,6 +1695,7 @@ async function resolveHostedRunnerSourceRoots(input: {
     path.join(input.repoRoot, "Dockerfile.cloudflare-hosted-runner"),
     path.join(input.repoRoot, "Dockerfile.cloudflare-hosted-runner-base"),
     path.join(input.appDir, ".dockerignore"),
+    path.join(input.appDir, "config", "codex-gpt6-models.json"),
     path.join(input.appDir, "scripts"),
   ];
 
