@@ -40,6 +40,7 @@ import {
   runCanonicalWrite,
   showAutomation,
   upsertAutomation,
+  upsertEvent,
   validateVault,
 } from "@murphai/core";
 import { createIntegratedInboxServices } from "@murphai/inbox-services";
@@ -1261,6 +1262,15 @@ describe("hosted workspace runtime entrypoint", () => {test("carries inbox media
         rawRefs: [envelopePath], attachments: [], text: "Synthetic confidential fixture text", envelopePath,
       } });
       const original = await readFile(path.join(sourceVaultRoot, ledgerPath), "utf8");
+      const historicalEvent = await upsertEvent({
+        vaultRoot: sourceVaultRoot,
+        payload: {
+          kind: "note", occurredAt: "2020-02-12T09:00:00.000Z",
+          note: "Synthetic canonical history is outside content retention.",
+          title: "Historical event",
+        },
+      });
+      const historicalBytes = await readFile(path.join(sourceVaultRoot, historicalEvent.ledgerFile));
       const bundle = await snapshotHostedBundleRoots({
         kind: "vault", roots: [{ root: sourceVaultRoot, rootKey: "vault" }],
       });
@@ -1293,6 +1303,9 @@ describe("hosted workspace runtime entrypoint", () => {test("carries inbox media
       expect(result.nextWakeAt).toBe(assistantWake);
       expect(checkpointRequests.at(-1)?.inboxMediaRetentionWakeAt).toBe("2026-07-06T00:00:00.000Z");
       expect(await readFile(path.join(liveVaultRoot, ledgerPath), "utf8")).toBe(original);
+      expect(await readFile(path.join(liveVaultRoot, historicalEvent.ledgerFile))).toEqual(historicalBytes);
+      await expect(access(path.join(liveVaultRoot, `${historicalEvent.ledgerFile}.br`)))
+        .rejects.toMatchObject({ code: "ENOENT" });
       await drainHostedRuntimeLogWritesBestEffort();
       const issues = logRequests.flatMap((request) => request.entries)
         .filter((entry) => entry.eventCode === "runtime.retention_issue");

@@ -2979,12 +2979,17 @@ describe("runHostedDeviceSyncPass", () => {
     assert.equal(result.processedJobs, 3);
   });
 
-  it("runs bounded dense raw retention after device-sync drains and logs byte counts", async () => {
+  it.each([
+    { elapsedMs: 40_000, passTimeoutMs: 90_000, retentionBudgetMs: 45_000 },
+    { elapsedMs: 60_000, passTimeoutMs: 90_000, retentionBudgetMs: 30_000 },
+    { elapsedMs: 60_000, passTimeoutMs: 300_000, retentionBudgetMs: 45_000 },
+    { elapsedMs: 60_000, passTimeoutMs: null, retentionBudgetMs: 45_000 },
+  ])("runs bounded dense raw retention with the remaining pass budget: %j", async ({ elapsedMs, passTimeoutMs, retentionBudgetMs }) => {
     const close = vi.fn();
     const logRequests: HostedRuntimeLogRequest[] = [];
     const runSchedulerOnce = vi.fn(async () => undefined);
     const drainWorker = vi.fn(async () => {
-      vi.advanceTimersByTime(40_000);
+      vi.advanceTimersByTime(elapsedMs);
       return 2;
     });
 
@@ -3025,7 +3030,7 @@ describe("runHostedDeviceSyncPass", () => {
         "/tmp/vault-root",
         DEVICE_SYNC_CONFIG,
         createMaintenanceDeviceSyncPortStub(),
-        90_000,
+        passTimeoutMs,
         {
           runtimeLogPlatform: {
             logPort: {
@@ -3056,7 +3061,7 @@ describe("runHostedDeviceSyncPass", () => {
     }));
     assert.equal(
       mocks.pruneWearableDenseRawTimeseries.mock.calls[0]?.[0]?.deadlineMs,
-      5_000,
+      retentionBudgetMs,
     );
 
     await drainHostedRuntimeLogWritesBestEffort();
@@ -3279,7 +3284,7 @@ describe("runHostedDeviceSyncPass", () => {
     const close = vi.fn();
     const runSchedulerOnce = vi.fn(async () => undefined);
     const drainWorker = vi.fn(async () => {
-      vi.advanceTimersByTime(45_000);
+      vi.advanceTimersByTime(90_000);
       return 0;
     });
 
@@ -3310,12 +3315,12 @@ describe("runHostedDeviceSyncPass", () => {
     );
 
     assert.deepEqual(result, {
-      nextWakeAt: "2026-04-08T00:01:15.000Z",
+      nextWakeAt: "2026-04-08T00:02:00.000Z",
       postCheckpointRecord: null,
       processedJobs: 0,
       skipped: false,
     });
-    await expectDenseRawRetentionMailboxWakeAt("2026-04-08T00:01:15.000Z");
+    await expectDenseRawRetentionMailboxWakeAt("2026-04-08T00:02:00.000Z");
     expect(mocks.pruneWearableDenseRawTimeseries).not.toHaveBeenCalled();
     expect(mocks.detectWearableStorageMigrationCandidates).not.toHaveBeenCalled();
   });

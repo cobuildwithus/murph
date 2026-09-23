@@ -187,6 +187,17 @@ background reads, they stay paused through checkpoint retries, effect drain and
 return. Foreground work still proceeds; unfinished asks and clinical extraction
 retain their durable successors instead of repeatedly reclaiming canceled work.
 
+Finite `inbox_media_retention` checkpoints run the existing transient-content
+cleanup owners and publish their next deadlines. They do not scan or compress
+unrelated canonical event or integration history; ordinary idle checkpoints
+remain responsible for those archives. This separation does not change content
+eligibility, protected pending work, or the maximum retention deadline.
+
+Post-device-sync dense raw retention receives up to forty-five seconds within
+the remaining overall device-pass budget. Time spent fetching or importing does
+not consume that separate stage allowance. An exhausted overall budget, remaining
+retention work, or a failure still uses the existing bounded continuation wake.
+
 The conversation-activity callback carries the original persisted
 `AssistantInputEvent.receivedAt` epoch milliseconds (mailbox `createdAt`), not
 provider `occurredAt`, replay time, response time, or invocation completion.

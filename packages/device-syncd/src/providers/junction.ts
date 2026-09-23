@@ -4737,13 +4737,18 @@ export function createJunctionDeviceSyncProvider(
         break;
       }
 
-      executionWindowStart ??= window.windowStart;
+      // Historical imports stop at their first populated window. Empty prefixes
+      // need no import owner, so keep that populated window's original boundary.
+      executionWindowStart = options.preservePartialRetryableFailure === true
+        ? window.windowStart
+        : executionWindowStart ?? window.windowStart;
       executionWindowEnd = window.windowEnd;
       accumulatedRecords = accumulatedRecords.concat(records);
-      if (
-        options.preservePartialRetryableFailure === true
-        && index < preciseWindows.length - 1
-      ) {
+      if (shouldCheckpointJunctionPreciseTimeseriesWindow({
+        options,
+        providerRecordCount: accumulatedRecords.length,
+        remainingWindowCount: preciseWindows.length - index - 1,
+      })) {
         fetchComplete = false;
         yieldedAt = window.windowEnd;
         break;
@@ -10633,6 +10638,22 @@ function resolveGloballyClosedProviderDayEnd(windowEnd: string, asOf: string): n
     ),
   );
   return Math.min(requestedClosedEndMs, globallyClosedEndMs);
+}
+
+function shouldCheckpointJunctionPreciseTimeseriesWindow(input: {
+  options: JunctionPreciseTimeseriesImportOptions;
+  providerRecordCount: number;
+  remainingWindowCount: number;
+}): boolean {
+  if (
+    input.options.preservePartialRetryableFailure !== true
+    || input.remainingWindowCount === 0
+  ) {
+    return false;
+  }
+  // Calendar history shares only empty windows within the existing owner-unit
+  // budget. Exact-record history and populated dates retain their checkpoint.
+  return input.options.dateQueryFormat !== "date" || input.providerRecordCount > 0;
 }
 
 function buildPreciseTimeseriesWindows(

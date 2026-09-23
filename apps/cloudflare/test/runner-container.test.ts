@@ -5559,6 +5559,74 @@ describe("RunnerContainer", () => {
     } finally { vi.useRealTimers(); }
   });
 
+  it.each(["before-result", "after-result"] as const)("concurrent exact completion notifications %s still stop a drained background invocation", async (arrival) => {
+    const started = createDeferred<void>();
+    const finished = createDeferred<void>();
+    const { container, destroy } = createContainerDouble({
+      containerFetch: vi.fn(async (url: string) => {
+        if (url.endsWith("/health")) return Response.json(createRunnerHealthResult());
+        started.resolve();
+        await finished.promise;
+        return Response.json(createRunnerResult());
+      }),
+    });
+    const request = createRunnerRequest("evt_concurrent_completion_cleanup");
+    const invocation = container.invoke({
+      job: { kind: "workspace-invocation", request },
+      timeoutMs: 60_000,
+      userId: request.userId,
+    });
+    await started.promise;
+    if (arrival === "after-result") {
+      finished.resolve();
+      await invocation;
+    }
+    const completion = {
+      attemptId: request.attemptId,
+      leaseGeneration: request.leaseGeneration,
+      userId: request.userId,
+    };
+    const notifications = Promise.all([
+      container.onRuntimeCompletionRecorded(completion),
+      container.onRuntimeCompletionRecorded(completion),
+    ]);
+    expect(destroy).not.toHaveBeenCalled();
+    finished.resolve();
+    await Promise.all([invocation, notifications]);
+    expect(destroy).toHaveBeenCalledOnce();
+    expect(await container.listSchedules("onActivityExpired")).toEqual([]);
+  });
+
+  it("concurrent old completion notifications preserve a queued successor invocation", async () => {
+    const successorStarted = createDeferred<void>();
+    const successorFinished = createDeferred<void>();
+    let invocationCount = 0;
+    const { container, destroy } = createContainerDouble({
+      containerFetch: vi.fn(async (url: string) => {
+        if (url.endsWith("/health")) return Response.json(createRunnerHealthResult());
+        if (++invocationCount === 2) {
+          successorStarted.resolve();
+          await successorFinished.promise;
+        }
+        return Response.json(createRunnerResult());
+      }),
+    });
+    const request = createRunnerRequest("evt_old_completion_cleanup");
+    await container.invoke({ job: { kind: "workspace-invocation", request }, timeoutMs: 60_000, userId: request.userId });
+    const completion = { attemptId: request.attemptId, leaseGeneration: request.leaseGeneration, userId: request.userId };
+    const firstNotification = container.onRuntimeCompletionRecorded(completion);
+    const successorRequest = createRunnerRequest("evt_successor_completion_cleanup");
+    const successor = container.invoke({ job: { kind: "workspace-invocation", request: successorRequest }, timeoutMs: 60_000, userId: request.userId });
+    const secondNotification = container.onRuntimeCompletionRecorded(completion);
+    await successorStarted.promise;
+    expect(destroy).not.toHaveBeenCalled();
+    successorFinished.resolve();
+    await Promise.all([successor, firstNotification, secondNotification]);
+    expect(destroy).not.toHaveBeenCalled();
+    await container.onRuntimeCompletionRecorded({ attemptId: successorRequest.attemptId, leaseGeneration: successorRequest.leaseGeneration, userId: successorRequest.userId });
+    expect(destroy).toHaveBeenCalledOnce();
+  });
+
   it("native deadline cleanup does not depend on platform activity renewal", async () => {
     const renewActivityTimeout = vi.fn(() => { throw new Error("synthetic renewal failure"); });
     const { container, destroy } = createContainerDouble({ initialStatus: "running" });
@@ -5595,10 +5663,14 @@ describe("RunnerContainer", () => {
         // The HTTP response settled, but the entrypoint's finally block still
         // owns the active count while its completion callback awaits this DO.
         callbackPending = true;
-        await container.onRuntimeCompletionRecorded({
+        const completion = {
           attemptId: request.attemptId, leaseGeneration: request.leaseGeneration,
           userId: request.userId,
-        });
+        };
+        await Promise.all([
+          container.onRuntimeCompletionRecorded(completion),
+          container.onRuntimeCompletionRecorded(completion),
+        ]);
         expect(destroy).not.toHaveBeenCalled();
         const schedules = await container.listSchedules("onActivityExpired");
         expect(schedules).toHaveLength(1);

@@ -1,5 +1,11 @@
 # Murph Agent Docs Index
 
+Bounded empty-day history traversal and retention-only archive exclusion are
+owned by `packages/device-syncd/README.md` and
+`packages/assistant-runtime/README.md`; investigation, architecture consultation,
+and focused proof are tracked in
+[`container cost reduction`](exec-plans/active/2026-09-22-container-cost-reduction.md).
+
 Stable host-supplied group report labels and consented contact fallback are
 recorded in [group report labels](exec-plans/completed/2026-09-22-group-report-labels.md).
 The presentation and privacy contracts remain owned by ARCHITECTURE.md and SECURITY.md.

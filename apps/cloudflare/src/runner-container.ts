@@ -1179,17 +1179,19 @@ export class RunnerContainer extends Container {
           return;
         }
         const recorded = this.recordedCompletionCleanup;
+        this.pendingCompletionCleanup = pending;
         if (recorded && runnerCompletionCleanupMatches(pending, recorded)) {
-          this.pendingCompletionCleanup = null;
           this.recordedCompletionCleanup = null;
           await this.evaluateWarmContainerLifecycle({
             expectedInteractionGeneration: pending.expectedInteractionGeneration,
             trigger: "invoke-completed",
             userId: pending.userId,
           });
+          if (!this.lifecycleInteractionChanged(pending.expectedInteractionGeneration)) {
+            this.pendingCompletionCleanup = null;
+          }
           return;
         }
-        this.pendingCompletionCleanup = pending;
       }, { blockPointerlessWake: false });
     }
     return completedResult;
@@ -1206,13 +1208,18 @@ export class RunnerContainer extends Container {
         this.recordedCompletionCleanup = { ...input };
         return;
       }
-      this.pendingCompletionCleanup = null;
       this.recordedCompletionCleanup = null;
       await this.evaluateWarmContainerLifecycle({
         expectedInteractionGeneration: pending.expectedInteractionGeneration,
         trigger: "invoke-completed",
         userId: pending.userId,
       });
+      // A queued notification can itself make lifecycle evaluation yield.
+      // Keep the exact match for that waiter instead of consuming its only
+      // chance to stop the drained child before the recovery alarm.
+      if (!this.lifecycleInteractionChanged(pending.expectedInteractionGeneration)) {
+        this.pendingCompletionCleanup = null;
+      }
     }, { blockPointerlessWake: false });
   }
 
