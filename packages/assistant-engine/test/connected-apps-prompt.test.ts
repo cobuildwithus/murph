@@ -22,6 +22,42 @@ describe('connected-apps skill and system-prompt coverage', () => {
     expect(skill).toContain('a currently due check-in that passive evidence has not resolved')
   })
 
+  it('repairs incidental reminder locations through the existing versioned owner without copying travel facts', async () => {
+    const skill = (await readFile(path.join(resolveAssistantSkillsRoot(), 'journal-connected-context', 'SKILL.md'), 'utf8')).replace(/\s+/gu, ' ')
+    expect(skill).toContain('This also applies to unchanged plans')
+    expect(skill).toContain('existing automation inspect and version-checked patch path')
+    expect(skill).toContain('Preserve an explicitly fixed destination or venue')
+    expect(skill).toContain('Do not copy the new itinerary into every reminder')
+    expect(skill).toContain('Preserve subject, schedule, timezone, route, status, support ownership, and existing context references')
+    expect(skill).toContain('Already context-aware instructions need no write')
+    expect(skill).toContain('Do not touch group reminders, clinical instructions, or unrelated automations')
+    expect(skill).toContain('Repairs stay silent and create no extra follow-up or notification')
+    expect(skill).toContain('A planned trip does not prove arrival')
+  })
+
+  it('keeps weather lookup subordinate to current location and uncertainty', async () => {
+    const skill = (await readConnectedAppsSkill()).replace(/\s+/gu, ' ')
+    for (const text of [
+      'Resolve private reminder location before any weather call, including for legacy instructions naming a city',
+      'Flight arrival can already have passed',
+      'Respect connected-context account/category opt-outs',
+      'vault-cli event list --kind note --from <occurrence-minus-14-days> --to <occurrence-date> --limit 50 --format json',
+      'A past report without a covering window',
+      'event show <id> --format json',
+      'use the destination after its planned arrival and before its known return',
+      'An uncertain old city must not appear even in conditional wording',
+      'make destination wording conditional',
+      'omit city/weather rather than fall back to an old city or ask during the scheduled run',
+      'Never overwrite home/current-location memory or change schedules from a planned trip',
+      'Group reminders use only room-authorized location evidence',
+      'with no account selector',
+      'OPENWEATHER_API_GET_CURRENT_WEATHER', 'OPENWEATHER_API_GET5_DAY_FORECAST',
+      'search first only when their argument schema is unclear',
+      'A decline saves the reminder unchanged',
+      'With no reliable location or a failed read, send the ordinary cue',
+    ]) expect(skill).toContain(text)
+  })
+
   it('owns the approved service and toolkit use cases in the skill', async () => {
     const skill = await readConnectedAppsSkill()
 

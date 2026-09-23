@@ -1810,6 +1810,9 @@ describe('applyMurphManagedAutomations', () => {
     expect(morning?.instructions).toContain('Do not send a connection announcement or wait for a prior notice')
     expect(morning?.instructions).toContain('Read eligible active sources in this run while preserving explicit opt-outs')
     expect(morning?.instructions).not.toContain('connection-notice check')
+    expect(morning?.instructions).toContain('existing reminder reconciliation')
+    expect(morning?.instructions).toContain('unchanged travel plans still need this check')
+    expect(morning?.instructions).toContain('preserving timing and fixed destinations')
   })
 
   it.each([

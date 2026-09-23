@@ -182,10 +182,38 @@ Directly supplied dated constraints can use the same canonical plan fields with
 `--source manual` and no connected account. Keep lasting preferences in memory,
 established facilities in habitat, and goals/protocols in their existing owners.
 Use relevant overlaps when answering or wording an already-authorized reminder;
-do not rewrite schedules or experiments. A planned trip does not prove arrival,
+repair stale reminder assumptions as below, but do not rewrite schedules or
+experiments. A planned trip does not prove arrival,
 current location, or a realized experiment confounder. Record realized context
 through the existing experiment-context owner only after checking evidence.
 Preserve segment-local timezones and the member's saved home timezone.
+
+## Existing reminder reconciliation
+
+After reconciling eligible travel plans, review the bounded active automation
+inventory for private reminders affected by ongoing or upcoming travel. This
+also applies to unchanged plans: a previous run may have saved the trip but
+missed the reminder repair. Read only relevant reminders in detail.
+
+Repair an incidental location assumption (for example, a recurring outdoor cue
+that treats a previous trip's city as permanent) by replacing it with instructions
+to resolve location from current member context and canonical Journal travel at
+each occurrence, then read weather for that location. Preserve an explicitly
+fixed destination or venue. Do not copy the new itinerary into every reminder,
+create another location memory, or replace one permanently named city with another.
+
+Use the existing automation inspect and version-checked patch path. Change only
+stale contextual instructions and, if needed for their reads, the reminder model
+selection under the normal automation policy. Preserve subject, schedule,
+timezone, route, status, support ownership, and existing context references.
+Do not touch group reminders, clinical instructions, or unrelated automations.
+Already context-aware instructions need no write. If the version changed,
+reinspect before deciding; never overwrite a member correction. Check the patch
+readback. Repairs stay silent and create no extra follow-up or notification.
+Failed or partial provider reads are not authority to replace facts or move times;
+existing canonical evidence can still justify removing a permanently stale
+location assumption. The scheduled reminder independently resolves location even
+when this morning pass fails.
 
 ## Finish
 

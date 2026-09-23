@@ -1,0 +1,17 @@
+{
+  "publishedOn": "2026-09-22",
+  "order": 100,
+  "item": {
+    "id": "reminder-location-context",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Outdoor reminders use current travel context",
+    "summary": "Murph checks relevant travel context before choosing a location for outdoor reminder weather.",
+    "details": "The morning context check can repair outdated location assumptions in existing private reminders. Fixed destinations and reminder times stay intact, and uncertain travel plans are not treated as confirmed arrival.",
+    "relevanceTags": [
+      "reminders",
+      "travel"
+    ],
+    "sourcePullRequests": []
+  }
+}

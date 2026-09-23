@@ -1581,40 +1581,27 @@ describe('assistant execution prompt contract', () => {
     }
   })
 
-  it('offers a weather check before saving outdoor reminder automations', () => {
-    const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
-
-    expect(prompt).toContain('Outdoor-conditions reminder guard')
-    expect(prompt).toContain(
-      'reuse a city or region already known from this conversation, saved context, or the plan',
-    )
-    expect(prompt).toContain(
-      'offer once, as an option, to take one; ask for city or region, never an exact address',
-    )
-    expect(prompt).toContain(
-      'let a decline save the automation unchanged without raising it again',
-    )
-    expect(prompt).toContain(
-      'read weather for it before composing the message: call `murph.connected_apps_execute` with no account selector and `toolSlug: OPENWEATHER_API_GET_CURRENT_WEATHER`',
-    )
-    expect(prompt).toContain(
-      'or `OPENWEATHER_API_GET5_DAY_FORECAST` when the activity window is still hours away',
-    )
-    expect(prompt).toContain(
-      'Both slugs are server-allowlisted accountless reads, so search first only when their argument schema is unclear',
-    )
-    expect(prompt).toContain(
-      'name the conditions, then offer the nearest workable time in the same window or an indoor equivalent',
-    )
-    expect(prompt).toContain(
-      "Weather changes a run's wording, never whether it happens",
-    )
-    expect(prompt).toContain(
-      'with no stored location or a failed read, send the ordinary reminder without mentioning the check',
-    )
-    expect(prompt).toContain(
-      'save that coarse location once with `vault-cli memory upsert` so later automations reuse it instead of asking again',
-    )
+  it('routes outdoor authoring and execution to current location policy without freezing a city', () => {
+    for (const turnTrigger of [null, 'automation-cron'] as const) {
+      const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({ turnTrigger }))
+      expect(prompt).toContain("before authoring or running an outdoor reminder, read the `connected-apps` skill's reminder-location policy")
+      expect(prompt).toContain('never freeze an incidental current city into recurring instructions')
+      expect(prompt).toContain('Preserve explicitly fixed destinations and reminder timing')
+      expect(prompt).toContain('Newer member statements and Journal travel override incidental legacy cities')
+      expect(prompt).toContain('Planned arrival is not proof of presence')
+      expect(prompt).toContain('cross-check an inherited incidental city against bounded ongoing/recent canonical travel')
+      expect(prompt).toContain('with its date and any known validity window')
+      expect(prompt).not.toContain('With a location, store it in the instructions')
+      expect(prompt).not.toContain('so later automations reuse it instead of asking again')
+    }
+    const executionOnly = buildAssistantSystemPrompt(createCommonCodexPromptInput({
+      turnTrigger: 'automation-cron', hostedRuntime: true, assistantHostedAutomationAvailable: false,
+    }))
+    expect(executionOnly).toContain('Scheduled automation changes are unavailable in this turn')
+    expect(executionOnly).toContain('Private reminder location:')
+    expect(executionOnly).toContain('cross-check an inherited incidental city')
+    const group = buildAssistantSystemPrompt(createCommonCodexPromptInput({ conversationScope: 'group' }))
+    expect(group).not.toContain('Private reminder location:')
   })
 
   it('keeps outdoor reminder locations out of personal records in group rooms', () => {

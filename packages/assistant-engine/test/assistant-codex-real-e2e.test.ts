@@ -54,6 +54,7 @@ import {
   listAutomations,
   listWorkoutFormats,
   listWriteOperationMetadataPaths,
+  patchAutomation,
   readHabitatAspect,
   readEvent,
   readMemoryDocument,
@@ -15419,7 +15420,7 @@ describeRealCodex('real Codex Journal connected calendar capture e2e', () => {
 })
 
 describeRealCodex('real Codex Journal connected email travel capture e2e', () => {
-  it('groups one trip without retaining booking secrets or exact addresses', async () => {
+  it('captures travel and repairs stale reminder location without changing timing or fixed destinations', async () => {
     const config = await resolveRealCodexE2eConfig()
     const automation = MURPH_MANAGED_AUTOMATIONS.find(
       (candidate) => candidate.slug === 'journal-connected-context-morning',
@@ -15446,12 +15447,26 @@ describeRealCodex('real Codex Journal connected email travel capture e2e', () =>
           '  state: notice-sent',
         ].join('\n'),
       })
+      const seeded: Array<Awaited<ReturnType<typeof upsertAutomation>>['record']> = []
+      for (const [title, instructions] of [
+        ['Daily bicycle cue', 'The member is currently in Warsaw. Read Warsaw weather and remind them to take a relaxed bicycle ride.'],
+        ['Fixed venue ride', 'Prepare for the bicycle ride at the explicitly booked Warsaw venue. Always check that destination weather.'],
+        ['Reading cue', 'Read a few pages of a book.'],
+      ]) {
+        seeded.push((await upsertAutomation({
+          vaultRoot: workingDirectory, title, instructions,
+          schedule: { kind: 'dailyLocal', localTime: '19:30', timeZone: 'Europe/Warsaw' },
+          route: { channel: 'linq', deliveryTarget: 'synthetic-private-journal', identityId: null, participantId: null, threadId: 'synthetic-journal', threadIsDirect: true },
+          continuityPolicy: 'fresh', status: 'active', now: new Date('2026-08-20T06:00:00Z'),
+        })).record)
+      }
+      const inspectedVersions = new Map<string, string>()
       const connectedAppRequests: Array<{
         input: Record<string, unknown>
         operation: string
       }> = []
       const automationRequests: AssistantHostedAutomationToolRequest[] = []
-      const result = await executeRealCodexAppServerTurn({
+      const runTurn = () => executeRealCodexAppServerTurn({
         allowFinishWithoutReply: false,
         approvalPolicy: 'never',
         baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
@@ -15483,10 +15498,32 @@ describeRealCodex('real Codex Journal connected email travel capture e2e', () =>
         hostedToolContext: {
           automationTool: {
             request: async (request) => {
-              if (request.action !== 'save') {
-                throw new Error('Expected an automation save request.')
-              }
               automationRequests.push(request)
+              if (request.action === 'inspect' || request.action === 'patch') {
+                const before = await showAutomation({ vaultRoot: workingDirectory, automationId: request.lookup })
+                if (!before) throw new Error('Missing seeded reminder.')
+                if (request.action === 'inspect') inspectedVersions.set(before.automationId, before.updatedAt)
+                else {
+                  expect(request.expectedUpdatedAt).toBe(inspectedVersions.get(before.automationId))
+                  expect(request.lookup).toBe(seeded[0]?.automationId)
+                  expect(Object.keys(request).every(key => ['action', 'lookup', 'expectedUpdatedAt', 'instructions', 'assistantTargetOverride'].includes(key))).toBe(true)
+                  expect(request.instructions).toBeTruthy()
+                  await patchAutomation({ vaultRoot: workingDirectory, lookup: request.lookup, expectedUpdatedAt: request.expectedUpdatedAt,
+                    instructions: request.instructions, assistantTargetOverride: request.assistantTargetOverride,
+                    now: new Date('2026-08-31T06:00:00Z'),
+                  })
+                  inspectedVersions.delete(before.automationId)
+                }
+                const record = await showAutomation({ vaultRoot: workingDirectory, automationId: request.lookup })
+                if (!record) throw new Error('Missing reminder readback.')
+                return {
+                  action: request.action, automationId: record.automationId, lookupId: record.automationId,
+                  created: false, routeBinding: 'preserved' as const, instructions: record.instructions,
+                  title: record.title, schedule: record.schedule, status: record.status, updatedAt: record.updatedAt,
+                  effectiveTimeZone: 'Europe/Warsaw', occurrenceProjection: { status: 'resolved' as const, nextOccurrenceAt: '2026-08-31T17:30:00Z' },
+                }
+              }
+              if (request.action !== 'save') throw new Error('Unexpected automation action.')
               const saved = await upsertAutomation({
                 ...request, createOnly: true, vaultRoot: workingDirectory,
                 continuityPolicy: request.continuityPolicy ?? 'fresh',
@@ -15599,6 +15636,7 @@ describeRealCodex('real Codex Journal connected email travel capture e2e', () =>
         workingDirectory,
       })
 
+      const result = await runTurn()
       expect(parseAssistantNotificationDecision(result.finalMessage).kind, result.finalMessage).toBe('skip')
       const providerOperations = connectedAppRequests.map(
         (request) => request.operation,
@@ -15631,7 +15669,19 @@ describeRealCodex('real Codex Journal connected email travel capture e2e', () =>
       expect(upcomingText).not.toMatch(/ZX9Q|HTL-4431|1200|Rua Example/iu)
       expect(await readAssistantContextSnapshotPrompt({ vaultRoot: workingDirectory, now: new Date('2026-08-31T06:00:00Z') })).toContain('Lisbon')
       expect(journalWrites).toHaveLength(1)
-      expect((await listAutomations({ vaultRoot: workingDirectory })).items.length).toBeLessThanOrEqual(1)
+      expect((await listAutomations({ vaultRoot: workingDirectory })).items.length).toBeLessThanOrEqual(4)
+      expect(automationRequests.filter(request => request.action === 'patch')).toHaveLength(1)
+      const repaired = await showAutomation({ vaultRoot: workingDirectory, automationId: seeded[0]!.automationId })
+      if (!repaired) throw new Error('Missing repaired reminder.')
+      expect(repaired.instructions).toMatch(/current|latest|each|occurrence/iu)
+      expect(repaired.instructions).toMatch(/Journal|travel|location/iu)
+      expect(repaired.instructions).not.toMatch(/Warsaw|Lisbon/iu)
+      expect(repaired.schedule).toEqual(seeded[0]!.schedule)
+      expect(repaired.route).toEqual(seeded[0]!.route)
+      expect(repaired.status).toBe(seeded[0]!.status)
+      for (const record of seeded.slice(1)) {
+        expect(await showAutomation({ vaultRoot: workingDirectory, automationId: record.automationId })).toEqual(record)
+      }
       expect(JSON.stringify(savedNotes)).not.toMatch(/ZX9Q|HTL-4431|1200|Rua Example/iu)
       expect(journalWrites[0]).toMatch(/Lisbon/iu)
       expect(journalWrites[0]).toMatch(/12|15/iu)
@@ -15641,6 +15691,13 @@ describeRealCodex('real Codex Journal connected email travel capture e2e', () =>
       expect((await getKnowledgePage({ vault: workingDirectory, slug: 'journal-connected-context' })).page.body).toMatch(
         /mail_flight_out|mail_hotel|mail_flight_back/iu,
       )
+      const automationCount = (await listAutomations({ vaultRoot: workingDirectory })).items.length
+      const retry = await runTurn()
+      expect(parseAssistantNotificationDecision(retry.finalMessage).kind).toBe('skip')
+      expect(automationRequests.filter(request => request.action === 'patch')).toHaveLength(1)
+      expect((await listAutomations({ vaultRoot: workingDirectory })).items).toHaveLength(automationCount)
+      expect((await readVaultRawTolerant(workingDirectory)).events.filter(event => event.kind === 'note')).toHaveLength(1)
+      expect(await showAutomation({ vaultRoot: workingDirectory, automationId: repaired.automationId })).toEqual(repaired)
       process.stdout.write(
         `[journal-connected-email-e2e] ${JSON.stringify({
           automationWrites: automationRequests.length,
@@ -19585,6 +19642,121 @@ describeRealCodex('real Codex generic transcript memory judgment e2e', () => {
       }
     },
     600_000,
+  )
+})
+
+describeRealCodex('real Codex travel reminder location e2e', () => {
+  it.each(['past-arrival', 'member-correction', 'conflicting', 'fixed-destination'] as const)(
+    'resolves travel reminder location at execution: %s', async (scenario) => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-travel-location-e2e-'))
+      const now = '2026-11-12T18:00:00Z'
+      const requests: Array<{ operation: string; input: Record<string, unknown> }> = []
+      try {
+        const binDirectory = path.join(workingDirectory, 'bin')
+        const commandLogPath = path.join(workingDirectory, 'commands.log')
+        await materializeJournalConnectedContextVaultCli({
+          binDirectory, commandLogPath, vaultRoot: workingDirectory,
+          ledgerText: JSON.stringify({ version: 1, optOuts: { global: false, accounts: [], providers: [], categories: [] }, activeAccounts: [] }),
+        })
+        const travel = await upsertEvent({ vaultRoot: workingDirectory, payload: {
+          kind: 'note', noteType: 'journal-plan', source: 'manual', title: 'Flight to Oslo',
+          occurredAt: '2026-11-12T10:00:00+01:00', timeZone: 'Europe/Prague',
+          note: 'Planned flight from Prague to Oslo, arriving November 12 at 12:00 Europe/Oslo. Return planned November 16. Arrival has not been confirmed.',
+          plan: { endsAt: '2026-11-12T12:00:00+01:00', status: 'planned', lastVerifiedAt: '2026-11-12T07:00:00Z', category: 'travel' },
+        } })
+        await upsertMemory(workingDirectory, { section: 'Context', now: new Date('2026-11-01T09:00:00Z'), text: 'Current travel location: Prague, reported November 1.' })
+        const memoryBefore = await readMemoryDocument(workingDirectory)
+        expect((await refreshJournalTestContext(workingDirectory, now)).entries).toEqual([])
+        const context = await readAssistantContextSnapshotPrompt({ vaultRoot: workingDirectory, now: new Date(now) })
+        const stored = (await upsertAutomation({ vaultRoot: workingDirectory,
+          title: 'Bicycle break', status: 'active', continuityPolicy: 'fresh', now: new Date('2026-11-01T09:00:00Z'),
+          instructions: scenario === 'fixed-destination'
+            ? 'Prepare for the bicycle ride explicitly booked at the Prague venue tonight. Check weather for that fixed destination and send one short preparation reminder.'
+            : 'Bicycle break: the member is currently in Prague. Check Prague weather and send one brief reminder to take the bicycle out for a relaxed spin.',
+          schedule: { kind: 'dailyLocal', localTime: '19:00', timeZone: 'Europe/Prague' },
+          route: { channel: 'linq', deliveryTarget: 'synthetic-bicycle', identityId: null, participantId: null, threadId: 'synthetic-bicycle', threadIsDirect: true },
+        })).record
+        const source = findCanonicalAssistantCronRecordInList(await listCanonicalAssistantCronRecords(workingDirectory), stored.automationId)
+        if (!source || source.kind !== 'automation') throw new Error('Expected canonical bicycle reminder.')
+        const runtimeState = createAssistantCronCanonicalRuntimeRecord({ jobId: resolveCanonicalAssistantCronJobId(source), now })
+        const job = projectCanonicalAssistantCronJob({ source, runtimeState })
+        const instructions = buildAssistantCronExecutionInstructions({ job, kind: 'canonical', runtimeState, source }, { automationId: null, contextReferences: [] }, now)
+        const dynamicTools = [MURPH_CONNECTED_APPS_SEARCH_TOOL, MURPH_CONNECTED_APPS_EXECUTE_TOOL]
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+          codexHome: config.codexHome, model: config.model, modelProvider: config.modelProvider,
+          fixtureBinDirectory: binDirectory,
+          env: { ...config.env, [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: resolveAssistantSkillsRoot(), PATH: `${binDirectory}:${config.env.PATH ?? ''}` },
+          developerInstructions: buildWeeklyHealthInsightDeveloperInstructions({ currentLocalDate: '2026-11-12', currentTimeZone: 'Europe/Prague', scheduledOccurrenceAt: now }),
+          dynamicTools,
+          hostedToolContext: {
+            computerToolsAvailable: false, currentHostedDeliveryContext: () => null,
+            currentHostedMailboxItemIds: () => [], vaultFileSendAvailable: false,
+            sendVaultFile: async () => { throw new Error('No sends in this synthetic journey.') },
+            connectedApps: { request: async (request) => {
+              requests.push({ operation: request.operation, input: request.input })
+              if (request.operation === 'search') return { result: { success: true, tool_schemas: {
+                OPENWEATHER_API_GET_CURRENT_WEATHER: { input_schema: {
+                  type: 'object', additionalProperties: false,
+                  properties: { q: { type: 'string' }, units: { type: 'string', enum: ['metric'] } }, required: ['q', 'units'],
+                } },
+              } } }
+              if (request.operation !== 'execute') throw new Error('Unexpected provider operation.')
+              const city = scenario === 'member-correction' ? 'Porto' : scenario === 'fixed-destination' ? 'Prague' : 'Oslo'
+              if (request.input.toolSlug === 'OPENWEATHER_API_GET_GEOCODING_DIRECT') return { result: [{ name: city, lat: 50, lon: 14 }] }
+              if (request.input.toolSlug === 'MURPH_OPENWEATHER_GET_NATIONAL_ALERTS') return { result: { alerts: [] } }
+              return { result: { name: city, main: { temp: 16 }, weather: [{ description: 'clear sky' }], wind: { speed: 2 } } }
+            } },
+          },
+          prompt: resolveAssistantProviderPrompt({ dynamicTools,
+            providerConfig: normalizeAssistantProviderConfig({ provider: 'codex-cli' }), workingDirectory,
+            turnContextPrompt: [context, 'Saved context: current travel location Prague, reported November 1.',
+              scenario === 'member-correction' ? 'Latest member statement, November 12 at 17:00Z: I canceled that flight; I am in Porto until November 16.' : '',
+              scenario === 'conflicting' ? 'Latest member statement, November 12 at 17:00Z: My trip changed again. Neither the old city nor the booked destination is where I am; my current city is unspecified.' : '',
+            ].filter(Boolean).join('\n'),
+            prompt: instructions,
+          }),
+          reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
+        })
+        const decision = parseAssistantNotificationDecision(result.finalMessage)
+        const journalReads = (await readFile(commandLogPath, 'utf8').catch(() => '')).split('\n').filter(line => /event (?:show|list)/u.test(line)).length
+        process.stdout.write(`[travel-reminder-location] ${JSON.stringify({ scenario, decision, journalReads, weatherCalls: requests.filter(r => r.operation === 'execute').map(r => r.input) })}\n`)
+        expect(decision.kind).toBe('send_message')
+        if (decision.kind !== 'send_message') throw new Error('Expected the ordinary reminder.')
+        const reply = decision.text
+        expect(reply).toMatch(/bicycle|bike|ride|cycling|spin/iu)
+        const executions = requests.filter(r => r.operation === 'execute')
+        expect(executions.filter(r => r.input.toolSlug === 'OPENWEATHER_API_GET_CURRENT_WEATHER')).toHaveLength(scenario === 'conflicting' ? 0 : 1)
+        expect(executions.length).toBeLessThanOrEqual(scenario === 'conflicting' ? 0 : 3)
+        for (const request of requests.filter(r => r.operation === 'execute')) {
+          expect(['OPENWEATHER_API_GET_CURRENT_WEATHER', 'OPENWEATHER_API_GET_GEOCODING_DIRECT', 'MURPH_OPENWEATHER_GET_NATIONAL_ALERTS']).toContain(request.input.toolSlug)
+          expect(request.input.account).toBeUndefined()
+          const city = scenario === 'member-correction' ? 'Porto' : scenario === 'fixed-destination' ? 'Prague' : 'Oslo'
+          if (request.input.toolSlug !== 'MURPH_OPENWEATHER_GET_NATIONAL_ALERTS') expect(JSON.stringify(request.input.arguments)).toMatch(new RegExp(city, 'i'))
+        }
+        if (scenario === 'past-arrival') {
+          expect(reply).toMatch(/Oslo/iu)
+          expect(reply).toMatch(/if|assuming|planned|itinerary/iu)
+          expect(reply).not.toMatch(/Prague/iu)
+          const commands = await readFile(commandLogPath, 'utf8')
+          expect(commands).toMatch(/event (?:list|show)/u)
+        }
+        if (scenario === 'member-correction') {
+          expect(reply).toMatch(/Porto/iu)
+          expect(reply).not.toMatch(/Prague|Oslo/iu)
+        }
+        if (scenario === 'conflicting') expect(reply).not.toMatch(/Prague|Oslo|Porto|clear sky|16.?°|where are you/iu)
+        if (scenario === 'fixed-destination') expect(reply).toMatch(/Prague/iu)
+        expect(await readMemoryDocument(workingDirectory)).toEqual(memoryBefore)
+        expect((await readEvent({ vaultRoot: workingDirectory, eventId: travel.eventId })).event).toEqual(travel.event)
+        expect((await listAutomations({ vaultRoot: workingDirectory })).items).toHaveLength(1)
+        expect(await showAutomation({ vaultRoot: workingDirectory, automationId: stored.automationId })).toEqual(stored)
+      } finally {
+        await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+      }
+    }, 360_000,
   )
 })
 

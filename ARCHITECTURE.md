@@ -294,7 +294,15 @@ already concise records remain unchanged. This policy uses the existing memory
 format and tool, with no schema migration or second profile store.
 
 The morning Journal connected-context automation writes canonical Journal plans.
-Their note record owns end time, planned/tentative/canceled state, verification
+It also reconciles affected private reminder instructions through the existing
+version-checked automation patch: incidental location assumptions become runtime
+context lookups, while fixed destinations, schedules, routes, and clinical support
+remain unchanged. Repeated passes leave already context-aware reminders alone.
+Scheduled reminders resolve location independently from current member evidence
+and canonical travel, including recent segments after arrival leaves the upcoming
+projection. Plans remain conditional evidence, never proof of presence or authority
+to overwrite home timezone. No separate location store or scheduler is introduced.
+Each canonical Journal plan note owns end time, planned/tentative/canceled state, verification
 time, category, and optional connected account; existing event fields own start,
 timezone, title, source identity, revision, and detailed logistics. Typed note
 creation accepts the event timezone. A repeated source identity recovers the

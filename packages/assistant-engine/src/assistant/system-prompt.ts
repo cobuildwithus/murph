@@ -1922,11 +1922,16 @@ function buildAssistantCronGuidanceText(
   hostedAutomationAvailable: boolean,
   channel: string | null,
 ): string {
-  return buildAssistantAvailableAutomationGuidanceText(
-    conversationScope,
-    hostedRuntime,
-    hostedAutomationAvailable,
-    channel,
+  return joinPromptSections(
+    buildAssistantAvailableAutomationGuidanceText(
+      conversationScope,
+      hostedRuntime,
+      hostedAutomationAvailable,
+      channel,
+    ),
+    conversationScope === "direct"
+      ? "Private reminder location: before running an outdoor reminder, read the `connected-apps` skill's location policy. Newer member statements and Journal travel override incidental legacy cities; preserve explicitly fixed destinations and timing. Planned arrival is not proof of presence; use conditional wording. Stored automation wording is not a new member location report. Before weather lookup, cross-check an inherited incidental city against bounded ongoing/recent canonical travel unless a member report dated today or with a validity window covering this occurrence settles location. A past report without that window is stale. Follow the skill’s canonical event-list read before weather even after travel leaves upcoming context. If location or weather is unavailable, send the ordinary cue without city/weather."
+      : null,
   );
 }
 
@@ -2001,7 +2006,7 @@ function buildAssistantSharedAutomationPreferenceText(
     ? "Keep a city or region the room gives for this purpose in the automation's stored instructions only; never write it into a participant's personal record."
     : `When the user gives a city or region for this purpose, also save that coarse location once with ${code(
         "vault-cli memory upsert"
-      )} so later automations reuse it instead of asking again.`;
+      )} with its date and any known validity window; treat it as context, not a permanent current location.`;
   const oneShotReminderTimingPreference = conversationScope === "group"
     ? `One-shot reminder time selection:
 - Classify timing before any optional context read. Preserve a member-supplied exact clock time and day or date exactly; do not round, move, skip, or reinterpret it. For a broad window such as morning, afternoon, evening, or sometime that day, choose one reasonable concrete time inside the window from current room or message context, falling back to 09:00, 14:00, 19:00, or 12:00 respectively when useful.
@@ -2031,13 +2036,7 @@ Ordinary reminders, check-ins, and lightweight support use the automation contra
     hostedRuntime ? "continuityPolicy: fresh" : "--continuity-policy fresh"
   )} for larger automations such as research, audits, roundups, content inspection, or any recurring task likely to need multiple tool calls, so each run starts from current vault/tool evidence instead of prior run transcript context. ${routePreference}
 
-Outdoor-conditions reminder guard: before saving a reminder, check-in, or plan-support automation that asks someone to go outside, such as morning sunlight, a walk, run, ride, or outdoor workout, reuse a city or region already known from this conversation, saved context, or the plan. When none is known, offer once, as an option, to take one; ask for city or region, never an exact address, and let a decline save the automation unchanged without raising it again. With a location, store it in the instructions along with the run-time instruction to read weather for it before composing the message: call ${code(
-    "murph.connected_apps_execute"
-  )} with no account selector and ${code(
-    "toolSlug: OPENWEATHER_API_GET_CURRENT_WEATHER"
-  )}, or ${code(
-    "OPENWEATHER_API_GET5_DAY_FORECAST"
-  )} when the activity window is still hours away. Both slugs are server-allowlisted accountless reads, so search first only when their argument schema is unclear. Adapt rather than send an ask the conditions contradict: name the conditions, then offer the nearest workable time in the same window or an indoor equivalent. Weather changes a run's wording, never whether it happens; with no stored location or a failed read, send the ordinary reminder without mentioning the check. ${outdoorLocationPreference}
+Outdoor-conditions reminder guard: before authoring or running an outdoor reminder, read the \`connected-apps\` skill's reminder-location policy. Store instructions to resolve location at each occurrence before reading weather; never freeze an incidental current city into recurring instructions. Preserve explicitly fixed destinations and reminder timing. ${outdoorLocationPreference}
 
 ${selfTargetPreference}`;
 }

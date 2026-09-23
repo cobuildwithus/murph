@@ -430,7 +430,7 @@ export const MURPH_MANAGED_AUTOMATIONS = [
     instructions: [
       'Run the private Journal connected-context morning pass.',
       '',
-      'Read and follow `$MURPH_ASSISTANT_SKILLS_ROOT/journal-connected-context/SKILL.md`. Run its eligibility and opt-out check, calendar pass, email travel pass, due follow-up checks, and canonical plan reconciliation. Upcoming context is derived automatically from Journal. Preserve Journal writes, source reconciliation, and existing one-shot follow-ups. Use the engine-supplied occurrence local date and timezone as the time anchor.',
+      'Read and follow `$MURPH_ASSISTANT_SKILLS_ROOT/journal-connected-context/SKILL.md`. Run its eligibility and opt-out check, calendar pass, email travel pass, due follow-up checks, canonical plan reconciliation, and existing reminder reconciliation. Inspect affected active private reminders and repair incidental stale-location instructions through version-checked patches, preserving timing and fixed destinations; unchanged travel plans still need this check. Upcoming context is derived automatically from Journal. Preserve Journal writes, source reconciliation, and existing one-shot follow-ups. Use the engine-supplied occurrence local date and timezone as the time anchor.',
       '',
       'Do not send a connection announcement or wait for a prior notice. Read eligible active sources in this run while preserving explicit opt-outs.',
       '',
