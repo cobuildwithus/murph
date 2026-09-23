@@ -765,6 +765,15 @@ describe("hosted runtime control contracts", () => {
     expect(parseHostedWorkspaceInvocationRequest(workspaceInvocationRequest)).toEqual(
       workspaceInvocationRequest,
     );
+    expect(parseHostedWorkspaceInvocationRequest({
+      ...workspaceInvocationRequest,
+      hostedAssistantPriorityUntil: "2026-09-24T00:00:00Z",
+      workspace: null,
+    }).hostedAssistantPriorityUntil).toBe("2026-09-24T00:00:00Z");
+    expect(() => parseHostedWorkspaceInvocationRequest({
+      ...workspaceInvocationRequest,
+      hostedAssistantPriorityUntil: 123,
+    })).toThrow("hostedAssistantPriorityUntil");
     expect(() => parseHostedWorkspaceInvocationRequest({
       ...workspaceInvocationRequest,
       budget: {

@@ -8881,6 +8881,14 @@ export function parseHostedWorkspaceInvocationRequest(
   }
 
   return {
+    ...(record.hostedAssistantPriorityUntil === undefined
+      ? {}
+      : {
+          hostedAssistantPriorityUntil: requireString(
+            record.hostedAssistantPriorityUntil,
+            "Hosted workspace invocation request hostedAssistantPriorityUntil",
+          ),
+        }),
     ...(record.assistantExecutionBlocked === undefined
       ? {}
       : {

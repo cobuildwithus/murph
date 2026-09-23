@@ -3991,6 +3991,7 @@ export interface HostedWorkspaceInvocationBudget {
 }
 
 export interface HostedWorkspaceInvocationRequest {
+  hostedAssistantPriorityUntil?: string;
   assistantExecutionBlocked?: true;
   attemptId: string;
   budget?: HostedWorkspaceInvocationBudget | null;

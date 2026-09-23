@@ -368,6 +368,9 @@ reset prevents a previous Priority selection sticking to later Standard turns.
 This boost, including the Linq instant first reply and Priority child usage,
 uses Standard member allowance pricing: Murph absorbs the provider premium.
 No new database query, persisted grant, timer or provider retry is introduced.
+The Worker carries the optional expiry alongside the
+prefetched workspace in the typed invocation request; restore preserves it
+without another Web read, including when the prefetched workspace is null.
 
 Personal Patterns resolves each vault identity to a stable daily minute between
 09:00 and 16:59 local time. Existing active

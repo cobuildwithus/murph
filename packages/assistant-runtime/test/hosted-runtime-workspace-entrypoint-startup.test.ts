@@ -2890,7 +2890,13 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
-  test("projects the Web-owned first-day priority expiry into the assistant turn env", async () => {
+  test.each([
+    { source: "workspace port", priorityUntil: "2026-09-24T12:00:00Z" },
+    { source: "prefetched null", priorityUntil: "2026-09-24T12:00:00Z" },
+    { source: "prefetched existing", priorityUntil: "2026-09-24T12:00:00Z" },
+    { source: "prefetched null", priorityUntil: undefined },
+    { source: "prefetched existing", priorityUntil: undefined },
+  ])("projects Web-owned priority from $source ($priorityUntil)", async ({ source, priorityUntil }) => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const runtimeEnvs: Readonly<Record<string, string>>[] = [];
 
@@ -2899,6 +2905,12 @@ describe("hosted workspace runtime entrypoint", () => {
 
       await runHostedWorkspaceRuntimeJobInProcess(
         createWorkspaceRuntimeJobInput({
+          ...(source === "workspace port" ? {} : {
+            request: {
+              hostedAssistantPriorityUntil: priorityUntil,
+              workspace: source === "prefetched null" ? null : createWorkspaceState({ version: "0" }),
+            },
+          }),
           forwardedEnv: {
             HOSTED_ASSISTANT_PRIORITY_UNTIL: "2099-01-01T00:00:00Z",
           },
@@ -2931,9 +2943,10 @@ describe("hosted workspace runtime entrypoint", () => {
             workspacePort: {
               ...createWorkspacePort({ checkpointRequests: [], events: [], workspace: null }),
               async read() {
+                assert.equal(source, "workspace port", "Prefetched invocation must not read workspace again");
                 return {
                   fetchedAt: TEST_NOW,
-                  hostedAssistantPriorityUntil: "2026-09-24T12:00:00Z",
+                  hostedAssistantPriorityUntil: priorityUntil,
                   workspace: createWorkspaceState({ version: "0" }),
                 };
               },
@@ -2953,7 +2966,7 @@ describe("hosted workspace runtime entrypoint", () => {
       );
 
       assert.equal(runtimeEnvs.length, 1);
-      assert.equal(runtimeEnvs[0]?.HOSTED_ASSISTANT_PRIORITY_UNTIL, "2026-09-24T12:00:00Z");
+      assert.equal(runtimeEnvs[0]?.HOSTED_ASSISTANT_PRIORITY_UNTIL, priorityUntil);
     } finally {
       await removeTempRoot(vaultRoot);
     }
