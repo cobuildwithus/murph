@@ -55,6 +55,7 @@ import {
   listAutomations,
   listWorkoutFormats,
   listWriteOperationMetadataPaths,
+  patchAutomation,
   readHabitatAspect,
   readEvent,
   readMemoryDocument,
@@ -15401,7 +15402,7 @@ describeRealCodex('real Codex Journal connected account eligibility e2e', () => 
       expect((await readVaultRawTolerant(workingDirectory)).events).toHaveLength(scenario.optedOut ? 1 : 0)
       expect((await listAutomations({ vaultRoot: workingDirectory })).items).toEqual([])
       if (scenario.optedOut) {
-        expect(connectedAppRequests.every(request => request.operation === 'manage')).toBe(true)
+        expect(connectedAppRequests).toEqual([])
         expect((await readConnectedContextPolicy(workingDirectory))?.optOuts.global).toBe(true)
       } else {
         expect(connectedAppRequests.map(request => request.operation)).toEqual(expect.arrayContaining(['manage', 'search', 'execute']))
@@ -15713,7 +15714,7 @@ describeRealCodex('real Codex Journal connected calendar capture e2e', () => {
 })
 
 describeRealCodex('real Codex Journal connected email travel capture e2e', () => {
-  it('groups one trip without retaining booking secrets or exact addresses', async () => {
+  it('captures travel and repairs stale reminder location without changing timing or fixed destinations', async () => {
     const config = await resolveRealCodexE2eConfig()
     const automation = MURPH_MANAGED_AUTOMATIONS.find(
       (candidate) => candidate.slug === 'journal-connected-context-morning',
@@ -15740,12 +15741,26 @@ describeRealCodex('real Codex Journal connected email travel capture e2e', () =>
           '  state: notice-sent',
         ].join('\n'),
       })
+      const seeded: Array<Awaited<ReturnType<typeof upsertAutomation>>['record']> = []
+      for (const [title, instructions] of [
+        ['Daily bicycle cue', 'The member is currently in Warsaw. Read Warsaw weather and remind them to take a relaxed bicycle ride.'],
+        ['Fixed venue ride', 'Prepare for the bicycle ride at the explicitly booked Warsaw venue. Always check that destination weather.'],
+        ['Reading cue', 'Read a few pages of a book.'],
+      ]) {
+        seeded.push((await upsertAutomation({
+          vaultRoot: workingDirectory, title, instructions,
+          schedule: { kind: 'dailyLocal', localTime: '19:30', timeZone: 'Europe/Warsaw' },
+          route: { channel: 'linq', deliveryTarget: 'synthetic-private-journal', identityId: null, participantId: null, threadId: 'synthetic-journal', threadIsDirect: true },
+          continuityPolicy: 'fresh', status: 'active', now: new Date('2026-08-20T06:00:00Z'),
+        })).record)
+      }
+      const inspectedVersions = new Map<string, string>()
       const connectedAppRequests: Array<{
         input: Record<string, unknown>
         operation: string
       }> = []
       const automationRequests: AssistantHostedAutomationToolRequest[] = []
-      const result = await executeRealCodexAppServerTurn({
+      const runTurn = () => executeRealCodexAppServerTurn({
         allowFinishWithoutReply: false,
         approvalPolicy: 'never',
         baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
@@ -15777,10 +15792,32 @@ describeRealCodex('real Codex Journal connected email travel capture e2e', () =>
         hostedToolContext: {
           automationTool: {
             request: async (request) => {
-              if (request.action !== 'save') {
-                throw new Error('Expected an automation save request.')
-              }
               automationRequests.push(request)
+              if (request.action === 'inspect' || request.action === 'patch') {
+                const before = await showAutomation({ vaultRoot: workingDirectory, automationId: request.lookup })
+                if (!before) throw new Error('Missing seeded reminder.')
+                if (request.action === 'inspect') inspectedVersions.set(before.automationId, before.updatedAt)
+                else {
+                  expect(request.expectedUpdatedAt).toBe(inspectedVersions.get(before.automationId))
+                  expect(request.lookup).toBe(seeded[0]?.automationId)
+                  expect(Object.keys(request).every(key => ['action', 'lookup', 'expectedUpdatedAt', 'instructions', 'assistantTargetOverride'].includes(key))).toBe(true)
+                  expect(request.instructions).toBeTruthy()
+                  await patchAutomation({ vaultRoot: workingDirectory, lookup: request.lookup, expectedUpdatedAt: request.expectedUpdatedAt,
+                    instructions: request.instructions, assistantTargetOverride: request.assistantTargetOverride,
+                    now: new Date('2026-08-31T06:00:00Z'),
+                  })
+                  inspectedVersions.delete(before.automationId)
+                }
+                const record = await showAutomation({ vaultRoot: workingDirectory, automationId: request.lookup })
+                if (!record) throw new Error('Missing reminder readback.')
+                return {
+                  action: request.action, automationId: record.automationId, lookupId: record.automationId,
+                  created: false, routeBinding: 'preserved' as const, instructions: record.instructions,
+                  title: record.title, schedule: record.schedule, status: record.status, updatedAt: record.updatedAt,
+                  effectiveTimeZone: 'Europe/Warsaw', occurrenceProjection: { status: 'resolved' as const, nextOccurrenceAt: '2026-08-31T17:30:00Z' },
+                }
+              }
+              if (request.action !== 'save') throw new Error('Unexpected automation action.')
               const saved = await upsertAutomation({
                 ...request, createOnly: true, vaultRoot: workingDirectory,
                 continuityPolicy: request.continuityPolicy ?? 'fresh',
@@ -15893,6 +15930,7 @@ describeRealCodex('real Codex Journal connected email travel capture e2e', () =>
         workingDirectory,
       })
 
+      const result = await runTurn()
       expect(parseAssistantNotificationDecision(result.finalMessage).kind, result.finalMessage).toBe('skip')
       const providerOperations = connectedAppRequests.map(
         (request) => request.operation,
@@ -15915,17 +15953,36 @@ describeRealCodex('real Codex Journal connected email travel capture e2e', () =>
       const savedNotes = (await readVaultRawTolerant(workingDirectory)).events.filter(event => event.kind === 'note')
       expect(savedNotes).toHaveLength(1)
       const upcoming = await refreshJournalTestContext(workingDirectory, '2026-08-31T06:00:00Z')
-      expect(upcoming.entries).toHaveLength(1)
+      expect(upcoming.entries, JSON.stringify({
+        notes: savedNotes,
+        ledger: (await getKnowledgePage({ vault: workingDirectory, slug: 'journal-connected-context' })).page.body,
+      })).toHaveLength(1)
       expect(upcoming.entries[0]?.eventId).toBe(savedNotes[0]?.entityId)
       const upcomingText = JSON.stringify(upcoming)
       expect(upcomingText).toMatch(/Lisbon/iu)
       expect(upcomingText).toMatch(/Warsaw/iu)
-      expect(upcomingText).toMatch(/2026-09-12/u)
+      const trip = upcoming.entries[0]!
+      expect(trip.timeZone).toBeTruthy()
+      expect(new Intl.DateTimeFormat('en-CA', {
+        timeZone: trip.timeZone!, year: 'numeric', month: '2-digit', day: '2-digit',
+      }).format(new Date(trip.startsAt))).toBe('2026-09-12')
       expect(upcomingText).toMatch(/2026-09-15|September 15|15 Sep(?:tember)?/iu)
       expect(upcomingText).not.toMatch(/ZX9Q|HTL-4431|1200|Rua Example/iu)
       expect(await readAssistantContextSnapshotPrompt({ vaultRoot: workingDirectory, now: new Date('2026-08-31T06:00:00Z') })).toContain('Lisbon')
       expect(journalWrites).toHaveLength(1)
-      expect((await listAutomations({ vaultRoot: workingDirectory })).items.length).toBeLessThanOrEqual(1)
+      expect((await listAutomations({ vaultRoot: workingDirectory })).items.length).toBeLessThanOrEqual(4)
+      expect(automationRequests.filter(request => request.action === 'patch')).toHaveLength(1)
+      const repaired = await showAutomation({ vaultRoot: workingDirectory, automationId: seeded[0]!.automationId })
+      if (!repaired) throw new Error('Missing repaired reminder.')
+      expect(repaired.instructions).toMatch(/current|latest|each|occurrence/iu)
+      expect(repaired.instructions).toMatch(/Journal|travel|location/iu)
+      expect(repaired.instructions).not.toMatch(/Warsaw|Lisbon/iu)
+      expect(repaired.schedule).toEqual(seeded[0]!.schedule)
+      expect(repaired.route).toEqual(seeded[0]!.route)
+      expect(repaired.status).toBe(seeded[0]!.status)
+      for (const record of seeded.slice(1)) {
+        expect(await showAutomation({ vaultRoot: workingDirectory, automationId: record.automationId })).toEqual(record)
+      }
       expect(JSON.stringify(savedNotes)).not.toMatch(/ZX9Q|HTL-4431|1200|Rua Example/iu)
       expect(journalWrites[0]).toMatch(/Lisbon/iu)
       expect(journalWrites[0]).toMatch(/12|15/iu)
@@ -15935,6 +15992,13 @@ describeRealCodex('real Codex Journal connected email travel capture e2e', () =>
       expect((await getKnowledgePage({ vault: workingDirectory, slug: 'journal-connected-context' })).page.body).toMatch(
         /mail_flight_out|mail_hotel|mail_flight_back/iu,
       )
+      const automationCount = (await listAutomations({ vaultRoot: workingDirectory })).items.length
+      const retry = await runTurn()
+      expect(parseAssistantNotificationDecision(retry.finalMessage).kind).toBe('skip')
+      expect(automationRequests.filter(request => request.action === 'patch')).toHaveLength(1)
+      expect((await listAutomations({ vaultRoot: workingDirectory })).items).toHaveLength(automationCount)
+      expect((await readVaultRawTolerant(workingDirectory)).events.filter(event => event.kind === 'note')).toHaveLength(1)
+      expect(await showAutomation({ vaultRoot: workingDirectory, automationId: repaired.automationId })).toEqual(repaired)
       process.stdout.write(
         `[journal-connected-email-e2e] ${JSON.stringify({
           automationWrites: automationRequests.length,
@@ -19946,6 +20010,266 @@ describeRealCodex('real Codex generic transcript memory judgment e2e', () => {
       }
     },
     600_000,
+  )
+})
+
+describeRealCodex('real Codex morning reminder reconciliation e2e', () => {
+  it('repairs non-travel reminder context timing completion and duplicates without new connections', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const seed = MURPH_MANAGED_AUTOMATIONS.find(candidate => candidate.slug === 'journal-connected-context-morning')
+    if (!seed) throw new Error('Missing morning automation.')
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-reminder-reconciliation-e2e-'))
+    const now = new Date('2026-11-12T07:00:00Z')
+    const requests: AssistantHostedAutomationToolRequest[] = []
+    const providerOperations: string[] = []
+    const inspected = new Map<string, string>()
+    try {
+      const binDirectory = path.join(workingDirectory, 'bin')
+      await materializeJournalConnectedContextVaultCli({ binDirectory, vaultRoot: workingDirectory,
+        ledgerText: null,
+      })
+      await expect(getKnowledgePage({ vault: workingDirectory, slug: 'journal-connected-context' })).rejects.toMatchObject({ code: 'knowledge_page_not_found' })
+      const session = await upsertEvent({ vaultRoot: workingDirectory, payload: {
+        kind: 'note', noteType: 'journal-plan', source: 'manual', title: 'Pool session',
+        occurredAt: '2026-11-12T12:00:00+01:00', timeZone: 'Europe/Warsaw',
+        note: 'Member confirmed today that the November 12 pool session moved from 18:00 to 12:00. Bring a towel.',
+        plan: { category: 'training', status: 'planned', endsAt: '2026-11-12T13:00:00+01:00', lastVerifiedAt: now.toISOString() },
+      } })
+      const collection = await upsertEvent({ vaultRoot: workingDirectory, payload: {
+        kind: 'note', noteType: 'journal-context', source: 'manual', title: 'Repaired glasses collected',
+        occurredAt: '2026-11-12T07:30:00+01:00', timeZone: 'Europe/Warsaw',
+        note: 'Member confirms the repaired glasses were collected today. That one-off errand is finished.',
+      } })
+      await upsertMemory(workingDirectory, { section: 'Instructions', now,
+        text: 'As of November 12, the club supplies a racket at every session. For club preparation reminders, remind me to bring shoes only, not my own racket. I completed today’s reading chapter; keep the daily reading habit. I might change the museum visit but have not decided. Keep my paused sketching reminder paused. I accidentally saved the same one-off balcony watering errand twice; keep exactly one reminder for it. My fixed 18:30 snack reminder must stay at 18:30 even if the pool session moves.',
+      })
+      const route = { channel: 'linq', deliveryTarget: 'synthetic-reconciliation', identityId: null, participantId: null, threadId: 'synthetic-reconciliation', threadIsDirect: true }
+      const records: Array<Awaited<ReturnType<typeof upsertAutomation>>['record']> = []
+      for (const [index, item] of [
+        { title: 'Club preparation', instructions: 'Remind me to bring my own racket and shoes to the club.', recurring: true },
+        { title: 'Pack swim bag', instructions: 'Remind me to pack my swim bag exactly one hour before the linked pool session.', eventId: session.eventId },
+        { title: 'Collect repaired glasses', instructions: 'Remind me to collect the repaired glasses, a one-off errand.', eventId: collection.eventId },
+        { title: 'Fixed snack', instructions: 'Remind me to pack a snack at exactly 18:30, even if the pool session moves.', fixed: true },
+        { title: 'Reading habit', instructions: 'Daily reminder to read a chapter.', recurring: true },
+        { title: 'Museum visit', instructions: 'Remind me to bring museum tickets. The visit is still planned.' },
+        { title: 'Sketching', instructions: 'Remind me to sketch.', recurring: true, paused: true },
+        { title: 'Water balcony plants', instructions: 'One-off reminder to water the balcony plants this evening.' },
+        { title: 'Water balcony plants', instructions: 'One-off reminder to water the balcony plants this evening.' },
+        { title: 'Water indoor plant', instructions: 'Remind me to water the indoor plant.', recurring: true },
+        { title: 'Charge camera', instructions: 'Remind me to charge the camera.' },
+        { title: 'Wash towels', instructions: 'Remind me to wash towels.', recurring: true },
+      ].entries()) {
+        records.push((await upsertAutomation({ createOnly: true, vaultRoot: workingDirectory, title: item.title, instructions: item.instructions,
+          route, continuityPolicy: 'fresh', status: item.paused ? 'paused' : 'active',
+          now: new Date(Date.parse('2026-11-01T09:00:00Z') + index * 60_000),
+          schedule: item.recurring ? { kind: 'dailyLocal', localTime: '17:00', timeZone: 'Europe/Warsaw' }
+            : { kind: 'at', at: item.fixed ? '2026-11-12T17:30:00Z' : '2026-11-12T16:00:00Z' },
+          contextReferences: item.eventId ? [{ entityKind: 'event', entityId: item.eventId }] : [],
+        })).record)
+      }
+      expect(new Set(records.map(record => record.automationId)).size).toBe(12)
+      expect((await listAutomations({ vaultRoot: workingDirectory })).items).toHaveLength(12)
+      const runTurn = async () => executeRealCodexAppServerTurn({
+        approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome, model: config.model, modelProvider: config.modelProvider,
+        fixtureBinDirectory: binDirectory,
+        env: { ...config.env, [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: resolveAssistantSkillsRoot(), PATH: `${binDirectory}:${config.env.PATH ?? ''}` },
+        developerInstructions: buildWeeklyHealthInsightDeveloperInstructions({ currentLocalDate: '2026-11-12', currentTimeZone: 'Europe/Warsaw', scheduledOccurrenceAt: now.toISOString(), hostedAutomationAvailable: true }),
+        dynamicTools: [MURPH_AUTOMATION_TOOL, MURPH_CONNECTED_APPS_MANAGE_TOOL, MURPH_CONNECTED_APPS_SEARCH_TOOL, MURPH_CONNECTED_APPS_EXECUTE_TOOL],
+        hostedToolContext: {
+          computerToolsAvailable: false, currentHostedDeliveryContext: () => null,
+          currentHostedMailboxItemIds: () => [], vaultFileSendAvailable: false,
+          sendVaultFile: async () => { throw new Error('No file sends in this synthetic journey.') },
+          connectedApps: { request: async request => {
+            providerOperations.push(request.operation)
+            if (request.operation !== 'manage') throw new Error('There are no connected accounts to read.')
+            return { result: { accounts: [], toolkits: [] } }
+          } },
+          automationTool: { request: async request => {
+            requests.push(request)
+            if (request.action !== 'inspect' && request.action !== 'patch') throw new Error('Existing reminder repair must not create new automations.')
+            const before = await showAutomation({ vaultRoot: workingDirectory, automationId: request.lookup })
+            if (!before) throw new Error('Unknown reminder.')
+            if (request.action === 'inspect') inspected.set(before.automationId, before.updatedAt)
+            else {
+              expect(request.expectedUpdatedAt).toBe(inspected.get(before.automationId))
+              expect(Object.keys(request).every(key => ['action', 'lookup', 'expectedUpdatedAt', 'instructions', 'schedule', 'status', 'title', 'summary', 'contextReferences', 'assistantTargetOverride'].includes(key))).toBe(true)
+              await patchAutomation({ vaultRoot: workingDirectory, lookup: request.lookup, expectedUpdatedAt: request.expectedUpdatedAt,
+                instructions: request.instructions, schedule: request.schedule, status: request.status,
+                title: request.title, summary: request.summary, assistantTargetOverride: request.assistantTargetOverride,
+                contextReferences: request.contextReferences ? [...request.contextReferences] : undefined,
+                now: new Date(now.getTime() + requests.length * 1000),
+              })
+              inspected.delete(before.automationId)
+            }
+            const record = await showAutomation({ vaultRoot: workingDirectory, automationId: request.lookup })
+            if (!record) throw new Error('Missing readback.')
+            return { action: request.action, automationId: record.automationId, lookupId: record.automationId,
+              created: false, routeBinding: 'preserved' as const, instructions: record.instructions,
+              title: record.title, schedule: record.schedule, status: record.status, updatedAt: record.updatedAt,
+              contextReferences: record.contextReferences, effectiveTimeZone: 'Europe/Warsaw',
+              occurrenceProjection: { status: 'resolved' as const, nextOccurrenceAt: record.schedule.kind === 'at' ? record.schedule.at : '2026-11-12T16:00:00Z' },
+            }
+          } },
+        },
+        prompt: resolveAssistantProviderPrompt({
+          dynamicTools: [MURPH_AUTOMATION_TOOL, MURPH_CONNECTED_APPS_MANAGE_TOOL, MURPH_CONNECTED_APPS_SEARCH_TOOL, MURPH_CONNECTED_APPS_EXECUTE_TOOL],
+          providerConfig: normalizeAssistantProviderConfig({ provider: 'codex-cli' }), workingDirectory,
+          turnContextPrompt: await readAssistantCurrentStatePrompt({ vaultRoot: workingDirectory }),
+          prompt: seed.instructions,
+        }),
+        reasoningEffort: resolveMurphManagedAutomationSeed(seed.automationId)?.assistantTargetOverride?.reasoningEffort ?? 'high',
+        sandbox: 'workspace-write', workingDirectory,
+      })
+      const first = await runTurn()
+      expect(parseAssistantNotificationDecision(first.finalMessage).kind).toBe('skip')
+      const readAll = () => Promise.all(records.map(record => showAutomation({ vaultRoot: workingDirectory, automationId: record.automationId })))
+      const after = await readAll()
+      expect(requests.filter(request => request.action === 'patch')).toHaveLength(4)
+      expect(after[0]?.instructions).toMatch(/shoes/iu)
+      const equipmentInstructions = after[0]?.instructions ?? ''
+      expect(!/racket/iu.test(equipmentInstructions) || /only|suppl|provid|not.*racket|no.*racket/iu.test(equipmentInstructions)).toBe(true)
+      expect(after[0]?.instructions).not.toBe(records[0]?.instructions)
+      expect(after[0]?.schedule).toEqual(records[0]?.schedule)
+      expect(after[1]?.schedule).toEqual({ kind: 'at', at: '2026-11-12T10:00:00.000Z' })
+      expect(after[1]?.contextReferences).toEqual(records[1]?.contextReferences)
+      expect(after[2]?.status).toBe('archived')
+      expect(after.slice(3, 7)).toEqual(records.slice(3, 7))
+      expect(after.slice(7, 9).map(record => record?.status).sort()).toEqual(['active', 'archived'])
+      expect(after.slice(9)).toEqual(records.slice(9))
+      for (const [index, record] of after.entries()) {
+        expect(record?.route).toEqual(records[index]?.route)
+        expect(record?.assistantTargetOverride).toEqual(records[index]?.assistantTargetOverride)
+      }
+      expect(providerOperations.every(operation => operation === 'manage')).toBe(true)
+      expect((await readEvent({ vaultRoot: workingDirectory, eventId: session.eventId })).event).toEqual(session.event)
+      expect((await readEvent({ vaultRoot: workingDirectory, eventId: collection.eventId })).event).toEqual(collection.event)
+      process.stdout.write(`[morning-reminder-reconciliation] ${JSON.stringify({ pass: 'first', decision: first.finalMessage, repairs: 4, preserved: 7 })}\n`)
+      const repeat = await runTurn()
+      expect(parseAssistantNotificationDecision(repeat.finalMessage).kind).toBe('skip')
+      expect(requests.filter(request => request.action === 'patch')).toHaveLength(4)
+      expect(await readAll()).toEqual(after)
+      expect((await listAutomations({ vaultRoot: workingDirectory })).items).toHaveLength(records.length)
+      process.stdout.write(`[morning-reminder-reconciliation] ${JSON.stringify({ pass: 'repeat', decision: repeat.finalMessage, additionalRepairs: 0 })}\n`)
+    } finally {
+      await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+    }
+  }, 720_000)
+})
+
+describeRealCodex('real Codex travel reminder location e2e', () => {
+  it.each(['past-arrival', 'member-correction', 'conflicting', 'fixed-destination'] as const)(
+    'resolves travel reminder location at execution: %s', async (scenario) => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-travel-location-e2e-'))
+      const now = '2026-11-12T18:00:00Z'
+      const requests: Array<{ operation: string; input: Record<string, unknown> }> = []
+      try {
+        const binDirectory = path.join(workingDirectory, 'bin')
+        const commandLogPath = path.join(workingDirectory, 'commands.log')
+        await materializeJournalConnectedContextVaultCli({
+          binDirectory, commandLogPath, vaultRoot: workingDirectory,
+          ledgerText: JSON.stringify({ version: 1, optOuts: { global: false, accounts: [], providers: [], categories: [] }, activeAccounts: [] }),
+        })
+        const travel = await upsertEvent({ vaultRoot: workingDirectory, payload: {
+          kind: 'note', noteType: 'journal-plan', source: 'manual', title: 'Flight to Oslo',
+          occurredAt: '2026-11-12T10:00:00+01:00', timeZone: 'Europe/Prague',
+          note: 'Planned flight from Prague to Oslo, arriving November 12 at 12:00 Europe/Oslo. Return planned November 16. Arrival has not been confirmed.',
+          plan: { endsAt: '2026-11-12T12:00:00+01:00', status: 'planned', lastVerifiedAt: '2026-11-12T07:00:00Z', category: 'travel' },
+        } })
+        await upsertMemory(workingDirectory, { section: 'Context', now: new Date('2026-11-01T09:00:00Z'), text: 'Current travel location: Prague, reported November 1.' })
+        const memoryBefore = await readMemoryDocument(workingDirectory)
+        expect((await refreshJournalTestContext(workingDirectory, now)).entries).toEqual([])
+        const context = await readAssistantContextSnapshotPrompt({ vaultRoot: workingDirectory, now: new Date(now) })
+        const stored = (await upsertAutomation({ vaultRoot: workingDirectory,
+          title: 'Bicycle break', status: 'active', continuityPolicy: 'fresh', now: new Date('2026-11-01T09:00:00Z'),
+          instructions: scenario === 'fixed-destination'
+            ? 'Prepare for the bicycle ride explicitly booked at the Prague venue tonight. Check weather for that fixed destination and send one short preparation reminder.'
+            : 'Bicycle break: the member is currently in Prague. Check Prague weather and send one brief reminder to take the bicycle out for a relaxed spin.',
+          schedule: { kind: 'dailyLocal', localTime: '19:00', timeZone: 'Europe/Prague' },
+          route: { channel: 'linq', deliveryTarget: 'synthetic-bicycle', identityId: null, participantId: null, threadId: 'synthetic-bicycle', threadIsDirect: true },
+        })).record
+        const source = findCanonicalAssistantCronRecordInList(await listCanonicalAssistantCronRecords(workingDirectory), stored.automationId)
+        if (!source || source.kind !== 'automation') throw new Error('Expected canonical bicycle reminder.')
+        const runtimeState = createAssistantCronCanonicalRuntimeRecord({ jobId: resolveCanonicalAssistantCronJobId(source), now })
+        const job = projectCanonicalAssistantCronJob({ source, runtimeState })
+        const instructions = buildAssistantCronExecutionInstructions({ job, kind: 'canonical', runtimeState, source }, { automationId: null, contextReferences: [] }, now)
+        const dynamicTools = [MURPH_CONNECTED_APPS_SEARCH_TOOL, MURPH_CONNECTED_APPS_EXECUTE_TOOL]
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+          codexHome: config.codexHome, model: config.model, modelProvider: config.modelProvider,
+          fixtureBinDirectory: binDirectory,
+          env: { ...config.env, [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: resolveAssistantSkillsRoot(), PATH: `${binDirectory}:${config.env.PATH ?? ''}` },
+          developerInstructions: buildWeeklyHealthInsightDeveloperInstructions({ currentLocalDate: '2026-11-12', currentTimeZone: 'Europe/Prague', scheduledOccurrenceAt: now }),
+          dynamicTools,
+          hostedToolContext: {
+            computerToolsAvailable: false, currentHostedDeliveryContext: () => null,
+            currentHostedMailboxItemIds: () => [], vaultFileSendAvailable: false,
+            sendVaultFile: async () => { throw new Error('No sends in this synthetic journey.') },
+            connectedApps: { request: async (request) => {
+              requests.push({ operation: request.operation, input: request.input })
+              if (request.operation === 'search') return { result: { success: true, tool_schemas: {
+                OPENWEATHER_API_GET_CURRENT_WEATHER: { input_schema: {
+                  type: 'object', additionalProperties: false,
+                  properties: { q: { type: 'string' }, units: { type: 'string', enum: ['metric'] } }, required: ['q', 'units'],
+                } },
+              } } }
+              if (request.operation !== 'execute') throw new Error('Unexpected provider operation.')
+              const city = scenario === 'member-correction' ? 'Porto' : scenario === 'fixed-destination' ? 'Prague' : 'Oslo'
+              if (request.input.toolSlug === 'OPENWEATHER_API_GET_GEOCODING_DIRECT') return { result: [{ name: city, lat: 50, lon: 14 }] }
+              if (request.input.toolSlug === 'MURPH_OPENWEATHER_GET_NATIONAL_ALERTS') return { result: { alerts: [] } }
+              return { result: { name: city, main: { temp: 16 }, weather: [{ description: 'clear sky' }], wind: { speed: 2 } } }
+            } },
+          },
+          prompt: resolveAssistantProviderPrompt({ dynamicTools,
+            providerConfig: normalizeAssistantProviderConfig({ provider: 'codex-cli' }), workingDirectory,
+            turnContextPrompt: [context, 'Saved context: current travel location Prague, reported November 1.',
+              scenario === 'member-correction' ? 'Latest member statement, November 12 at 17:00Z: I canceled that flight; I am in Porto until November 16.' : '',
+              scenario === 'conflicting' ? 'Latest member statement, November 12 at 17:00Z: My trip changed again. Neither the old city nor the booked destination is where I am; my current city is unspecified.' : '',
+            ].filter(Boolean).join('\n'),
+            prompt: instructions,
+          }),
+          reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
+        })
+        const decision = parseAssistantNotificationDecision(result.finalMessage)
+        const journalReads = (await readFile(commandLogPath, 'utf8').catch(() => '')).split('\n').filter(line => /event (?:show|list)/u.test(line)).length
+        process.stdout.write(`[travel-reminder-location] ${JSON.stringify({ scenario, decision, journalReads, weatherCalls: requests.filter(r => r.operation === 'execute').map(r => r.input) })}\n`)
+        expect(decision.kind).toBe('send_message')
+        if (decision.kind !== 'send_message') throw new Error('Expected the ordinary reminder.')
+        const reply = decision.text
+        expect(reply).toMatch(/bicycle|bike|ride|cycling|spin/iu)
+        const executions = requests.filter(r => r.operation === 'execute')
+        expect(executions.filter(r => r.input.toolSlug === 'OPENWEATHER_API_GET_CURRENT_WEATHER')).toHaveLength(scenario === 'conflicting' ? 0 : 1)
+        expect(executions.length).toBeLessThanOrEqual(scenario === 'conflicting' ? 0 : 3)
+        for (const request of requests.filter(r => r.operation === 'execute')) {
+          expect(['OPENWEATHER_API_GET_CURRENT_WEATHER', 'OPENWEATHER_API_GET_GEOCODING_DIRECT', 'MURPH_OPENWEATHER_GET_NATIONAL_ALERTS']).toContain(request.input.toolSlug)
+          expect(request.input.account).toBeUndefined()
+          const city = scenario === 'member-correction' ? 'Porto' : scenario === 'fixed-destination' ? 'Prague' : 'Oslo'
+          if (request.input.toolSlug !== 'MURPH_OPENWEATHER_GET_NATIONAL_ALERTS') expect(JSON.stringify(request.input.arguments)).toMatch(new RegExp(city, 'i'))
+        }
+        if (scenario === 'past-arrival') {
+          expect(reply).toMatch(/Oslo/iu)
+          expect(reply).toMatch(/if|assuming|planned|itinerary/iu)
+          expect(reply).not.toMatch(/Prague/iu)
+          const commands = await readFile(commandLogPath, 'utf8')
+          expect(commands).toMatch(/event (?:list|show)/u)
+        }
+        if (scenario === 'member-correction') {
+          expect(reply).toMatch(/Porto/iu)
+          expect(reply).not.toMatch(/Prague|Oslo/iu)
+        }
+        if (scenario === 'conflicting') expect(reply).not.toMatch(/Prague|Oslo|Porto|clear sky|16.?°|where are you/iu)
+        if (scenario === 'fixed-destination') expect(reply).toMatch(/Prague/iu)
+        expect(await readMemoryDocument(workingDirectory)).toEqual(memoryBefore)
+        expect((await readEvent({ vaultRoot: workingDirectory, eventId: travel.eventId })).event).toEqual(travel.event)
+        expect((await listAutomations({ vaultRoot: workingDirectory })).items).toHaveLength(1)
+        expect(await showAutomation({ vaultRoot: workingDirectory, automationId: stored.automationId })).toEqual(stored)
+      } finally {
+        await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+      }
+    }, 360_000,
   )
 })
 
@@ -38414,13 +38738,15 @@ async function materializeJournalConnectedContextVaultCli(input: {
   binDirectory: string
   commandLogPath?: string
   vaultRoot: string
-  ledgerText?: string
+  ledgerText?: string | null
 }): Promise<void> {
   await initializeVault({ vaultRoot: input.vaultRoot, timezone: 'Europe/Warsaw' })
-  await upsertKnowledgePage({
-    vault: input.vaultRoot, slug: 'journal-connected-context', title: 'Journal connected context',
-    body: input.ledgerText ?? '# Journal connected context\n\n- account: calendar_old\n  toolkit: googlecalendar\n  state: baseline',
-  })
+  if (input.ledgerText !== null) {
+    await upsertKnowledgePage({
+      vault: input.vaultRoot, slug: 'journal-connected-context', title: 'Journal connected context',
+      body: input.ledgerText ?? '# Journal connected context\n\n- account: calendar_old\n  toolkit: googlecalendar\n  state: baseline',
+    })
+  }
   await materializeRealWorkoutVaultCli({
     binDirectory: input.binDirectory,
     commandLogPath: input.commandLogPath ?? path.join(input.vaultRoot, 'commands.log'),
