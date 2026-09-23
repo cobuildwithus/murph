@@ -8019,6 +8019,7 @@ export async function runHostedPendingInputProtectedIdleMaintenance(input: {
   persistGeneratedImageRetention?: Parameters<
     typeof runHostedIdleCheckpointMaintenance
   >[0]["persistGeneratedImageRetention"];
+  processingMode?: HostedWorkspaceInvocationProcessingMode;
   providerName: string | null;
   recordUsage: Parameters<typeof runHostedIdleCheckpointMaintenance>[0]["recordUsage"];
   reportRetentionIssue?: Parameters<typeof runHostedIdleCheckpointMaintenance>[0]["reportRetentionIssue"];
@@ -8054,6 +8055,7 @@ export async function runHostedPendingInputProtectedIdleMaintenance(input: {
     model: input.model,
     pendingWork: input.pendingWork,
     persistGeneratedImageRetention: input.persistGeneratedImageRetention ?? null,
+    processingMode: input.processingMode,
     protectedAttachmentIds: mediaRetentionProtections.protectedAttachmentIds,
     protectedCaptureIds: mediaRetentionProtections.protectedCaptureIds,
     protectedStoredPaths: mediaRetentionProtections.protectedStoredPaths,
@@ -8102,6 +8104,7 @@ async function runHostedInboxMediaRetentionOnlyCheckpoint(input: {
         memberId: input.input.request.userId,
         model: null,
         pendingWork: false,
+        processingMode: "inbox_media_retention",
         persistGeneratedImageRetention: async (write) => {
           const persisted = await runHostedWorkspaceCanonicalWriteAtBoundary({
             previousRedactedStatus: workspace.redactedStatus ?? null,

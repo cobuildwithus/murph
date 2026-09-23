@@ -20,7 +20,7 @@ const linqPollSchema = z.object({
   chat_id: z.string(),
   message_id: z.string(),
   poll: z.object({
-    options: z.array(z.object({ text: z.string().max(100), voters: z.array(z.object({ handle: z.string().min(1).max(320) })) })).max(100),
+    options: z.array(z.object({ option_id: z.string().uuid().optional(), text: z.string().max(100), voters: z.array(z.object({ handle: z.string().min(1).max(320) })) })).max(100),
     total_voters: z.number().int().nonnegative(),
   }),
 });
@@ -56,14 +56,13 @@ function linqPollVoters(poll: z.infer<typeof linqPollSchema>["poll"], voterCurso
 }
 
 export async function callLinqPoll(input: {
-  action: "create" | "read";
   chatId: string;
   pollRef: string;
   question: string;
   voterCursor?: string;
   options?: string[];
   messageId?: string;
-}): Promise<{ messageId: string; snapshot: ConversationPollSnapshot }> {
+} & ({ action: "create" | "read" } | { action: "vote"; messageId: string; optionId: string; operation: "add" | "remove" })): Promise<{ messageId: string; optionIds: (string | undefined)[]; voterHandlesByOption: string[][]; snapshot: ConversationPollSnapshot }> {
   const config = requireHostedOnboardingLinqConfig();
   try {
     const raw = await runLinqApiRequest({
@@ -74,6 +73,8 @@ export async function callLinqPoll(input: {
         ? client.chats.polls.create(input.chatId, {
             poll: { options: (input.options ?? []).map((text) => ({ text })), idempotency_key: input.pollRef },
           })
+        : input.action === "vote"
+        ? client.messages.poll.vote(input.messageId, { option_id: input.optionId, operation: input.operation })
         : client.messages.poll.retrieve(input.messageId ?? ""),
     });
     const result = linqPollSchema.parse(raw);
@@ -82,6 +83,8 @@ export async function callLinqPoll(input: {
     }
     return {
       messageId: result.message_id,
+      optionIds: result.poll.options.map((option) => option.option_id),
+      voterHandlesByOption: result.poll.options.map((option) => option.voters.map(({ handle }) => handle)),
       snapshot: {
         pollRef: input.pollRef, channel: "linq", question: input.question,
         ...(input.action === "read" ? linqPollVoters(result.poll, input.voterCursor) : {}),

@@ -1,3 +1,4 @@
+import { buildConversationPollResultInstructions } from "@murphai/hosted-execution/conversation-polls";
 import { buildManualMealEstimationInstructions } from '../src/assistant/manual-meal-estimation.js'
 import { executeGenerateImageTool } from '../src/assistant-codex/generate-image-tool.js'
 
@@ -101,6 +102,7 @@ import {
 } from '@murphai/operator-config/vault-cli-contracts'
 import {
   parsePersonalPatternVocabulary,
+  buildPersonalPatternReport,
   buildJournalView,
   readVaultRawTolerant,
   resolveMealNutritionGoals,
@@ -134,6 +136,7 @@ import {
   parseAssistantRealCodexRunArgs,
 } from '../../../scripts/run-assistant-real-codex-e2e.ts'
 import {
+  compactWarmCodexThread,
   executeCodexAppServerTurn,
   readCodexAppServerTurnFailureContext,
   resolveMurphDynamicTools,
@@ -167,6 +170,7 @@ import {
   MURPH_GENERATE_IMAGE_TOOL,
   MURPH_GROUP_CHAT_TOOL,
   MURPH_GROUP_DATA_TOOL,
+  MURPH_GROUP_EMAIL_TOOL,
   MURPH_GROUP_MEMBERSHIP_TOOL,
   MURPH_GROUP_SHARED_READ_TOOL,
   MURPH_GROUP_USAGE_TOOL,
@@ -4671,6 +4675,106 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
     360_000,
   )
 
+  it('attaches an editable completed workout without reopening or rewriting it', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const fixture = await createCanonicalLiveFixture(config, 'linq')
+    const workouts = await import('@murphai/vault-usecases/workouts')
+    const provider = vi.spyOn(clinicalExtractionCodex, 'executeCodexAppServerTurn')
+    try {
+      const started = await workouts.startLiveWorkout({
+        exercises: [{ mode: 'bodyweight', name: 'Calf raise', setCount: 4 }],
+        name: 'Finished movement', startedAt: '2026-08-20T12:00:00.000Z', vault: fixture.vault,
+      })
+      await workouts.logLiveWorkoutSet({
+        exerciseOrder: 1, setOrder: 1, reps: 8, workoutId: started.eventId,
+        vault: fixture.vault,
+      })
+      await workouts.finishLiveWorkout({
+        workoutId: started.eventId, endedAt: '2026-08-20T12:30:00.000Z', vault: fixture.vault,
+      })
+      const before = await showWorkoutRecord(fixture.vault, started.eventId)
+      const result = await fixture.message(
+        `Show the editable card for my completed Finished movement workout ${started.eventId}, including the skipped sets, so I can correct it. Do not reopen it or change any results.`,
+      )
+      expect(provider).toHaveBeenCalledTimes(1)
+      const turn = await provider.mock.results[0]!.value
+      expect(turn.responseCard).toMatchObject({
+        workout: {
+          state: 'completed',
+          exercises: [{ name: 'Calf raise', sets: [
+            { status: 'completed' }, { status: 'skipped' }, { status: 'skipped' }, { status: 'skipped' },
+          ] }],
+        },
+        editor: { actionBinding: expect.stringMatching(/^[a-f0-9]{64}$/u) },
+      })
+      expect(turn.runtimeIssueInputs).toEqual([])
+      expect(await showWorkoutRecord(fixture.vault, started.eventId)).toEqual(before)
+      expect(result.delivery).toBeNull()
+    } finally {
+      provider.mockRestore()
+      await fixture.close()
+      await removeRealCodexTemporaryPaths(config.temporaryPaths)
+    }
+  }, 360_000)
+
+  it.each(['transient', 'persistent'] as const)(
+    'recovers %s workout editor failure without sending a read-only active card',
+    async (failureMode) => {
+      const config = await resolveRealCodexE2eConfig()
+      const fixture = await createCanonicalLiveFixture(config, 'linq')
+      const workouts = await import('@murphai/vault-usecases/workouts')
+      const nativeRead = workouts.readLiveWorkoutCardEditor
+      const readEditor = vi.spyOn(workouts, 'readLiveWorkoutCardEditor')
+      const provider = vi.spyOn(clinicalExtractionCodex, 'executeCodexAppServerTurn')
+      let reads = 0
+      readEditor.mockImplementation(async (input) => {
+        reads += 1
+        if (failureMode === 'persistent' || reads === 1) {
+          throw Object.assign(new Error('Synthetic reader interruption'), { code: 'EACCES' })
+        }
+        return nativeRead(input)
+      })
+      try {
+        const started = await startLiveWorkout({
+          exercises: [{ mode: 'bodyweight', name: 'Calf raise', setCount: 4 }],
+          name: 'Afternoon movement',
+          startedAt: new Date().toISOString(),
+          vault: fixture.vault,
+        })
+        const before = await showWorkoutRecord(fixture.vault, started.eventId)
+        const result = await fixture.message(
+          `Show me the editable workout card for my saved Afternoon movement workout ${started.eventId}. Do not change the workout or log any sets.`,
+        )
+        expect(provider).toHaveBeenCalledTimes(1)
+        const turn = await provider.mock.results[0]!.value
+        expect(readEditor).toHaveBeenCalledTimes(2)
+        expect(readEditor.mock.calls.every(([input]) => input.workoutId === started.eventId && input.vault === fixture.vault)).toBe(true)
+        expect(await showWorkoutRecord(fixture.vault, started.eventId)).toEqual(before)
+        const vault = await readVaultRawTolerant(fixture.vault)
+        expect(vault.events.filter((event) => workoutSessionSchema.safeParse(event.attributes.workout).success)).toHaveLength(1)
+        expect(result.delivery).toBeNull()
+        if (failureMode === 'transient') {
+          expect(turn.responseCard).toMatchObject({
+            workout: { state: 'active', exercises: [{ name: 'Calf raise' }] },
+            editor: { version: 1, actionBinding: expect.stringMatching(/^[a-f0-9]{64}$/u) },
+          })
+        } else {
+          expect(turn.responseCard).toBeNull()
+          expect(result.response).toMatch(/card/iu)
+          expect(result.response).not.toMatch(/read.only|actionBinding|projection|schema|(?:sent|attached) (?:the |your |an? )?(?:editable )?card/iu)
+        }
+        expect(turn.runtimeIssueInputs.filter((issue: { errorCode: string | null }) => issue.errorCode === 'WORKOUT_CARD_EDITOR_UNAVAILABLE'))
+          .toHaveLength(failureMode === 'transient' ? 1 : 2)
+      } finally {
+        readEditor.mockRestore()
+        provider.mockRestore()
+        await fixture.close()
+        await removeRealCodexTemporaryPaths(config.temporaryPaths)
+      }
+    },
+    360_000,
+  )
+
   it(
     'keeps resistance and bodyweight editor modes explicit before any load is logged',
     async () => {
@@ -4750,6 +4854,7 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
           ].join(' '),
           reasoningEffort: 'low',
           sandbox: 'workspace-write',
+          vaultRoot: workingDirectory,
           workingDirectory,
         })
         const vault = await readVaultRawTolerant(workingDirectory)
@@ -4785,6 +4890,26 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
             kind: 'workout',
           },
           workout: { state: 'active' },
+          editor: {
+            actionBinding: expect.stringMatching(/^[a-f0-9]{64}$/u),
+            version: 1,
+            exercises: [
+              {
+                unitOverride: 'lb',
+                sets: Array.from({ length: 3 }, () => ({
+                  logged: false,
+                  result: null,
+                })),
+              },
+              {
+                unitOverride: null,
+                sets: Array.from({ length: 3 }, () => ({
+                  logged: false,
+                  result: null,
+                })),
+              },
+            ],
+          },
         })
         expectStructuredWorkoutAuthoringAttempt({
           entityId: workout.id,
@@ -9937,6 +10062,159 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
     720_000,
   )
 
+  it('prepares a sparse multi-metric group email despite batch label differences', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-email-label-batches-e2e-'))
+    const reads: AssistantHostedGroupSharedReadRequest[] = []
+    const effects: string[] = []
+    let emailText = ''
+    try {
+      const scopes = [
+        { projectionKind: 'steps-days.v0' as const }, { projectionKind: 'sleep-duration-days.v0' as const },
+        { projectionKind: 'hrv-days.v0' as const }, { projectionKind: 'workouts.v0' as const },
+      ]
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome, env: config.env,
+        developerInstructions: buildAssistantSystemPrompt({
+          assistantCliContract: null, onboardingGuidance: false, modelBehaviorProfile: 'gpt5-agentic',
+          assistantHostedGroupToolSurface: 'families', channel: 'linq',
+          cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+          conversationScope: 'group', hostedRuntime: true,
+          currentLocalDate: '2026-09-20', currentTimeZone: 'America/New_York',
+          turnTrigger: 'automation-cron', scheduledOccurrenceAt: '2026-09-20T13:00:00.000Z',
+        }),
+        dynamicTools: [MURPH_GROUP_DATA_TOOL, MURPH_GROUP_EMAIL_TOOL],
+        groupConversation: true,
+        hostedToolContext: {
+          computerToolsAvailable: false, currentHostedDeliveryContext: () => null,
+          currentHostedMailboxItemIds: () => [],
+          currentScheduledAutomationAuthority: () => ({
+            automationId: 'automation_report', occurrenceAt: '2026-09-20T13:00:00.000Z',
+          }),
+          groupEmailEffect: { request: async (request) => {
+            effects.push(request.action)
+            if (request.action === 'send_email') {
+              emailText = request.text ?? request.html
+              return { action: 'send_email', result: { status: 'accepted', participantCount: 2,
+                skippedNoEmailMemberIds: [], deliveryId: 'delivery_report' } }
+            }
+            return { action: 'prepare_email', result: { status: 'ok',
+              authorizationProof: 'a'.repeat(64), groupId: 'group_report', missingEmailParticipants: [],
+              participants: [0, 1].map((index) => ({ memberId: `member_report_${index}`, hasEmail: true,
+                authorizedShares: scopes.map((scope) => ({
+                  projectionScopeKey: scope.projectionKind, shareId: `share_${index}_${scope.projectionKind}`,
+                })),
+              })),
+            } }
+          } },
+          groupSharedReader: { request: async (request) => {
+            reads.push(request)
+            const hasSteps = request.projectionScopes.some((scope) => scope.projectionKind === 'steps-days.v0')
+            return { status: 'ok', requestedProjectionScopeKeys: request.projectionScopes.map((scope) => scope.projectionKind),
+              members: ['Cedar', 'Rowan'].map((name, index) => ({
+                displayName: hasSteps ? name : `Participant ${index === 0 ? 'A7C29D4E61F0' : 'BC026DF831A9'}`,
+                participantId: `participant_report_${index}`, memberId: `member_report_${index}`, currentTurnHandles: [],
+                projections: request.projectionScopes.map((projectionScope) => ({
+                  projectionScope, projectionScopeKey: projectionScope.projectionKind, grantStatus: 'granted',
+                  dataStatus: projectionScope.projectionKind === 'steps-days.v0' ? 'available' : 'missing',
+                  records: projectionScope.projectionKind === 'steps-days.v0' ? [{
+                    recordKey: '2026-09-19', occurredAt: '2026-09-19T00:00:00.000Z',
+                    data: { date: '2026-09-19', metricKey: 'steps', value: 4000 + index * 1000, unit: 'count' },
+                  }] : [],
+                })),
+              })),
+            } satisfies AssistantHostedGroupSharedReadResponse
+          } },
+          sendVaultFile: async () => { throw new Error('File sending is unavailable in this synthetic journey.') },
+          vaultFileSendAvailable: false,
+        },
+        model: config.model, modelProvider: config.modelProvider,
+        prompt: 'Scheduled automation: prepare and queue the group email for September 19. Read steps-days.v0, sleep-duration-days.v0, hrv-days.v0, and workouts.v0 together with audience group_email. Include every member, report available values, and say when a metric has no shared records.',
+        reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
+      })
+      process.stdout.write(`[email-label-batches-e2e] ${JSON.stringify({ effects, reads, emailText, reply: result.finalMessage })}\n`)
+      expect(effects).toEqual(['prepare_email', 'send_email'])
+      expect(reads).toHaveLength(2)
+      expect(reads.flatMap((read) => read.projectionScopes).map((scope) => scope.projectionKind).sort())
+        .toEqual(scopes.map((scope) => scope.projectionKind).sort())
+      expect(emailText).toMatch(/Cedar[\s\S]*4,?000/u)
+      expect(emailText).toMatch(/Rowan[\s\S]*5,?000/u)
+      expect(emailText).toMatch(/no (?:shared )?(?:data|records)|unavailable|not (?:shared|available)/iu)
+      expect(emailText).not.toMatch(/unverified|member_report_|participant_report_|authorizationProof/iu)
+    } finally {
+      await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+    }
+  }, 360_000)
+
+
+  it('labels every scheduled shared row using host names and stable participant fallbacks', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-group-report-labels-e2e-'))
+    const requests: AssistantHostedGroupSharedReadRequest[] = []
+    try {
+      const skillsRoot = path.join(workingDirectory, 'skills')
+      await materializeAssistantSkill({ skillsRoot, slug: 'group-chat' })
+      const names = ['Rowan', 'Cedar', 'Participant A7C29D4E61F0', 'River (9A3D21F065B7)', 'River (BC026DF831A9)']
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions: buildAssistantSystemPrompt({
+          assistantCliContract: null, onboardingGuidance: false, modelBehaviorProfile: 'gpt5-agentic',
+          assistantHostedGroupToolSurface: 'shared_read', channel: 'linq',
+          cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+          conversationScope: 'group', hostedRuntime: true,
+          currentLocalDate: '2026-09-20', currentTimeZone: 'America/New_York',
+          turnTrigger: 'automation-cron', scheduledOccurrenceAt: '2026-09-20T13:00:00.000Z',
+        }),
+        dynamicTools: [MURPH_GROUP_SHARED_READ_TOOL],
+        env: { ...config.env, [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot },
+        groupConversation: true,
+        hostedToolContext: {
+          computerToolsAvailable: false, currentHostedDeliveryContext: () => null,
+          currentHostedMailboxItemIds: () => [],
+          groupSharedReader: { request: async (request) => {
+            requests.push(request)
+            return {
+              status: 'ok', requestedProjectionScopeKeys: ['steps-days.v0'],
+              members: names.map((displayName, index) => ({
+                displayName, participantId: `participant_report_${index}`,
+                memberId: `member_report_${index}`, currentTurnHandles: [],
+                projections: [{
+                  projectionScope: { projectionKind: 'steps-days.v0' }, projectionScopeKey: 'steps-days.v0',
+                  grantStatus: 'granted', dataStatus: 'available',
+                  records: [{ recordKey: '2026-09-19', occurredAt: '2026-09-19T00:00:00.000Z',
+                    data: { date: '2026-09-19', metricKey: 'steps', value: 4000 + index * 1000, unit: 'count' } }],
+                }],
+              })),
+            } satisfies AssistantHostedGroupSharedReadResponse
+          } },
+          sendVaultFile: async () => { throw new Error('File sending is unavailable in this synthetic journey.') },
+          vaultFileSendAvailable: false,
+        },
+        model: config.model, modelProvider: config.modelProvider,
+        prompt: 'Scheduled group automation: daily steps summary. Report every participant’s shared steps for September 19, 2026 in one concise text update. There is no current sender.',
+        reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
+      })
+      const decision = parseAssistantNotificationDecision(result.finalMessage)
+      process.stdout.write(`[group-report-labels-e2e] ${JSON.stringify({ decision, requests })}\n`)
+      expect(requests).toEqual([{ projectionScopes: [{ projectionKind: 'steps-days.v0' }] }])
+      expect(decision.kind).toBe('send_message')
+      if (decision.kind !== 'send_message') throw new Error('Expected the scheduled report.')
+      for (const [index, name] of names.entries()) {
+        expect(decision.text).toContain(name)
+        const afterName = decision.text.slice(decision.text.indexOf(name) + name.length)
+        const nextName = Math.min(afterName.length, ...names.map((other) => afterName.indexOf(other)).filter((position) => position >= 0))
+        expect(afterName.slice(0, nextName)).toMatch(new RegExp(`${index + 4},?000`, 'u'))
+      }
+      expect(decision.text).not.toMatch(/unverified|owner contact|unnamed|unknown participant|who is|confirm.*name|member_report_|participant_report_|phone number|email address/iu)
+    } finally {
+      await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+    }
+  }, 360_000)
+
   it('reports sparse 90-day history from an already-active metric grant after following date pages', async () => {
     const config = await resolveRealCodexE2eConfig()
     const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-group-history-e2e-'))
@@ -14776,12 +15054,12 @@ describeRealCodex('real Codex Personal Patterns typed-ledger Luna high digest e2
       ].filter((pattern) => pattern.test(message))
       expect(mentionedOutcomes).toHaveLength(1)
       expect(message).toMatch(/\bHRV\b|heart.rate variability/iu)
-      expect(message).toMatch(/next (?:day|morning)|following (?:day|morning)|day after/iu)
+      expect(message).toMatch(/next[ -](?:day|morning)|following[ -](?:day|morning)|day after/iu)
       const reportsDelta = /(?:20|twenty)\s*(?:ms|milliseconds)/iu.test(message)
       const reportsMeans = /(?:70|seventy)\s*(?:ms|milliseconds)/iu.test(message)
         && /(?:50|fifty)\s*(?:ms|milliseconds)/iu.test(message)
       expect(reportsDelta || reportsMeans).toBe(true)
-      expect(message).toMatch(/without|(?:non|not)[ -]yard[ -]work|days (?:you |with )?(?:didn.t|did not|weren.t)/iu)
+      expect(message).toMatch(/without|(?:non|not|no)[ -]yard[ -]work|days (?:you |with )?(?:didn.t|did not|weren.t)/iu)
     } finally {
       await removeRealCodexTemporaryPath(workingDirectory)
       await removeRealCodexTemporaryPaths(config.temporaryPaths)
@@ -15147,7 +15425,7 @@ describeRealCodex('real Codex Journal connected account eligibility e2e', () => 
 })
 
 describeRealCodex('real Codex Journal connected calendar capture e2e', () => {
-  it('saves one private training plan and linked follow-up, publishes upcoming context and deduplicates a morning retry', async () => {
+  it.each([false, true])('vault pass recovery saves a linked calendar follow-up and deduplicates a retry (partial save: %s)', async (partialSave) => {
     const config = await resolveRealCodexE2eConfig()
     const automation = MURPH_MANAGED_AUTOMATIONS.find(
       (candidate) => candidate.slug === 'journal-connected-context-morning',
@@ -15174,6 +15452,19 @@ describeRealCodex('real Codex Journal connected calendar capture e2e', () => {
           '  state: notice-sent',
         ].join('\n'),
       })
+      if (partialSave) {
+        const saved = await upsertEvent({ vaultRoot: workingDirectory, payload: {
+          kind: 'note', noteType: 'journal-plan', source: 'import', title: 'Tennis training',
+          occurredAt: '2026-08-31T18:00:00+02:00', timeZone: 'Europe/Warsaw',
+          tags: ['planned', 'timing-timed'], note: 'Training from 18:00 to 19:00.',
+          plan: { endsAt: '2026-08-31T19:00:00+02:00', status: 'planned', lastVerifiedAt: '2026-08-31T06:00:00Z', category: 'training', accountId: 'calendar_ready' },
+        } })
+        await upsertKnowledgePage({ vault: workingDirectory, slug: 'journal-connected-context', body: [
+          JSON.stringify({ version: 1, optOuts: { global: false, accounts: [], providers: [], categories: [] }, activeAccounts: [{ id: 'calendar_ready', provider: 'googlecalendar' }] }),
+          '', '## Sources', '',
+          JSON.stringify([{ accountId: 'calendar_ready', sourceId: 'calendar_evt_tennis', eventId: saved.eventId, revision: 1 }]),
+        ].join('\n') })
+      }
       const connectedAppRequests: Array<{
         input: Record<string, unknown>
         operation: string
@@ -15362,9 +15653,11 @@ describeRealCodex('real Codex Journal connected calendar capture e2e', () => {
       expect(JSON.stringify(upcoming)).toMatch(/tennis/iu)
       expect(JSON.stringify(upcoming)).not.toMatch(/dentist|dinner|Alex/iu)
 
-      expect(journalWrites).toHaveLength(1)
-      expect(journalWrites[0]).toMatch(/tennis/iu)
-      expect(journalWrites[0]).not.toMatch(/dentist|dinner|Alex/iu)
+      expect(journalWrites).toHaveLength(partialSave ? 0 : 1)
+      if (!partialSave) {
+        expect(journalWrites[0]).toMatch(/tennis/iu)
+        expect(journalWrites[0]).not.toMatch(/dentist|dinner|Alex/iu)
+      }
       expect(JSON.stringify(savedNotes)).not.toMatch(/dentist|dinner|Alex/iu)
       expect((await listAutomations({ vaultRoot: workingDirectory })).items).toHaveLength(1)
       expect(automationRequests).toHaveLength(1)
@@ -16095,6 +16388,73 @@ describeRealCodex('real Codex Journal and Patterns help e2e', () => {
 })
 
 describeRealCodex('real Codex private Journal capture recovery e2e', () => {
+  it('vault pass recovery compacts a live conversation and preserves its task', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-live-compaction-e2e-'))
+    try {
+      const input: Omit<CodexAppServerTurnInput, 'prompt'> = {
+        approvalPolicy: 'never', codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome, model: config.model, modelProvider: 'murph-compaction-proof',
+        env: config.env, dynamicTools: [], processLifetime: 'warm',
+        configOverrides: ['model_providers.murph-compaction-proof.name="OpenAI compaction proof"', 'model_providers.murph-compaction-proof.wire_api="responses"', 'model_providers.murph-compaction-proof.requires_openai_auth=true', 'model_providers.murph-compaction-proof.supports_websockets=true', 'model_providers.murph-compaction-proof.stream_idle_timeout_ms=90000', 'model_providers.murph-compaction-proof.stream_max_retries=0'],
+        reasoningEffort: 'medium', sandbox: 'read-only', workingDirectory,
+      }
+      const first = await executeRealCodexAppServerTurn({ ...input,
+        prompt: 'Remember this task across compaction: prepare a two-day workshop plan. Its exact project code is MAPLE-482, its budget is 73 credits, and its rule is no evening sessions. No tools or files are needed. Reply only READY.',
+      })
+      const compact = await compactWarmCodexThread({ minThreadTokens: 1, timeoutMs: 120_000 })
+      expect(compact.kind).toBe('compacted')
+      const next = await executeRealCodexAppServerTurn({ ...input, resumeSessionId: first.sessionId,
+        prompt: 'What are the saved project code, budget, and scheduling constraint? Answer in one sentence without tools.',
+      })
+      expect(next.finalMessage).toContain('MAPLE-482')
+      expect(next.finalMessage).toContain('73')
+      expect(next.finalMessage).toMatch(/no evening|not.*evening|without evening/iu)
+      process.stdout.write(`[vault-pass-live-compaction] ${JSON.stringify({ model: config.model, kind: compact.kind, durationMs: compact.kind === 'compacted' ? compact.durationMs : null, continuityPreserved: true })}\n`)
+    } finally {
+      await stopWarmCodexAppServer('vault-pass-live-compaction-complete')
+      await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+    }
+  }, 360_000)
+
+  it('vault pass recovery captures actions and reported outcomes as usable Pattern evidence', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-pattern-capture-e2e-'))
+    try {
+      await initializeVault({ vaultRoot: workingDirectory, timezone: 'UTC' })
+      const binDirectory = path.join(workingDirectory, 'bin')
+      await materializeRealWorkoutVaultCli({ binDirectory, commandLogPath: path.join(workingDirectory, 'commands.log'), vaultRoot: workingDirectory })
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome, model: config.model, modelProvider: config.modelProvider,
+        developerInstructions: buildDirectConversationDeveloperInstructions(false, null, [], '2026-09-22T16:00:00Z'),
+        dynamicTools: [],
+        env: { ...config.env, PATH: `${binDirectory}:${config.env.PATH ?? ''}`, [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: resolveAssistantSkillsRoot() },
+        prompt: 'On September 20 and September 21, 2026, I meditated for ten minutes in the evening. My mood was good on September 20 and great on September 21. Today my wrist feels stiff, with no severity rating. Save these facts; I do not need advice or reminders.',
+        reasoningEffort: 'medium', sandbox: 'workspace-write', workingDirectory,
+      })
+      const vault = await readVaultRawTolerant(workingDirectory)
+      const factors = vault.events.filter(event => event.attributes.noteType === 'journal-factor')
+      expect(factors).toHaveLength(2)
+      expect(factors.every(event => event.tags.includes('happened') && event.tags.some(tag => tag.startsWith('key-')))).toBe(true)
+      expect(new Set(factors.flatMap(event => event.tags.filter(tag => tag.startsWith('key-')))).size).toBe(1)
+      const outcomes = vault.events.filter(event => event.attributes.noteType === 'journal-outcome' && event.tags.some(tag => tag.startsWith('value-')))
+      expect(outcomes).toHaveLength(2)
+      expect(outcomes.map(event => event.tags.find(tag => tag.startsWith('value-'))).sort()).toEqual(['value-good', 'value-great'])
+      const wrist = vault.events.filter(event => /wrist|stiff/iu.test(JSON.stringify(event.attributes)))
+      expect(wrist).toHaveLength(1)
+      expect(wrist[0]?.tags.some(tag => tag.startsWith('value-'))).toBe(false)
+      const report = buildPersonalPatternReport(vault, { asOf: '2026-09-22' })
+      expect(report.factors.some(factor => factor.observedDays === 2)).toBe(true)
+      expect(report.outcomes.some(outcome => outcome.id.startsWith('subjective-'))).toBe(true)
+      expect((await listAutomations({ vaultRoot: workingDirectory })).items).toEqual([])
+      process.stdout.write(`[vault-pass-capture] ${JSON.stringify({ factors: factors.length, scoredOutcomes: outcomes.length, unscoredFacts: wrist.length, reply: result.finalMessage })}\n`)
+    } finally {
+      await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+    }
+  }, 360_000)
+
   it('saves a reported symptom without its guessed cause and verifies an empty-page complaint without duplicating it', async () => {
     const config = await resolveRealCodexE2eConfig()
     const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-journal-recovery-e2e-'))
@@ -41899,4 +42259,196 @@ describeRealCodex('real Codex native conversation polls e2e', () => {
       }
     } finally { await rm(workingDirectory, { force: true, recursive: true }) }
   }, 720_000)
+})
+
+
+describeRealCodex('real Codex poll self vote e2e', () => {
+  it.each(['tie', 'remove', 'telegram', 'settled', 'uncertain'] as const)('poll self vote %s', async (scenario) => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-poll-vote-e2e-'))
+    const { MURPH_POLL_TOOL } = await import('../src/assistant-codex/dynamic-tools/conversation-polls.js')
+    const pollRef = 'poll_' + 'c'.repeat(32)
+    const channel = scenario === 'telegram' ? 'telegram' : 'linq'
+    const calls: Array<import('@murphai/hosted-execution/conversation-polls').ConversationPollRequest> = []
+    let submitted = false
+    try {
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions: buildAssistantSystemPrompt({
+          assistantCliContract: null, assistantKnowledgeToolsAvailable: false, assistantPollsAvailable: true,
+          channel, cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+          conversationScope: 'group', currentLocalDate: '2026-09-22',
+          currentInstant: '2026-09-22T16:00:00.000Z', currentTimeZone: 'UTC',
+          hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false, turnTrigger: null,
+        }),
+        dynamicTools: [MURPH_POLL_TOOL], env: config.env,
+        hostedToolContext: {
+          computerToolsAvailable: false, vaultFileSendAvailable: false,
+          pollTool: { request: async (request) => {
+            calls.push(request)
+            const action = request.request
+            if (action.action === 'vote') {
+              if (scenario === 'uncertain') throw new Error('Synthetic lost vote acknowledgement')
+              submitted = true
+            }
+            return { status: action.action === 'vote' ? 'vote_submitted' : 'results', polls: [{
+              pollRef, channel, question: 'Post-walk snack?',
+              options: [{ text: 'Apples', votes: 2 }, { text: 'Cinnamon buns', votes: scenario === 'remove' ? (submitted ? 2 : 3) : (submitted ? 3 : 2) }],
+              totalVoters: scenario === 'remove' ? (submitted ? 4 : 5) : (submitted ? 5 : 4),
+              anonymous: channel === 'telegram', multipleAnswers: channel === 'linq', closed: false,
+              observedAt: '2026-09-22T16:00:00.000Z', freshness: channel === 'linq' ? 'provider_read' : 'provider_update',
+            }] }
+          } },
+          currentInvocationScope: () => ({ origin: { kind: 'accepted_input', sessionId: 'synthetic-self-vote', assistantInputId: 'ain_' + 'd'.repeat(32) }, conversationScope: 'group' }),
+          currentHostedDeliveryContext: () => null, currentHostedMailboxItemIds: () => [],
+          sendVaultFile: async () => { throw new Error('No file send authorized.') },
+        },
+        model: config.model, modelProvider: config.modelProvider,
+        prompt: scenario === 'tie'
+          ? `Our snack poll ${pollRef} is deadlocked between Apples and Cinnamon buns. Murph, you have the deciding vote. Your robot heart knows which one smells better.`
+          : scenario === 'remove'
+          ? `Murph, remove your Cinnamon buns vote from our snack poll ${pollRef}. Don't replace it with anything.`
+          : scenario === 'telegram'
+          ? `Murph, cast your own vote for Cinnamon buns in our Telegram poll ${pollRef}.`
+          : scenario === 'settled'
+          ? `We closed the discussion and agreed on Apples. Leave the snack poll ${pollRef} alone. Murph, suggest one drink to bring.`
+          : `Murph, vote for Cinnamon buns in our iMessage snack poll ${pollRef}.`,
+        reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
+      })
+      process.stdout.write(JSON.stringify({ scenario: 'poll self vote ' + scenario, reply: result.finalMessage, actions: calls.map((call) => call.request) }) + '\n')
+      const votes = calls.filter((call) => call.request.action === 'vote')
+      expect(calls.every((call) => ['read', 'vote'].includes(call.request.action))).toBe(true)
+      if (scenario === 'telegram' || scenario === 'settled') {
+        expect(votes).toHaveLength(0)
+        if (scenario === 'settled') expect(calls).toHaveLength(0)
+        if (scenario === 'telegram') {
+          expect(result.finalMessage).toMatch(/Cinnamon buns/iu)
+          expect(result.finalMessage).toMatch(/can't|cannot|can’t|unable/iu)
+          expect(result.finalMessage).not.toMatch(/I(?:'ve|’ve)? (?:cast|voted)|vote (?:is |has been )?(?:cast|added|counted)/iu)
+        }
+      } else {
+        expect(votes).toHaveLength(1)
+        expect(votes[0]?.request).toEqual({ action: 'vote', pollRef, optionIndex: 1, operation: scenario === 'remove' ? 'remove' : 'add' })
+        expect(calls[0]?.request).toEqual({ action: 'read', pollRef })
+        expect(calls.filter((call) => call.request.action === 'read').length).toBeLessThanOrEqual(2)
+        if (scenario === 'uncertain') {
+          expect(result.finalMessage).toMatch(/confirm|sure|unclear|may|couldn[’']t/iu)
+          expect(result.finalMessage).not.toMatch(/I(?:'ve|’ve)? voted|broke the tie|now (?:3|three)/iu)
+        } else if (scenario === 'remove') expect(result.finalMessage).toMatch(/remov|withdraw|retract/iu)
+        else expect(result.finalMessage).toMatch(/Cinnamon buns/iu)
+      }
+    } finally { await rm(workingDirectory, { force: true, recursive: true }) }
+  }, 720_000)
+})
+
+
+describeRealCodex('real Codex poll result wake e2e', () => {
+  it.each([false, true])('poll result checkpoint settled=%s', async (settled) => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-poll-result-e2e-'))
+    const permissionHome = await materializeRealCodexHostedPermissionHome(config)
+    try {
+      await initializeVault({ timezone: 'America/New_York', vaultRoot: workingDirectory })
+      const modelTarget = createAssistantModelTarget({
+        approvalPolicy: 'never', codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND),
+        codexHome: permissionHome.codexHome, model: config.model, modelProvider: config.modelProvider,
+        provider: 'codex-cli', reasoningEffort: 'low', sandbox: 'workspace-write',
+      })
+      if (!modelTarget) throw new Error('Expected real Codex target.')
+      const events: unknown[] = []
+      const instructions = buildConversationPollResultInstructions({
+        pollRef: 'poll_' + 'a'.repeat(32), channel: 'telegram', question: 'Picnic day?',
+        options: [{ text: 'Saturday', votes: 3 }, { text: 'Sunday', votes: 1 }],
+        totalVoters: 4, anonymous: true, multipleAnswers: false, closed: false,
+        observedAt: new Date().toISOString(), freshness: 'provider_update',
+      }, { reason: 'majority', eligibleCount: 5 })
+      const result = await sendAssistantNotificationLocal({
+        actorId: null, bindingDeliveryTarget: '-100:topic:12', channel: 'telegram',
+        deliveryDispatchMode: 'queue-only', deliveryTarget: '-100:topic:12',
+        deliveryIdempotencyKey: 'synthetic-poll-result', responsePolicy: { kind: 'allow_send_or_skip' },
+        executionContext: { hosted: { defaultTarget: modelTarget, memberId: 'synthetic-group', userEnvKeys: [] } },
+        identityId: null,
+        instructions: instructions + (settled
+          ? '\n\nCurrent conversation evidence: The group already acknowledged the tally, agreed on Saturday, and moved on to discussing a movie. Murph already acknowledged Saturday too.'
+          : '\n\nCurrent conversation evidence: The group asked Murph to help choose a picnic day. No one has acknowledged the tally yet.'),
+        threadId: 'opaque-poll-conversation', threadIsDirect: false,
+        onTraceEvent: (event) => events.push(event.rawEvent),
+        turnEnvironment: { currentWorkingDirectory: workingDirectory, env: config.env },
+        turnTrigger: 'manual-deliver', vault: workingDirectory, workingDirectory,
+      })
+      expect(readCapabilityRoutingActions(events)).toEqual([])
+      const intents = await listAssistantOutboxIntents(workingDirectory)
+      const reply = result.response ?? ''
+      process.stdout.write(`[real-codex poll result checkpoint] ${JSON.stringify({ settled, reply, decision: result.decision.kind, intents: intents.length })}\n`)
+      if (settled) {
+        expect(result.decision.kind).toBe('skip')
+        expect(intents).toHaveLength(0)
+      } else {
+        expect(result.decision.kind).toBe('send_message')
+        expect(result.deliveryOutcome?.kind).toBe('queued')
+        expect(intents).toHaveLength(1)
+        expect(intents[0]).toMatchObject({ channel: 'telegram', threadIsDirect: false, explicitTarget: '-100:topic:12', status: 'pending' })
+        expect(reply).toMatch(/Saturday/iu)
+        expect(reply).not.toMatch(/closed|unanimous|everyone voted|all (?:five|5)|booked|reserved|scheduled|checkpoint|electorate|webhook/iu)
+        expect(reply.length).toBeLessThan(400)
+      }
+    } finally {
+      await removeRealCodexTemporaryPaths([workingDirectory, ...permissionHome.temporaryPaths, ...config.temporaryPaths])
+    }
+  }, 360_000)
+})
+
+describeRealCodex('real Codex poll freshness e2e', () => {
+  it('poll participation refreshes before reminders', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-poll-freshness-e2e-'))
+    const { MURPH_POLL_TOOL } = await import('../src/assistant-codex/dynamic-tools/conversation-polls.js')
+    const pollRef = 'poll_' + 'e'.repeat(32)
+    const calls: Array<import('@murphai/hosted-execution/conversation-polls').ConversationPollRequest> = []
+    try {
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions: buildAssistantSystemPrompt({
+          assistantCliContract: null, assistantKnowledgeToolsAvailable: false, assistantPollsAvailable: true,
+          channel: 'linq', cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+          conversationScope: 'group', currentLocalDate: '2026-09-22', currentInstant: '2026-09-22T16:00:00.000Z',
+          currentTimeZone: 'UTC', hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false, turnTrigger: null,
+        }),
+        dynamicTools: [MURPH_POLL_TOOL], env: config.env,
+        hostedToolContext: {
+          computerToolsAvailable: false, vaultFileSendAvailable: false,
+          pollTool: { request: async (request) => {
+            calls.push(request)
+            if (request.request.action !== 'read') throw new Error('Only a current poll read is authorized for this check.')
+            return { status: 'results', polls: [{
+              pollRef, channel: 'linq', question: 'Available meetup times?',
+              options: [{ text: 'Morning', votes: 3 }, { text: 'Afternoon', votes: 2 }, { text: 'Evening', votes: 2 }],
+              totalVoters: 5, anonymous: false, multipleAnswers: true, closed: false,
+              observedAt: '2026-09-22T16:00:00.000Z', freshness: 'provider_read',
+              voters: ['rowan@example.test', 'sage@example.test', 'finley@example.test', 'arden@example.test', 'river@example.test'].map((id, index) => ({
+                kind: 'imessage_handle' as const, id, optionIndexes: [[0, 1], [0, 2], [0], [1], [2]][index]!, observedAt: '2026-09-22T16:00:00.000Z',
+              })), voterSource: 'provider_read', nextVoterCursor: null,
+            }] }
+          } },
+          currentInvocationScope: () => ({ origin: { kind: 'accepted_input', sessionId: 'synthetic-fresh-poll', assistantInputId: 'ain_' + 'e'.repeat(32) }, conversationScope: 'group' }),
+          currentHostedDeliveryContext: () => null, currentHostedMailboxItemIds: () => [],
+          sendVaultFile: async () => { throw new Error('No file send authorized.') },
+        },
+        model: config.model, modelProvider: config.modelProvider,
+        prompt: `Conversation context: This room has five human attendees: Rowan, Sage, Finley, Arden and River, with matching example.test email handles. We are choosing a meetup time using poll ${pollRef}. An earlier result read at 15:20 showed only three participants, so two responses were missing then. Current message: Before we chase anyone, how many people are still missing from the poll?`,
+        reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
+      })
+      process.stdout.write(`[real-codex poll freshness] ${JSON.stringify({ reply: result.finalMessage, actions: calls.map((call) => call.request) })}\n`)
+      expect(calls.map((call) => call.request)).toEqual([{ action: 'read', pollRef }])
+      expect(result.finalMessage).toMatch(/(?:all\s+)?(?:five|5)\s+(?:people|participants|attendees|have|responded|voted)|everyone|nobody|no one/iu)
+      expect(result.finalMessage).not.toMatch(/(?:still|yet to|need(?:s)? to|please) vote|(?:seven|7) (?:people|participants)|completed|finished the meetup|closed/iu)
+      expect(result.finalMessage.length).toBeLessThan(400)
+    } finally {
+      await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+    }
+  }, 360_000)
 })

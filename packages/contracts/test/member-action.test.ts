@@ -150,6 +150,24 @@ describe("member action contract", () => {
     }).success).toBe(false);
   });
 
+  it("requires exactly one editable envelope or historical URL in a result", () => {
+    const card = { schemaVersion: 6, card: { k: "w", v: 1, t: "Workout", u: null, f: null, s: "c",
+      b: "a".repeat(64), d: "b".repeat(64), e: [["Push-up", null, [["s", null, null]]]],
+    } };
+    const result = { kind: "workout.live.apply", version: 1, card };
+    const outcome = { actionId: validRequest().actionId, completedAt: "2026-08-12T15:00:01.000Z",
+      schemaVersion: 1, status: "applied", reason: null, result };
+    expect(memberActionOutcomeV1Schema.safeParse(outcome).success).toBe(true);
+    for (const invalid of [
+      { ...result, cardUrl: "https://www.withmurph.ai/#murph-card=abc_123" },
+      { kind: result.kind, version: 1 },
+      { ...result, card: { ...card, schemaVersion: 4 } },
+      { ...result, card: { ...card, card: { ...card.card, b: undefined } } },
+    ]) {
+      expect(memberActionOutcomeV1Schema.safeParse({ ...outcome, result: invalid }).success).toBe(false);
+    }
+  });
+
   it("rejects malformed or unbounded optional apply presentation", () => {
     const request = validRequest();
     expect(memberActionRequestV1Schema.safeParse({
@@ -277,6 +295,30 @@ describe("member action contract", () => {
     }).success).toBe(false);
   });
 
+  it("accepts a full 16 by 16 correction with 512 structural mutations", () => {
+    const expectedSets = Array.from({ length: 16 }, () => ({ logged: true, result: { kind: "reps", reps: 8 } }));
+    const request = validRequest();
+    const full = { ...request, action: { ...request.action,
+      expectedWorkout: { actionBinding: "a".repeat(64), setRemovalBinding: "b".repeat(64),
+        exercises: Array.from({ length: 16 }, (_, i) => ({ name: `Exercise ${i + 1}`, sets: expectedSets.map(() => ({ logged: true })) })) },
+      mutations: Array.from({ length: 16 }, (_, i) => {
+        const exercisePosition = i + 1;
+        const exerciseName = `Exercise ${exercisePosition}`;
+        return [
+          { kind: "exercise.rename", exercisePosition, name: `Renamed ${exercisePosition}` },
+          ...Array.from({ length: 15 }, (_, j) => ({ kind: "set.remove", exercisePosition, exerciseName, setPosition: j + 2, expectedSets })),
+          { kind: "set.put", exercisePosition, exerciseName, setPosition: 1, expectedResult: { kind: "reps", reps: 8 }, result: { kind: "reps", reps: 12 } },
+          ...Array.from({ length: 15 }, (_, j) => ({ kind: "set.append", exercisePosition, exerciseName, setPosition: j + 2, result: { kind: "reps", reps: 12 } })),
+        ];
+      }).flat(),
+    } };
+    expect(full.action.mutations).toHaveLength(512);
+    expect(memberActionRequestV1Schema.safeParse(full).success).toBe(true);
+    expect(memberActionRequestV1Schema.safeParse({ ...full, action: { ...full.action,
+      mutations: [...full.action.mutations, full.action.mutations[0]],
+    } }).success).toBe(false);
+  });
+
   it("bounds workout shape and mutations", () => {
     const request = validRequest();
     expect(memberActionRequestV1Schema.safeParse({
@@ -285,7 +327,7 @@ describe("member action contract", () => {
         ...request.action,
         expectedWorkout: {
           actionBinding: request.action.expectedWorkout.actionBinding,
-          exercises: Array.from({ length: 9 }, (_, index) => ({
+          exercises: Array.from({ length: 17 }, (_, index) => ({
             name: `Exercise ${index + 1}`,
             sets: [{ logged: false }],
           })),

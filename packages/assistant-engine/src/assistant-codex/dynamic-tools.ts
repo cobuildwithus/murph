@@ -3355,13 +3355,26 @@ async function executeResponseCardAttachmentDynamicTool(
       'conflict',
     )
   }
-  const card = await attachTrustedWorkoutCardEditor({
+  const { card, runtimeIssueInputs } = await attachTrustedWorkoutCardEditor({
     card: request.card,
     vaultRoot: input.vaultRoot ?? null,
   })
+  if (card === null) {
+    return {
+      ...toolTextResult(false, [
+        'No card was attached: a workout card requires verified editing support.',
+        'Read this exact workout once and retry attachment once using its complete current state.',
+        'Do not repeat workout writes, discard saved fields, change exercise modes, or mark it completed to make a card fit.',
+        'If attachment still fails, use a brief ordinary-text reply with the verified workout results and explain that the editable card is unavailable.',
+        'Do not claim that a card was sent or that a saved workout update failed merely because card attachment failed.',
+      ].join(' '), 'unavailable'),
+      ...(runtimeIssueInputs ? { runtimeIssueInputs } : {}),
+    }
+  }
   return {
     ...toolTextResult(true, nutritionCardAttachmentGuidance(card)),
     responseCardPatch: { card },
+    ...(runtimeIssueInputs ? { runtimeIssueInputs } : {}),
   }
 }
 
@@ -3906,14 +3919,18 @@ async function dispatchMurphDynamicToolRequest(
 async function attachTrustedWorkoutCardEditor(input: {
   card: AssistantResponseCard
   vaultRoot: string | null
-}): Promise<AssistantResponseCard> {
+}): Promise<{
+  card: AssistantResponseCard | null
+  runtimeIssueInputs?: readonly AssistantRuntimeIssueInput[]
+}> {
   if (
-    input.vaultRoot === null
-    || input.card.kind !== 'compact_table'
+    input.card.kind !== 'compact_table'
     || !('workout' in input.card)
-    || input.card.workout.state !== 'active'
   ) {
-    return input.card
+    return { card: input.card }
+  }
+  if (input.vaultRoot === null) {
+    return workoutCardEditorFailure('missing_vault')
   }
   try {
     const trusted = await readLiveWorkoutCardEditor({
@@ -3922,16 +3939,49 @@ async function attachTrustedWorkoutCardEditor(input: {
       workoutId: input.card.tracking.entityId,
     })
     if (trusted === null) {
-      return input.card
+      return workoutCardEditorFailure('projection_rejected')
     }
     const candidate = assistantResponseCardSchema.safeParse({
       ...input.card,
       editor: trusted.editor,
       workout: trusted.workout,
     })
-    return candidate.success ? candidate.data : input.card
-  } catch {
-    return input.card
+    return candidate.success && 'editor' in candidate.data && candidate.data.editor !== undefined
+      ? { card: candidate.data }
+      : workoutCardEditorFailure('schema_rejected')
+  } catch (error) {
+    return workoutCardEditorFailure('reader_failed', error)
+  }
+}
+
+function workoutCardEditorFailure(
+  reason: 'missing_vault' | 'projection_rejected' | 'schema_rejected' | 'reader_failed',
+  error?: unknown,
+): {
+  card: null
+  runtimeIssueInputs: readonly AssistantRuntimeIssueInput[]
+} {
+  const code = error !== null && typeof error === 'object' && 'code' in error
+    ? error.code
+    : null
+  // Error messages and arbitrary error codes may contain private vault data.
+  const errorCode = typeof code === 'string' && [
+    'ENOENT', 'EACCES', 'EPERM', 'ERR_MODULE_NOT_FOUND', 'MODULE_NOT_FOUND',
+    'ERR_PACKAGE_PATH_NOT_EXPORTED', 'not_found', 'contract_invalid',
+    'invalid_operation',
+  ].includes(code) ? code : 'unclassified'
+  return {
+    card: null,
+    runtimeIssueInputs: [{
+      component: 'assistant.workout-card-editor',
+      operation: 'attach_response_card',
+      phase: 'tool_call',
+      issueKind: 'tool_error',
+      severity: 'warning',
+      errorCode: 'WORKOUT_CARD_EDITOR_UNAVAILABLE',
+      summary: 'A workout card was rejected because its editor could not be verified.',
+      details: { reason, ...(reason === 'reader_failed' ? { errorCode } : {}) },
+    }],
   }
 }
 
@@ -6683,8 +6733,7 @@ async function readGroupEmailSharedData(input: {
           continue
         }
         if (
-          existing.displayName !== member.displayName
-          || existing.participantId !== member.participantId
+          existing.participantId !== member.participantId
           || !hasExactStringEntries(
             existing.currentTurnHandles,
             member.currentTurnHandles,
@@ -6692,6 +6741,8 @@ async function readGroupEmailSharedData(input: {
         ) {
           return null
         }
+        // Keep one complete host naming snapshot: optional contact labels can
+        // differ across metric batches without changing identity or authority.
         members.set(member.memberId, {
           ...existing,
           projections: [...existing.projections, ...projections],

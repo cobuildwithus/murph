@@ -910,7 +910,7 @@ describe("readHostedGroupSharedDataByRuntimeMemberId", () => {
     expect(result.requestedProjectionScopeKeys).toEqual([STEPS_KEY, DEVICE_KEY]);
     expect(result.members).toHaveLength(3);
     expect(result.members[0]).toMatchObject({
-      displayName: "Alex",
+      displayName: expect.stringMatching(/^Alex \([A-F0-9]{12}\)$/u),
       memberId: "member_a",
       participantId: "participant_a",
       projections: [
@@ -934,7 +934,7 @@ describe("readHostedGroupSharedDataByRuntimeMemberId", () => {
       source: "garmin",
     });
     expect(result.members[1]).toMatchObject({
-      displayName: "Alex",
+      displayName: expect.stringMatching(/^Alex \([A-F0-9]{12}\)$/u),
       memberId: "member_b",
       participantId: "participant_b",
       projections: [
@@ -958,7 +958,7 @@ describe("readHostedGroupSharedDataByRuntimeMemberId", () => {
       "participant_c",
     ]);
     expect(result.members[2]).toMatchObject({
-      displayName: null,
+      displayName: expect.stringMatching(/^Participant [A-F0-9]{12}$/u),
       memberId: "member_c",
       participantId: "participant_c",
       projections: [
@@ -1145,6 +1145,8 @@ describe("readHostedGroupSharedDataByRuntimeMemberId", () => {
     expect(result.members).toEqual([expect.objectContaining({
       memberId: "member_zero",
       participantId: "participant_zero",
+      displayName: expect.stringMatching(/^Participant [A-F0-9]{12}$/u),
+      currentTurnHandles: [],
       projections: [expect.objectContaining({
         dataStatus: "available",
         grantStatus: "granted",

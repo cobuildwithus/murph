@@ -96,6 +96,14 @@ receipt and either a settled native invocation or an inactive runtime fence
 proved during reconciliation. Successful release retains the member's
 warm target. Failed or ambiguous retirement requires exact native stop proof
 before clearing its assignment. Bound slots never return to shared inventory.
+Idle cleanup of a member-bound slot also reconciles this canonical owner before
+stopping an otherwise empty child. A matching starting, active or retiring owner
+protects the readiness-to-launch handoff, including after Durable Object
+reactivation. Failed reads and incomplete cutover preserve the existing scheduled
+lifecycle recheck; they do not grant a new conversation lease. Cleanup rechecks
+native interaction fencing after the bounded control read, which runs outside
+the lifecycle lock so arriving work does not wait on control-plane latency. Explicit retirement
+and its exact native stop proof remain the recovery owner.
 
 The runtime completion callback and outer invocation result share the same
 native receipt and Web `complete` command. Each stage uses one HTTP request for

@@ -861,10 +861,11 @@ describe('native poll input measurement', () => {
       const catalog = await writeHostedOpenAiMixedModeModelCatalogJson({
         codexCommand: scenario.turnInput.codexCommand, directory: scenario.turnInput.codexHome,
       })
+      const selfVote = process.env.MURPH_MEASURE_POLL_SELF_VOTE === '1'
       const measurements = []
       for (const phase of ['base', 'head'] as const) {
         const layers = buildAssistantSystemPromptLayers({
-          assistantPollsAvailable: phase === 'head', assistantCliContract: null, assistantHostedAutomationAvailable: true,
+          assistantPollsAvailable: selfVote || phase === 'head', assistantCliContract: null, assistantHostedAutomationAvailable: true,
           assistantHostedGroupToolSurface: scope === 'group' ? 'shared_read' : 'none',
           channel: 'linq', cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
           conversationScope: scope, currentLocalDate: '2026-09-21',
@@ -872,14 +873,36 @@ describe('native poll input measurement', () => {
           hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false,
           ordinaryInboundTurn: true,
         })
-        const developerInstructions = [layers.staticCacheableCorePrompt, layers.stableRouteCapabilityPrompt, layers.threadContextPrompt].join('\n\n')
+        let developerInstructions = [layers.staticCacheableCorePrompt, layers.stableRouteCapabilityPrompt, layers.threadContextPrompt].join('\n\n')
 
-        const tools = resolveMurphDynamicTools({
+        let tools: readonly AssistantProviderDynamicTool[] = resolveMurphDynamicTools({
           allowFinishWithoutReply: true, automationAvailable: true, personalizationAvailable: true,
           groupSharedReadAvailable: scope === 'group', responseCardsAvailable: scope === 'direct',
           imageGenerationAvailable: false, progressUpdatesAvailable: false,
-          pollsAvailable: phase === 'head',
+          pollsAvailable: selfVote || phase === 'head',
         })
+        if (selfVote && phase === 'base') {
+          // Exact input ablation against 2013c92511: only the new guidance,
+          // vote description, action and its two argument properties differ.
+          developerInstructions = developerInstructions
+            .replace(/^- You can vote yourself when it fits:.*\n/mu, '')
+            .replace(/^- Poll results are snapshots, not live context\..*\n/mu, '')
+          tools = tools.map((tool) => {
+            if (tool.name !== 'poll') return tool
+            const schema = readRecord(structuredClone(tool.inputSchema))
+            assert.ok(schema)
+            const properties = readRecord(schema.properties)
+            assert.ok(properties)
+            delete properties.optionIndex
+            delete properties.operation
+            const action = readRecord(properties.action)
+            assert.ok(action && Array.isArray(action.enum))
+            action.enum = action.enum.filter((value) => value !== 'vote')
+            return { ...tool, inputSchema: schema, description: tool.description
+              .replace('read, vote in or close', 'read or close')
+              .replace(/Vote is iMessage-only.*?Only Telegram supports close;/u, 'Only Telegram supports close;') }
+          })
+        }
         await stopWarmCodexAppServer()
         stub.markRequestBaseline()
         stub.captureProviderRequestDiagnostics({ completeInput: true })
@@ -904,7 +927,7 @@ describe('native poll input measurement', () => {
       }
       process.stdout.write('[poll-input-proof] ' + JSON.stringify({ scope, measurements,
         tokens: null, tokenLimitation: 'No exact Terra tokenizer configured.',
-        baseline: 'Same production inputs with new poll capability disabled; no other initial-input changes.',
+        baseline: selfVote ? '2013c92511: exact vote-guidance and poll-tool input ablation; identical production fixtures.' : 'Same production inputs with new poll capability disabled; no other initial-input changes.',
       }) + '\n')
     },
   )

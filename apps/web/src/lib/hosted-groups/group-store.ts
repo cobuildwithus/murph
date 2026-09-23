@@ -98,6 +98,7 @@ import {
   type HostedGroupJoinConfirmationSignal,
 } from "./group-join-confirmation";
 import { normalizeHostedGroupKind, type HostedGroupKind } from "./types";
+import { labelHostedGroupSharedMembers } from "./shared-participant-labels";
 
 export type HostedGroupsReadClient = PrismaClient | Prisma.TransactionClient;
 
@@ -1099,7 +1100,10 @@ export async function readHostedGroupSharedDataByRuntimeMemberId(input: HostedGr
       ))].sort();
     }
     const result: HostedRuntimeGroupSharedReadResult = {
-      members, requestedProjectionScopeKeys, status: "ok",
+      members: await labelHostedGroupSharedMembers({
+        members, prisma, runtimeMemberId: input.runtimeMemberId,
+      }),
+      requestedProjectionScopeKeys, status: "ok",
       ...(options.history ? { dateCoverage: dateCoverage
         ?? pageHostedGroupSharedHistory([], options.history).dateCoverage } : {}),
     };

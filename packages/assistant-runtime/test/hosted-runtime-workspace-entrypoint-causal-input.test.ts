@@ -1002,13 +1002,9 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps idle-window t
           if (applyResult?.kind !== "workout.live.apply") {
             throw new TypeError("Expected the canonical direct-save card result.");
           }
-          const encoded = new URL(applyResult.cardUrl).hash
-            .replace(/^#murph-card=/u, "");
-          const envelope = JSON.parse(
-            Buffer.from(encoded, "base64url").toString("utf8"),
-          );
+          assert.equal(applyResult.card?.schemaVersion, 6);
           assert.equal(
-            parseWorkoutSessionAppCardEnvelopeV4(envelope)
+            parseWorkoutSessionAppCardEnvelopeV4(applyResult.card)
               ?.workout.exercises[0]?.sets[0]?.actual,
             "9 reps",
           );

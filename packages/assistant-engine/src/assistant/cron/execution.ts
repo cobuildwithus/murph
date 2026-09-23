@@ -2367,7 +2367,7 @@ function finalizeAssistantCronJobAfterRun(input: {
       new Date(input.finishedAt),
     )
 
-    if (input.run.outcome === 'failed') {
+    if (input.run.outcome === 'failed' || input.run.outcome === 'expired') {
       return assistantCronJobSchema.parse({
         ...input.job,
         enabled:
@@ -2590,7 +2590,7 @@ function finalizeCanonicalAssistantCronRuntimeAfterRun(input: {
       input.failureConsumesOccurrence,
     )
   ) {
-    if (input.run.outcome === 'failed') {
+    if (input.run.outcome === 'failed' || input.run.outcome === 'expired') {
       return {
         ...input.runtimeState,
         sessionId: input.responseSessionId ?? input.runtimeState.sessionId,

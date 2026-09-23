@@ -6,14 +6,15 @@
     "kind": "improvement",
     "priority": 2,
     "title": "Device history catches up with less repeated work",
-    "summary": "Large device history imports reuse repeated checks and resume promptly after saving progress.",
+    "summary": "Large device history imports reuse repeated checks and move through dates with no readings with fewer interruptions.",
     "details": "Every historical day remains covered, with current connection checks before saving data and the same priority for new readings and messages.",
     "relevanceTags": [
       "devices",
       "reliability"
     ],
     "sourcePullRequests": [
-      3652
+      3652,
+      3666
     ]
   }
 }

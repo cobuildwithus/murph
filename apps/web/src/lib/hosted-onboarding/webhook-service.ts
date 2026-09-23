@@ -1,3 +1,4 @@
+import { handleHostedLinqPollWebhook } from "../hosted-polls/linq-webhook";
 import type {
   Prisma,
   PrismaClient,
@@ -330,13 +331,9 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       signalAbortedAfterVerify: input.signal?.aborted ?? false,
     });
 
-    if (event.event_type === "chat.typing_indicator.started") {
-      requireHostedLinqTypingIndicatorStartedEvent(event);
-      const response: HostedOnboardingLinqWebhookResponse = {
-        ignored: true,
-        ok: true,
-        reason: "typing-ignored",
-      };
+    const earlyResponse = await handleHostedLinqNonMessageWebhook(event);
+    if (earlyResponse) {
+      const response = earlyResponse;
       responseReason = response.reason ?? null;
       finishHostedOnboardingTiming(timing, "completed", {
         eventIdSuffix: toHostedOnboardingLogIdSuffix(eventId),
@@ -3318,4 +3315,11 @@ export async function runHostedOnboardingWebhookTransaction<TResult>(
       ...buildHostedWebhookDbTimingLogDetails(operations),
     });
   }
+}
+
+async function handleHostedLinqNonMessageWebhook(event: HostedLinqWebhookEvent): Promise<HostedOnboardingLinqWebhookResponse | null> {
+  if (await handleHostedLinqPollWebhook(event)) return { ok: true, ignored: true };
+  if (event.event_type !== "chat.typing_indicator.started") return null;
+  requireHostedLinqTypingIndicatorStartedEvent(event);
+  return { ok: true, ignored: true, reason: "typing-ignored" };
 }

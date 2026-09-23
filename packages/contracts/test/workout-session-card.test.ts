@@ -908,7 +908,9 @@ describe("workout wire parser edge cases", () => {
     expect(parseWorkoutSessionAppCardEnvelopeV4(envelope(6, [["s", null, null]]))).toBeNull();
     const completedEditor = envelope(6, [["c", null, ["r", 0]]]);
     completedEditor.card.s = "c";
-    expect(parseWorkoutSessionAppCardEnvelopeV4(completedEditor)).toBeNull();
+    expect(parseWorkoutSessionAppCardEnvelopeV4(completedEditor)?.workout.state).toBe("completed");
+    completedEditor.card.e[0]![2] = [["s", null, null]];
+    expect(parseWorkoutSessionAppCardEnvelopeV4(completedEditor)?.workout.exercises[0]?.sets[0]?.status).toBe("skipped");
   });
 
   it("retains short-circuit and repeated-read behavior at tuple boundaries", () => {
@@ -924,7 +926,7 @@ describe("workout wire parser edge cases", () => {
     expect(parseWorkoutSessionAppCardEnvelopeV4(input)).not.toBeNull();
     expect(reads).toEqual([
       "version", "version", "version", // envelope admission
-      "version", "version", "version", // header bindings and state
+      "version", // header bindings
       "version", "version", "version", "version", "version", // exercise tuple
       "version", "version", "actual", "version", "actual", // set tuple and actual
     ]);

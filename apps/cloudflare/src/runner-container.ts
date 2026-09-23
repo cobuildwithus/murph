@@ -1181,23 +1181,24 @@ export class RunnerContainer extends Container {
         leaseGeneration: input.job.request.leaseGeneration,
         userId: routeUserId,
       };
-      await this.withLifecycleLock(async () => {
+      const cleanupRecorded = await this.withLifecycleLock(async () => {
         if (this.readWorkspaceInvocationOperation() === operation) {
-          return;
+          return false;
         }
         const recorded = this.recordedCompletionCleanup;
         if (recorded && runnerCompletionCleanupMatches(pending, recorded)) {
           this.pendingCompletionCleanup = null;
           this.recordedCompletionCleanup = null;
-          await this.evaluateWarmContainerLifecycle({
-            expectedInteractionGeneration: pending.expectedInteractionGeneration,
-            trigger: "invoke-completed",
-            userId: pending.userId,
-          });
-          return;
+          return true;
         }
         this.pendingCompletionCleanup = pending;
+        return false;
       }, { blockPointerlessWake: false });
+      if (cleanupRecorded) await this.evaluateWarmContainerLifecycle({
+        expectedInteractionGeneration: pending.expectedInteractionGeneration,
+        trigger: "invoke-completed",
+        userId: pending.userId,
+      });
     }
     return completedResult;
   }
@@ -1206,7 +1207,7 @@ export class RunnerContainer extends Container {
     input: RunnerContainerRuntimeCompletionRecordedInput,
   ): Promise<void> {
     this.authorizeBoundUser(input.userId);
-    await this.withLifecycleLock(async () => {
+    const pending = await this.withLifecycleLock(async () => {
       this.authorizeBoundUser(input.userId);
       const pending = this.pendingCompletionCleanup;
       if (!pending || !runnerCompletionCleanupMatches(pending, input)) {
@@ -1215,12 +1216,13 @@ export class RunnerContainer extends Container {
       }
       this.pendingCompletionCleanup = null;
       this.recordedCompletionCleanup = null;
-      await this.evaluateWarmContainerLifecycle({
-        expectedInteractionGeneration: pending.expectedInteractionGeneration,
-        trigger: "invoke-completed",
-        userId: pending.userId,
-      });
+      return pending;
     }, { blockPointerlessWake: false });
+    if (pending) await this.evaluateWarmContainerLifecycle({
+      expectedInteractionGeneration: pending.expectedInteractionGeneration,
+      trigger: "invoke-completed",
+      userId: pending.userId,
+    });
   }
 
   async destroyInstance(): Promise<void> {
@@ -2139,31 +2141,43 @@ export class RunnerContainer extends Container {
   }
 
   override async onActivityExpired(): Promise<void> {
-    const interactionGenerationAtExpiry = this.containerInteractionGeneration;
-    await this.withLifecycleLock(async () => {
-      if (this.readRunnerSlotBindingOptional()?.state === "unbound") {
-        this.renewPlatformActivityTimeout("standby-unbound-ready");
-        return;
-      }
-      await this.evaluateWarmContainerLifecycle({
-        expectedInteractionGeneration: interactionGenerationAtExpiry,
-        trigger: "activity-expired",
-      });
-    }, { blockPointerlessWake: false });
+    await this.evaluateWarmContainerLifecycle({
+      expectedInteractionGeneration: this.containerInteractionGeneration,
+      trigger: "activity-expired",
+    });
   }
 
   private async evaluateWarmContainerLifecycle(
     input: RunnerContainerLifecycleEvaluationInput,
   ): Promise<void> {
+    const eligible = await this.withLifecycleLock(async () => {
+      if (this.readRunnerSlotBindingOptional()?.state === "unbound") {
+        this.renewPlatformActivityTimeout("standby-unbound-ready");
+        return false;
+      }
+      // SDK 0.3.7 consumes a scheduled callback even if it throws. Persist
+      // recovery before external reads; uncertainty grants no conversation lease.
+      await this.scheduleLifecycleCheck(
+        Date.now() + (input.trigger === "invoke-completed"
+          ? HOSTED_CONTAINER_RUNTIME_COMPLETION_TIMEOUT_MS
+          : readRunnerContainerLifecycleReevaluationMs(this.environment)),
+      );
+      return !this.lifecycleInteractionChanged(input.expectedInteractionGeneration);
+    }, { blockPointerlessWake: false });
+    // Control-plane latency must not hold the native lifecycle lock ahead of
+    // an arriving message. The locked evaluator rechecks interaction ownership.
+    if (!eligible || !await this.runtimeOwnerAllowsIdleCleanup()) return;
+    await this.withLifecycleLock(
+      () => this.evaluateWarmContainerLifecycleLocked(input),
+      { blockPointerlessWake: false },
+    );
+  }
+
+  private async evaluateWarmContainerLifecycleLocked(
+    input: RunnerContainerLifecycleEvaluationInput,
+  ): Promise<void> {
     const lifecycleObservedAtMs = Date.now();
     const lifecycleStagePrefix = input.trigger;
-    // SDK 0.3.7 consumes a scheduled callback even if it throws. Persist the
-    // next safety check before health/stop awaits; uncertainty grants recovery,
-    // not a new conversation lease. A proved warm receipt replaces this date.
-    await this.scheduleLifecycleCheck(
-      lifecycleObservedAtMs + readRunnerContainerLifecycleReevaluationMs(this.environment),
-    );
-
     if (this.lifecycleInteractionChanged(input.expectedInteractionGeneration)) {
       return;
     }
@@ -2314,15 +2328,6 @@ export class RunnerContainer extends Container {
       return false;
     }
     if (health.activeJobCount > 0) {
-      // The response can settle before the entrypoint's completion callback
-      // releases its active count. Give that drain one short recheck; ordinary
-      // expiry retains the normal cadence if work is still active then.
-      if (input.lifecycleStagePrefix === "invoke-completed"
-        && !this.lifecycleInteractionChanged(input.expectedInteractionGeneration)) {
-        await this.scheduleLifecycleCheck(
-          Date.now() + HOSTED_CONTAINER_RUNTIME_COMPLETION_TIMEOUT_MS,
-        );
-      }
       return false;
     }
     if (this.lifecycleInteractionChanged(input.expectedInteractionGeneration)) {
@@ -2338,6 +2343,31 @@ export class RunnerContainer extends Container {
       }
     }
     return true;
+  }
+
+  private async runtimeOwnerAllowsIdleCleanup(): Promise<boolean> {
+    const binding = this.readRunnerSlotBindingOptional();
+    if (binding?.state !== "bound") return true;
+    try {
+      // Claim precedes binding, readiness and native launch. An empty child
+      // cannot prove idle while that durable owner is handing work to this slot,
+      // including after DO eviction. Explicit retirement owns uncertain work.
+      const { cutover, status, owner } = await commandHostedRuntimeOwner({
+        source: this.environment,
+        userId: binding.userId,
+        command: { operation: "reconcile" },
+        timeoutMs: RUNNER_DESTROY_SETTLE_TIMEOUT_MS,
+      });
+      return cutover === "postgres" && status === "observed"
+        && (owner?.runnerContainerName !== binding.slotName || owner.phase === "idle");
+    } catch (error) {
+      this.logLifecycleCleanupFailure(
+        "Hosted execution container could not verify runtime ownership during idle cleanup.",
+        error,
+        binding.userId,
+      );
+      return false;
+    }
   }
 
   override onStart(): void {
