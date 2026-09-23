@@ -200,8 +200,14 @@ function assertLinqProductionCanaryReply(input: {
   if (input.turn === 5 && !input.reply.includes(LINQ_PRODUCTION_CANARY_GOAL_TITLE)) {
     throwCanaryFailure("goal-readback-reply-invalid");
   }
-  const isIdentityQuestion = Object.values(MURPH_ASSISTANT_ONBOARDING_IDENTITY_QUESTIONS)
+  const questions = Object.values(MURPH_ASSISTANT_ONBOARDING_IDENTITY_QUESTIONS);
+  // Compare the complete word sequence, tolerating only case and separators.
+  const words = (value: string) => value.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+  const isExactIdentityQuestion = questions
     .some((question) => input.reply === question);
+  const identityMatch = isExactIdentityQuestion ? "exact"
+    : questions.some((question) => words(input.reply) === words(question)) ? "format-only" : "different";
+  const isIdentityQuestion = identityMatch !== "different";
   if (
     (input.turn === 2 && !isIdentityQuestion)
     || (input.turn === 3 && isIdentityQuestion)
@@ -213,12 +219,8 @@ function assertLinqProductionCanaryReply(input: {
     )
   ) {
     // Closed diagnostic categories preserve the failed assertion without logging copy.
-    const words = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/gu, " ").trim();
-    const identityCopy = isIdentityQuestion ? "exact"
-      : Object.values(MURPH_ASSISTANT_ONBOARDING_IDENTITY_QUESTIONS)
-        .some((question) => words(input.reply) === words(question)) ? "format-only" : "different";
     throwCanaryFailure(
-      `reply-semantics-invalid; turn=${input.turn}; identity_copy=${identityCopy}; welcome_copy=${input.reply === MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE}; reply_chars=${Math.min(input.reply.length, 10000)}`,
+      `reply-semantics-invalid; turn=${input.turn}; identity_copy=${identityMatch}; welcome_copy=${input.reply === MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE}; reply_chars=${Math.min(input.reply.length, 10000)}`,
     );
   }
 }
