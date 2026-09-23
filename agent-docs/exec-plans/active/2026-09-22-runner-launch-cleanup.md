@@ -14,7 +14,7 @@ Postgres runtime ownership is canonical before slot binding and across the separ
 
 ## Design
 
-Derive pending work from the existing runtime owner at the final idle-cleanup boundary. Use the existing bounded reconcile command for member-bound slots, preserving starting, active and retiring exact targets and failing closed on uncertainty. Recheck the existing interaction generation after the await. Keep the existing lifecycle recheck as recovery; add no lease, timestamp, schema, timer or admission state. Normal invocation and explicit retirement remain unchanged.
+Derive pending work from the existing runtime owner at the final idle-cleanup boundary. Use the existing bounded reconcile command for member-bound slots, preserving starting, active and retiring exact targets and failing closed on uncertainty. Run that read outside the existing lifecycle lock so arriving readiness does not wait; recheck the existing interaction generation under the lock before cleanup. Keep the existing lifecycle recheck as recovery; add no lease, timestamp, schema, timer or admission state. Normal invocation and explicit retirement remain unchanged.
 
 A cleanup decision that precedes a new claim still uses existing native retirement and reconciliation. This change protects ownership already established before the cleanup read; it does not promise a warm shell after idle cleanup has already won. No production deployment or rollout-policy change is included. Platform rollouts can independently interrupt containers and are separate from this defect.
 
@@ -30,4 +30,15 @@ Exercise real binding, readiness, expiry and SQLite stores with synthetic native
 
 ## Verification
 
-Pending.
+- Original code: seven new ownership cases failed, including both readiness-to-launch and reactivation startup regressions.
+- Focused Cloudflare lifecycle, callback, supervision and Postgres processing suites: 359 tests pass.
+- Cloudflare typecheck passes after local Prisma generation; the initial unprepared checkout lacked generated Prisma exports.
+- Complexity diff passes: existing debt 67 and maximum 72 unchanged. Existing unrelated hotspots remain out of scope.
+- Changelog production rendering: 10 tests pass from repository-root Vitest; the documented app-local command matches no files (existing Frog reports). Web typecheck and docs drift pass.
+- Final ReviewGPT and required PR CI pending on PR #3664.
+
+## Product UX
+
+- Outcome: avoid destroying a ready session during admitted message handoff.
+- Reaches: hosted member runtimes using immutable bound slots; platform rollout interruptions remain separate.
+- Proof: real lifecycle/binding owners with synthetic native/control boundaries, including readiness completing while the control read remains unresolved. Delivery and assistant behavior are unchanged; production latency is not claimed from local tests.
