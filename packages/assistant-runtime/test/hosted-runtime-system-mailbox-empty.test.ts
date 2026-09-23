@@ -87,15 +87,25 @@ describe("empty system-mailbox preparation", () => {
     expect(await readHostedSystemMailboxState(workspace.vaultRoot)).toEqual(transferred);
     expect(resolveHostedSystemMailboxProgress({ importedSeq: "2", now, state: transferred }))
       .toMatchObject({ handledThroughSeq: "2", firstPendingSeq: null, deviceSyncContinuationSeqs: ["1"] });
+    const statePath = path.join(resolveAssistantStatePaths(workspace.vaultRoot).assistantStateRoot, "hosted-system-mailbox.json");
     for (let pass = 0; pass < 3; pass += 1) {
+      vi.mocked(writeFile).mockClear();
+      vi.mocked(rename).mockClear();
       await expect(prepareHostedSystemMailboxItemForCheckpoint({
-        allowedRouteActions: ["run-device-sync-wake"], allowedWakeKinds: ["device-sync.wake"],
+        allowedRouteActions: pass === 0
+          ? ["continue-assistant-ask"]
+          : ["run-device-sync-wake"],
         now: () => now, runtime: createRuntime(), runtimeEnv: {}, vaultRoot: workspace.vaultRoot,
       })).resolves.toBeNull();
       await expect(resolveHostedSystemMailboxNextWakeCandidate({
         now: () => now, vaultRoot: workspace.vaultRoot,
       })).resolves.toEqual({ at: retryAt, executionClass: null, reason: "device-sync.reconcile" });
       expect(await readHostedSystemMailboxState(workspace.vaultRoot)).toEqual(transferred);
+      expect(vi.mocked(writeFile).mock.calls.filter(([file]) =>
+        String(file) === statePath || String(file).startsWith(`${statePath}.`),
+      )).toHaveLength(0);
+      expect(vi.mocked(rename).mock.calls.filter(([, target]) => target === statePath))
+        .toHaveLength(0);
     }
   });
 
