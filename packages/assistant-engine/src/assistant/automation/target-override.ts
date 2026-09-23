@@ -8,7 +8,6 @@ import {
   HOSTED_ASSISTANT_GPT_6_LUNA_MODEL,
   HOSTED_ASSISTANT_LUNA_MODEL,
   HOSTED_ASSISTANT_SOL_MODEL,
-  HOSTED_ASSISTANT_DEFAULT_MODEL,
   HOSTED_ASSISTANT_VENICE_PROVIDER_MODELS,
   isHostedAssistantProductModel,
   type HostedAssistantProductModel,
@@ -25,9 +24,27 @@ import {
 import {
   assistantCodexModelProviderRequiresModelThreadCompatibility,
   VENICE_CODEX_MODEL_PROVIDER_ID,
+  OPENAI_CODEX_MODEL_PROVIDER_ID,
+  HOSTED_OPENAI_CODEX_MODEL_PROVIDER_ID,
+  HOSTED_CHATGPT_OPENAI_CODEX_MODEL_PROVIDER_ID,
+  HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID,
 } from '@murphai/operator-config/assistant/target-runtime'
 
 import { normalizeNullableString } from '../shared.js'
+
+// Reviewed replacements apply at execution, after the provider is resolved.
+// Keep stored pins intact so a provider switch or rollback can resolve them again.
+const AUTOMATION_OPENAI_MODEL_REPLACEMENTS = new Map<string, HostedAssistantProductModel>([
+  [HOSTED_ASSISTANT_LUNA_MODEL, HOSTED_ASSISTANT_GPT_6_LUNA_MODEL],
+  [HOSTED_ASSISTANT_SOL_MODEL, HOSTED_ASSISTANT_GPT_6_SOL_MODEL],
+  ['gpt-5.6-terra', HOSTED_ASSISTANT_GPT_6_SOL_MODEL],
+])
+const AUTOMATION_OPENAI_MODEL_PROVIDERS = new Set<string>([
+  OPENAI_CODEX_MODEL_PROVIDER_ID,
+  HOSTED_OPENAI_CODEX_MODEL_PROVIDER_ID,
+  HOSTED_CHATGPT_OPENAI_CODEX_MODEL_PROVIDER_ID,
+  HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID,
+])
 
 const AUTOMATION_DEFAULT_REASONING_BY_HOSTED_PRODUCT_MODEL = {
   [HOSTED_ASSISTANT_LUNA_MODEL]: 'high',
@@ -47,10 +64,7 @@ export function compactAutomationAssistantTargetOverride(
     return null
   }
 
-  const storedModel = normalizeNullableString(input.model)
-  const model = storedModel === 'gpt-5.6-terra'
-    ? HOSTED_ASSISTANT_DEFAULT_MODEL
-    : storedModel
+  const model = normalizeNullableString(input.model)
   const modelProvider = normalizeNullableString(input.modelProvider)
   const reasoningEffort = normalizeNullableString(input.reasoningEffort)
   const target = {
@@ -66,8 +80,13 @@ export function compactAutomationAssistantTargetOverride(
 
 function resolveAutomationAssistantTargetOverrideDefaults(
   input: AutomationAssistantTargetOverride | null | undefined,
+  modelProvider: string | null | undefined,
 ): AutomationAssistantTargetOverride | null {
-  const target = compactAutomationAssistantTargetOverride(input)
+  const storedTarget = compactAutomationAssistantTargetOverride(input)
+  const replacement = modelProvider && AUTOMATION_OPENAI_MODEL_PROVIDERS.has(modelProvider)
+    ? AUTOMATION_OPENAI_MODEL_REPLACEMENTS.get(storedTarget?.model ?? '')
+    : undefined
+  const target = replacement ? { ...storedTarget, model: replacement } : storedTarget
   if (
     !target?.model ||
     target.reasoningEffort ||
@@ -85,8 +104,9 @@ function resolveAutomationAssistantTargetOverrideDefaults(
 
 export function automationAssistantTargetOverrideToProviderConfigInput(
   input: AutomationAssistantTargetOverride | null | undefined,
+  modelProvider?: string | null,
 ): AssistantProviderConfigInput | null {
-  const target = resolveAutomationAssistantTargetOverrideDefaults(input)
+  const target = resolveAutomationAssistantTargetOverrideDefaults(input, modelProvider)
   if (!target) {
     return null
   }
@@ -109,18 +129,22 @@ export function resolveAutomationAssistantTargetOverrideForTarget(
   input: AutomationAssistantTargetOverride | null | undefined,
   baseTarget: AssistantModelTarget | null | undefined,
 ): AssistantProviderConfigInput | null {
-  const override = automationAssistantTargetOverrideToProviderConfigInput(input)
-  if (!override) {
+  const storedOverride = compactAutomationAssistantTargetOverride(input)
+  if (!storedOverride) {
     return null
   }
 
   const baseConfig = baseTarget
     ? assistantBackendTargetToProviderConfigInput(baseTarget)
     : null
-  const explicitModelProvider = normalizeNullableString(override.modelProvider)
+  const explicitModelProvider = normalizeNullableString(storedOverride.modelProvider)
   const effectiveModelProvider =
     explicitModelProvider ?? normalizeNullableString(baseConfig?.modelProvider)
-  if (!effectiveModelProvider) {
+  const override = automationAssistantTargetOverrideToProviderConfigInput(
+    storedOverride,
+    effectiveModelProvider,
+  )
+  if (!override) {
     return override
   }
 
@@ -130,10 +154,12 @@ export function resolveAutomationAssistantTargetOverrideForTarget(
     )
   const suppressProductModel =
     explicitModelProvider === null &&
-    isHostedAssistantProductModel(override.model) &&
+    (isHostedAssistantProductModel(override.model) ||
+      override.model === 'gpt-5.6-terra') &&
     (!supportsReasoningEffort ||
       (effectiveModelProvider === VENICE_CODEX_MODEL_PROVIDER_ID &&
-        !HOSTED_ASSISTANT_VENICE_PROVIDER_MODELS[override.model]))
+        (!isHostedAssistantProductModel(override.model) ||
+          !HOSTED_ASSISTANT_VENICE_PROVIDER_MODELS[override.model])))
   if (!suppressProductModel && supportsReasoningEffort) {
     return override
   }
@@ -144,8 +170,8 @@ export function resolveAutomationAssistantTargetOverrideForTarget(
     : null
 
   return compactAssistantProviderConfigInput({
-    ...(model ? { model } : {}),
-    ...(explicitModelProvider ? { modelProvider: explicitModelProvider } : {}),
-    ...(reasoningEffort ? { reasoningEffort } : {}),
+    model,
+    modelProvider: explicitModelProvider,
+    reasoningEffort,
   })
 }

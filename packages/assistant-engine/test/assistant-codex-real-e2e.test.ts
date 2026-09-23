@@ -1,3 +1,4 @@
+import { resolveAutomationAssistantTargetOverrideForTarget } from '../src/assistant/automation/target-override.ts'
 import { buildConversationPollResultInstructions } from "@murphai/hosted-execution/conversation-polls";
 import { buildManualMealEstimationInstructions } from '../src/assistant/manual-meal-estimation.js'
 import { executeGenerateImageTool } from '../src/assistant-codex/generate-image-tool.js'
@@ -8113,6 +8114,77 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
     },
     720_000,
   )
+
+  it('runs a saved legacy Luna reminder on the current OpenAI model without rewriting it', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-automation-model-upgrade-e2e-'))
+    const binDirectory = path.join(workingDirectory, 'bin')
+    const commandLogPath = path.join(workingDirectory, 'commands.log')
+    try {
+      await materializeRealWorkoutVaultCli({ binDirectory, commandLogPath, vaultRoot: workingDirectory })
+      await initializeVault({ timezone: 'UTC', vaultRoot: workingDirectory })
+      const saved = await upsertAutomation({
+        assistantTargetOverride: { model: 'gpt-5.6-luna' },
+        continuityPolicy: 'fresh',
+        instructions: 'Send this self-contained reminder now: put the recycling bin outside. No lookups or other actions are needed.',
+        now: new Date('2026-09-23T12:00:00.000Z'),
+        route: { channel: 'linq', deliveryTarget: 'synthetic-reminder', identityId: null, participantId: null, threadId: 'synthetic-reminder', threadIsDirect: true },
+        schedule: { kind: 'dailyLocal', localTime: '18:00' },
+        slug: 'synthetic-model-upgrade-reminder', status: 'active', title: 'Recycling reminder', vaultRoot: workingDirectory,
+      })
+      // Prove the real canonical CLI is available before spending a live turn.
+      const readback = await execFileAsync(path.join(binDirectory, 'vault-cli'), [
+        'automation', 'show', saved.record.automationId, '--format', 'json',
+      ])
+      expect(readback.stdout).toContain(saved.record.automationId)
+      await writeFile(commandLogPath, '', 'utf8')
+      const source = findCanonicalAssistantCronRecordInList(await listCanonicalAssistantCronRecords(workingDirectory), saved.record.automationId)
+      if (!source || source.kind !== 'automation') throw new Error('Expected canonical reminder source.')
+      const runtimeState = createAssistantCronCanonicalRuntimeRecord({ jobId: resolveCanonicalAssistantCronJobId(source), now: '2026-09-23T12:00:00.000Z' })
+      const instructions = buildAssistantCronExecutionInstructions({
+        job: projectCanonicalAssistantCronJob({ source, runtimeState }), kind: 'canonical', runtimeState, source,
+      }, { automationId: null, contextReferences: [] })
+      const prepared = await prepareAssistantCronNotificationInput({
+        instructions, recurringReminderConversation: true,
+        outboxAutomationAuthority: { automationId: saved.record.automationId, expectedUpdatedAt: saved.record.updatedAt },
+        scheduledAutomationScheduleKind: source.schedule.kind,
+        scheduledInvocationAuthority: { automationId: saved.record.automationId, occurrenceAt: '2026-09-23T18:00:00.000Z' },
+        turnTrigger: 'automation-cron', vault: workingDirectory, workingDirectory,
+      }, { sessionId: 'synthetic-model-upgrade-session' })
+      const target = resolveAutomationAssistantTargetOverrideForTarget(saved.record.assistantTargetOverride, createAssistantModelTarget({
+        model: config.model, modelProvider: config.modelProvider ?? 'openai', provider: 'codex-cli', reasoningEffort: 'low',
+      }))
+      expect(target).toMatchObject({ model: 'gpt-6-luna', reasoningEffort: 'low' })
+      if (!target?.model) throw new Error('Expected upgraded model.')
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome, developerInstructions: buildScheduledAutomationDeveloperInstructions(),
+        dynamicTools: [],
+        env: { ...config.env, PATH: `${binDirectory}${path.delimiter}${config.env.PATH ?? ''}` },
+        model: target.model, modelProvider: config.modelProvider,
+        prompt: prepared.instructions, reasoningEffort: target.reasoningEffort, sandbox: 'workspace-write', workingDirectory,
+      })
+      const decision = parseAssistantNotificationDecision(result.finalMessage)
+      process.stdout.write(`[automation-model-upgrade-live] ${JSON.stringify({ model: target.model, decision })}\n`)
+      expect(decision.kind).toBe('send_message')
+      const reply = JSON.stringify(decision)
+      expect(reply).toMatch(/recycling bin/iu)
+      expect(reply).not.toMatch(/gpt-|model upgrade|migrat|reschedul/iu)
+      // A canonical read is permitted; no mutation or unrelated action is needed.
+      const commands = (await readFile(commandLogPath, 'utf8')).split('\n').filter(Boolean)
+      expect(commands.length).toBeLessThanOrEqual(1)
+      for (const command of commands) {
+        expect(normalizeRecordedVaultCommand(command)).toBe(`automation show ${saved.record.automationId}`)
+      }
+      const actions = readCapabilityRoutingActions(result.jsonEvents)
+      expect(actions).toHaveLength(commands.length)
+      for (const action of actions) expect(action).toMatchObject({ kind: 'command', ok: true })
+      expect(await showAutomation({ automationId: saved.record.automationId, vaultRoot: workingDirectory })).toEqual(saved.record)
+    } finally {
+      await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+    }
+  }, 360_000)
 
   it(
     'keeps an ordinary production-shaped scheduled exercise cue natural and attaches reviewed media',
