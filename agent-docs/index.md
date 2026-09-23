@@ -1,7 +1,7 @@
 # Murph Agent Docs Index
 
 Runtime HTTP request reductions are tracked in
-[`runtime request reduction`](exec-plans/active/2026-09-23-runtime-request-reduction.md).
+[`runtime request reduction`](exec-plans/completed/2026-09-23-runtime-request-reduction.md).
 Retry/completion and telemetry contracts remain in the hosted runtime references.
 Reminder timers retain their existing recovery behavior.
 
