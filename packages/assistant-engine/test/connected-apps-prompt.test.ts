@@ -22,17 +22,32 @@ describe('connected-apps skill and system-prompt coverage', () => {
     expect(skill).toContain('a currently due check-in that passive evidence has not resolved')
   })
 
-  it('repairs incidental reminder locations through the existing versioned owner without copying travel facts', async () => {
+  it('reconciles all existing private reminders from supported canonical context through the versioned owner', async () => {
     const skill = (await readFile(path.join(resolveAssistantSkillsRoot(), 'journal-connected-context', 'SKILL.md'), 'utf8')).replace(/\s+/gu, ' ')
-    expect(skill).toContain('This also applies to unchanged plans')
-    expect(skill).toContain('existing automation inspect and version-checked patch path')
-    expect(skill).toContain('Preserve an explicitly fixed destination or venue')
-    expect(skill).toContain('Do not copy the new itinerary into every reminder')
-    expect(skill).toContain('Preserve subject, schedule, timezone, route, status, support ownership, and existing context references')
-    expect(skill).toContain('Already context-aware instructions need no write')
-    expect(skill).toContain('Do not touch group reminders, clinical instructions, or unrelated automations')
-    expect(skill).toContain('Repairs stay silent and create no extra follow-up or notification')
-    expect(skill).toContain('A planned trip does not prove arrival')
+    for (const text of [
+      'Run this every morning, even with no new plans, no travel, or no eligible connected accounts',
+      'vault-cli automation list --status active --status paused --compact --limit 200 --format json',
+      'The default ten-item list is not the inventory',
+      'Never claim a complete review of a truncated inventory',
+      'existing automation inspect and version-checked patch path, not just location',
+      'Update event-relative timing when the underlying event moves',
+      "preserving the member's requested offset",
+      'Fix a schedule that contradicts an explicit current member request',
+      'Preserve an explicitly chosen clock time unless the member changed it',
+      'Completion of one occurrence never retires a recurring habit',
+      'Similar titles alone do not establish duplication',
+      'Include paused reminders when correcting their content, but preserve their pause',
+      'Newer explicit member corrections win over older memory or provider evidence',
+      'Preserve delivery route, audience, identity, and all unrelated fields',
+      'Use the owning support/clinical skill',
+      'Uncertain conflicts stay unchanged',
+      'Already correct reminders need no write',
+      'Repairs stay silent and create no extra follow-up or notification',
+      'Do not copy the new itinerary into every reminder',
+      'Continue existing reminder reconciliation using only permitted member-supplied canonical context',
+      'including reminder repair and automatic context projection',
+    ]) expect(skill).toContain(text)
+    expect(skill).not.toContain('Change only stale contextual instructions')
   })
 
   it('keeps weather lookup subordinate to current location and uncertainty', async () => {

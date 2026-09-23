@@ -15123,7 +15123,7 @@ describeRealCodex('real Codex Journal connected account eligibility e2e', () => 
       expect((await readVaultRawTolerant(workingDirectory)).events).toHaveLength(scenario.optedOut ? 1 : 0)
       expect((await listAutomations({ vaultRoot: workingDirectory })).items).toEqual([])
       if (scenario.optedOut) {
-        expect(connectedAppRequests.every(request => request.operation === 'manage')).toBe(true)
+        expect(connectedAppRequests).toEqual([])
         expect((await readConnectedContextPolicy(workingDirectory))?.optOuts.global).toBe(true)
       } else {
         expect(connectedAppRequests.map(request => request.operation)).toEqual(expect.arrayContaining(['manage', 'search', 'execute']))
@@ -19643,6 +19643,147 @@ describeRealCodex('real Codex generic transcript memory judgment e2e', () => {
     },
     600_000,
   )
+})
+
+describeRealCodex('real Codex morning reminder reconciliation e2e', () => {
+  it('repairs non-travel reminder context timing completion and duplicates without new connections', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const seed = MURPH_MANAGED_AUTOMATIONS.find(candidate => candidate.slug === 'journal-connected-context-morning')
+    if (!seed) throw new Error('Missing morning automation.')
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-reminder-reconciliation-e2e-'))
+    const now = new Date('2026-11-12T07:00:00Z')
+    const requests: AssistantHostedAutomationToolRequest[] = []
+    const providerOperations: string[] = []
+    const inspected = new Map<string, string>()
+    try {
+      const binDirectory = path.join(workingDirectory, 'bin')
+      await materializeJournalConnectedContextVaultCli({ binDirectory, vaultRoot: workingDirectory,
+        ledgerText: JSON.stringify({ version: 1, optOuts: { global: false, accounts: [], providers: [], categories: [] }, activeAccounts: [] }),
+      })
+      const session = await upsertEvent({ vaultRoot: workingDirectory, payload: {
+        kind: 'note', noteType: 'journal-plan', source: 'manual', title: 'Pool session',
+        occurredAt: '2026-11-12T20:00:00+01:00', timeZone: 'Europe/Warsaw',
+        note: 'Member confirmed today that the November 12 pool session moved from 18:00 to 20:00. Bring a towel.',
+        plan: { category: 'training', status: 'planned', endsAt: '2026-11-12T21:00:00+01:00', lastVerifiedAt: now.toISOString() },
+      } })
+      const collection = await upsertEvent({ vaultRoot: workingDirectory, payload: {
+        kind: 'note', noteType: 'journal-context', source: 'manual', title: 'Repaired glasses collected',
+        occurredAt: '2026-11-12T07:30:00+01:00', timeZone: 'Europe/Warsaw',
+        note: 'Member confirms the repaired glasses were collected today. That one-off errand is finished.',
+      } })
+      await upsertMemory(workingDirectory, { section: 'Instructions', now,
+        text: 'As of November 12, the club supplies a racket at every session. For club preparation reminders, remind me to bring shoes only, not my own racket. I completed today’s reading chapter; keep the daily reading habit. I might change the museum visit but have not decided. Keep my paused sketching reminder paused. I accidentally saved the same one-off balcony watering errand twice; keep exactly one reminder for it. My fixed 18:30 snack reminder must stay at 18:30 even if the pool session moves.',
+      })
+      const route = { channel: 'linq', deliveryTarget: 'synthetic-reconciliation', identityId: null, participantId: null, threadId: 'synthetic-reconciliation', threadIsDirect: true }
+      const records: Array<Awaited<ReturnType<typeof upsertAutomation>>['record']> = []
+      for (const [index, item] of [
+        { title: 'Club preparation', instructions: 'Remind me to bring my own racket and shoes to the club.', recurring: true },
+        { title: 'Pack swim bag', instructions: 'Remind me to pack my swim bag exactly one hour before the linked pool session.', eventId: session.eventId },
+        { title: 'Collect repaired glasses', instructions: 'Remind me to collect the repaired glasses, a one-off errand.', eventId: collection.eventId },
+        { title: 'Fixed snack', instructions: 'Remind me to pack a snack at exactly 18:30, even if the pool session moves.', fixed: true },
+        { title: 'Reading habit', instructions: 'Daily reminder to read a chapter.', recurring: true },
+        { title: 'Museum visit', instructions: 'Remind me to bring museum tickets. The visit is still planned.' },
+        { title: 'Sketching', instructions: 'Remind me to sketch.', recurring: true, paused: true },
+        { title: 'Water balcony plants', instructions: 'One-off reminder to water the balcony plants this evening.' },
+        { title: 'Water balcony plants', instructions: 'One-off reminder to water the balcony plants this evening.' },
+        { title: 'Water indoor plant', instructions: 'Remind me to water the indoor plant.', recurring: true },
+        { title: 'Charge camera', instructions: 'Remind me to charge the camera.' },
+        { title: 'Wash towels', instructions: 'Remind me to wash towels.', recurring: true },
+      ].entries()) {
+        records.push((await upsertAutomation({ createOnly: true, vaultRoot: workingDirectory, title: item.title, instructions: item.instructions,
+          route, continuityPolicy: 'fresh', status: item.paused ? 'paused' : 'active',
+          now: new Date(Date.parse('2026-11-01T09:00:00Z') + index * 60_000),
+          schedule: item.recurring ? { kind: 'dailyLocal', localTime: '17:00', timeZone: 'Europe/Warsaw' }
+            : { kind: 'at', at: item.fixed ? '2026-11-12T17:30:00Z' : '2026-11-12T16:00:00Z' },
+          contextReferences: item.eventId ? [{ entityKind: 'event', entityId: item.eventId }] : [],
+        })).record)
+      }
+      expect(new Set(records.map(record => record.automationId)).size).toBe(12)
+      expect((await listAutomations({ vaultRoot: workingDirectory })).items).toHaveLength(12)
+      const runTurn = async () => executeRealCodexAppServerTurn({
+        approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome, model: config.model, modelProvider: config.modelProvider,
+        fixtureBinDirectory: binDirectory,
+        env: { ...config.env, [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: resolveAssistantSkillsRoot(), PATH: `${binDirectory}:${config.env.PATH ?? ''}` },
+        developerInstructions: buildWeeklyHealthInsightDeveloperInstructions({ currentLocalDate: '2026-11-12', currentTimeZone: 'Europe/Warsaw', scheduledOccurrenceAt: now.toISOString(), hostedAutomationAvailable: true }),
+        dynamicTools: [MURPH_AUTOMATION_TOOL, MURPH_CONNECTED_APPS_MANAGE_TOOL, MURPH_CONNECTED_APPS_SEARCH_TOOL, MURPH_CONNECTED_APPS_EXECUTE_TOOL],
+        hostedToolContext: {
+          computerToolsAvailable: false, currentHostedDeliveryContext: () => null,
+          currentHostedMailboxItemIds: () => [], vaultFileSendAvailable: false,
+          sendVaultFile: async () => { throw new Error('No file sends in this synthetic journey.') },
+          connectedApps: { request: async request => {
+            providerOperations.push(request.operation)
+            if (request.operation !== 'manage') throw new Error('There are no connected accounts to read.')
+            return { result: { accounts: [] } }
+          } },
+          automationTool: { request: async request => {
+            requests.push(request)
+            if (request.action !== 'inspect' && request.action !== 'patch') throw new Error('Existing reminder repair must not create new automations.')
+            const before = await showAutomation({ vaultRoot: workingDirectory, automationId: request.lookup })
+            if (!before) throw new Error('Unknown reminder.')
+            if (request.action === 'inspect') inspected.set(before.automationId, before.updatedAt)
+            else {
+              expect(request.expectedUpdatedAt).toBe(inspected.get(before.automationId))
+              expect(Object.keys(request).every(key => ['action', 'lookup', 'expectedUpdatedAt', 'instructions', 'schedule', 'status', 'title', 'summary', 'contextReferences', 'assistantTargetOverride'].includes(key))).toBe(true)
+              await patchAutomation({ vaultRoot: workingDirectory, lookup: request.lookup, expectedUpdatedAt: request.expectedUpdatedAt,
+                instructions: request.instructions, schedule: request.schedule, status: request.status,
+                title: request.title, summary: request.summary, assistantTargetOverride: request.assistantTargetOverride,
+                contextReferences: request.contextReferences ? [...request.contextReferences] : undefined,
+                now: new Date(now.getTime() + requests.length * 1000),
+              })
+              inspected.delete(before.automationId)
+            }
+            const record = await showAutomation({ vaultRoot: workingDirectory, automationId: request.lookup })
+            if (!record) throw new Error('Missing readback.')
+            return { action: request.action, automationId: record.automationId, lookupId: record.automationId,
+              created: false, routeBinding: 'preserved' as const, instructions: record.instructions,
+              title: record.title, schedule: record.schedule, status: record.status, updatedAt: record.updatedAt,
+              contextReferences: record.contextReferences, effectiveTimeZone: 'Europe/Warsaw',
+              occurrenceProjection: { status: 'resolved' as const, nextOccurrenceAt: record.schedule.kind === 'at' ? record.schedule.at : '2026-11-12T16:00:00Z' },
+            }
+          } },
+        },
+        prompt: resolveAssistantProviderPrompt({
+          dynamicTools: [MURPH_AUTOMATION_TOOL, MURPH_CONNECTED_APPS_MANAGE_TOOL, MURPH_CONNECTED_APPS_SEARCH_TOOL, MURPH_CONNECTED_APPS_EXECUTE_TOOL],
+          providerConfig: normalizeAssistantProviderConfig({ provider: 'codex-cli' }), workingDirectory,
+          turnContextPrompt: await readAssistantCurrentStatePrompt({ vaultRoot: workingDirectory }),
+          prompt: seed.instructions,
+        }),
+        reasoningEffort: resolveMurphManagedAutomationSeed(seed.automationId)?.assistantTargetOverride?.reasoningEffort ?? 'high',
+        sandbox: 'workspace-write', workingDirectory,
+      })
+      const first = await runTurn()
+      expect(parseAssistantNotificationDecision(first.finalMessage).kind).toBe('skip')
+      const readAll = () => Promise.all(records.map(record => showAutomation({ vaultRoot: workingDirectory, automationId: record.automationId })))
+      const after = await readAll()
+      expect(requests.filter(request => request.action === 'patch')).toHaveLength(4)
+      expect(after[0]?.instructions).toMatch(/shoes/iu)
+      const equipmentInstructions = after[0]?.instructions ?? ''
+      expect(!/racket/iu.test(equipmentInstructions) || /only|suppl|provid|not.*racket|no.*racket/iu.test(equipmentInstructions)).toBe(true)
+      expect(after[0]?.instructions).not.toBe(records[0]?.instructions)
+      expect(after[0]?.schedule).toEqual(records[0]?.schedule)
+      expect(after[1]?.schedule).toEqual({ kind: 'at', at: '2026-11-12T18:00:00.000Z' })
+      expect(after[1]?.contextReferences).toEqual(records[1]?.contextReferences)
+      expect(after[2]?.status).toBe('archived')
+      expect(after.slice(3, 7)).toEqual(records.slice(3, 7))
+      expect(after.slice(7, 9).map(record => record?.status).sort()).toEqual(['active', 'archived'])
+      expect(after.slice(9)).toEqual(records.slice(9))
+      for (const [index, record] of after.entries()) expect(record?.route).toEqual(records[index]?.route)
+      expect(providerOperations.every(operation => operation === 'manage')).toBe(true)
+      expect((await readEvent({ vaultRoot: workingDirectory, eventId: session.eventId })).event).toEqual(session.event)
+      expect((await readEvent({ vaultRoot: workingDirectory, eventId: collection.eventId })).event).toEqual(collection.event)
+      process.stdout.write(`[morning-reminder-reconciliation] ${JSON.stringify({ pass: 'first', decision: first.finalMessage, repairs: 4, preserved: 7 })}\n`)
+      const repeat = await runTurn()
+      expect(parseAssistantNotificationDecision(repeat.finalMessage).kind).toBe('skip')
+      expect(requests.filter(request => request.action === 'patch')).toHaveLength(4)
+      expect(await readAll()).toEqual(after)
+      expect((await listAutomations({ vaultRoot: workingDirectory })).items).toHaveLength(records.length)
+      process.stdout.write(`[morning-reminder-reconciliation] ${JSON.stringify({ pass: 'repeat', decision: repeat.finalMessage, additionalRepairs: 0 })}\n`)
+    } finally {
+      await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+    }
+  }, 720_000)
 })
 
 describeRealCodex('real Codex travel reminder location e2e', () => {

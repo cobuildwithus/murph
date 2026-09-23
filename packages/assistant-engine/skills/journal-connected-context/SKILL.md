@@ -1,6 +1,6 @@
 ---
 name: journal-connected-context
-description: Use for automatic private Journal plans and upcoming context from connected calendars or relevant email confirmations, and for member opt-outs from that capture.
+description: Use for automatic private Journal plans and upcoming context from connected calendars or relevant email confirmations, member opt-outs from that capture, and morning reconciliation of existing private reminders against current canonical context.
 ---
 
 # Journal connected context
@@ -17,10 +17,12 @@ into the ledger.
 ## Eligible connections and opt-outs
 
 Read the existing ledger before deciding to capture. A global opt-out is a hard
-stop: persist the global opt-out in the normalized ledger below, keep Journal
-history, then return `skip`. Do not call provider search or execute, send an
-announcement, or create a follow-up. Provider/category opt-outs exclude that
-source or category from every later step, including automatic context projection.
+stop for connected reads and capture: preserve it in the normalized ledger below
+and keep Journal history. Do not list accounts, search or execute provider tools,
+send an announcement, or create a connected-plan follow-up. Continue existing
+reminder reconciliation using only permitted member-supplied canonical context.
+Provider/category opt-outs exclude that source or category from every later step,
+including reminder repair and automatic context projection.
 
 List active connected accounts. Only Google Calendar, Gmail, and Outlook have
 automatic reads. Active supported accounts are eligible in this same run unless
@@ -182,38 +184,69 @@ Directly supplied dated constraints can use the same canonical plan fields with
 `--source manual` and no connected account. Keep lasting preferences in memory,
 established facilities in habitat, and goals/protocols in their existing owners.
 Use relevant overlaps when answering or wording an already-authorized reminder;
-repair stale reminder assumptions as below, but do not rewrite schedules or
-experiments. A planned trip does not prove arrival,
+reconcile existing reminders as below; do not rewrite the underlying goals,
+regimens, or experiments to fit a reminder. A planned trip does not prove arrival,
 current location, or a realized experiment confounder. Record realized context
 through the existing experiment-context owner only after checking evidence.
 Preserve segment-local timezones and the member's saved home timezone.
 
 ## Existing reminder reconciliation
 
-After reconciling eligible travel plans, review the bounded active automation
-inventory for private reminders affected by ongoing or upcoming travel. This
-also applies to unchanged plans: a previous run may have saved the trip but
-missed the reminder repair. Read only relevant reminders in detail.
+Run this every morning, even with no new plans, no travel, or no eligible connected
+accounts. Review the existing private reminder inventory, not only reminders that
+match newly captured events. Start with `vault-cli automation list --status active
+--status paused --compact --limit 200 --format json`; compare returned count with
+`totalCount`, narrowing by supported filters if necessary. The default ten-item
+list is not the inventory. Inspect each candidate’s instructions and relevant
+canonical references; compact titles alone cannot establish correctness. Never
+claim a complete review of a truncated inventory. Include paused
+reminders when correcting their content, but preserve their pause. Never reactivate
+an archived or paused reminder merely because its context now looks relevant.
 
-Repair an incidental location assumption (for example, a recurring outdoor cue
-that treats a previous trip's city as permanent) by replacing it with instructions
-to resolve location from current member context and canonical Journal travel at
-each occurrence, then read weather for that location. Preserve an explicitly
-fixed destination or venue. Do not copy the new itinerary into every reminder,
-create another location memory, or replace one permanently named city with another.
+For each reminder, compare its purpose, instructions, timing, lifecycle, and
+canonical references with the latest permitted context: explicit member requests,
+dated preferences and constraints, Journal facts/plans, and the relevant canonical
+goal, routine, regimen, or experiment. Read exact referenced records and necessary
+details before changing anything. Newer explicit member corrections win over
+older memory or provider evidence. Match the same subject and occurrence; a plan,
+an absent reply, a failed/partial read, or an event missing from a search does not
+prove completion or cancellation. Respect all source and category opt-outs.
 
-Use the existing automation inspect and version-checked patch path. Change only
-stale contextual instructions and, if needed for their reads, the reminder model
-selection under the normal automation policy. Preserve subject, schedule,
-timezone, route, status, support ownership, and existing context references.
-Do not touch group reminders, clinical instructions, or unrelated automations.
-Already context-aware instructions need no write. If the version changed,
-reinspect before deciding; never overwrite a member correction. Check the patch
-readback. Repairs stay silent and create no extra follow-up or notification.
-Failed or partial provider reads are not authority to replace facts or move times;
-existing canonical evidence can still justify removing a permanently stale
-location assumption. The scheduled reminder independently resolves location even
-when this morning pass fails.
+Repair every supported mismatch through the existing automation inspect and
+version-checked patch path, not just location. This includes stale activity,
+preparation, equipment, venue, wording, dates, timezone assumptions, and references.
+Update event-relative timing when the underlying event moves, preserving the
+member's requested offset. Fix a schedule that contradicts an explicit current
+member request. Preserve an explicitly chosen clock time unless the member changed
+it; a calendar conflict or inferred preference alone does not authorize moving it.
+Archive obsolete one-off reminders when that exact task or event is confirmed
+completed, canceled, or superseded. Completion of one occurrence never retires a
+recurring habit. Remove only verified duplicates of the same purpose, occurrence,
+and delivery audience by archiving the redundant record, keeping one authoritative
+reminder. Similar titles alone do not establish duplication.
+
+Keep changing facts in their canonical owners. Replace a permanently embedded
+incidental assumption with instructions to resolve current context at execution;
+for outdoor reminders, use the `connected-apps` location policy and then weather.
+Preserve an explicitly fixed destination or venue unless that destination itself
+was corrected. Do not copy the new itinerary into every reminder or create another
+location store. The reminder still resolves location if this morning pass fails.
+
+Patch only fields justified by current evidence. Preserve delivery route, audience,
+identity, and all unrelated fields. Use the owning support/clinical skill for
+managed, regimen, or experiment reminders; repair their reminder representation
+from the canonical plan without inventing treatment changes, modifying the plan,
+or overriding code-owned lifecycle rules. Do not touch group reminders or built-in
+maintenance jobs through this private sweep. Uncertain conflicts stay unchanged;
+ask only one necessary clarification when it blocks a useful repair, without
+holding up independent repairs. Never invent facts to make reminders consistent.
+
+Inspect before each patch and pass the returned version. If the version changed,
+reinspect and reconsider against the newer member edit. Check the patch readback.
+Already correct reminders need no write, including on a repeated or partial-run
+retry. Repairs stay silent and create no extra follow-up or notification. A failed
+provider refresh does not block repairs supported by other current canonical
+context, but never interpret that failure as new evidence.
 
 ## Finish
 

@@ -1811,8 +1811,8 @@ describe('applyMurphManagedAutomations', () => {
     expect(morning?.instructions).toContain('Read eligible active sources in this run while preserving explicit opt-outs')
     expect(morning?.instructions).not.toContain('connection-notice check')
     expect(morning?.instructions).toContain('existing reminder reconciliation')
-    expect(morning?.instructions).toContain('unchanged travel plans still need this check')
-    expect(morning?.instructions).toContain('preserving timing and fixed destinations')
+    expect(morning?.instructions).toContain('even without new plans or eligible connections')
+    expect(morning?.instructions).toContain('instructions, timing, references, and lifecycle through version-checked patches')
   })
 
   it.each([

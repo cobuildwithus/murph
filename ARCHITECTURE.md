@@ -294,14 +294,18 @@ already concise records remain unchanged. This policy uses the existing memory
 format and tool, with no schema migration or second profile store.
 
 The morning Journal connected-context automation writes canonical Journal plans.
-It also reconciles affected private reminder instructions through the existing
-version-checked automation patch: incidental location assumptions become runtime
-context lookups, while fixed destinations, schedules, routes, and clinical support
-remain unchanged. Repeated passes leave already context-aware reminders alone.
-Scheduled reminders resolve location independently from current member evidence
-and canonical travel, including recent segments after arrival leaves the upcoming
-projection. Plans remain conditional evidence, never proof of presence or authority
-to overwrite home timezone. No separate location store or scheduler is introduced.
+It also reviews existing private reminders against current permitted canonical
+context, even without new connected plans. Existing version-checked automation
+patches repair supported instruction, timing, reference, and lifecycle mistakes;
+explicit clock-time choices, delivery audiences, and domain ownership remain
+intact. Event-relative reminders follow verified event changes; exact completed
+or canceled one-offs and verified duplicates can be archived. Correct reminders
+and recurring habits are preserved, including on retries. Source opt-outs still
+apply, and uncertain context does not authorize a mutation.
+Scheduled outdoor reminders independently resolve current member location and
+canonical travel, including recent segments after arrival leaves the upcoming
+projection. Plans remain conditional evidence. No separate reconciliation store,
+location store, or scheduler is introduced.
 Each canonical Journal plan note owns end time, planned/tentative/canceled state, verification
 time, category, and optional connected account; existing event fields own start,
 timezone, title, source identity, revision, and detailed logistics. Typed note
