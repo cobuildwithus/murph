@@ -167,6 +167,7 @@ import {
   MURPH_GENERATE_IMAGE_TOOL,
   MURPH_GROUP_CHAT_TOOL,
   MURPH_GROUP_DATA_TOOL,
+  MURPH_GROUP_EMAIL_TOOL,
   MURPH_GROUP_MEMBERSHIP_TOOL,
   MURPH_GROUP_SHARED_READ_TOOL,
   MURPH_GROUP_USAGE_TOOL,
@@ -9936,6 +9937,159 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
     },
     720_000,
   )
+
+  it('prepares a sparse multi-metric group email despite batch label differences', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-email-label-batches-e2e-'))
+    const reads: AssistantHostedGroupSharedReadRequest[] = []
+    const effects: string[] = []
+    let emailText = ''
+    try {
+      const scopes = [
+        { projectionKind: 'steps-days.v0' as const }, { projectionKind: 'sleep-duration-days.v0' as const },
+        { projectionKind: 'hrv-days.v0' as const }, { projectionKind: 'workouts.v0' as const },
+      ]
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome, env: config.env,
+        developerInstructions: buildAssistantSystemPrompt({
+          assistantCliContract: null, onboardingGuidance: false, modelBehaviorProfile: 'gpt5-agentic',
+          assistantHostedGroupToolSurface: 'families', channel: 'linq',
+          cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+          conversationScope: 'group', hostedRuntime: true,
+          currentLocalDate: '2026-09-20', currentTimeZone: 'America/New_York',
+          turnTrigger: 'automation-cron', scheduledOccurrenceAt: '2026-09-20T13:00:00.000Z',
+        }),
+        dynamicTools: [MURPH_GROUP_DATA_TOOL, MURPH_GROUP_EMAIL_TOOL],
+        groupConversation: true,
+        hostedToolContext: {
+          computerToolsAvailable: false, currentHostedDeliveryContext: () => null,
+          currentHostedMailboxItemIds: () => [],
+          currentScheduledAutomationAuthority: () => ({
+            automationId: 'automation_report', occurrenceAt: '2026-09-20T13:00:00.000Z',
+          }),
+          groupEmailEffect: { request: async (request) => {
+            effects.push(request.action)
+            if (request.action === 'send_email') {
+              emailText = request.text ?? request.html
+              return { action: 'send_email', result: { status: 'accepted', participantCount: 2,
+                skippedNoEmailMemberIds: [], deliveryId: 'delivery_report' } }
+            }
+            return { action: 'prepare_email', result: { status: 'ok',
+              authorizationProof: 'a'.repeat(64), groupId: 'group_report', missingEmailParticipants: [],
+              participants: [0, 1].map((index) => ({ memberId: `member_report_${index}`, hasEmail: true,
+                authorizedShares: scopes.map((scope) => ({
+                  projectionScopeKey: scope.projectionKind, shareId: `share_${index}_${scope.projectionKind}`,
+                })),
+              })),
+            } }
+          } },
+          groupSharedReader: { request: async (request) => {
+            reads.push(request)
+            const hasSteps = request.projectionScopes.some((scope) => scope.projectionKind === 'steps-days.v0')
+            return { status: 'ok', requestedProjectionScopeKeys: request.projectionScopes.map((scope) => scope.projectionKind),
+              members: ['Cedar', 'Rowan'].map((name, index) => ({
+                displayName: hasSteps ? name : `Participant ${index === 0 ? 'A7C29D4E61F0' : 'BC026DF831A9'}`,
+                participantId: `participant_report_${index}`, memberId: `member_report_${index}`, currentTurnHandles: [],
+                projections: request.projectionScopes.map((projectionScope) => ({
+                  projectionScope, projectionScopeKey: projectionScope.projectionKind, grantStatus: 'granted',
+                  dataStatus: projectionScope.projectionKind === 'steps-days.v0' ? 'available' : 'missing',
+                  records: projectionScope.projectionKind === 'steps-days.v0' ? [{
+                    recordKey: '2026-09-19', occurredAt: '2026-09-19T00:00:00.000Z',
+                    data: { date: '2026-09-19', metricKey: 'steps', value: 4000 + index * 1000, unit: 'count' },
+                  }] : [],
+                })),
+              })),
+            } satisfies AssistantHostedGroupSharedReadResponse
+          } },
+          sendVaultFile: async () => { throw new Error('File sending is unavailable in this synthetic journey.') },
+          vaultFileSendAvailable: false,
+        },
+        model: config.model, modelProvider: config.modelProvider,
+        prompt: 'Scheduled automation: prepare and queue the group email for September 19. Read steps-days.v0, sleep-duration-days.v0, hrv-days.v0, and workouts.v0 together with audience group_email. Include every member, report available values, and say when a metric has no shared records.',
+        reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
+      })
+      process.stdout.write(`[email-label-batches-e2e] ${JSON.stringify({ effects, reads, emailText, reply: result.finalMessage })}\n`)
+      expect(effects).toEqual(['prepare_email', 'send_email'])
+      expect(reads).toHaveLength(2)
+      expect(reads.flatMap((read) => read.projectionScopes).map((scope) => scope.projectionKind).sort())
+        .toEqual(scopes.map((scope) => scope.projectionKind).sort())
+      expect(emailText).toMatch(/Cedar[\s\S]*4,?000/u)
+      expect(emailText).toMatch(/Rowan[\s\S]*5,?000/u)
+      expect(emailText).toMatch(/no (?:shared )?(?:data|records)|unavailable|not (?:shared|available)/iu)
+      expect(emailText).not.toMatch(/unverified|member_report_|participant_report_|authorizationProof/iu)
+    } finally {
+      await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+    }
+  }, 360_000)
+
+
+  it('labels every scheduled shared row using host names and stable participant fallbacks', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-group-report-labels-e2e-'))
+    const requests: AssistantHostedGroupSharedReadRequest[] = []
+    try {
+      const skillsRoot = path.join(workingDirectory, 'skills')
+      await materializeAssistantSkill({ skillsRoot, slug: 'group-chat' })
+      const names = ['Rowan', 'Cedar', 'Participant A7C29D4E61F0', 'River (9A3D21F065B7)', 'River (BC026DF831A9)']
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions: buildAssistantSystemPrompt({
+          assistantCliContract: null, onboardingGuidance: false, modelBehaviorProfile: 'gpt5-agentic',
+          assistantHostedGroupToolSurface: 'shared_read', channel: 'linq',
+          cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+          conversationScope: 'group', hostedRuntime: true,
+          currentLocalDate: '2026-09-20', currentTimeZone: 'America/New_York',
+          turnTrigger: 'automation-cron', scheduledOccurrenceAt: '2026-09-20T13:00:00.000Z',
+        }),
+        dynamicTools: [MURPH_GROUP_SHARED_READ_TOOL],
+        env: { ...config.env, [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot },
+        groupConversation: true,
+        hostedToolContext: {
+          computerToolsAvailable: false, currentHostedDeliveryContext: () => null,
+          currentHostedMailboxItemIds: () => [],
+          groupSharedReader: { request: async (request) => {
+            requests.push(request)
+            return {
+              status: 'ok', requestedProjectionScopeKeys: ['steps-days.v0'],
+              members: names.map((displayName, index) => ({
+                displayName, participantId: `participant_report_${index}`,
+                memberId: `member_report_${index}`, currentTurnHandles: [],
+                projections: [{
+                  projectionScope: { projectionKind: 'steps-days.v0' }, projectionScopeKey: 'steps-days.v0',
+                  grantStatus: 'granted', dataStatus: 'available',
+                  records: [{ recordKey: '2026-09-19', occurredAt: '2026-09-19T00:00:00.000Z',
+                    data: { date: '2026-09-19', metricKey: 'steps', value: 4000 + index * 1000, unit: 'count' } }],
+                }],
+              })),
+            } satisfies AssistantHostedGroupSharedReadResponse
+          } },
+          sendVaultFile: async () => { throw new Error('File sending is unavailable in this synthetic journey.') },
+          vaultFileSendAvailable: false,
+        },
+        model: config.model, modelProvider: config.modelProvider,
+        prompt: 'Scheduled group automation: daily steps summary. Report every participant’s shared steps for September 19, 2026 in one concise text update. There is no current sender.',
+        reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
+      })
+      const decision = parseAssistantNotificationDecision(result.finalMessage)
+      process.stdout.write(`[group-report-labels-e2e] ${JSON.stringify({ decision, requests })}\n`)
+      expect(requests).toEqual([{ projectionScopes: [{ projectionKind: 'steps-days.v0' }] }])
+      expect(decision.kind).toBe('send_message')
+      if (decision.kind !== 'send_message') throw new Error('Expected the scheduled report.')
+      for (const [index, name] of names.entries()) {
+        expect(decision.text).toContain(name)
+        const afterName = decision.text.slice(decision.text.indexOf(name) + name.length)
+        const nextName = Math.min(afterName.length, ...names.map((other) => afterName.indexOf(other)).filter((position) => position >= 0))
+        expect(afterName.slice(0, nextName)).toMatch(new RegExp(`${index + 4},?000`, 'u'))
+      }
+      expect(decision.text).not.toMatch(/unverified|owner contact|unnamed|unknown participant|who is|confirm.*name|member_report_|participant_report_|phone number|email address/iu)
+    } finally {
+      await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+    }
+  }, 360_000)
 
   it('reports sparse 90-day history from an already-active metric grant after following date pages', async () => {
     const config = await resolveRealCodexE2eConfig()

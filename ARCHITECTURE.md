@@ -4079,6 +4079,25 @@ server time. Owner-derived authority remains independent. Partial oversized
 rosters therefore cannot turn an omitted or departed participant into an
 unbounded subscription capability.
 
+Shared-data reports populate every row's display name at the Web read boundary.
+An authorized profile projection wins. For a reportable row without that name,
+the existing owner-address-book reader may supply a plain contact name after
+current joined membership, unsuspended health consent,
+verified phone identity, and unique phone matching are checked. This optional
+overlay admits at most 16 candidates in one membership query and one batched
+phone decryption, then invokes the existing bounded owner lookup once; no
+per-member database or external fanout is introduced. Failure or overflow
+preserves the shared records and uses a deterministic group-scoped participant
+pseudonym derived from opaque runtime/membership IDs, never contact identifiers
+or roster position. Duplicate names receive a participant disambiguator.
+These labels are presentation only, carry no sender/effect authority, and are
+neither cached nor persisted. The existing displayName wire field carries them
+so old runtime consumers remain compatible.
+Multi-batch email aggregation retains the first complete host naming snapshot;
+presentation differences across metric batches do not invalidate a report.
+Member/participant identities, current-turn handles, grants, and recipient
+authorization remain independently checked.
+
 Group-to-private growth attribution is a separate, non-authoritative analytics
 projection. The existing capped roster reconciliation also upserts one global,
 versioned contact lookup key per current non-self handle with only its first

@@ -6683,8 +6683,7 @@ async function readGroupEmailSharedData(input: {
           continue
         }
         if (
-          existing.displayName !== member.displayName
-          || existing.participantId !== member.participantId
+          existing.participantId !== member.participantId
           || !hasExactStringEntries(
             existing.currentTurnHandles,
             member.currentTurnHandles,
@@ -6692,6 +6691,8 @@ async function readGroupEmailSharedData(input: {
         ) {
           return null
         }
+        // Keep one complete host naming snapshot: optional contact labels can
+        // differ across metric batches without changing identity or authority.
         members.set(member.memberId, {
           ...existing,
           projections: [...existing.projections, ...projections],
