@@ -248,6 +248,7 @@ function createRoutePlanningDiagnostics(): AssistantRouteTurnPlan['planningDiagn
 
 async function createHostedCodexFlexCatalog(input: {
   model: string
+  priority?: boolean
 }): Promise<{
   cleanup(): Promise<void>
   env: NodeJS.ProcessEnv
@@ -261,6 +262,7 @@ async function createHostedCodexFlexCatalog(input: {
         {
           slug: input.model,
           service_tiers: [
+            ...(input.priority ? [{ id: 'priority', name: 'Priority' }] : []),
             {
               id: 'flex',
               name: 'Flex',
@@ -1921,13 +1923,29 @@ describe('Codex model catalog', () => {
     expect(providerInput?.groupConversation).toBe(true)
   })
 
-  it('drops unsupported rich user parts and keeps flex for the hosted-local OpenAI route', async () => {
+  it.each([
+    { name: 'Flex stays Flex during onboarding', ageMs: 1, requested: 'flex', expected: 'flex' },
+    { name: 'signup instant', ageMs: 0, expected: 'priority' },
+    { name: 'just before 24 hours', ageMs: 86_399_999, expected: 'priority' },
+    { name: 'exactly 24 hours', ageMs: 86_400_000, expected: null },
+    { name: 'established account', ageMs: 172_800_000, expected: null },
+    { name: 'future signup', ageMs: -1, expected: null },
+    { name: 'old Web without expiry', ageMs: null, expected: null },
+    { name: 'malformed expiry', ageMs: NaN, expected: null },
+    { name: 'unsupported catalog', ageMs: 1, catalogPriority: false, expected: null },
+    { name: 'custom inference', ageMs: 1, provider: 'murph_custom', expected: null },
+    { name: 'Venice', ageMs: 1, provider: 'venice', expected: null },
+    { name: 'local subscription', ageMs: 1, hosted: false, expected: null },
+    { name: 'scheduled standard retry', ageMs: 1, scheduled: true, expected: null },
+  ] as const)('selects the tier for $name and preserves rich input filtering', async (scenario) => {
     const providerScopeEvents: string[] = []
-    const flexCatalog = await createHostedCodexFlexCatalog({ model: 'gpt-5.6-terra' })
+    const now = Date.parse('2026-09-23T12:00:00Z')
+    vi.spyOn(Date, 'now').mockReturnValue(now)
+    const flexCatalog = await createHostedCodexFlexCatalog({ model: 'gpt-5.6-terra', priority: !('catalogPriority' in scenario) || scenario.catalogPriority })
     const route = createRoute({
       providerOptions: {
         model: 'gpt-5.6-terra',
-        modelProvider: HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID,
+        modelProvider: 'provider' in scenario ? scenario.provider : HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID,
       },
     })
     const session = createAssistantSession({
@@ -1952,7 +1970,8 @@ describe('Codex model catalog', () => {
         },
       ],
       vault: '/vaults/test',
-      serviceTier: 'flex',
+      serviceTier: 'requested' in scenario ? scenario.requested : null,
+      ...('scheduled' in scenario ? { turnTrigger: 'automation-cron' as const } : {}),
     } satisfies Parameters<typeof executeCodexTurnWithRecovery>[0]['input']
 
     providerMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
@@ -1967,11 +1986,8 @@ describe('Codex model catalog', () => {
     )
     providerTurnRunnerMocks.buildCodexTurnExecutionPlan.mockResolvedValue({
       activeTurnSteering: null,
-      executionContext: {
-        hosted: {
-          memberId: 'member-flex-openai',
-          userEnvKeys: [],
-        },
+      executionContext: 'hosted' in scenario ? { hosted: null } : {
+        hosted: { memberId: 'member-onboarding', userEnvKeys: [] },
       },
       input,
       profile: {
@@ -1994,7 +2010,13 @@ describe('Codex model catalog', () => {
         assistantContractFingerprint:
           'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
         assistantCliContract: null,
-        cliEnv: flexCatalog.env,
+        cliEnv: {
+          ...flexCatalog.env,
+          ...(scenario.ageMs === null ? {} : {
+            HOSTED_ASSISTANT_PRIORITY_UNTIL: Number.isNaN(scenario.ageMs)
+              ? 'invalid' : new Date(now + 86_400_000 - scenario.ageMs).toISOString(),
+          }),
+        },
         developerInstructions: null,
         dynamicTools: [],
         diagnosticsPolicy: {
@@ -2018,7 +2040,7 @@ describe('Codex model catalog', () => {
     } satisfies AssistantCodexAttemptPlan)
 
     try {
-      await executeCodexTurnWithRecovery({
+      const outcome = await executeCodexTurnWithRecovery({
         input,
         onProviderRequestPlanned: async () => {
           providerScopeEvents.push('bound')
@@ -2033,6 +2055,8 @@ describe('Codex model catalog', () => {
         turnCreatedAt: '2026-04-29T00:00:00.000Z',
         turnId: 'turn-1',
       })
+      if (outcome.kind === 'failed_terminal') throw outcome.error
+      expect(outcome.kind).toBe('succeeded')
     } finally {
       await flexCatalog.cleanup()
     }
@@ -2043,9 +2067,14 @@ describe('Codex model catalog', () => {
     expect(providerScopeEvents).toEqual(['bound', 'provider', 'released'])
     const providerInput =
       providerMocks.executeCodexAssistantTurnAttemptFromInput.mock.calls[0]?.[0]
-    expect(providerInput?.serviceTier).toBe('flex')
-    expect(timeoutSpy).toHaveBeenCalledWith(600_000)
-    expect(providerInput?.abortSignal).not.toBe(upstreamAbort.signal)
+    expect(providerInput?.serviceTier).toBe(scenario.expected)
+    if (scenario.expected === 'flex') {
+      expect(timeoutSpy).toHaveBeenCalledWith(600_000)
+      expect(providerInput?.abortSignal).not.toBe(upstreamAbort.signal)
+    } else {
+      expect(timeoutSpy).not.toHaveBeenCalled()
+      expect(providerInput?.abortSignal).toBe(upstreamAbort.signal)
+    }
     expect(providerInput?.abortSignal?.aborted).toBe(false)
     upstreamAbort.abort()
     expect(providerInput?.abortSignal?.aborted).toBe(true)

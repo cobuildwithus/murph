@@ -533,7 +533,7 @@ is recorded in [`2026-09-18-ios-canary-deployment-continuity.md`](exec-plans/com
 | `agent-docs/exec-plans/tech-debt-tracker.md` | Current debt register with owner/priority/status. | Rolling debt tracker | Medium | 2026-03-12 |
 | `agent-docs/prompts/seam-audits/` | One-pass bespoke seam prompts governed by a shared review-only, evidence, correction, and zero-finding contract. | Seam-audit prompt library | Low | 2026-07-13 |
 | `apps/web/README.md` | Hosted Web setup, runtime ownership, build/deploy contracts, and bounded legacy phone-call deletion execution. | `apps/web/**` | Medium | 2026-09-10 |
-| `apps/cloudflare/README.md` | Hosted execution-plane overview, runtime contract, scoped `cf` CLI access for operational reads, and retired member shell-hint transport. | `apps/cloudflare/**` | Medium | 2026-09-10 |
+| `apps/cloudflare/README.md` | Hosted execution-plane overview, runtime contract, pinned native Codex build/update ownership, scoped `cf` operational reads, and retired member shell-hint transport. | `apps/cloudflare/**` | Medium | 2026-09-23 |
 | `apps/cloudflare/scripts/benchmark-workspace-restore.md` | Synthetic encrypted restore benchmark, measurement controls, and local/Linux limitations. | Cloudflare workspace restore | Medium | 2026-09-04 |
 | `apps/cloudflare/DEPLOY.md` | Current deployment procedure for hosted execution, consumer-first Web runtime admission, single-pool capacity, isolated artifact smoke, compatible native gradual rollout, and member shell-hint transport retirement. | Hosted deploy flow | Medium | 2026-09-10 |
 | `packages/assistant-runtime/README.md` | Headless hosted runtime, durable completion, and Browser Vault wake qualification. | `packages/assistant-runtime/**` | Medium | 2026-09-11 |
@@ -625,6 +625,9 @@ Personal Patterns repeat-suppression proof is recorded in
 Interactive voice-orb design playground implementation and proof are tracked in
 [`2026-09-20-voice-orb.md`](exec-plans/completed/2026-09-20-voice-orb.md).
 
+The shared orb's authenticated native-call integration is tracked in
+[`2026-09-21-native-voice-orb.md`](exec-plans/completed/2026-09-21-native-voice-orb.md).
+
 Voice-orb browser and PNG fallback proof is tracked in
 [`2026-09-20-voice-orb-browser-support.md`](exec-plans/completed/2026-09-20-voice-orb-browser-support.md).
 
@@ -674,6 +677,9 @@ Worker callback preparation, HTTP-header timing, and bounded Vercel region
 attribution are tracked in
 [`mailbox latency phases`](exec-plans/completed/2026-09-22-mailbox-latency-phases.md).
 
+Current native voice release port and rollout proof:
+[`2026-09-22-native-voice-codex-155.md`](exec-plans/completed/2026-09-22-native-voice-codex-155.md).
+
 Preserving query-source error privacy across audit archives is tracked in
 [`audit query errors`](exec-plans/completed/2026-09-22-audit-query-errors.md).
 
@@ -684,3 +690,7 @@ The current read contract is owned by `apps/web/README.md`.
 Bounded same-request foreground ownership recovery is owned by
 `references/hosted-postgres-runtime.md`; implementation and synthetic proof are
 tracked in `exec-plans/completed/2026-09-23-foreground-owner-handoff.md`.
+
+First-day priority implementation: [`onboarding priority`](exec-plans/completed/2026-09-23-onboarding-priority.md).
+
+First-day priority prefetch correction: [`invocation propagation`](exec-plans/completed/2026-09-23-onboarding-priority-prefetch.md).

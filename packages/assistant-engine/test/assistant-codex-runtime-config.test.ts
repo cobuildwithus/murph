@@ -396,6 +396,19 @@ describe('assistant codex runtime', () => {
       serviceTier: 'flex',
       threadId: 'thread-1',
     })
+    expect(
+      buildCodexTurnStartParams({
+        images: [],
+        input: {
+          ...baseInput,
+          serviceTier: 'priority',
+        },
+        codexThreadId: 'thread-1',
+      }),
+    ).toMatchObject({
+      serviceTier: 'priority',
+      threadId: 'thread-1',
+    })
 
     expect(
       buildCodexTurnStartParams({

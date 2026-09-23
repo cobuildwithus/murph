@@ -1384,19 +1384,6 @@ export function getGeneratedHealthCommonsProtocolIndexReader() {
     );
   });
 
-  it("rejects a runner bundle after its launch catalog source changes", async () => {
-    const sourceFixture = await createDeployArtifactSourceFixture();
-    const catalogDir = path.join(sourceFixture.appDir, "config");
-    await mkdir(catalogDir, { recursive: true });
-    const catalogPath = path.join(catalogDir, "codex-gpt6-models.json");
-    await writeFile(catalogPath, '{"models":[]}\n');
-    const fixture = await createDeployArtifactFixture(sourceFixture);
-    await writeFile(catalogPath, '{"models":[{"slug":"gpt-6-sol"}]}\n');
-    await expect(assertPreparedRunnerBundle(fixture)).rejects.toThrow(
-      "Prepared runner bundle source fingerprint is stale",
-    );
-  });
-
   it("ignores generated package outputs when checking the source fingerprint", async () => {
     const sourceFixture = await createDeployArtifactSourceFixture({
       generatedFilesPackageName: healthCommonsPackageName,
@@ -1421,6 +1408,21 @@ export function getGeneratedHealthCommonsProtocolIndexReader() {
     await expect(assertPreparedRunnerBundle(fixture)).resolves.toMatchObject({
       sourceFingerprint: fixture.manifest.sourceFingerprint,
     });
+  });
+
+  it("rejects a prepared runner bundle after only the native Codex patch changes", async () => {
+    const sourceFixture = await createDeployArtifactSourceFixture();
+    const fixture = await createDeployArtifactFixture(sourceFixture);
+    await mkdir(path.join(sourceFixture.repoRoot, "patches"), { recursive: true });
+    await writeFile(
+      path.join(sourceFixture.repoRoot, "patches", "codex-public-live.patch"),
+      "synthetic native compatibility patch\n",
+      "utf8",
+    );
+
+    await expect(assertPreparedRunnerBundle(fixture)).rejects.toThrow(
+      "Prepared runner bundle source fingerprint is stale",
+    );
   });
 
   it("accepts worker secrets rendered after the runner bundle", async () => {

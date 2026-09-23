@@ -5,11 +5,11 @@
  * source-tree review rather than trusting one platform's binary layout.
  */
 export const PINNED_CODEX_OPENAI_EGRESS_INVENTORY = {
-  upstreamCommit: "be2951ea34f0d295ed0becf97079f92fa5f6950e",
+  upstreamCommit: "b412ff32c417f855c2b2d1581b77058eed87c84b",
   upstreamSourceRoot: "codex-rs/codex-api/src",
-  upstreamSourceTree: "16b908fe59bff96de1df72b69d23f0377eee8a60",
-  upstreamTag: "rust-v0.155.1",
-  version: "0.155.1",
+  upstreamSourceTree: "cec6091ac1321a179f1e0694bef88746e6f44f0e",
+  upstreamTag: "rust-v0.156.1",
+  version: "0.156.1",
   baseRelativeProviderRoutes: [
     "alpha/search",
     "guardian",
@@ -17,6 +17,7 @@ export const PINNED_CODEX_OPENAI_EGRESS_INVENTORY = {
     "images/edits",
     "images/generations",
     "live",
+    "live/sessions",
     "memories/trace_summarize",
     "models",
     "realtime",
@@ -35,6 +36,26 @@ export const PINNED_CODEX_OPENAI_EGRESS_INVENTORY = {
     "codex-rs/codex-api/src/files.rs",
   ],
   routes: [
+    {
+      disposition: "allowed",
+      feature: "public Live session setup (native patch)",
+      method: "POST",
+      owner: "codex",
+      pathname: "/v1/live/sessions",
+      proof: "reviewed_source",
+      source: "codex-rs/codex-api/src/endpoint/realtime_call.rs",
+      transport: "http",
+    },
+    {
+      disposition: "allowed_scoped_websocket_only",
+      feature: "public Live attachment (native patch)",
+      method: "GET",
+      owner: "codex",
+      pathname: "/v1/live/sessions/synthetic-session/attach",
+      proof: "reviewed_source",
+      source: "codex-rs/codex-api/src/endpoint/realtime_websocket/methods.rs",
+      transport: "websocket",
+    },
     {
       disposition: "allowed",
       feature: "model responses",
@@ -183,6 +204,78 @@ export const PINNED_CODEX_OPENAI_EGRESS_INVENTORY = {
     },
   ],
   nonProviderBinaryCandidates: [
+    {
+      candidate: "/v1/liveuse",
+      disposition: "binary_false_positive",
+      owner: "codex",
+      reason: "The rebuilt 0.156.1 Linux CLI joins /v1/live to the adjacent useCases field label; scanning stops at its uppercase C. realtime_websocket/methods.rs constructs only the reviewed /v1/live endpoint.",
+    },
+    {
+      candidate: "/v1/6",
+      disposition: "binary_false_positive",
+      owner: "dependency",
+      reason: "The 0.156.1 Linux release places the /v1/ base-path literal beside numeric printable data among unrelated string constants. The pinned provider source contains no /v1/6 endpoint.",
+    },
+    {
+      candidate: "/v1/analytics/codex/turn-costsvariant",
+      disposition: "binary_false_positive",
+      owner: "codex-analytics",
+      reason: "The 0.156.1 Linux release joins the turn-cost route to adjacent serialized variant text. backend-client/src/client/turn_usage.rs sets only /v1/analytics/codex/turn-costs on the separate analytics origin.",
+    },
+    {
+      candidate: "/v1/liveapi.pathopponentazurefd.",
+      disposition: "binary_false_positive",
+      owner: "codex",
+      reason: "The 0.156.1 Linux release joins the /v1/live literal to unrelated field labels and host text. realtime_websocket/methods.rs constructs only the reviewed /v1/live endpoint.",
+    },
+    {
+      candidate: "/v1/livecomments",
+      disposition: "binary_false_positive",
+      owner: "codex",
+      reason: "This exact Linux release token joins the reviewed /v1/live literal to adjacent printable data; realtime_websocket/methods.rs constructs only /v1/live.",
+    },
+    {
+      candidate: "/v1/logs48",
+      disposition: "binary_false_positive",
+      owner: "codex-otel",
+      reason: "This exact Linux release token extends the reviewed OTLP /v1/logs literal with adjacent printable data. The pinned opentelemetry-otlp exporter uses /v1/logs on its configured telemetry origin.",
+    },
+    {
+      candidate: "/v1/analytics/codex/turn-costsopenai-organizationopenai-project",
+      disposition: "binary_false_positive",
+      owner: "codex-analytics",
+      reason: "This exact rebuilt-binary token joins the reviewed turn-cost route to its adjacent header allowlist in backend-client/src/client/turn_usage.rs; it is not another endpoint.",
+    },
+    {
+      candidate: "/v1/livequicksilvera",
+      disposition: "binary_false_positive",
+      owner: "codex",
+      reason: "This exact rebuilt-binary token joins the reviewed /v1/live route to the adjacent legacy intent value and formatting text; realtime_websocket/methods.rs constructs only the reviewed route.",
+    },
+    {
+      candidate: "/v1/realtime/live",
+      disposition: "binary_false_positive",
+      owner: "codex",
+      reason: "This exact rebuilt-binary token concatenates adjacent /v1/realtime and /live path-normalization literals in realtime_websocket/methods.rs; the function replaces the realtime suffix rather than appending live to it.",
+    },
+    {
+      candidate: "/v1/tokenformatting",
+      disposition: "binary_false_positive",
+      owner: "codex-auth",
+      reason: "This exact rebuilt-binary token joins the reviewed authentication token endpoint to adjacent formatting text; it is not a model-provider route.",
+    },
+    {
+      candidate: "/v1/user-auth-credential/whoamistruct",
+      disposition: "binary_false_positive",
+      owner: "codex-auth",
+      reason: "This exact rebuilt-binary token joins the WHOAMI_PATH constant in login/src/auth/personal_access_token.rs to serialized type text; the request uses only the reviewed whoami route.",
+    },
+    {
+      candidate: "/v1/x-session-idevent",
+      disposition: "binary_false_positive",
+      owner: "codex",
+      reason: "This exact rebuilt-binary token joins the /v1/ path literal to a session header and tracing label in realtime_websocket/methods.rs; the header is not a route.",
+    },
     {
       candidate: "/v1/26.4--cd",
       disposition: "binary_false_positive",

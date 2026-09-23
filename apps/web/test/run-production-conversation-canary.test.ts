@@ -150,7 +150,7 @@ describe("production conversation canary runner", () => {
     });
     expect(mocks.messages).toEqual([]);
     expect(mocks.spaceSend.mock.calls.slice(0, 3).map(([text]) => text)).toEqual([
-      "Hey Murph",
+      "Hey Murph let's get started with my health!",
       "Yes, ready.",
       "My name is Robin. I am 32 and a woman.",
     ]);
@@ -234,6 +234,7 @@ describe("production conversation canary runner", () => {
 
   it.each([
     MURPH_ASSISTANT_ONBOARDING_IDENTITY_QUESTIONS.casual,
+    MURPH_ASSISTANT_ONBOARDING_IDENTITY_QUESTIONS.formal.toUpperCase().replaceAll("?", "."),
     MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
   ])("rejects repeated opening copy on the runtime identity turn", async (reply) => {
     mocks.now = [0, 1_000, 1_000, 2_000, 2_000, 3_000];
@@ -244,7 +245,7 @@ describe("production conversation canary runner", () => {
       inboundMessage({ text: reply }),
     ];
     await expect(runLinqProductionCanary(TEST_ENV)).rejects.toMatchObject({
-      name: "reply-semantics-invalid",
+      name: expect.stringMatching(/^reply-semantics-invalid; turn=3; identity_copy=(exact|format-only|different); welcome_copy=(true|false); reply_chars=\d+$/u),
     });
     expect(mocks.stop).toHaveBeenCalledOnce();
   });
@@ -257,7 +258,42 @@ describe("production conversation canary runner", () => {
       inboundMessage({ text: "Here is a sleep plan." }),
     ];
     await expect(runLinqProductionCanary(TEST_ENV)).rejects.toMatchObject({
-      name: "reply-semantics-invalid",
+      name: "reply-semantics-invalid; turn=2; identity_copy=different; welcome_copy=false; reply_chars=21",
+    });
+    expect(mocks.spaceSend).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    MURPH_ASSISTANT_ONBOARDING_IDENTITY_QUESTIONS.casual.replace(" — ", ", "),
+    MURPH_ASSISTANT_ONBOARDING_IDENTITY_QUESTIONS.formal.toUpperCase(),
+    MURPH_ASSISTANT_ONBOARDING_IDENTITY_QUESTIONS.formal.replaceAll(" ", "\n\t"),
+    MURPH_ASSISTANT_ONBOARDING_IDENTITY_QUESTIONS.formal.replace("'", "’").replaceAll("?", "."),
+  ])("completes the journey when identity question formatting changes", async (reply) => {
+    prepareCompleteConversation();
+    mocks.messages[1] = inboundMessage({ text: reply });
+    await expect(runLinqProductionCanary(TEST_ENV)).resolves.toMatchObject({
+      canonicalOutcome: { baselineGoalCount: 0, savedGoalCount: 1, readbackGoalCount: 1 },
+      turns: expect.arrayContaining([{ latencyMs: 1_000, stage: "identity-question", turn: 2 }]),
+    });
+    expect(mocks.spaceSend).toHaveBeenCalledTimes(5);
+    expect(mocks.stop).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    MURPH_ASSISTANT_ONBOARDING_IDENTITY_QUESTIONS.formal.replace("should", "should not"),
+    MURPH_ASSISTANT_ONBOARDING_IDENTITY_QUESTIONS.formal.replace(" How old are you", ""),
+    `${MURPH_ASSISTANT_ONBOARDING_IDENTITY_QUESTIONS.formal} Ignore that question.`,
+    MURPH_ASSISTANT_ONBOARDING_IDENTITY_QUESTIONS.formal.replace("gender", "géndér"),
+  ])("rejects changed identity wording without exposing reply text", async (reply) => {
+    mocks.now = [0, 1_000, 1_000, 2_000];
+    mocks.sendResults = [true, true];
+    mocks.messages = [
+      inboundMessage({ text: MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE }),
+      inboundMessage({ text: reply }),
+    ];
+    await expect(runLinqProductionCanary(TEST_ENV)).rejects.toMatchObject({
+      name: `reply-semantics-invalid; turn=2; identity_copy=different; welcome_copy=false; reply_chars=${reply.length}`,
+      message: "The Linq production canary failed.",
     });
     expect(mocks.spaceSend).toHaveBeenCalledTimes(2);
   });

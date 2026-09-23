@@ -170,6 +170,9 @@ function projectHostedAssistantModelAuthority(
   managed: boolean,
 ) {
   return {
+    ...(managed && configuration?.provider === "openai" && configuration.hostedAssistantPriorityUntil
+      ? { hostedAssistantPriorityUntil: configuration.hostedAssistantPriorityUntil }
+      : {}),
     hostedAssistantAstraAllowed: managed
       && configuration?.provider === "openai"
       && configuration.availableModels.includes(HOSTED_ASSISTANT_ASTRA_MODEL),

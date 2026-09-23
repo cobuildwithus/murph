@@ -1,8 +1,58 @@
 ARG NODE_VERSION=24.14.1
 ARG NODE_IMAGE_DIGEST=sha256:b506e7321f176aae77317f99d67a24b272c1f09f1d10f1761f2773447d8da26c
-ARG CODEX_CLI_VERSION=0.155.1
+ARG CODEX_CLI_VERSION=0.156.1
+ARG CODEX_UPSTREAM_REVISION=b412ff32c417f855c2b2d1581b77058eed87c84b
 ARG TYPST_VERSION=0.15.0
 ARG TYPST_SHA256=59b207df01be2dab9f13e80f73d04d7ff8273ffd46b3dd1b9eef5c60f3eeabea
+
+FROM node:${NODE_VERSION}-bookworm-slim@${NODE_IMAGE_DIGEST} AS codex-package
+
+ARG CODEX_CLI_VERSION
+
+# Reuse the reviewed release's helpers; only the patched CLI is rebuilt.
+RUN npm install --global --omit=dev --no-audit --no-fund --ignore-scripts "@openai/codex@${CODEX_CLI_VERSION}" \
+  && native_codex="$(find "$(npm root -g)/@openai" -path '*/vendor/*/bin/codex' -type f -perm /111 -print -quit)" \
+  && test -n "${native_codex}" \
+  && mkdir /opt/codex \
+  && cp -a "$(dirname "$(dirname "${native_codex}")")/." /opt/codex/ \
+  && test -x /opt/codex/bin/codex-code-mode-host \
+  && test -x /opt/codex/codex-resources/bwrap
+
+FROM rust:1.95.0-slim-bookworm@sha256:d7482085ff5b415f84dba5647ae71606650bdef00db7aeb69f4b3d170c3e4082 AS codex-builder
+
+ARG CODEX_CLI_VERSION
+ARG CODEX_UPSTREAM_REVISION
+
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends \
+    build-essential ca-certificates clang cmake git libasound2-dev libcap-dev libssl-dev pkg-config python3 \
+  && rm -rf /var/lib/apt/lists/*
+
+ADD --checksum=sha256:1ac6a92e7318b8acf3d767170c5c5e6dceeffdc074c73b1c5d422b46f0de4daf \
+  https://codeload.github.com/openai/codex/tar.gz/${CODEX_UPSTREAM_REVISION} /tmp/codex.tar.gz
+RUN mkdir /build \
+  && tar -xzf /tmp/codex.tar.gz --strip-components=1 -C /build \
+  && rm /tmp/codex.tar.gz
+COPY patches/codex-public-live.patch /tmp/codex-public-live.patch
+COPY --from=codex-package /opt/codex/ /opt/codex/
+WORKDIR /build
+
+# The release tag changes the workspace version but leaves workspace lock
+# entries at 0.0.0. Normalize only those local entries; registry pins stay exact.
+RUN python3 -c 'import pathlib, sys, tomllib; p = pathlib.Path("codex-rs/Cargo.lock"); s = p.read_text(); assert all("source" not in v for v in tomllib.loads(s)["package"] if v["version"] == "0.0.0"); p.write_text(s.replace("version = \"0.0.0\"", "version = \"" + sys.argv[1] + "\""))' "${CODEX_CLI_VERSION}"
+
+# Embed the checksum of the exact bundled sandbox helper we preserve, then
+# replace only the CLI. No separate helper or native-package release is needed.
+# Bound compiler concurrency instead of using every CPU in a local Docker VM.
+RUN git apply --check /tmp/codex-public-live.patch \
+  && git apply /tmp/codex-public-live.patch \
+  && cd codex-rs \
+  && export CODEX_BWRAP_SHA256="$(sha256sum /opt/codex/codex-resources/bwrap | cut -d ' ' -f 1)" \
+  && export STABLE_GIT_COMMIT="${CODEX_UPSTREAM_REVISION}.murph.$(sha256sum /tmp/codex-public-live.patch | cut -d ' ' -f 1)" \
+  && cargo build --locked --release --target x86_64-unknown-linux-gnu --bin codex --jobs 2 \
+  && strip --strip-debug --strip-unneeded target/x86_64-unknown-linux-gnu/release/codex \
+  && install -m 0755 target/x86_64-unknown-linux-gnu/release/codex /opt/codex/bin/codex \
+  && printf '%s\n' "${STABLE_GIT_COMMIT}" > /opt/codex/murph-source-revision
 
 FROM node:${NODE_VERSION}-bookworm-slim@${NODE_IMAGE_DIGEST} AS typst-installer
 
@@ -28,9 +78,9 @@ FROM node:${NODE_VERSION}-bookworm-slim@${NODE_IMAGE_DIGEST}
 
 ARG NODE_VERSION
 ARG NODE_IMAGE_DIGEST
-ARG CODEX_CLI_VERSION
 
 COPY --from=typst-installer /usr/local/bin/typst /usr/local/bin/typst
+COPY --from=codex-builder /opt/codex/ /usr/local/lib/murph-codex/
 
 ENV DEBIAN_FRONTEND=noninteractive \
     HOME=/home/runner \
@@ -48,6 +98,9 @@ RUN apt-get update \
     file \
     ffmpeg \
     jq \
+    libasound2 \
+    libcap2 \
+    libssl3 \
     poppler-utils \
     python-is-python3 \
     python3 \
@@ -64,14 +117,9 @@ RUN apt-get update \
 
 # The hosted assistant harness is Codex app-server itself; repo-local helpers
 # only coordinate the mailbox/runtime around this pinned CLI.
-RUN npm install --global --omit=dev --no-audit --no-fund --ignore-scripts "@openai/codex@${CODEX_CLI_VERSION}" \
-  && native_codex="$(find "$(npm root -g)/@openai" -path '*/vendor/*/bin/codex' -type f -perm /111 -print -quit)" \
-  && native_bwrap="$(find "$(npm root -g)/@openai" -path '*/vendor/*/codex-resources/bwrap' -type f -perm /111 -print -quit)" \
-  && test -n "${native_codex}" \
-  && test -n "${native_bwrap}" \
-  && "${native_bwrap}" --help | grep -Fq -- '--argv0' \
-  && ln -sfn "${native_codex}" /usr/local/bin/codex \
-  && npm cache clean --force
+RUN test -x /usr/local/lib/murph-codex/bin/codex-code-mode-host \
+  && /usr/local/lib/murph-codex/codex-resources/bwrap --help | grep -Fq -- '--argv0' \
+  && ln -sfn /usr/local/lib/murph-codex/bin/codex /usr/local/bin/codex
 
 WORKDIR /app
 

@@ -27135,6 +27135,82 @@ describeRealCodex('real Codex personalization schema e2e', () => {
   }, 360_000)
 })
 
+describeRealCodex('real Codex voice reminder destination e2e', () => {
+  it('voice reminder confirms the durable messaging channel after exactly one save', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-voice-reminder-e2e-'))
+    const requests: AssistantHostedAutomationToolRequest[] = []
+    try {
+      await initializeVault({ createdAt: '2026-10-14T16:00:00.000Z', vaultRoot: workingDirectory })
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        automationRelativeDateReferenceWindow: {
+          earliestAt: '2026-10-14T16:00:00.000Z', latestAt: '2026-10-14T16:00:00.000Z',
+        },
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions: buildAssistantSystemPrompt({
+          assistantCliContract: 'Use the hosted automation tool for reminder creation.',
+          assistantHostedAutomationAvailable: true, assistantProgressUpdatesAvailable: false,
+          assistantHostedDeviceConnectAvailable: false, assistantHostedDeviceConnectProviders: [],
+          assistantKnowledgeToolsAvailable: false, assistantContextSnapshotPrompt: null,
+          channel: 'voice', cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+          conversationScope: 'direct', currentLocalDate: '2026-10-14',
+          currentInstant: '2026-10-14T16:00:00.000Z', currentTimeZone: 'America/New_York',
+          hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic',
+          onboardingGuidance: false, ordinaryInboundTurn: true, turnTrigger: 'automation-auto-reply',
+        }),
+        dynamicTools: [MURPH_AUTOMATION_TOOL], env: config.env,
+        hostedToolContext: {
+          computerToolsAvailable: false,
+          automationTool: { async request(request) {
+            requests.push(request)
+            if (request.action !== 'save') throw new Error('Only one reminder creation is authorized.')
+            const saved = await upsertAutomation({
+              continuityPolicy: 'preserve', createOnly: true, instructions: request.instructions, title: request.title,
+              schedule: request.schedule, status: 'active', vaultRoot: workingDirectory,
+              assistantTargetOverride: request.assistantTargetOverride,
+              route: { channel: 'telegram', deliveryTarget: 'synthetic-private-chat', threadIsDirect: true,
+                identityId: 'synthetic-identity', participantId: null, threadId: 'synthetic-private-chat' },
+            })
+            return {
+              action: 'save', automationId: saved.record.automationId, created: saved.created,
+              deliveryChannel: saved.record.route.channel, effectiveTimeZone: 'America/New_York',
+              lookupId: saved.record.slug, occurrenceProjection: {
+                status: 'resolved', nextOccurrenceAt: '2026-10-15T13:00:00.000Z',
+              },
+              routeBinding: 'member_notification', schedule: saved.record.schedule,
+              status: saved.record.status, updatedAt: saved.record.updatedAt,
+            }
+          } },
+          currentHostedDeliveryContext: () => null, currentHostedMailboxItemIds: () => [],
+          sendVaultFile: async () => { throw new Error('No file send authorized.') }, vaultFileSendAvailable: false,
+        },
+        model: config.model, modelProvider: config.modelProvider,
+        prompt: 'Remind me tomorrow at 9 AM New York time to stretch. I will end this voice call now, so tell me where the reminder will arrive.',
+        reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
+      })
+      const actions = readCapabilityRoutingActions(result.jsonEvents)
+      const reply = result.finalMessage.trim()
+      process.stdout.write('[voice-reminder-live] ' + JSON.stringify({ reply, requests: requests.length }) + '\n')
+      expect(requests).toHaveLength(1)
+      expect(requests[0]).toMatchObject({
+        action: 'save', schedule: { kind: 'at', at: '2026-10-15T13:00:00.000Z' },
+        assistantTargetOverride: { model: 'gpt-5.6-luna' },
+      })
+      expect(actions).toHaveLength(1)
+      expect(actions[0]).toMatchObject({ kind: 'dynamic', tool: MURPH_AUTOMATION_TOOL.name, success: true })
+      expect(reply).toMatch(/telegram/iu)
+      expect(reply).toMatch(/9(?::00)?\s*(?:a\.?m\.?|in the morning)/iu)
+      expect(reply).toMatch(/stretch/iu)
+      expect(reply).not.toMatch(/this (?:Telegram )?(?:conversation|chat)|keep.*call.*open|call you|deliveryChannel|routeBinding|scheduler|projection/iu)
+      expect(result.runtimeIssueInputs).toEqual([])
+    } finally {
+      await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+    }
+  }, 360_000)
+})
+
 describeRealCodex('real Codex automation edit progress e2e', () => {
   it.each([
     { count: 1, label: 'quick single edit', progressCount: 0 },

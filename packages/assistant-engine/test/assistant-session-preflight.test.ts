@@ -1,4 +1,4 @@
-import { readFile, rm, writeFile } from 'node:fs/promises'
+import { access, readFile, rm, writeFile } from 'node:fs/promises'
 
 import { createAssistantModelTarget } from '@murphai/operator-config/assistant-backend'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -88,6 +88,20 @@ describe('assistant session preflight', () => {
       expect(await readFile(sessionPath, 'utf8')).toBe(before)
     },
   )
+
+  it('does not prepare secret storage for a non-persisting lookup', async () => {
+    const vault = await createVault()
+    const created = await resolveAssistantSession({
+      ...groupRoute, target: target(), vault,
+    })
+    await rm(created.paths.secretsDirectory, { recursive: true, force: true })
+
+    const candidate = await lookupAssistantSession({ ...groupRoute, vault })
+
+    expect(candidate.session.sessionId).toBe(created.session.sessionId)
+    await expect(access(created.paths.secretsDirectory))
+      .rejects.toMatchObject({ code: 'ENOENT' })
+  })
 
   it('excludes expired conversation candidates without creating a replacement', async () => {
     const vault = await createVault()

@@ -414,6 +414,7 @@ export function resolveHostedAiUsageTokenPricingBasis(input: {
   providerName: unknown;
   serviceTier?: string | null | undefined;
 }): AssistantUsageTokenPricingBasis {
+  // Priority onboarding is a platform-funded boost: member usage stays standard.
   if (input.serviceTier !== "flex") {
     return "standard";
   }
@@ -3637,6 +3638,8 @@ export interface HostedWorkspaceState {
 
 export interface HostedWorkspaceReadResponse {
   fetchedAt: string;
+  /** Derived from personal member signup; rechecked at each provider attempt. */
+  hostedAssistantPriorityUntil?: string;
   hostedAssistantAstraAllowed?: boolean;
   hostedAssistantCustomInferenceOverride?: HostedAssistantCustomInferenceOverride;
   hostedAssistantModelOverride?: HostedAssistantModelOverride;
@@ -3988,6 +3991,9 @@ export interface HostedWorkspaceInvocationBudget {
 }
 
 export interface HostedWorkspaceInvocationRequest {
+  /** Ephemeral reservation only; SDP never enters an invocation job. */
+  voiceCallId?: string;
+  hostedAssistantPriorityUntil?: string;
   assistantExecutionBlocked?: true;
   attemptId: string;
   budget?: HostedWorkspaceInvocationBudget | null;

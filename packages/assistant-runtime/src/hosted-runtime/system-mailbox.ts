@@ -342,29 +342,16 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
   >(
     input.vaultRoot,
     async (state) => {
-      if (state.pending.length === 0) {
-        return { result: null, write: false };
-      }
       if (input.pendingOnly && state.pending.some((item) =>
         item.status === "sending" && input.allowedRouteActions?.includes(item.routeAction)
       )) {
         return { result: null, write: false };
       }
-      const continuationItemIds = await readHostedSystemMailboxContinuationItemIds({
-        state, vaultRoot: input.vaultRoot,
-      });
       const admissionState =
         projectHostedSystemMailboxRetainedDeviceWakeAdmission({
           now: startedAt,
           state,
         });
-      const modelFreeProjectedState =
-        usesHostedModelFreeSystemMailboxSelection({
-          allowedRouteActions: input.allowedRouteActions ?? null,
-          allowedWakeKinds: input.allowedWakeKinds ?? null,
-        })
-          ? selectHostedModelFreeSystemMailboxItems(admissionState)
-          : admissionState;
       const eligibleItemIds = new Set(admissionState.pending.filter((item) =>
         !input.excludedRouteActions?.includes(item.routeAction)
         && (
@@ -393,6 +380,19 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
           )
         )
       ).map((item) => item.itemId));
+      if (eligibleItemIds.size === 0) {
+        return { result: null, write: false };
+      }
+      const continuationItemIds = await readHostedSystemMailboxContinuationItemIds({
+        state, vaultRoot: input.vaultRoot,
+      });
+      const modelFreeProjectedState =
+        usesHostedModelFreeSystemMailboxSelection({
+          allowedRouteActions: input.allowedRouteActions ?? null,
+          allowedWakeKinds: input.allowedWakeKinds ?? null,
+        })
+          ? selectHostedModelFreeSystemMailboxItems(admissionState)
+          : admissionState;
       const selectionState = {
         pending: modelFreeProjectedState.pending.filter((item) =>
           eligibleItemIds.has(item.itemId)
@@ -414,10 +414,11 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
           eligibleItemIds,
           state,
         });
+        if (!compacted.retired) {
+          return { result: null, write: false };
+        }
         return {
-          result: compacted.retired
-            ? { disposition: "hint_transferred", item: compacted.retired }
-            : null,
+          result: { disposition: "hint_transferred", item: compacted.retired },
           state: compacted.state,
         };
       }

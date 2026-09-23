@@ -1522,6 +1522,8 @@ function isHostedConversationMailboxPendingReplyEligible(input: {
       return input.assistantRuntimeState.linqAutoReplyEnabled;
     case "telegram":
       return input.assistantRuntimeState.telegramAutoReplyEnabled;
+    case "voice":
+      return input.assistantRuntimeState.voiceAutoReplyEnabled === true;
     default:
       return false;
   }
@@ -1715,6 +1717,10 @@ function createHostedConversationAssistantInputText(
   const authoredText = normalizeHostedAssistantInputText(
     readHostedExecutionConversationMessageText(wake.message) ?? "",
   );
+  if (wake.message.channel === "voice") {
+    if (!authoredText) throw new TypeError("Voice input requires normalized speech text.");
+    return authoredText;
+  }
   if (isHostedLinqConversationMessageWake(wake)) {
     if (authoredText) {
       return authoredText;
@@ -1897,6 +1903,16 @@ function createHostedConversationAssistantInputConversation(
   wake: HostedExecutionConversationMessageWake,
   identifierBlind: HostedAssistantConversationIdentifierBlind,
 ): UpsertAssistantInputEventInput["conversation"] {
+  if (wake.message.channel === "voice") {
+    return {
+      accountId: null,
+      actorId: null,
+      actorIsSelf: false,
+      source: "voice",
+      threadId: hashHostedAssistantConversationIdentifier(identifierBlind, wake.message.callId),
+      threadIsDirect: true,
+    };
+  }
   if (isHostedLinqConversationMessageWake(wake)) {
     const accountLookupKey = readHostedLinqConversationMessageAccountLookupKey(wake.message);
     return {
@@ -1974,6 +1990,9 @@ function createHostedConversationAssistantInputConversation(
 function createHostedConversationAssistantInputReplyTarget(
   wake: HostedExecutionConversationMessageWake,
 ): UpsertAssistantInputEventInput["replyTarget"] {
+  if (wake.message.channel === "voice") {
+    return { channel: "voice", messageId: wake.message.inputId, threadId: wake.message.callId };
+  }
   if (isHostedLinqConversationMessageWake(wake)) {
     return {
       channel: "linq",

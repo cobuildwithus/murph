@@ -8,6 +8,9 @@ import {
 } from "@murphai/assistant-runtime";
 import {
   createHostedWorkspaceInvocationLease,
+  createHostedRuntimeVoice,
+  createHostedRuntimeVoiceCall,
+  type HostedRuntimeVoice,
   runHostedWorkspaceInvocation as runPackageHostedWorkspaceInvocation,
 } from "@murphai/assistant-runtime/hosted-invocation";
 import type {
@@ -75,9 +78,11 @@ type HostedWorkspaceInvocationRuntimeWakeInput =
       notifiedAtEpochMs?: number | null;
       orchestration?: HostedRuntimeOrchestrationLatencyDiagnostics | null;
       requestedProcessingMode?: HostedWorkspaceInvocationProcessingMode | null;
+      voiceCallId?: string;
     };
 
 export interface HostedWorkspaceInvocationOptions {
+  onVoiceReady?: (voice: Pick<HostedRuntimeVoice, "connect" | "closeCall">) => void;
   dispatch?: {
     invokeReceivedAtEpochMs?: number;
     containerEnsureReadyStartedAtEpochMs?: number;
@@ -166,13 +171,7 @@ export async function runHostedWorkspaceInvocation(
   };
   const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
   let acceptingRuntimeWakes = true;
-  options.onRuntimeWakeReady?.((wakeInput?: HostedWorkspaceInvocationRuntimeWakeInput) => {
-    if (!acceptingRuntimeWakes) {
-      return false;
-    }
-    runtimeWakeSignal.notify(wakeInput);
-    return true;
-  });
+  let voice: HostedRuntimeVoice | null = null;
 
   try {
     emitHostedExecutionStructuredLog({
@@ -216,6 +215,42 @@ export async function runHostedWorkspaceInvocation(
         },
       },
     });
+    voice = createHostedRuntimeVoice({
+      notifyRuntime: () => runtimeWakeSignal.notify(),
+      createCall(callId) {
+        const usagePort = platform.usageRecordPort;
+        const admitVoiceInput = platform.mailboxPort?.admitVoiceInput;
+        if (!usagePort || !admitVoiceInput) throw new Error("Hosted voice ports are unavailable.");
+        return createHostedRuntimeVoiceCall({
+          callId,
+          memberId: boundUserId,
+          signal: AbortSignal.any([
+            ...(options.signal ? [options.signal] : []),
+            ...(options.shutdownSignal ? [options.shutdownSignal] : []),
+          ]),
+          usagePort,
+          admitInput: (value) => admitVoiceInput({ ...value, occurredAt: new Date().toISOString() }),
+          notifyRuntime: () => runtimeWakeSignal.notify(),
+          onError: () => emitHostedExecutionStructuredLog({
+            component: "container",
+            level: "error",
+            message: "Hosted voice closure or settlement failed.",
+            phase: "failed",
+            userId: boundUserId,
+          }),
+        });
+      },
+    });
+    const invocationVoice = voice;
+    if (job.request.voiceCallId) invocationVoice.reserve(job.request.voiceCallId);
+    options.onVoiceReady?.(invocationVoice);
+    options.onRuntimeWakeReady?.((wakeInput?: HostedWorkspaceInvocationRuntimeWakeInput) => {
+      if (!acceptingRuntimeWakes) return false;
+      const callId = typeof wakeInput === "object" ? wakeInput.voiceCallId : undefined;
+      if (callId && !invocationVoice.reserve(callId)) return false;
+      runtimeWakeSignal.notify(wakeInput);
+      return true;
+    });
     const webControlFetch = createCloudflareHostedTrustedInternalFetch(
       boundUserId,
       normalizeCloudflareWorkerFetch(),
@@ -230,12 +265,10 @@ export async function runHostedWorkspaceInvocation(
     });
 
     const nodeStartupMs = options.nodeStartupMs;
-    const hasNodeStartup = nodeStartupMs !== null && nodeStartupMs !== undefined;
-    const hasDispatch = options.dispatch !== null
-      && options.dispatch !== undefined
+    const hasNodeStartup = nodeStartupMs != null;
+    const hasDispatch = options.dispatch != null
       && Object.keys(options.dispatch).length > 0;
-    const hasOrchestration = options.orchestration !== null
-      && options.orchestration !== undefined
+    const hasOrchestration = options.orchestration != null
       && Object.keys(options.orchestration).length > 0;
     const latencyMilestones: HostedRuntimeLatencyTraceStagedMilestones = {
       ...(options.runnerJobAcceptedAt
@@ -247,7 +280,7 @@ export async function runHostedWorkspaceInvocation(
               schemaVersion: 1,
               ...(hasOrchestration ? { orchestration: { ...options.orchestration } } : {}),
               ...(hasDispatch ? { dispatch: { ...options.dispatch } } : {}),
-              ...(nodeStartupMs === null || nodeStartupMs === undefined
+              ...(nodeStartupMs == null
                 ? {}
                 : { boot: { nodeStartupMs } }),
             },
@@ -260,6 +293,7 @@ export async function runHostedWorkspaceInvocation(
       mailboxPayloadDecoder: decodeMailboxPayload,
       onConversationActivityObserved: options.onConversationActivityObserved,
       platform,
+      voice: invocationVoice,
       preparedWorkspaceRestore: options.preparedWorkspaceRestore ?? null,
       readCurrentLease: () => currentLease,
       runtimeIssueProvenance: {
@@ -285,6 +319,7 @@ export async function runHostedWorkspaceInvocation(
     );
   } finally {
     acceptingRuntimeWakes = false;
+    await voice?.close();
   }
 }
 

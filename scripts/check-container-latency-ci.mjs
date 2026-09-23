@@ -142,7 +142,10 @@ async function main(baseArgument, candidateArgument) {
       await mkdir(directory);
       await bundleBenchmarkSource(build, root, contents, directory, path.join(directory, "import.mjs"));
       await copyFile(path.join(candidate, "scripts/container-latency-boot.mjs"), path.join(directory, "boot.mjs"));
-      command("pnpm", ["--dir", path.join(root, "apps/cloudflare"), "runner:docker:base"], { stdio: "inherit" });
+      // Cold native Codex compilation is setup, not a measured latency sample.
+      command("pnpm", ["--dir", path.join(root, "apps/cloudflare"), "runner:docker:base"], {
+        stdio: "inherit", timeout: 90 * 60_000,
+      });
       const image = `murph-latency-${randomUUID()}`;
       command("docker", ["build", "--platform", "linux/amd64", "--tag", image,
         "--file", path.join(root, "Dockerfile.cloudflare-hosted-runner"),

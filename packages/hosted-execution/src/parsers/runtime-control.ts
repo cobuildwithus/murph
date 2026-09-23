@@ -1,3 +1,4 @@
+import { parseHostedVoiceCallId } from "../voice-input.ts";
 import { parseHostedGroupSharedReadOptions, parseHostedGroupSharedDateCoverage } from "../group-shared-history.ts";
 import { parseHostedGroupSharedFreshnessRequirements } from "../group-shared-freshness.ts";
 import {
@@ -8349,6 +8350,14 @@ export function parseHostedWorkspaceReadResponse(
     ...(hostedAssistantSubagentModelOverridesAllowed === null
       ? {}
       : { hostedAssistantSubagentModelOverridesAllowed }),
+    ...(record.hostedAssistantPriorityUntil === undefined
+      ? {}
+      : {
+          hostedAssistantPriorityUntil: requireString(
+            record.hostedAssistantPriorityUntil,
+            "Hosted workspace read response hostedAssistantPriorityUntil",
+          ),
+        }),
     ...(hostedAssistantAstraAllowed === null ? {} : { hostedAssistantAstraAllowed }),
     ...(platformAiUsageAllowed === null ? {} : { platformAiUsageAllowed }),
     workspace:
@@ -8864,6 +8873,12 @@ export function parseHostedWorkspaceInvocationRequest(
 ): HostedWorkspaceInvocationRequest {
   const record = requireObject(value, "Hosted workspace invocation request");
 
+  if (record.voiceCallId !== undefined
+    && ((record.processingMode != null && record.processingMode !== "default")
+      || record.assistantExecutionBlocked === true)) {
+    throw new TypeError("Voice reservation requires default processing mode.");
+  }
+
   for (const field of HOSTED_WORKSPACE_INVOCATION_REMOVED_FIELDS) {
     rejectHostedWorkspaceInvocationRemovedField(
       record,
@@ -8873,6 +8888,15 @@ export function parseHostedWorkspaceInvocationRequest(
   }
 
   return {
+    ...(record.voiceCallId === undefined ? {} : { voiceCallId: parseHostedVoiceCallId(record.voiceCallId) }),
+    ...(record.hostedAssistantPriorityUntil === undefined
+      ? {}
+      : {
+          hostedAssistantPriorityUntil: requireString(
+            record.hostedAssistantPriorityUntil,
+            "Hosted workspace invocation request hostedAssistantPriorityUntil",
+          ),
+        }),
     ...(record.assistantExecutionBlocked === undefined
       ? {}
       : {

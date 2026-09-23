@@ -904,7 +904,7 @@ describe('assistant codex event shaping', () => {
     const verifyLateChildUsage = async (
       childStatus: 'completed' | 'failed' | 'interrupted',
       expectedOutcome: 'aborted' | 'partial' | 'succeeded',
-      childServiceTier: 'default' | 'flex' | null = 'flex',
+      childServiceTier: 'default' | 'flex' | 'fast' | 'priority' | null = 'flex',
       interruptUsageWait = false,
     ): Promise<void> => {
       const workingDirectory = await createTempDir(
@@ -1137,7 +1137,7 @@ describe('assistant codex event shaping', () => {
       await verifyLateChildUsage('completed', 'succeeded', 'flex', true)
     })
 
-    it.each([null, 'default'] as const)(
+    it.each([null, 'default', 'fast', 'priority'] as const)(
       'records standard child usage with serviceTier %s after the parent reply',
       async (serviceTier) => {
         await verifyLateChildUsage('completed', 'succeeded', serviceTier)

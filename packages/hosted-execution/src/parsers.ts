@@ -991,6 +991,13 @@ export function parseHostedExecutionConversationMessagePayload(
   );
 
   switch (channel) {
+    case "voice":
+      return {
+        channel,
+        callId: requireString(record.callId, "Voice call id"),
+        inputId: requireString(record.inputId, "Voice input id"),
+        text: requireString(record.text, "Voice input text"),
+      };
     case "linq":
       return parseHostedExecutionLinqConversationMessagePayload(record, channel);
     case "telegram": {
