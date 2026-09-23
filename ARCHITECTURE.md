@@ -1259,7 +1259,7 @@ removes Murph's own line selection by a zero-based option index. Web resolves th
 immutable option ID from a fresh conversation-bound provider read, rechecks live
 route/access and egress policy, then submits one explicit add/remove request.
 Multiple selections are independent. Vote submission returns provider acceptance,
-not confirmed device delivery; ambiguous failures require readback before retry.
+not confirmed device delivery; ambiguous failures allow readback without automatic resubmission.
 No local vote tally or additional persisted state is created. Telegram bots cannot
 vote; Murph may state a preference without claiming a ballot or changing counts.
 Deploy this Web consumer before runtimes producing vote requests, and retain it
@@ -1287,6 +1287,8 @@ The system prompt admits proactive polls only with the native tool available.
 Use concrete shared decisions on an open conversational floor; preserve direct
 answers, delegated judgment, settled decisions and human-owned exchanges. Polls
 record preferences without authorizing bookings or other downstream effects.
+Murph may join a poll with its own preference, a joke or a tie-breaker when it
+fits, without an explicit invitation; this does not require voting in every poll.
 
 Deploy the additive poll migration, then Web, then the runtime tool. Existing
 runtimes remain compatible. Keep Web's poll callback while new runtimes exist;

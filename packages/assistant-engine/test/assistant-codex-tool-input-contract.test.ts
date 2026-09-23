@@ -875,7 +875,7 @@ describe('native poll input measurement', () => {
         })
         let developerInstructions = [layers.staticCacheableCorePrompt, layers.stableRouteCapabilityPrompt, layers.threadContextPrompt].join('\n\n')
 
-        let tools = resolveMurphDynamicTools({
+        let tools: readonly AssistantProviderDynamicTool[] = resolveMurphDynamicTools({
           allowFinishWithoutReply: true, automationAvailable: true, personalizationAvailable: true,
           groupSharedReadAvailable: scope === 'group', responseCardsAvailable: scope === 'direct',
           imageGenerationAvailable: false, progressUpdatesAvailable: false,
@@ -887,7 +887,8 @@ describe('native poll input measurement', () => {
           developerInstructions = developerInstructions.replace(/^- You can vote yourself when it fits:.*\n/mu, '')
           tools = tools.map((tool) => {
             if (tool.name !== 'poll') return tool
-            const schema = structuredClone(tool.inputSchema)
+            const schema = readRecord(structuredClone(tool.inputSchema))
+            assert.ok(schema)
             const properties = readRecord(schema.properties)
             assert.ok(properties)
             delete properties.optionIndex

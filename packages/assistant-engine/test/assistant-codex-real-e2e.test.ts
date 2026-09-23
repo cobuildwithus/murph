@@ -41858,8 +41858,8 @@ describeRealCodex('real Codex poll self vote e2e', () => {
             }
             return { status: action.action === 'vote' ? 'vote_submitted' : 'results', polls: [{
               pollRef, channel, question: 'Post-walk snack?',
-              options: [{ text: 'Apples', votes: 2 }, { text: 'Cinnamon buns', votes: submitted && scenario !== 'remove' ? 3 : 2 }],
-              totalVoters: submitted && scenario !== 'remove' ? 5 : 4,
+              options: [{ text: 'Apples', votes: 2 }, { text: 'Cinnamon buns', votes: scenario === 'remove' ? (submitted ? 2 : 3) : (submitted ? 3 : 2) }],
+              totalVoters: scenario === 'remove' ? (submitted ? 4 : 5) : (submitted ? 5 : 4),
               anonymous: channel === 'telegram', multipleAnswers: channel === 'linq', closed: false,
               observedAt: '2026-09-22T16:00:00.000Z', freshness: channel === 'linq' ? 'provider_read' : 'provider_update',
             }] }

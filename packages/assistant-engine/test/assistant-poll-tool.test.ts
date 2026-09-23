@@ -79,6 +79,15 @@ describe('native poll dynamic tool', () => {
     expect(denied.rpcResult.success).toBe(false)
     expect(port).not.toHaveBeenCalled()
   })
+  it('keeps ambiguous voting uncertain without inviting an automatic resubmission', async () => {
+    port.mockRejectedValueOnce(new Error('Synthetic lost acknowledgement'))
+    const request = parse({ action: 'vote', pollRef, optionIndex: 0, operation: 'add' })
+    if (!request) throw new Error('Expected vote request')
+    const result = await executeMurphDynamicToolRequest({ request, hostedToolContext: context(), env: {}, fetchImpl: fetch, nextUsageOrdinal: () => 0, progressDelivery: null })
+    expect(result.rpcResult.success).toBe(false)
+    expect(result.rpcResult.contentItems[0]?.text).toContain('may have applied')
+    expect(result.rpcResult.contentItems[0]?.text).toContain('do not automatically resubmit')
+  })
   it('accepts a returned voter cursor on read only', () => {
     expect(parse({ action: 'read', pollRef, voterCursor: '50' })).toMatchObject({ kind: 'poll', request: { voterCursor: '50' } })
     expect(parse({ action: 'close', pollRef, voterCursor: '50' })?.kind).toBe('invalid-poll-arguments')
