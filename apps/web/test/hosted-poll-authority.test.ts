@@ -36,6 +36,11 @@ describe("poll current-conversation authority", () => {
     m.policy.mockResolvedValueOnce({ policy: { kind: "block", code: "chat_opted_out" } });
     await expect(authorizePollConversation(input)).rejects.toThrow("blocked");
   });
+  it("applies the live egress block to votes as well as creation", async () => {
+    m.policy.mockResolvedValueOnce({ policy: { kind: "block", code: "chat_opted_out" } });
+    await expect(authorizePollConversation({ ...input, request: { ...input.request, request: { action: "vote", pollRef: "poll_" + "a".repeat(32), optionIndex: 0, operation: "add" } } })).rejects.toThrow("blocked");
+    expect(m.policy).toHaveBeenCalledOnce();
+  });
   it("checks the canonical private Telegram route", async () => {
     m.wake.mockResolvedValue(telegram());
     expect(await authorizePollConversation(input)).toEqual({ channel: "telegram", target: "100" });

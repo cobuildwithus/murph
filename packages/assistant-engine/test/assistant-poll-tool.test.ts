@@ -38,6 +38,13 @@ describe('native poll dynamic tool', () => {
         expect(layers.prompt).toContain('make the choice when asked to use your judgment')
         expect(layers.prompt).toContain('human-owned exchanges alone')
         expect(layers.prompt).toContain('not consent to spend, book, or act for anyone')
+        expect(layers.prompt).toContain('share a preference, join a joke, or break a tie without waiting to be asked')
+        expect(layers.prompt).toContain('On Telegram, bots cannot cast ballots')
+        expect(layers.prompt).toContain('Read the poll in this turn before stating a current tally')
+        expect(layers.prompt).toContain('an old tally or an incomplete voter page')
+        expect(layers.prompt).toContain('option counts are not distinct participant counts')
+        expect(layers.prompt).toContain('not completion of the activity being considered')
+        expect(layers.prompt).toContain('do not vote in every poll or reopen a settled decision')
       }
     }
   })
@@ -50,11 +57,40 @@ describe('native poll dynamic tool', () => {
     { action: 'create', question: 'Day?', options: ['A'] },
     { action: 'create', question: 'Day?', options: ['A', 'B'], chatId: 'other' },
     { action: 'read', pollRef: 'invented' },
+    { action: 'vote', pollRef, optionIndex: -1, operation: 'add' },
+    { action: 'vote', pollRef, optionIndex: 100, operation: 'add' },
+    { action: 'vote', pollRef, optionIndex: 0.5, operation: 'add' },
+    { action: 'vote', pollRef, optionIndex: 0, operation: 'toggle' },
+    { action: 'vote', pollRef, optionIndex: 0 },
+    { action: 'vote', pollRef, optionIndex: 0, operation: 'add', voterId: 'someone-else' },
   ])('rejects invalid or route-selecting input %j', (args) => {
     expect(parse(args)?.kind).toBe('invalid-poll-arguments')
   })
   it.each([true, false])('preserves the requested anonymity choice %s', (anonymous) => {
     expect(parse({ action: 'create', question: 'Day?', options: ['A', 'B'], anonymous })).toMatchObject({ kind: 'poll', request: { anonymous } })
+  })
+  it.each(['add', 'remove'] as const)('binds a %s vote to accepted input with no voter or destination selector', async (operation) => {
+    port.mockClear()
+    const args = { action: 'vote', pollRef, optionIndex: 1, operation }
+    const request = parse(args)
+    expect(request).toMatchObject({ kind: 'poll', request: args })
+    if (!request) throw new Error('Expected vote request')
+    const result = await executeMurphDynamicToolRequest({ request, hostedToolContext: context(), env: {}, fetchImpl: fetch, nextUsageOrdinal: () => 0, progressDelivery: null })
+    expect(result.rpcResult.success).toBe(true)
+    expect(port).toHaveBeenCalledExactlyOnceWith({ assistantInputId: inputId, request: args })
+    port.mockClear()
+    const denied = await executeMurphDynamicToolRequest({ request, hostedToolContext: { ...context(), currentInvocationScope: () => null }, env: {}, fetchImpl: fetch, nextUsageOrdinal: () => 0, progressDelivery: null })
+    expect(denied.rpcResult.success).toBe(false)
+    expect(port).not.toHaveBeenCalled()
+  })
+  it('keeps ambiguous voting uncertain without inviting an automatic resubmission', async () => {
+    port.mockRejectedValueOnce(new Error('Synthetic lost acknowledgement'))
+    const request = parse({ action: 'vote', pollRef, optionIndex: 0, operation: 'add' })
+    if (!request) throw new Error('Expected vote request')
+    const result = await executeMurphDynamicToolRequest({ request, hostedToolContext: context(), env: {}, fetchImpl: fetch, nextUsageOrdinal: () => 0, progressDelivery: null })
+    expect(result.rpcResult.success).toBe(false)
+    expect(result.rpcResult.contentItems[0]?.text).toContain('may have applied')
+    expect(result.rpcResult.contentItems[0]?.text).toContain('do not automatically resubmit')
   })
   it('accepts a returned voter cursor on read only', () => {
     expect(parse({ action: 'read', pollRef, voterCursor: '50' })).toMatchObject({ kind: 'poll', request: { voterCursor: '50' } })

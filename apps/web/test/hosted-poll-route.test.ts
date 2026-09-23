@@ -12,8 +12,8 @@ describe("hosted poll route", () => {
   function request(body: unknown) {
     return new Request("https://web.example.test/api/internal/hosted-execution/polls/tool", { method: "POST", body: JSON.stringify(body), headers: { "content-type": "application/json" } });
   }
-  it("derives the member from the signed callback", async () => {
-    const body = { assistantInputId: "ain_" + "a".repeat(32), request: { action: "list" } };
+  it.each(["list", "vote"] as const)("derives the member for %s from the signed callback", async (action) => {
+    const body = { assistantInputId: "ain_" + "a".repeat(32), request: action === "list" ? { action } : { action, pollRef: "poll_" + "b".repeat(32), optionIndex: 0, operation: "remove" } };
     expect((await POST(request(body))).status).toBe(200);
     expect(m.callback).toHaveBeenCalledWith(expect.any(Request), { maxBodyBytes: 8_192, runtimeAuthority: "caller_transaction" });
     expect(m.tool).toHaveBeenCalledExactlyOnceWith({ memberId: "member_bound", runtimeIdentity: null, request: body });

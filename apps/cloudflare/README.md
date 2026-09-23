@@ -954,10 +954,6 @@ and health. The same check covers the entrypoint callback still holding its acti
 count. If work or uncertainty remains at expiry, the normal recovery interval
 resumes. A proved warm conversation replaces that check with its absolute receipt
 expiry. No stale completion gains permission to destroy a newer interaction.
-Duplicate matching completion notifications retain the pending match when a
-queued interaction makes lifecycle evaluation yield. The matching waiter retries
-the same guarded cleanup; a duplicate cannot consume the only immediate cleanup
-opportunity, and a successor remains protected by the interaction generation.
 A valid receipt within the ten-minute window schedules its absolute expiry.
 Missing receipt metadata grants no idle warmth; the active-work count still
 protects old children during rollout. A missing completion notification or DO

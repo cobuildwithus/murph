@@ -49,17 +49,12 @@ vi.mock("@/src/lib/hosted-crypto/domain-root-store", async () => {
   };
 });
 
-vi.mock("@/src/lib/hosted-orchestration/signal-runtime", async () => {
-  const actual = await vi.importActual<
-    typeof import("@/src/lib/hosted-orchestration/signal-runtime")
-  >("@/src/lib/hosted-orchestration/signal-runtime");
-
-  return {
-    ...actual,
-    signalHostedMailboxAppendRuntime: activationWakeBoundary.signal,
-    signalHostedRuntimeRecheckRuntime: runtimeRecheckBoundary.signal,
-  };
-});
+// Importing the real module here can initialize cyclic activation consumers
+// before the replacement is installed, leaking a real Temporal call into proof.
+vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
+  signalHostedMailboxAppendRuntime: activationWakeBoundary.signal,
+  signalHostedRuntimeRecheckRuntime: runtimeRecheckBoundary.signal,
+}));
 
 vi.mock("@/src/lib/hosted-onboarding/family-plan", async () => {
   const actual = await vi.importActual<

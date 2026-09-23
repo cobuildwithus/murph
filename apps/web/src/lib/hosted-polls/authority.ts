@@ -33,7 +33,7 @@ export async function authorizePollConversation(input: {
       authorityCheckOnly: true, memberId: input.memberId, prisma, target: message.chatId,
     });
     if (assertion.resolvedRoute.target !== message.chatId) throw new TypeError("Poll conversation changed.");
-    if (input.request.request.action === "create") {
+    if (input.request.request.action === "create" || input.request.request.action === "vote") {
       const { policy } = await resolveHostedLinqEgressPolicyForRuntime({
         prisma, target: message.chatId, fromPhoneNumber: assertion.resolvedRoute.fromPhoneNumber,
         linePhoneNumberLookupKey: assertion.linePhoneNumberLookupKey, targetKind: "thread",

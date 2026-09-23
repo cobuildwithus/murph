@@ -1224,6 +1224,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260920210000_snapshot_recovery_deadline",
       "20260921190000_conversation_polls",
       "20260922170000_hosted_sponsorship_topup_margin",
+      "20260922220000_poll_result_notifications",
       "migration_lock.toml",
     ]);
     expect(migrationEntries).toEqual(

@@ -1,3 +1,4 @@
+vi.mock("../src/lib/hosted-polls/notification", () => ({ maybeNotifyPollResult: vi.fn() }));
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { HostedConversationPoll, HostedConversationPollVote } from "@prisma/client";
 import type { ConversationPollSnapshot } from "@murphai/hosted-execution/conversation-polls";
@@ -19,7 +20,7 @@ vi.mock("../src/lib/hosted-crypto/secure-box", () => ({ sealHostedUserSecureBoxS
 import { handleHostedTelegramPollWebhook } from "../src/lib/hosted-polls/telegram-webhook";
 import { withTelegramPollVoters } from "../src/lib/hosted-polls/votes";
 const pollRef = "poll_" + "a".repeat(32);
-const row: HostedConversationPoll = { id: pollRef, memberId: "synthetic-member", channel: "telegram", conversationKey: "synthetic-conversation", providerPollKey: "blinded:provider-poll", definitionEncrypted: "definition", resultEncrypted: "result", dispatchedAt: new Date(), lastUpdateId: 1000n, closedAt: null, createdAt: new Date(), updatedAt: new Date() };
+const row: HostedConversationPoll = { id: pollRef, memberId: "synthetic-member", channel: "telegram", conversationKey: "synthetic-conversation", providerPollKey: "blinded:provider-poll", definitionEncrypted: "definition", resultEncrypted: "result", dispatchedAt: new Date(), lastUpdateId: 1000n, closedAt: null, resultNotifiedAt: null, createdAt: new Date(), updatedAt: new Date() };
 const snapshot: ConversationPollSnapshot = { pollRef, channel: "telegram", question: "Day?", options: [{ text: "Saturday", votes: 1 }, { text: "Sunday", votes: 0 }], totalVoters: 1, anonymous: false, closed: false, multipleAnswers: false, observedAt: new Date().toISOString(), freshness: "provider_update" };
 const answer = { poll_id: "provider-poll", user: { id: 17, first_name: "Riley", last_name: "Example", username: "synthetic_riley" }, option_ids: [0] };
 const key = (vote: Pick<HostedConversationPollVote, "pollId" | "voterKey">) => vote.pollId + ":" + vote.voterKey;
