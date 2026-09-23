@@ -194,7 +194,7 @@ remain unchanged; an older backend leaves the native section retryable.
 
 ## Proactive messages
 
-The managed Personal Patterns automation checks each day at 13:00 local time.
+The managed Personal Patterns automation checks each day on the member’s assigned local schedule.
 Its model target is Luna with high reasoning, using the common Flex-first cron
 policy and Standard retries after failures. Before a clean scheduled model attempt,
 the exact managed recipe reads the current calculated report and the existing
@@ -208,7 +208,10 @@ invalid, or degraded history retain ordinary model review.
 The existing `personal-pattern-notifications` Knowledge page uses version 1 JSON:
 `initialDigestSent`, `reviewedFactorIds`, `mutedFactorIds`, and `results`. Each result
 stores `factorId`, `outcomeId`, `comparisonBasis`, `lagDays`, `lastSeenGrade`,
-`firstSharedDate` (date or null), and `muted`. Identity includes the outcome's lag,
+`firstSharedDate` (date or null), and `muted`. Missing legacy grades and delivery
+dates normalize to null without dropping identities or mutes. An unknown grade
+cannot prove that a current graded result was reviewed. Invalid supplied values
+still require model review. Identity includes the outcome's lag,
 falling back to the report lag. Duplicate identities or unknown fields cannot prove
 that a report is reviewed. The model converts legacy history only when all existing
 history and preferences can be preserved; otherwise it retains that history and
