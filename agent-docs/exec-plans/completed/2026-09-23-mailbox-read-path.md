@@ -1,6 +1,6 @@
 # Remove unnecessary mailbox dependency loading and allowance reads
 
-Status: active
+Status: completed
 Created: 2026-09-23
 
 ## Outcome and protected invariants
@@ -75,3 +75,5 @@ unchanged; query count and dependency initialization shrink. No prompt, tool,
 provider input or assistant behavior changes require a model journey. The
 changelog states reduced preparation without a quantitative latency promise.
 External review, exact-head CI and authorized deployment remain pending.
+Updated: 2026-09-23
+Completed: 2026-09-23
