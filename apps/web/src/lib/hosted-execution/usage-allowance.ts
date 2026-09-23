@@ -39,6 +39,7 @@ import {
 } from "@murphai/hosted-execution/assistant-model";
 
 import {
+  HOSTED_FAMILY_BILLING_PLAN_CODE,
   getHostedAiUsageMonthlyAllowanceUsdMicros,
   getHostedDefaultBillingPlanCode,
   getHostedFamilyAiUsageMonthlyAllowanceForPlan,
@@ -54,10 +55,6 @@ import {
 import {
   buildHostedStarterUsageLifetimePeriod,
 } from "../hosted-onboarding/starter-usage";
-import {
-  HOSTED_FAMILY_BILLING_PLAN_CODE,
-  readHostedFamilyAccessForMember,
-} from "../hosted-onboarding/family-plan";
 import {
   type HostedMemberPersonAccessState,
   hostedMemberPersonAccessSelect,
@@ -375,9 +372,33 @@ async function readHostedFamilySponsoredBillingRefForMember(input: {
   memberId: string;
   tx: Prisma.TransactionClient;
 }): Promise<HostedAiUsageAllowanceBillingRef | null> {
-  const familyAccess = await readHostedFamilyAccessForMember({
-    memberId: input.memberId,
-    prisma: input.tx,
+  const familyAccess = await input.tx.hostedAccountGroupMembership.findFirst({
+    relationLoadStrategy: "join",
+    orderBy: { createdAt: "asc" },
+    where: {
+      memberId: input.memberId,
+      status: "active",
+      group: { billingStatus: HostedBillingStatus.active, suspendedAt: null },
+    },
+    select: {
+      planCode: true,
+      usagePlanTransitionAt: true,
+      usagePlanTransitionFromCode: true,
+      usagePlanTransitionKind: true,
+      usagePlanTransitionToCode: true,
+      group: {
+        select: {
+          billingRef: {
+            select: {
+              currentBillingPlanCode: true,
+              currentBillingPhase: true,
+              currentPeriodEnd: true,
+              currentPeriodStart: true,
+            },
+          },
+        },
+      },
+    },
   });
   if (!familyAccess) {
     return null;
@@ -387,17 +408,7 @@ async function readHostedFamilySponsoredBillingRefForMember(input: {
     return null;
   }
 
-  const billingRef = await input.tx.hostedAccountGroupBillingRef.findUnique({
-    select: {
-      currentBillingPlanCode: true,
-      currentBillingPhase: true,
-      currentPeriodEnd: true,
-      currentPeriodStart: true,
-    },
-    where: {
-      groupId: familyAccess.groupId,
-    },
-  });
+  const billingRef = familyAccess.group.billingRef;
   const periodBillingRef =
     billingRef?.currentBillingPlanCode === HOSTED_FAMILY_BILLING_PLAN_CODE &&
     billingRef.currentBillingPhase === "paid"

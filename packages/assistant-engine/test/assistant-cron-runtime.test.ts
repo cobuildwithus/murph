@@ -36,6 +36,7 @@ import {
 import {
   executeMemberMemoryDynamicTool,
 } from '../src/assistant-codex/dynamic-tools/member-memory.js'
+import { getKnowledgePage } from '../src/knowledge/service.js'
 import * as assistantDiagnostics from '../src/assistant/diagnostics.js'
 import {
   resolveAssistantConversationPolicy,
@@ -6574,6 +6575,8 @@ describe('assistant cron runtime orchestration', () => {
       'assistant-cron-runtime-journal-eligibility-',
     )
     addManagedBackgroundAutomation(vaultRoot, automationId)
+    await expect(getKnowledgePage({ vault: vaultRoot, slug: 'journal-connected-context' }))
+      .rejects.toMatchObject({ code: 'knowledge_page_not_found' })
     const request = vi.fn(async () => ({
       result: {
         accounts: hasAccount ? [{ id: 'account-new', toolkit: { slug: 'googlecalendar' } }] : [],
@@ -6596,30 +6599,17 @@ describe('assistant cron runtime orchestration', () => {
       vault: vaultRoot,
     })
 
-    expect(request).toHaveBeenCalledExactlyOnceWith({
-      input: { action: 'list' },
-      operation: 'manage',
-    }, { signal: expect.any(AbortSignal) })
-    expect(summary).toEqual({
-      failed: 0,
-      processed: 1,
-      succeeded: hasAccount ? 1 : 0,
-    })
-    if (hasAccount) {
-      expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledExactlyOnceWith(
-        expect.objectContaining({
-          instructions: expect.stringContaining('timeMax: 2026-04-22T08:00:00.000Z'),
-          scheduledInvocationAuthority: { automationId, occurrenceAt },
-          serviceTier: 'flex',
-        }),
-      )
-    } else {
-      expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
-      expect(await listAssistantOutboxIntents(vaultRoot)).toEqual([])
-      expect(
-        await listAssistantCronRuns({ job: automationId, vault: vaultRoot }),
-      ).toMatchObject({ runs: [{ outcome: 'skipped_gate', status: 'skipped' }] })
-    }
+    // Account inventory cannot prove that member-authored reminders need no work.
+    // Source eligibility is evaluated by the skill after the morning turn starts.
+    expect(request).not.toHaveBeenCalled()
+    expect(summary).toEqual({ failed: 0, processed: 1, succeeded: 1 })
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        instructions: expect.stringContaining('timeMax: 2026-04-22T08:00:00.000Z'),
+        scheduledInvocationAuthority: { automationId, occurrenceAt },
+        serviceTier: 'flex',
+      }),
+    )
     const job = await getAssistantCronJob(vaultRoot, automationId)
     expect(job.state.consecutiveFailures).toBe(0)
     expect(job.state.nextRunAt).toBe(

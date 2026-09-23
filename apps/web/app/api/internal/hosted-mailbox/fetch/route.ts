@@ -25,7 +25,7 @@ import {
 } from "@/src/lib/hosted-mailbox/store";
 import {
   resolveHostedRuntimeAiUsageGate,
-  getHostedRuntimeUsageMemberSelect,
+  hostedRuntimeUsageMemberSelect,
 } from "@/src/lib/hosted-orchestration/runtime-usage-decision";
 import { readOptionalJsonObject } from "@/src/lib/http";
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
@@ -60,7 +60,7 @@ export async function POST(request: Request): Promise<Response> {
         const memberState = await tx.hostedMember.findUnique({
           where: { id: userId },
           select: {
-            ...getHostedRuntimeUsageMemberSelect(),
+            ...hostedRuntimeUsageMemberSelect,
             assistantProviderPreference: true,
             inferenceConnection: { select: { selected: true, revision: true } },
           },

@@ -60,6 +60,7 @@ import {
   type AssistantTurnEnvironment,
   type HostedAssistantTurnTimingStage,
   stampAssistantProviderStartCriticalPath,
+  scopeAssistantAutomationToolToRoute,
 } from "@murphai/assistant-engine";
 import { VaultCliError } from "@murphai/operator-config/vault-cli-errors";
 import {
@@ -445,7 +446,6 @@ function readHostedInitialAssistantInputIds(
 
 function createHostedAssistantAutomationOperationScope(
   input: HostedWorkspaceRuntimeAssistantPhaseInput,
-  redactedLogEntries: HostedExecutionRedactedLogEntry[],
 ): AssistantAutomationOperationScope {
   return {
     async runAutoReplyGroup<T>(scopeInput: {
@@ -481,14 +481,9 @@ function createHostedAssistantAutomationOperationScope(
         telegramSenderHandles: durableContext.telegramSenderHandles,
         vaultRoot: input.restored.vaultRoot,
       });
-      const scopedExecutionContext = scopeHostedAutomationToolToAssistantOperation({
+      const scopedExecutionContext = scopeAssistantAutomationToolToRoute({
         executionContext: groupScopedExecutionContext,
-        redactedLogEntries,
-        resolveMemberNotificationRoute: (context) =>
-          input.runtime.platform.effectsPort.resolveMemberNotificationRoute?.(context)
-            ?? Promise.resolve(null),
         route,
-        vaultRoot: input.restored.vaultRoot,
       });
       const providerStartCriticalPath = stampAssistantProviderStartCriticalPath(
         scopeInput.providerStartCriticalPath,
@@ -904,48 +899,17 @@ type MemberNotificationRouteResolver = (
   context?: { signal?: AbortSignal | null },
 ) => Promise<HostedExecutionAssistantNotificationRoute | null>;
 
-function scopeHostedAutomationToolToAssistantOperation(input: {
-  resolveMemberNotificationRoute: MemberNotificationRouteResolver;
-  executionContext: AssistantExecutionContext;
-  redactedLogEntries: HostedExecutionRedactedLogEntry[];
-  route: AssistantCurrentDeliveryRoute | null;
-  vaultRoot: string;
-}): AssistantExecutionContext {
-  const hosted = input.executionContext.hosted;
-  if (!hosted) {
-    return input.executionContext;
-  }
-
-  const { automationTool: _unscopedAutomationTool, ...hostedWithoutAutomation } = hosted;
-  void _unscopedAutomationTool;
-  const automationTool = input.route
-    && typeof input.route.threadIsDirect === "boolean"
-    && !(
-      normalizeAssistantRouteString(input.route.channel)?.toLowerCase() === "email"
-      && input.route.threadIsDirect === false
-    )
-    ? createHostedAssistantAutomationTool({
-        redactedLogEntries: input.redactedLogEntries,
-        resolveMemberNotificationRoute: input.resolveMemberNotificationRoute,
-        route: input.route,
-        vaultRoot: input.vaultRoot,
-      })
-    : null;
-
-  return {
-    hosted: {
-      ...hostedWithoutAutomation,
-      ...(automationTool ? { automationTool } : {}),
-    },
-  };
-}
-
 function createHostedAssistantAutomationTool(input: {
   resolveMemberNotificationRoute: MemberNotificationRouteResolver;
   redactedLogEntries: HostedExecutionRedactedLogEntry[];
   route: AssistantCurrentDeliveryRoute;
   vaultRoot: string;
-}): HostedAssistantAutomationTool {
+}): HostedAssistantAutomationTool | null {
+  if (typeof input.route.threadIsDirect !== "boolean"
+    || (normalizeAssistantRouteString(input.route.channel)?.toLowerCase() === "email"
+      && input.route.threadIsDirect === false)) {
+    return null;
+  }
   const currentRouteBinding = input.route.channel === "voice"
     ? "member_notification" : "current_conversation";
   const resolveCurrentRoute = async (context?: { signal?: AbortSignal | null }) => {
@@ -1636,10 +1600,19 @@ export async function runHostedWorkspaceAssistantPhase(
     }).catch(() => undefined);
   }
   const executionTargetHydrateStartedAt = Date.now();
+  const assistantAutomationRedactedLogEntries: HostedExecutionRedactedLogEntry[] = [];
   const executionContext: AssistantExecutionContext = await hydrateHostedExecutionDefaultTarget(
     {
       hosted: {
         actionApprovalPort: input.runtime.platform.actionApprovalPort ?? null,
+        createAutomationTool: (route) => createHostedAssistantAutomationTool({
+          redactedLogEntries: assistantAutomationRedactedLogEntries,
+          resolveMemberNotificationRoute: (context) =>
+            input.runtime.platform.effectsPort.resolveMemberNotificationRoute?.(context)
+              ?? Promise.resolve(null),
+          route,
+          vaultRoot: input.restored.vaultRoot,
+        }),
         async assertTurnCommitAuthority({ acceptedInputs }) {
           const linqDeliveryContexts =
             await resolveHostedAssistantInputIdsTurnCommitLinqContexts({
@@ -1829,11 +1802,7 @@ export async function runHostedWorkspaceAssistantPhase(
     },
   );
   const executionTargetHydrateMs = elapsedSince(executionTargetHydrateStartedAt);
-  const assistantAutomationRedactedLogEntries: HostedExecutionRedactedLogEntry[] = [];
-  const automationOperationScope = createHostedAssistantAutomationOperationScope(
-    input,
-    assistantAutomationRedactedLogEntries,
-  );
+  const automationOperationScope = createHostedAssistantAutomationOperationScope(input);
   try {
     const hasFreshConversationInput = hasFreshHostedConversationInput(input);
     const systemMailboxMaintenanceStartedAt = Date.now();

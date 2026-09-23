@@ -1439,6 +1439,13 @@ fresh workspace, configuration and usage callback before invocation.
 
 ### Mailbox fetch timing
 
+Mailbox reads use the allowance owner's narrow Family sponsorship projection,
+with sponsorship and billing-period fields joined in one SQL statement. The
+allowance reader imports plan constants from `billing-plans`, not the Family
+mutation workflow, so checking messages does not initialize its Stripe, email,
+or Temporal signaling dependencies. Active membership, group access, tier
+validation and billing-period fallback remain owned by the allowance reader.
+
 `/api/internal/hosted-mailbox/fetch` emits one content-free
 `hosted-mailbox.fetch.timing` record for the first request in a module instance,
 a failed request, or a request with at least 250 ms of handler work or verified

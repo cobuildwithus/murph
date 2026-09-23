@@ -1,3 +1,4 @@
+import type { AssistantCurrentDeliveryRoute } from '@murphai/operator-config/assistant/current-delivery-route'
 import type { ConversationPollTool } from "@murphai/hosted-execution/conversation-polls";
 import type { AssistantAutomationExecutionInspection } from './cron/inspection.js'
 import {
@@ -566,6 +567,7 @@ export interface AssistantHostedExecutionContext {
     turnId: string
   }): Promise<void>
   automationTool?: AssistantHostedAutomationTool | null
+  createAutomationTool?(route: AssistantCurrentDeliveryRoute): AssistantHostedAutomationTool | null
   currentAssistantInputId?: () => string | null
   createScheduledGroupTools?(input: {
     channel: string
@@ -737,6 +739,7 @@ export function normalizeAssistantExecutionContext(
           }
         : {}),
       ...optionalHostedField('automationTool', automationTool),
+      ...optionalHostedField('createAutomationTool', hosted.createAutomationTool),
       ...(typeof hosted.currentAssistantInputId === 'function'
         ? {
             currentAssistantInputId: hosted.currentAssistantInputId,
@@ -1262,5 +1265,22 @@ export function resolveAssistantExecutionOperatorDefaults(input: {
     identityId: input.defaults?.identityId ?? null,
     selfDeliveryTargets: input.defaults?.selfDeliveryTargets ?? null,
     backend: hostedDefaultTarget,
+  }
+}
+
+export function scopeAssistantAutomationToolToRoute(input: {
+  executionContext: AssistantExecutionContext
+  route: AssistantCurrentDeliveryRoute | null
+}): AssistantExecutionContext {
+  const hosted = input.executionContext.hosted
+  if (!hosted) return input.executionContext
+  const { automationTool: _previousTool, ...unscopedHosted } = hosted
+  void _previousTool
+  const automationTool = input.route ? hosted.createAutomationTool?.(input.route) : null
+  return {
+    hosted: {
+      ...unscopedHosted,
+      ...(automationTool ? { automationTool } : {}),
+    },
   }
 }

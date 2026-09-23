@@ -22,6 +22,62 @@ describe('connected-apps skill and system-prompt coverage', () => {
     expect(skill).toContain('a currently due check-in that passive evidence has not resolved')
   })
 
+  it('reconciles all existing private reminders from supported canonical context through the versioned owner', async () => {
+    const skill = (await readFile(path.join(resolveAssistantSkillsRoot(), 'journal-connected-context', 'SKILL.md'), 'utf8')).replace(/\s+/gu, ' ')
+    for (const text of [
+      'Run this every morning, even with no new plans, no travel, or no eligible connected accounts',
+      'vault-cli automation list --status active --status paused --compact --limit 200 --format json',
+      'The default ten-item list is not the inventory',
+      'Never claim a complete review of a truncated inventory',
+      'existing automation inspect and version-checked patch path, not just location',
+      'Update event-relative timing when the underlying event moves',
+      "preserving the member's requested offset",
+      'Calculate the due instant with timezone-aware code',
+      'canonical timestamp and its explicit offset (`Z` means UTC)',
+      'Check the returned `occurrenceProjection.nextOccurrenceAt` against the calculated instant',
+      'Fix a schedule that contradicts an explicit current member request',
+      'Preserve an explicitly chosen clock time unless the member changed it',
+      'Completion of one occurrence never retires a recurring habit',
+      'Similar titles alone do not establish duplication',
+      'Include paused reminders when correcting their content, but preserve their pause',
+      'Newer explicit member corrections win over older memory or provider evidence',
+      'Preserve delivery route, audience, identity, and all unrelated fields',
+      'Use the owning support/clinical skill',
+      'Uncertain conflicts stay unchanged',
+      'Already correct reminders need no write',
+      'Repairs stay silent and create no extra follow-up or notification',
+      'Do not copy the new itinerary into every reminder',
+      'Make the smallest instruction edit, preserving the original activity and delivery conditions',
+      'Reuse that policy instead of copying its procedure or adding new weather-based suppression rules',
+      'Continue existing reminder reconciliation using only permitted member-supplied canonical context',
+      'including reminder repair and automatic context projection',
+    ]) expect(skill).toContain(text)
+    expect(skill).not.toContain('Change only stale contextual instructions')
+  })
+
+  it('keeps weather lookup subordinate to current location and uncertainty', async () => {
+    const skill = (await readConnectedAppsSkill()).replace(/\s+/gu, ' ')
+    for (const text of [
+      'Resolve private reminder location before any weather call, including for legacy instructions naming a city',
+      'Flight arrival can already have passed',
+      'Respect connected-context account/category opt-outs',
+      'vault-cli event list --kind note --from <occurrence-minus-14-days> --to <occurrence-date> --limit 50 --format json',
+      'A past report without a covering window',
+      'event show <id> --format json',
+      'use the destination after its planned arrival and before its known return',
+      'An uncertain old city must not appear even in conditional wording',
+      'make destination wording conditional',
+      'omit city/weather rather than fall back to an old city or ask during the scheduled run',
+      'Never overwrite home/current-location memory or change schedules from a planned trip',
+      'Group reminders use only room-authorized location evidence',
+      'with no account selector',
+      'OPENWEATHER_API_GET_CURRENT_WEATHER', 'OPENWEATHER_API_GET5_DAY_FORECAST',
+      'search first only when their argument schema is unclear',
+      'A decline saves the reminder unchanged',
+      'With no reliable location or a failed read, send the ordinary cue',
+    ]) expect(skill).toContain(text)
+  })
+
   it('owns the approved service and toolkit use cases in the skill', async () => {
     const skill = await readConnectedAppsSkill()
 
