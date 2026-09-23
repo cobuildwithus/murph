@@ -5,11 +5,11 @@
  * source-tree review rather than trusting one platform's binary layout.
  */
 export const PINNED_CODEX_OPENAI_EGRESS_INVENTORY = {
-  upstreamCommit: "3d2ee51ca2d5db578f328aa75e20aa22c0197c9a",
+  upstreamCommit: "be2951ea34f0d295ed0becf97079f92fa5f6950e",
   upstreamSourceRoot: "codex-rs/codex-api/src",
-  upstreamSourceTree: "f89292b9cf6a6f0c316c7d88a47f111a20dc0015",
-  upstreamTag: "rust-v0.153.4",
-  version: "0.153.4",
+  upstreamSourceTree: "16b908fe59bff96de1df72b69d23f0377eee8a60",
+  upstreamTag: "rust-v0.155.1",
+  version: "0.155.1",
   baseRelativeProviderRoutes: [
     "alpha/search",
     "guardian",
@@ -22,10 +22,8 @@ export const PINNED_CODEX_OPENAI_EGRESS_INVENTORY = {
     "realtime",
     "realtime/calls",
     "responses",
-    "responses/compact",
   ],
   reviewedSources: [
-    "codex-rs/codex-api/src/endpoint/compact.rs",
     "codex-rs/codex-api/src/endpoint/images.rs",
     "codex-rs/codex-api/src/endpoint/memories.rs",
     "codex-rs/codex-api/src/endpoint/models.rs",
@@ -45,16 +43,6 @@ export const PINNED_CODEX_OPENAI_EGRESS_INVENTORY = {
       pathname: "/v1/responses",
       proof: "real_codex_worker",
       source: "codex-rs/codex-api/src/endpoint/responses.rs",
-      transport: "http",
-    },
-    {
-      disposition: "allowed",
-      feature: "remote compaction",
-      method: "POST",
-      owner: "codex",
-      pathname: "/v1/responses/compact",
-      proof: "policy_contract",
-      source: "codex-rs/codex-api/src/endpoint/compact.rs",
       transport: "http",
     },
     {
@@ -195,6 +183,30 @@ export const PINNED_CODEX_OPENAI_EGRESS_INVENTORY = {
     },
   ],
   nonProviderBinaryCandidates: [
+    {
+      candidate: "/v1/26.4--cd",
+      disposition: "binary_false_positive",
+      owner: "dependency",
+      reason: "This exact Linux printable token joins unrelated version and command-line labels; the reviewed provider source has no such HTTP route.",
+    },
+    {
+      candidate: "/v1/analytics/codex/turn-costsa",
+      disposition: "binary_false_positive",
+      owner: "codex-analytics",
+      reason: "This exact printable token joins the separate ChatGPT-origin turn-costs route to an adjacent serialization label ('a map'); it is not a provider route.",
+    },
+    {
+      candidate: "/v1/liveapi.path",
+      disposition: "binary_false_positive",
+      owner: "codex",
+      reason: "This exact macOS printable token joins the reviewed /v1/live route to the adjacent api.path tracing label; it is not a separate HTTP route.",
+    },
+    {
+      candidate: "/v1/liveapi.pathopponentchannelsresponse",
+      disposition: "binary_false_positive",
+      owner: "codex",
+      reason: "This exact Linux printable token joins the reviewed /v1/live route to adjacent tracing and protocol labels; it is not a separate HTTP route.",
+    },
     {
       candidate: "/v1/agent",
       disposition: "different_origin",

@@ -86,6 +86,7 @@ export async function handleHostedRuntimeAssistantConfigurationTool(input: {
         error.code !== "ASSISTANT_MODEL_SOL_REQUIRES_EDGE" &&
         error.code !== "ASSISTANT_MODEL_ASTRA_REQUIRES_EDGE" &&
         error.code !== "ASSISTANT_MODEL_ASTRA_REQUIRES_OPENAI" &&
+        error.code !== "ASSISTANT_MODEL_REQUIRES_OPENAI" &&
         error.code !== "ASSISTANT_PROVIDER_VENICE_UNAVAILABLE" &&
         error.code !== "ASSISTANT_CONFIGURATION_PERSONAL_CHAT_REQUIRED" &&
         error.code !== "HOSTED_ACCESS_REQUIRED"

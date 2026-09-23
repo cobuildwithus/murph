@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { constants } from "node:fs";
+import { constants, readFileSync } from "node:fs";
 import { access, copyFile, cp, readFile, rename, rm, symlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { Writable } from "node:stream";
@@ -184,6 +184,8 @@ const cleanupHostedRunnerContainerLocalState = vi.fn<
 const collectDockerDevDiagnostics = vi.fn(async () => "Docker diagnostics:\n- docker version: ok");
 const DEFAULT_CODEX_MODEL_CATALOG_TEXT = JSON.stringify({
   models: [
+    { slug: "gpt-6-sol" },
+    { slug: "gpt-6-luna" },
     {
       name: "GPT-5.6-Sol",
       service_tiers: [
@@ -329,9 +331,8 @@ vi.mock("node:fs/promises", () => ({
   mkdir: vi.fn(async () => {}),
   mkdtemp: vi.fn(async () => "/tmp/murph-dev-env-test"),
   readFile: vi.fn(async (filePath) => {
-    if (String(filePath).endsWith(".murph-runner-bundle-manifest.json")) {
-      return defaultRunnerBundleManifestText;
-    }
+    const fixture = readRunnerBundleManifestFixture(filePath);
+    if (fixture !== null) return fixture;
     const error = new Error("File not found") as Error & { code: string };
     error.code = "ENOENT";
     throw error;
@@ -596,6 +597,9 @@ function createDeferred<T>(): {
 }
 
 function readRunnerBundleManifestFixture(filePath: unknown): string | null {
+  if (String(filePath).endsWith("codex-gpt6-models.json")) {
+    return readFileSync(new URL("../../../../apps/cloudflare/config/codex-gpt6-models.json", import.meta.url), "utf8");
+  }
   return String(filePath).endsWith(".murph-runner-bundle-manifest.json")
     ? defaultRunnerBundleManifestText
     : null;
@@ -3033,6 +3037,8 @@ describe("hosted local dev stack", () => {
           status: 0,
           stdout: JSON.stringify({
             models: [
+              { slug: "gpt-6-sol" },
+              { slug: "gpt-6-luna" },
               {
                 name: "GPT-5.6-Sol",
                 service_tiers: [
@@ -3143,18 +3149,13 @@ describe("hosted local dev stack", () => {
     expect(catalogWrite).toBeDefined();
     expect(JSON.parse(String(catalogWrite?.[1]))).toMatchObject({
       models: [
+        { slug: "gpt-6-sol", tool_mode: "code_mode" },
+        { slug: "gpt-6-luna", tool_mode: "code_mode" },
         {
           service_tiers: expect.arrayContaining([
             expect.objectContaining({ id: "flex" }),
           ]),
           slug: "gpt-5.6-sol",
-          tool_mode: "code_mode",
-        },
-        {
-          service_tiers: expect.arrayContaining([
-            expect.objectContaining({ id: "flex" }),
-          ]),
-          slug: "gpt-5.6-terra",
           tool_mode: "code_mode",
         },
         {
@@ -3201,6 +3202,8 @@ describe("hosted local dev stack", () => {
       expectedMessage: "Hosted local dev Codex model catalog is missing gpt-5.4-mini.",
       stdout: JSON.stringify({
         models: [
+          { slug: "gpt-6-sol" },
+          { slug: "gpt-6-luna" },
           { slug: "gpt-5.6-sol" },
           { slug: "gpt-5.6-terra" },
           { slug: "gpt-5.6-luna" },

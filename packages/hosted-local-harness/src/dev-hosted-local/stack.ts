@@ -191,8 +191,9 @@ const MURPH_RUNNER_BUNDLE_TEST_PARSER_TOOLCHAIN_ENV =
 const HOSTED_LOCAL_CODEX_MODEL_CATALOG_FILE =
   "codex-model-catalog.openai-flex.json";
 const HOSTED_LOCAL_OPENAI_PRODUCT_MODEL_SLUGS = [
+  "gpt-6-sol",
+  "gpt-6-luna",
   "gpt-5.6-sol",
-  "gpt-5.6-terra",
   "gpt-5.6-luna",
 ] as const;
 const HOSTED_LOCAL_OPENAI_FLEX_SERVICE_TIER = {
@@ -2358,7 +2359,10 @@ async function prepareHostedLocalCodexModelCatalog(input: {
     throw new Error("Hosted local dev could not read the bundled Codex model catalog.");
   }
 
-  const catalogText = buildHostedLocalOpenAiCodexModelCatalogText(result.stdout);
+  const catalogText = buildHostedLocalOpenAiCodexModelCatalogText(
+    result.stdout,
+    await readFile(path.join(repoRoot, "apps/cloudflare/config/codex-gpt6-models.json"), "utf8"),
+  );
   await mkdir(path.dirname(input.catalogPath), { mode: 0o700, recursive: true });
   await writeFile(input.catalogPath, catalogText, { encoding: "utf8", mode: 0o644 });
   await chmod(input.catalogPath, 0o644);
@@ -2377,10 +2381,12 @@ function buildHostedLocalCodexCatalogCommandEnv(
   };
 }
 
-function buildHostedLocalOpenAiCodexModelCatalogText(rawCatalog: string): string {
+function buildHostedLocalOpenAiCodexModelCatalogText(rawCatalog: string, rawLaunchCatalog: string): string {
   let parsed: unknown;
+  let launch: unknown;
   try {
     parsed = JSON.parse(rawCatalog);
+    launch = JSON.parse(rawLaunchCatalog);
   } catch (error) {
     throw new Error("Hosted local dev received an invalid Codex model catalog.", {
       cause: error,
@@ -2391,7 +2397,17 @@ function buildHostedLocalOpenAiCodexModelCatalogText(rawCatalog: string): string
     throw new Error("Hosted local dev received a Codex model catalog without a models array.");
   }
 
-  const catalogModels = parsed.models.filter(isRecord);
+  if (!isRecord(launch) || !Array.isArray(launch.models)) {
+    throw new Error("Hosted local dev received an invalid launch model catalog.");
+  }
+  const catalogModels = [
+    ...launch.models.filter(isRecord),
+    ...parsed.models.filter(isRecord).filter((model) =>
+      model.slug !== "gpt-6-sol" && model.slug !== "gpt-6-luna" && model.slug !== "gpt-5.6-terra"
+    ),
+  ];
+  parsed.models = catalogModels;
+
   for (const slug of HOSTED_LOCAL_OPENAI_PRODUCT_MODEL_SLUGS) {
     const targetModel = catalogModels.find((candidate) => candidate.slug === slug);
     if (!targetModel) {
@@ -2438,7 +2454,7 @@ function buildHostedLocalOpenAiCodexModelCatalogText(rawCatalog: string): string
       );
     }
 
-    parsed.models.push({
+    catalogModels.push({
       ...templateModel,
       description: "Fast, low-cost model for deploy smoke checks.",
       display_name: "GPT-5.4-Nano",

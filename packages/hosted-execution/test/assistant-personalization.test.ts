@@ -151,7 +151,7 @@ describe("hosted assistant personalization contract", () => {
       action: "update",
       result: {
         mainPersona: "scientist",
-        model: "gpt-5.6-terra",
+        model: "gpt-6-sol",
         modelChangeAppliesNextRun: false,
         modelUpdated: false,
         solAvailable: false,
@@ -164,7 +164,7 @@ describe("hosted assistant personalization contract", () => {
       action: "update",
       result: {
         mainPersona: "scientist",
-        model: "gpt-5.6-terra",
+        model: "gpt-6-sol",
         modelChangeAppliesNextRun: false,
         modelUpdated: false,
         solAvailable: false,
@@ -178,7 +178,7 @@ describe("hosted assistant personalization contract", () => {
       action: "update",
       result: {
         mainPersona: "classic",
-        model: "gpt-5.6-terra",
+        model: "gpt-6-sol",
         modelChangeAppliesNextRun: false,
         modelUpdated: false,
         solAvailable: true,
@@ -199,7 +199,7 @@ describe("hosted assistant personalization contract", () => {
       action: "read",
       result: {
         mainPersona: "classic",
-        model: "gpt-5.6-terra",
+        model: "gpt-6-sol",
         solAvailable: false,
         supportingPersona: null,
         tone: null,
@@ -210,7 +210,7 @@ describe("hosted assistant personalization contract", () => {
       action: "read",
       result: {
         mainPersona: "classic",
-        model: "gpt-5.6-terra",
+        model: "gpt-6-sol",
         solAvailable: false,
         supportingPersona: null,
         tone: "formal",
@@ -310,7 +310,7 @@ describe("hosted assistant personalization contract", () => {
   it("rejects impossible model, rejection, and duplicate update states", () => {
     const validResult = {
       mainPersona: "classic",
-      model: "gpt-5.6-terra",
+      model: "gpt-6-sol",
       modelChangeAppliesNextRun: false,
       modelUpdated: false,
       solAvailable: true,

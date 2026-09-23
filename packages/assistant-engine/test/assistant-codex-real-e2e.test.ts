@@ -650,7 +650,7 @@ afterAll(() => {
     )
   }
 })
-const DEFAULT_REAL_CODEX_MODEL = 'gpt-5.6-terra'
+const DEFAULT_REAL_CODEX_MODEL = 'gpt-6-sol'
 const REAL_CODEX_HOSTED_CONFIG_OVERRIDES = [
   'allow_login_shell=false',
   'features.plugins=false',
@@ -1411,18 +1411,19 @@ describeRealCodex('real Codex voice memo attachment evidence e2e', () => {
   )
 })
 
-describeRealCodex('real Codex Astra configuration e2e', () => {
-  it('saves Astra exactly once for the next Edge query', async () => {
+describeRealCodex('real Codex GPT-6 configuration e2e', () => {
+  it.each(['astra', 'sol', 'luna'] as const)('saves GPT-6 %s exactly once for the next query', async (variant) => {
+    const selectedModel = `gpt-6-${variant}` as const
     const config = await resolveRealCodexE2eConfig()
     const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-astra-selection-'))
     const updates: unknown[] = []
     const snapshot: import('@murphai/hosted-execution/runtime-control').HostedRuntimeAssistantConfigurationSnapshot = {
-      availableModels: ['gpt-5.6-luna', 'gpt-5.6-terra', 'gpt-5.6-sol', 'gpt-6-astra'],
+      availableModels: ['gpt-6-sol', 'gpt-6-luna', 'gpt-5.6-luna', 'gpt-5.6-sol', 'gpt-6-astra'],
       availableProviders: ['openai'] as const,
       availableReasoningEfforts: ['low', 'medium', 'high', 'xhigh'] as const,
       configurationAvailable: true,
       dormantSolPreference: false,
-      model: 'gpt-5.6-terra' as const,
+      model: 'gpt-5.6-luna' as const,
       provider: 'openai' as const,
       reasoningEffort: 'low' as const,
       solAvailable: true,
@@ -1448,7 +1449,7 @@ describeRealCodex('real Codex Astra configuration e2e', () => {
           },
           computerToolsAvailable: false,
           currentAssistantInputId: () => 'ain_00000000000000000000000000000061',
-          currentAssistantTarget: () => ({ model: 'gpt-5.6-terra', provider: 'openai', reasoningEffort: 'low' }),
+          currentAssistantTarget: () => ({ model: 'gpt-6-sol', provider: 'openai', reasoningEffort: 'low' }),
           currentHostedDeliveryContext: () => null,
           currentHostedMailboxItemIds: () => [],
           sendVaultFile: async () => ({ filename: 'unused', status: 'denied' }),
@@ -1456,15 +1457,15 @@ describeRealCodex('real Codex Astra configuration e2e', () => {
         },
         model: config.model,
         modelProvider: config.modelProvider,
-        prompt: 'I am on the paid Edge plan. Please use GPT-6 Astra for my future queries. Keep my provider and reasoning settings as they are.',
+        prompt: `I am on the paid Edge plan. Please use GPT-6 ${variant} for my future queries. Keep my provider and reasoning settings as they are.`,
         reasoningEffort: 'low',
         sandbox: 'workspace-write',
         vaultRoot: workingDirectory,
         workingDirectory,
       })
-      process.stdout.write(`[astra-selection-e2e] ${JSON.stringify({ reply: result.finalMessage, updates: updates.length })}\n`)
-      expect(updates).toEqual([{ action: 'update', assistantInputId: 'ain_00000000000000000000000000000061', model: 'gpt-6-astra' }])
-      expect(result.finalMessage).toMatch(/Astra/iu)
+      process.stdout.write(`[gpt6-selection-e2e] ${JSON.stringify({ model: selectedModel, reply: result.finalMessage, updates: updates.length })}\n`)
+      expect(updates).toEqual([{ action: 'update', assistantInputId: 'ain_00000000000000000000000000000061', model: selectedModel }])
+      expect(result.finalMessage).toMatch(new RegExp(variant, 'iu'))
       expect(result.finalMessage).toMatch(/next|future|going forward/iu)
       expect(result.finalMessage).not.toMatch(/upgrade|payment|cannot|unable/iu)
       expect(readCapabilityRoutingActions(result.jsonEvents).filter((action) => action.kind === 'command')).toEqual([])
@@ -2775,7 +2776,7 @@ describe('real Codex live fixture contracts', () => {
   }, 120_000)
 
   it('uses production Responses websocket configuration for canonical provider journeys', () => {
-    const toml = buildRealCodexConfigToml({ apiKeyEnv: 'OPENAI_API_KEY', model: 'gpt-5.6-terra', modelProvider: 'openai-env', productionTransport: true })
+    const toml = buildRealCodexConfigToml({ apiKeyEnv: 'OPENAI_API_KEY', model: 'gpt-6-sol', modelProvider: 'openai-env', productionTransport: true })
     expect(toml).toContain('wire_api = "responses"')
     expect(toml).toContain('supports_websockets = true')
     expect(toml).toContain(`base_url = "${OPENAI_CODEX_MODEL_PROVIDER_CONFIG.baseUrl}"`)
@@ -2783,7 +2784,7 @@ describe('real Codex live fixture contracts', () => {
     expect(toml.split('[model_providers.')[0]).not.toContain('OPENAI_API_KEY')
   })
   it('executes canonical gate CLI commands and rejects an unknown command without a model', async () => {
-    const fixture = await createCanonicalLiveFixture({ codexHome: null, env: { PATH: process.env.PATH }, model: 'gpt-5.6-terra', modelProvider: 'openai-env' })
+    const fixture = await createCanonicalLiveFixture({ codexHome: null, env: { PATH: process.env.PATH }, model: 'gpt-6-sol', modelProvider: 'openai-env' })
     try {
       const codex = await execFileAsync(fixture.codexCommand, ['-c', 'default_permissions="murph-member-read"', 'features', 'list'], { env: fixture.env, timeout: 60_000 })
       expect(codex.stdout.trim()).not.toBe('')
@@ -6298,7 +6299,7 @@ describeRealCodex('real Codex preference source e2e', () => {
           personalizationTool: {
             async request(request, authority) {
               if (request.action === 'read') return { action: 'read', result: {
-                mainPersona: 'classic', model: 'gpt-5.6-terra', solAvailable: true,
+                mainPersona: 'classic', model: 'gpt-6-sol', solAvailable: true,
                 supportingPersona: null, tone: 'casual', voice: 'warm',
               } }
               writes.push({ request, authority })
@@ -6319,7 +6320,7 @@ describeRealCodex('real Codex preference source e2e', () => {
               expect(authority).toMatchObject({ assistantInputId: later })
               expect(request).toEqual({ action: 'update', tone: 'formal' })
               return { action: 'update', result: {
-                mainPersona: 'classic', model: 'gpt-5.6-terra',
+                mainPersona: 'classic', model: 'gpt-6-sol',
                 modelChangeAppliesNextRun: false, modelUpdated: false, solAvailable: true,
                 status: 'saved', supportingPersona: null, tone: 'formal', voice: 'warm',
               } }
@@ -8957,7 +8958,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
                         action: 'read',
                         result: {
                           mainPersona: 'classic',
-                          model: 'gpt-5.6-terra',
+                          model: 'gpt-6-sol',
                           solAvailable: true,
                           supportingPersona: null,
                           tone: 'casual',
@@ -8970,7 +8971,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
                         action: 'update',
                         result: {
                           mainPersona: 'classic',
-                          model: 'gpt-5.6-terra',
+                          model: 'gpt-6-sol',
                           modelChangeAppliesNextRun: false,
                           modelUpdated: false,
                           solAvailable: true,
@@ -13445,7 +13446,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
 describeRealCodex('real Codex generated-music fallback e2e', () => {
   it('shared schema: honors the canonical song limit in a subscription Terra code-only journey', async () => {
     const config = await resolveRealCodexE2eConfig({
-      sourceEnv: { ...process.env, MURPH_REAL_CODEX_AUTH: 'subscription', MURPH_REAL_CODEX_MODEL: 'gpt-5.6-terra' },
+      sourceEnv: { ...process.env, MURPH_REAL_CODEX_AUTH: 'subscription', MURPH_REAL_CODEX_MODEL: 'gpt-6-sol' },
     })
     const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-shared-schema-song-'))
     const isolatedHomePaths: string[] = []
@@ -26332,7 +26333,7 @@ describeRealCodex('real Codex personalization schema e2e', () => {
     const snapshot = {
       mainPersona: 'classic' as const, supportingPersona: null,
       tone: 'casual' as const, voice: 'classic' as const,
-      model: 'gpt-5.6-terra' as const, solAvailable: true,
+      model: 'gpt-6-sol' as const, solAvailable: true,
     }
     try {
       const codexCommand = normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? 'codex'
@@ -27083,7 +27084,7 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
             },
             vaultFileSendAvailable: false,
           },
-          model: 'gpt-5.6-terra',
+          model: 'gpt-6-sol',
           modelProvider: config.modelProvider,
           prompt: [
             `My knee rehabilitation condition is saved as ${conditionId}.`,
@@ -27185,7 +27186,7 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
           entityId: conditionId,
           entityKind: 'condition',
         }])
-        expect(['gpt-5.6-luna', 'gpt-5.6-terra']).toContain(
+        expect(['gpt-5.6-luna', 'gpt-6-sol']).toContain(
           savedRequest.assistantTargetOverride?.model,
         )
         if (savedRequest.schedule.kind === 'dailyLocal') {
@@ -28288,7 +28289,7 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
         /recovery/iu,
         /decid|recommend|train|recover/iu,
       ],
-      expectedModel: 'gpt-5.6-terra',
+      expectedModel: 'gpt-6-sol',
       expectedScheduleKind: 'recurring',
       occurrenceProjection: { status: 'pending' as const },
       prompt: [
@@ -29337,13 +29338,13 @@ describe('real Codex app-server cache usage e2e harness', () => {
   it('writes provider-key config without embedding the provider key value', () => {
     const configToml = buildRealCodexConfigToml({
       apiKeyEnv: 'PROVIDER_AUTH',
-      model: 'gpt-5.6-terra',
+      model: 'gpt-6-sol',
       modelProvider: OPENAI_ENV_MODEL_PROVIDER,
     })
     const hostedPermissionConfigToml = buildRealCodexHostedPermissionConfigToml({
       codexHome: null,
       env: {},
-      model: 'gpt-5.6-terra',
+      model: 'gpt-6-sol',
       modelProvider: OPENAI_ENV_MODEL_PROVIDER,
       providerApiKeyEnv: 'PROVIDER_AUTH',
       temporaryPaths: [],
@@ -29352,7 +29353,7 @@ describe('real Codex app-server cache usage e2e harness', () => {
       buildRealCodexHostedPermissionConfigToml({
         codexHome: null,
         env: {},
-        model: 'gpt-5.6-terra',
+        model: 'gpt-6-sol',
         modelProvider: OPENAI_SUBSCRIPTION_MODEL_PROVIDER,
         providerApiKeyEnv: null,
         temporaryPaths: [],

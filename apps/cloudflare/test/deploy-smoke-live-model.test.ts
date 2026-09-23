@@ -8,7 +8,7 @@ import {
 
 describe("deploy live model turn smoke", () => {
   it("uses Terra for the bounded live deploy smoke", () => {
-    expect(DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL).toBe("gpt-5.6-terra");
+    expect(DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL).toBe("gpt-6-sol");
   });
 
   it("reads only the top-level OpenAI Responses model", () => {

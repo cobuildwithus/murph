@@ -17,7 +17,7 @@ import {
   HOSTED_ASSISTANT_PROVIDERS,
   HOSTED_ASSISTANT_REASONING_EFFORTS,
   HOSTED_ASSISTANT_SOL_MODEL,
-  HOSTED_ASSISTANT_TERRA_MODEL,
+  HOSTED_ASSISTANT_DEFAULT_MODEL,
   type HostedAssistantProductModel,
   type HostedAssistantReasoningEffort,
 } from '@murphai/hosted-execution/assistant-model'

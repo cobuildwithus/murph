@@ -202,7 +202,7 @@ export function registerModelCommands(
         description: 'Save a Codex model id without re-running onboarding.',
         options: {
           preset: 'codex',
-          model: 'gpt-5.6-terra',
+          model: 'gpt-6-sol',
         },
       },
     ],

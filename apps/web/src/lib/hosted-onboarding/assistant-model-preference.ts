@@ -6,12 +6,15 @@ import {
 } from "@prisma/client";
 import {
   HOSTED_ASSISTANT_ASTRA_MODEL,
+  HOSTED_ASSISTANT_DEFAULT_MODEL,
   HOSTED_ASSISTANT_DEFAULT_PROVIDER,
+  HOSTED_ASSISTANT_GPT_6_SOL_MODEL,
+  HOSTED_ASSISTANT_GPT_6_LUNA_MODEL,
+  HOSTED_ASSISTANT_VENICE_PROVIDER_MODELS,
   HOSTED_ASSISTANT_DEFAULT_REASONING_EFFORT,
   HOSTED_ASSISTANT_PRODUCT_MODELS,
   HOSTED_ASSISTANT_REASONING_EFFORTS,
   HOSTED_ASSISTANT_SOL_MODEL,
-  HOSTED_ASSISTANT_TERRA_MODEL,
   HOSTED_ASSISTANT_VENICE_PROVIDER,
   isHostedAssistantProductModel,
   isHostedAssistantReasoningEffort,
@@ -293,11 +296,12 @@ export async function updateHostedMemberAssistantConfigurationTx(input: {
     current,
     model: input.model,
     provider: input.provider,
+    storedModel: parseHostedAssistantModelOverride(member.assistantModelPreference),
   });
 
-  const defaultModel = isThreadContainerMember
+  const defaultModel = (input.provider ?? current.provider) === HOSTED_ASSISTANT_VENICE_PROVIDER
     ? HOSTED_ASSISTANT_SOL_MODEL
-    : HOSTED_ASSISTANT_TERRA_MODEL;
+    : HOSTED_ASSISTANT_DEFAULT_MODEL;
   const nextModelPreference = input.model === undefined
     ? member.assistantModelPreference
     : input.model === defaultModel
@@ -379,6 +383,7 @@ function assertHostedAssistantModelSelection(input: {
   current: HostedMemberAssistantModelResolution;
   model: HostedAssistantProductModel | undefined;
   provider: HostedAssistantProvider | undefined;
+  storedModel: HostedAssistantProductModel | null;
 }): void {
   if (input.model === HOSTED_ASSISTANT_SOL_MODEL && !input.current.solAvailable) {
     throw hostedOnboardingError({
@@ -395,6 +400,16 @@ function assertHostedAssistantModelSelection(input: {
       message: "GPT-6 Astra requires an active paid Edge or Max plan.",
     });
   }
+  const selectedModel = input.model ?? input.storedModel;
+  if ((selectedModel === HOSTED_ASSISTANT_GPT_6_SOL_MODEL
+      || selectedModel === HOSTED_ASSISTANT_GPT_6_LUNA_MODEL)
+      && (input.provider ?? input.current.provider) !== HOSTED_ASSISTANT_DEFAULT_PROVIDER) {
+    throw hostedOnboardingError({
+      code: "ASSISTANT_MODEL_REQUIRES_OPENAI",
+      httpStatus: 400,
+      message: "Choose OpenAI to use GPT-6 Sol or Luna.",
+    });
+  }
   if ((input.model ?? input.current.model) === HOSTED_ASSISTANT_ASTRA_MODEL
       && (input.provider ?? input.current.provider) !== HOSTED_ASSISTANT_DEFAULT_PROVIDER) {
     throw hostedOnboardingError({
@@ -407,13 +422,17 @@ function assertHostedAssistantModelSelection(input: {
 
 function resolveEffectiveHostedAssistantModel(input: {
   astraAvailable: boolean;
-  isThreadContainerMember: boolean;
   provider: HostedAssistantProvider;
   solAvailable: boolean;
   storedModel: HostedAssistantProductModel | null;
 }): HostedAssistantProductModel {
-  const defaultModel = input.isThreadContainerMember
-    ? HOSTED_ASSISTANT_SOL_MODEL : HOSTED_ASSISTANT_TERRA_MODEL;
+  const defaultModel = input.provider === HOSTED_ASSISTANT_VENICE_PROVIDER
+    ? HOSTED_ASSISTANT_SOL_MODEL : HOSTED_ASSISTANT_DEFAULT_MODEL;
+  if (input.storedModel !== null
+      && input.provider === HOSTED_ASSISTANT_VENICE_PROVIDER
+      && !HOSTED_ASSISTANT_VENICE_PROVIDER_MODELS[input.storedModel]) {
+    return defaultModel;
+  }
   if (input.storedModel === HOSTED_ASSISTANT_ASTRA_MODEL
       && (!input.astraAvailable || input.provider !== HOSTED_ASSISTANT_DEFAULT_PROVIDER)) {
     return defaultModel;
@@ -436,7 +455,7 @@ export function resolveHostedMemberAssistantModel(
       customInferenceReverificationRequired: false,
       customInferenceSelected: false,
       dormantSolPreference: false,
-      model: HOSTED_ASSISTANT_TERRA_MODEL,
+      model: HOSTED_ASSISTANT_DEFAULT_MODEL,
       provider: HOSTED_ASSISTANT_DEFAULT_PROVIDER,
       reasoningEffort: HOSTED_ASSISTANT_DEFAULT_REASONING_EFFORT,
       solAvailable: false,
@@ -496,7 +515,6 @@ export function resolveHostedMemberAssistantModel(
   const provider = resolveHostedMemberAssistantProvider(member);
   const model = resolveEffectiveHostedAssistantModel({
     astraAvailable,
-    isThreadContainerMember,
     provider,
     solAvailable,
     storedModel: storedModelPreference,
@@ -536,9 +554,7 @@ export function resolveHostedMemberAssistantModel(
     ...(customInferenceOverride
       ? { hostedAssistantCustomInferenceOverride: customInferenceOverride }
       : {}),
-    ...(model !== HOSTED_ASSISTANT_TERRA_MODEL
-      ? { hostedAssistantModelOverride: model }
-      : {}),
+    hostedAssistantModelOverride: model,
     ...(storedProviderOverride
       ? { hostedAssistantProviderOverride: storedProviderOverride }
       : {}),
