@@ -1476,14 +1476,34 @@ and attempt identifiers, nonce values, signatures and error prose are excluded.
 Diagnostics add no database writes or network requests and logging failure cannot
 replace the response or original error.
 
-The Google KMS, Google auth and Vercel OIDC SDKs load only for real KMS operations.
-Ingress-envelope reads verify signatures locally without evaluating those SDKs.
-Concurrent first KMS operations share client construction inside the existing
-`sdk_initialize` deadline/cancellation boundary; auth refresh and RPC policies are
-unchanged. This is Web-only, requires no migration or Worker rollout order, and
-preserves the existing response contract. After deployment, compare first-module
-and slow-fetch phase records with the same Vercel invocation metadata; local
-import benchmarks alone do not establish production latency savings.
+Google auth and Vercel OIDC load only for real KMS operations. Ingress-envelope
+reads verify signatures locally without evaluating those SDKs. The four KMS
+operations use bounded HTTPS REST requests; the KMS RPC SDK, generated protobuf
+and gRPC initialization are absent from this path. Google auth still owns
+Workload Identity token refresh and sharing between concurrent operations.
+
+Concurrent first operations share auth client construction inside the existing
+`sdk_initialize` deadline/cancellation boundary. The `kms_rpc` duration includes
+auth header acquisition, HTTP transport and bounded response consumption. REST
+uses base64 bytes and decimal CRC32C strings; resource binding, verification
+flags and response integrity checks remain mandatory. Redirects are rejected,
+response bodies are capped at 128 KiB, and caller/attempt cancellation aborts
+fetch and response consumption. Known connection failures and HTTP 503/504
+without a valid Google status map to the existing transient/deadline reasons;
+only decrypt may retry once within its existing aggregate deadline. Certificate,
+auth, quota, malformed-response and integrity failures remain terminal.
+
+The existing Web control connection owner records `hosted-control.connect.timing`
+for a failed connection or setup taking at least 250 ms. It records only elapsed
+milliseconds, TLS presence and completion, never destinations or error prose.
+This measures new connection setup, not request handling, reused sockets or
+cross-host clock skew. It adds no requests or waits, and logger failure cannot
+prevent connection completion.
+
+This is Web-only, requires no migration or Worker rollout order, and preserves
+the existing response contract. After deployment, compare first-operation crypto
+and control-connection records with webhook-to-typing milestones. Local import
+benchmarks alone do not establish production latency savings.
 
 ### Vercel setup
 

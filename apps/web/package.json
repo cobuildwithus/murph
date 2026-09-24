@@ -57,7 +57,6 @@
   "dependencies": {
     "@base-ui/react": "1.4.1",
     "@composio/client": "0.1.0-alpha.76",
-    "@google-cloud/kms": "6.0.0",
     "@junction-api/sdk": "1.2.0",
     "@linqapp/sdk": "0.34.0",
     "@lob/lob-typescript-sdk": "1.4.0",

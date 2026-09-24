@@ -1,0 +1,17 @@
+{
+  "publishedOn": "2026-09-24",
+  "order": 100,
+  "item": {
+    "id": "less-message-startup-work",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Less waiting when you send a message",
+    "summary": "Murph does less startup work before processing a message when its messaging service starts fresh.",
+    "details": "The change keeps the same encryption checks and message handling. Response times still depend on service and network conditions.",
+    "relevanceTags": [
+      "messaging",
+      "performance"
+    ],
+    "sourcePullRequests": []
+  }
+}
