@@ -2834,6 +2834,9 @@ describe('assistant experiment onboarding guidance', () => {
     expect(prompt).toContain(
       'For any multi-day or repeated comparison, also read experiment-onboarding',
     )
+    expect(prompt).toContain('For repeated plans, use behavior-followthrough to offer reminders and a check-in proactively.')
+    expect(prompt).not.toContain('add behavior-followthrough only when recurring support matters')
+    expect(groupPrompt).not.toContain('offer reminders and a check-in proactively')
     expect(prompt.match(/Private longitudinal default:/gu) ?? []).toHaveLength(1)
     expect(
       prompt.match(/A reminder, calendar event, check-in, recurring workflow, or tracking plan is a separate action\./gu) ?? [],
