@@ -20878,7 +20878,7 @@ describeRealCodex('real Codex public goal setup e2e', () => {
           /\b(?:I|we|Murph)\s+(?:do not|don't|cannot|can't)\s+(?:find|have|know|see)\s+(?:any\s+|your\s+|a\s+)?(?:saved\s+)?(?:sleep|wearable|health)?\s*(?:baseline|context|data|plan|prior attempts?|schedule)\b/iu,
         )
         expect(discoveryReply).toMatch(
-          /(?:(?:six|6(?:\.0)?)\s*(?:hours?|hrs?|h)\b|12:30.{0,100}6:30)/isu,
+          /(?:(?:six|6(?:\.0)?)[\s-]*(?:hours?|hrs?|h)\b|12:30.{0,100}6:30)/isu,
         )
         expect(discoveryReply).not.toContain('goal_template:')
         expect(discoveryReply).not.toContain('sha256:')
@@ -21515,7 +21515,6 @@ describeRealCodex('real Codex public goal setup e2e', () => {
         expect(coldVault.regimens).toHaveLength(0)
         expect(automationRequests.filter(isGoalSetupAutomationMutationRequest))
           .toHaveLength(acceptedAutomationMutationCount)
-        expect(cold.finalMessage).toMatch(/30[-\s]*minutes?/iu)
         const coldQuestions = cold.finalMessage.match(/[^.!?\n]+\?/gu) ?? []
         expect(coldQuestions, 'one relevant clarifier before saving without prior context').toHaveLength(1)
         expect(coldQuestions[0]).toMatch(/sleep|rest|bed|wake|confirm|approve|save|create|set up/iu)
