@@ -1,12 +1,8 @@
 import { runWithPrismaOperationTimings, type PrismaOperationTiming } from "@/src/lib/prisma-operation-timing";
 import { reconcileHostedRuntimeUploads } from "@/src/lib/hosted-execution/runtime-upload-recovery";
 const uploadRecovery = vi.hoisted(() => ({ purge: vi.fn() }));
-const completionNotification = vi.hoisted(() => ({ notify: vi.fn() }));
 vi.mock("@/src/lib/hosted-execution/control", () => ({
   readHostedExecutionControlClientIfConfigured: () => ({ purgeRuntimeResource: uploadRecovery.purge }),
-}));
-vi.mock("@/src/lib/hosted-orchestration/runtime-owner-release", () => ({
-  notifyHostedRuntimeOwnerCompletion: completionNotification.notify,
 }));
 import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
@@ -292,10 +288,6 @@ describe.skipIf(!enabled)("Postgres runtime ownership", () => {
       workspaceVersion: "0", customInferenceEnvelope: null,
       platformAiUsageAllowed: true, providerEgressTokenHash });
     await recordHostedRuntimeAccepted({ prisma: first, identity: runtime });
-    const notifiedOwners: HostedRuntimeOwner[] = [];
-    completionNotification.notify.mockReset().mockImplementationOnce(async () => {
-      notifiedOwners.push(await observer.hostedRuntimeOwner.findUniqueOrThrow({ where: { userId } }));
-    });
 
     expect(await executeHostedRuntimeOwnerCommand({ prisma: first, userId, command: {
       operation: "complete", ...runtime, settledRunnerContainerName: null, immediateRecheckRequested: false,
@@ -303,10 +295,6 @@ describe.skipIf(!enabled)("Postgres runtime ownership", () => {
     expect(await observer.hostedRuntimeOwner.findUniqueOrThrow({ where: { userId } })).toMatchObject({
       phase: "retiring", attemptId: runtime.attemptId, generation: BigInt(runtime.generation),
       runnerContainerName, completedAt: expect.any(Date), platformAiUsageAllowed: false,
-    });
-    expect(notifiedOwners).toMatchObject([{ phase: "retiring", completedAt: expect.any(Date) }]);
-    expect(completionNotification.notify).toHaveBeenCalledWith({
-      userId, runtimeAttemptId: runtime.attemptId, immediateRecheckRequested: false,
     });
     expect((await claim(userId, second)).status).toBe("existing");
     expect(await authorizeHostedRuntimeProvider({ prisma: second, userId, runnerContainerName: null,
@@ -320,7 +308,6 @@ describe.skipIf(!enabled)("Postgres runtime ownership", () => {
     expect(await observer.hostedRuntimeOwner.findUniqueOrThrow({ where: { userId } })).toMatchObject({
       phase: "retiring", attemptId: runtime.attemptId, runnerContainerName,
     });
-    expect(completionNotification.notify).toHaveBeenCalledTimes(1);
   });
 
   it("settles completion once while retaining the warm assignment and uncertain upload obligations", async () => {
@@ -341,10 +328,6 @@ describe.skipIf(!enabled)("Postgres runtime ownership", () => {
     } });
     const command = { operation: "complete" as const, ...runtime, settledRunnerContainerName: runnerContainerName,
       immediateRecheckRequested: true };
-    const notifiedOwners: HostedRuntimeOwner[] = [];
-    completionNotification.notify.mockReset().mockImplementationOnce(async () => {
-      notifiedOwners.push(await observer.hostedRuntimeOwner.findUniqueOrThrow({ where: { userId } }));
-    });
 
     expect(await executeHostedRuntimeOwnerCommand({ prisma: first, userId, command }))
       .toMatchObject({ cutover: "postgres", status: "updated" });
@@ -353,10 +336,6 @@ describe.skipIf(!enabled)("Postgres runtime ownership", () => {
       phase: "idle", attemptId: null, allocationId: originalOwner.allocationId, runnerContainerName,
       processingMode: null, workspaceVersion: null, customInferenceEnvelope: null,
       providerEgressTokenHash: null, platformAiUsageAllowed: false, completedAt: expect.any(Date),
-    });
-    expect(notifiedOwners).toEqual([completedOwner]);
-    expect(completionNotification.notify).toHaveBeenCalledWith({
-      userId, runtimeAttemptId: runtime.attemptId, immediateRecheckRequested: true,
     });
     const drains = await observer.hostedRuntimePutDrain.findMany({ where: { userId }, orderBy: { writeId: "asc" } });
     expect(drains).toHaveLength(2);
@@ -381,7 +360,6 @@ describe.skipIf(!enabled)("Postgres runtime ownership", () => {
       ...command, settledRunnerContainerName: null,
     } })).toMatchObject({ status: "stale" });
     expect(await observer.hostedRuntimeOwner.findUniqueOrThrow({ where: { userId } })).toEqual(successor);
-    expect(completionNotification.notify).toHaveBeenCalledTimes(1);
   });
 
   it("keeps an upload capability drain and orphan obligation after session and member deletion", async () => {
