@@ -1,6 +1,6 @@
 # Let Web Luna finish the opening exchange
 
-Status: active
+Status: completed
 Created: 2026-09-24
 Updated: 2026-09-24
 
@@ -53,5 +53,7 @@ A short bounded acknowledgement structure replaces unconstrained prose that
 could unnecessarily reintroduce Murph. Final GPT-6 Luna and Sol comparisons passed all eight opening scenarios; replies reviewed Ready.
 Web claim/delivery/dispatch coverage passed 260 tests, including third-reply replay
 and cap checks. Web typecheck, focused lint, complexity guard, and docs drift
-passed. Final review, exact-head CI, prerequisite rollout, and production canary
-remain pending. No user-visible latency claim is made from local Codex timing.
+passed. Changelog fragment/render proof passed 17 tests. Implementation and local proof
+are complete. PR #3689 owns final review, exact-head CI, prerequisite rollout,
+and production canary; it must not merge before PR #3686 runtime convergence. No user-visible latency claim is made from local Codex timing.
+Completed: 2026-09-24

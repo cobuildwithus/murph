@@ -12,6 +12,9 @@
       "messaging",
       "onboarding"
     ],
-    "sourcePullRequests": []
+    "sourcePullRequests": [
+      3686,
+      3689
+    ]
   }
 }
