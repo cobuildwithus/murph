@@ -870,6 +870,32 @@ const CHILD_MODEL_SELECTION_CONFIG_OVERRIDES = [
   'features.multi_agent_v2.expose_spawn_agent_model_overrides=true',
   'features.multi_agent_v2.max_concurrent_threads_per_session=4',
 ] as const
+
+async function readHostedDelegationHintOverrides(): Promise<string[]> {
+  // Read the production owner without a runtime dependency back to its caller.
+  const source = await readFile(new URL('../../assistant-runtime/src/hosted-runtime/codex-config.ts', import.meta.url), 'utf8')
+  return [
+    ['usage_hint_text', 'HOSTED_CODEX_MULTI_AGENT_USAGE_HINT_TEXT'],
+    ['multi_agent_mode_hint_text', 'HOSTED_CODEX_MULTI_AGENT_MODE_HINT_TEXT'],
+    ['subagent_usage_hint_text', 'HOSTED_CODEX_SUBAGENT_USAGE_HINT_TEXT'],
+  ].map(([key, name]) => {
+    const declaration = new RegExp(`const ${name} =\\s*([\\s\\S]*?);$`, 'mu').exec(source)?.[1]?.trim()
+    if (!declaration) throw new Error(`Missing production delegation hint: ${name}`)
+    if (declaration.startsWith('[') && !declaration.endsWith('].join(" ")')) {
+      throw new Error(`Unsupported production delegation hint: ${name}`)
+    }
+    const values = declaration.startsWith('[')
+      ? declaration.slice(0, declaration.indexOf('].join(" ")')).match(/"(?:[^"\\]|\\.)*"/gu)
+      : [declaration]
+    if (!values?.length) throw new Error(`Invalid production delegation hint: ${name}`)
+    const hint = values.map((value) => {
+      const text: unknown = JSON.parse(value)
+      if (typeof text !== 'string') throw new Error(`Invalid production delegation hint: ${name}`)
+      return text
+    }).join(' ')
+    return `features.multi_agent_v2.${key}=${JSON.stringify(hint)}`
+  })
+}
 const REAL_NUTRITION_CARD_CONVERSATION_INPUT = {
   groupConversation: false,
 } as const satisfies Pick<CodexAppServerTurnInput, 'groupConversation'>
@@ -1606,7 +1632,7 @@ describeRealCodex('real Codex child model selection e2e', () => {
 
 describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
   it(
-    'continues the opening while one native child saves real canonical identity',
+    'continues the opening while one native child saves identity and one stall check-in respects silence',
     async () => {
       const config = await resolveRealCodexE2eConfig()
       const workingDirectory = await prepareRealCodexOnboardingDirectory()
@@ -1629,13 +1655,13 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
         const startedAt = Date.now()
         const result = await executeRealCodexAppServerTurn({
           ...turnInput,
-          configOverrides: CHILD_MODEL_SELECTION_CONFIG_OVERRIDES,
+          configOverrides: [...CHILD_MODEL_SELECTION_CONFIG_OVERRIDES, ...await readHostedDelegationHintOverrides()],
           developerInstructions: buildDirectConversationDeveloperInstructions(true, [
             'Visible direct conversation imported from confirmed Web replies:',
             `Murph: ${ASSISTANT_FIRST_CONTACT_WELCOME_MESSAGE}`,
             'Member: Yes, ready.',
             `Murph: ${MURPH_ASSISTANT_ONBOARDING_IDENTITY_QUESTIONS.formal}`,
-          ].join('\n\n'), [], new Date(startedAt).toISOString()),
+          ].join('\n\n'), [], new Date(startedAt).toISOString(), true),
           dynamicTools: [MURPH_AUTOMATION_TOOL],
           env: {
             ...turnInput.env,
@@ -1649,8 +1675,32 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
           hostedToolContext: {
             automationTool: {
               request: async (request) => {
+                if (request.action !== 'save' || request.schedule.kind !== 'at') {
+                  throw new Error('Expected one opening check-in save.')
+                }
                 automationRequests.push(request)
-                throw new Error('Opening identity must not schedule a check-in.')
+                const saved = await upsertAutomation({
+                  vaultRoot: workingDirectory,
+                  slug: request.slug,
+                  title: request.title,
+                  summary: request.summary,
+                  instructions: request.instructions,
+                  schedule: request.schedule,
+                  tags: [...(request.tags ?? [])],
+                  status: 'active',
+                  continuityPolicy: 'fresh',
+                  route: {
+                    channel: 'linq', deliveryTarget: 'synthetic-opening', identityId: null,
+                    participantId: null, threadId: 'synthetic-opening', threadIsDirect: true,
+                  },
+                })
+                return {
+                  action: 'save', automationId: saved.record.automationId, created: saved.created,
+                  effectiveTimeZone: 'America/New_York', lookupId: saved.record.slug,
+                  occurrenceProjection: { nextOccurrenceAt: request.schedule.at, status: 'resolved' },
+                  routeBinding: 'current_conversation', schedule: request.schedule,
+                  status: 'active', updatedAt: saved.record.updatedAt,
+                }
               },
             },
             computerToolsAvailable: false,
@@ -1682,7 +1732,14 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
         expect(result.finalMessage).not.toMatch(/saved|recorded|subagent|checkpoint|still working/iu)
         expect(await readOnboardingPolicyFiles(actions, path.join(workingDirectory, 'skills'))).toEqual([])
         expect(actions.filter((action) => action.kind === 'command' && /memory (?:set-name|upsert|update)/u.test(action.command))).toEqual([])
-        expect(automationRequests).toHaveLength(0)
+        expect(automationRequests).toHaveLength(1)
+        expect(automationRequests[0]).toMatchObject({ action: 'save', slug: 'onboarding-early-stall-check-in' })
+        const checkIn = automationRequests[0]
+        expect(checkIn?.action).toBe('save')
+        if (checkIn?.action !== 'save' || checkIn.schedule.kind !== 'at') {
+          throw new Error('Expected the opening one-shot schedule.')
+        }
+        expect(Math.abs(Date.parse(checkIn.schedule.at) - (startedAt + 15 * 60_000))).toBeLessThan(60_000)
         await waitForWarmCodexBackgroundWork()
         const memory = await readMemoryDocument(workingDirectory)
         const identity = memory.records.map((record) => record.text).join('\n')
@@ -1692,11 +1749,43 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
         expect(identity).toMatch(/guy|male|man/iu)
         const commands = await readFile(commandLogPath, 'utf8')
         expect(commands).toMatch(/memory set-name/u)
-        expect(await showAutomation({ vaultRoot: workingDirectory, slug: 'onboarding-early-stall-check-in' })).toBeNull()
+        const savedCheckIn = await showAutomation({ vaultRoot: workingDirectory, slug: 'onboarding-early-stall-check-in' })
+        expect(savedCheckIn?.status).toBe('active')
+        expect(savedCheckIn?.instructions).toBe(checkIn.instructions)
         process.stdout.write(`[onboarding-opening-saved-e2e] ${JSON.stringify({
           replyMs, allWritesVerifiedMs: Date.now() - startedAt,
           childCount: childUsages.length, memoryRecordCount: memory.records.length, checkInCount: automationRequests.length,
         })}\n`)
+        const occurrenceAt = checkIn.schedule.at
+        for (const scenario of [
+          { label: 'stalled', kind: 'send_message', history: 'Onboarding is still open. The latest message is Murph asking what the member would most like from their health, fifteen minutes ago. No reply or pause request followed.' },
+          { label: 'replied', kind: 'skip', history: 'Onboarding is still open. Murph asked what the member would most like from their health fifteen minutes ago. The latest message is the member answering that they want more energy, one minute ago.' },
+          { label: 'recent question', kind: 'skip', history: 'Onboarding is still open. The conversation continued. The latest message is Murph asking a setup question two minutes ago. No reply or pause request followed.' },
+          { label: 'paused', kind: 'skip', history: 'Onboarding remains incomplete. The member asked to pause setup and continue tomorrow. Murph acknowledged the pause. No later messages followed.' },
+          { label: 'completed', kind: 'skip', history: 'Onboarding is complete. Murph confirmed setup was finished ten minutes ago. No later messages followed.' },
+        ]) {
+          const scheduled = await executeRealCodexAppServerTurn({
+            ...turnInput,
+            developerInstructions: buildScheduledAutomationDeveloperInstructions('direct', 'none')
+              .replaceAll('2026-08-05T13:00:00.000Z', occurrenceAt)
+              .replaceAll('2026-08-05', occurrenceAt.slice(0, 10)),
+            dynamicTools: [], followUpAttachmentAllowed: false,
+            sandbox: 'read-only',
+            prompt: [checkIn.instructions, `Current time: ${occurrenceAt}. This saved one-shot is due now.`,
+              'Complete recent conversation and onboarding state supplied by the host:', scenario.history].join('\n\n'),
+          })
+          const decision = parseAssistantNotificationDecision(scheduled.finalMessage)
+          expect(decision.kind, decision.privateSummary).toBe(scenario.kind)
+          expect(scheduled.followUpRequest).toBeNull()
+          expect(readCapabilityRoutingActions(scheduled.jsonEvents).filter((action) => action.kind === 'dynamic')).toHaveLength(0)
+          if (decision.kind === 'send_message') {
+            expect(decision.text.length).toBeLessThan(360)
+            expect(decision.text).not.toMatch(/automation|internal state|you failed|you ignored/iu)
+            expect(decision.text).not.toContain('What would you most like from your health')
+          }
+          process.stdout.write(`[onboarding-stall-e2e ${scenario.label}] ${decision.kind === 'send_message' ? decision.text : 'skip'}\n`)
+        }
+        expect(await showAutomation({ vaultRoot: workingDirectory, slug: 'onboarding-early-stall-check-in' })).toEqual(savedCheckIn)
       } finally {
         await stopWarmCodexAppServer('onboarding-opening-e2e-complete')
         await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
@@ -2737,6 +2826,24 @@ describe('onboarding policy read detection', () => {
 })
 
 describe('real Codex live fixture contracts', () => {
+  it('loads production delegation hints for the opening identity journey', async () => {
+    const overrides = await readHostedDelegationHintOverrides()
+    expect(overrides).toHaveLength(3)
+    expect(overrides[0]).toContain('Keep independent onboarding saves nonblocking.')
+    expect(overrides[1]).toContain('Murph bounded delegation mode is active;')
+    expect(overrides[2]).toContain('Do not spawn or delegate to another child.')
+    for (const override of overrides) {
+      expect(typeof JSON.parse(override.slice(override.indexOf('=') + 1))).toBe('string')
+    }
+  })
+
+  it('advertises the real automation port in the opening identity journey', () => {
+    const prompt = buildDirectConversationDeveloperInstructions(true, null, [], '2030-01-15T14:00:00.000Z', true)
+    expect(prompt).toContain('Scheduled automation changes for this conversation are available through `murph.automation`.')
+    expect(prompt).not.toContain('Scheduled automation changes are unavailable in this turn.')
+    expect(prompt).toContain('onboarding-early-stall-check-in')
+  })
+
   it('aligns Journal automation instructions with its port and uses real canonical CLI writes', async () => {
     const prompt = buildWeeklyHealthInsightDeveloperInstructions({ hostedAutomationAvailable: true })
     expect(prompt).toContain('Scheduled automation changes for this conversation are available')
@@ -40200,9 +40307,11 @@ function buildDirectConversationDeveloperInstructions(
   assistantHostedDeviceConnectProviders:
     readonly AssistantHostedDeviceConnectProvider[] = [],
   currentInstant: string | null = null,
+  assistantHostedAutomationAvailable = false,
 ): string {
   return buildAssistantSystemPrompt({
     assistantCliContract: null,
+    assistantHostedAutomationAvailable,
     assistantContextSnapshotPrompt,
     assistantHostedDeviceConnectAvailable:
       assistantHostedDeviceConnectProviders.length > 0,

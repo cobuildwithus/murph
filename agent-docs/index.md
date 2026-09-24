@@ -710,3 +710,5 @@ Concurrent standby replenishment and lightweight per-slot readiness are owned by
 [`standby refill`](exec-plans/completed/2026-09-23-standby-refill.md).
 
 Completed implementation evidence: [signup opening simplification](exec-plans/completed/2026-09-23-signup-latency.md).
+
+Early onboarding recovery restoration: [one-time stall check-in](exec-plans/completed/2026-09-23-restore-onboarding-check-in.md).

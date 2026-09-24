@@ -3126,9 +3126,11 @@ describe('assistant Murph onboarding guidance', () => {
     expect(prompt).toContain(
       'For that first-reply fast path, do not read the onboarding skill and do not run `vault-cli assistant onboarding resume-context --format json`.',
     )
-    expect(prompt).toContain('Do not schedule a check-in during this opening exchange.')
-    expect(prompt).not.toContain('onboarding-early-stall-check-in')
-    expect(prompt).not.toContain('Early-stall check-in:')
+    expect(prompt).toContain('Use the host-rendered current clock in these instructions; only if it is absent, read the current clock once.')
+    expect(prompt).not.toContain('Read the current clock once and use `murph.automation`')
+    expect(prompt).toContain('This injected recipe is the explicit exception to requiring a loaded skill for its stable slug.')
+    expect(prompt).toContain('localAt: { date: <target YYYY-MM-DD>, time: <target HH:MM>, timeZone: <current clock IANA timezone> }')
+    expect(prompt).not.toContain('at: <now + 15 minutes, ISO with offset>')
 
     expect(prompt).toContain(
       'hey — what should i call you?',
