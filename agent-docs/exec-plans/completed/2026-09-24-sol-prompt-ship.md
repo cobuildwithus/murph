@@ -1,6 +1,6 @@
 # Final GPT-6 Sol prompt review and shipping
 
-Status: active
+Status: completed
 Created: 2026-09-24
 Updated: 2026-09-24
 
@@ -40,3 +40,16 @@ Fresh official source: https://developers.openai.com/api/docs/guides/latest-mode
 
 - Workout default and terminal support-error replays now pass, including canonical effects and truthful delivery status. A rejected workout payload may recover only if canonical results are correct; unexpected runtime errors remain failures.
 - Goal replay exposed a fixture clock conflict: prompt/handler time was August while the canonical CLI used the current date. The fixture now uses the real clock and derives future accepted dates through existing timezone helpers, preserving exact schedule equality and duplicate prevention.
+
+- Opened https://github.com/cobuildwithus/murph/pull/3691 and linked both member-facing changelog fragments. Parent candidate review is clear; all 21 affected/new/model-changed live journeys have passing latest replays. The retained merged inventory is 375, with Sol the default and the explicitly named Luna canary preserved. No single full merged-inventory green run is claimed.
+- Final Goal proof uses current prompt time and real handler time, future exact accepted local dates through existing timezone helpers, and a relative cold-start review horizon. It passed discovery, canonical Goal/regimen persistence, exactly four accepted schedules, fresh-session reuse without duplicates, and empty-vault clarification without writes. Equivalent “six-hour” phrasing is accepted; repeating the cold-start duration is not an outcome requirement.
+- Final local verification: 62 deterministic live-harness checks, 121 privacy/prompt contracts, 274 merged-owner checks, engine/CLI/Web typechecks, prepared runtime build, complexity guard, and 17 changelog checks pass. The root default Vitest config excluded Web tests; the corrected explicit Web config passed both changelog files.
+- Final ReviewGPT round 1 runs on immutable head `94a7964765c0193acd0ee8685adc91bd49079668`, Eragon lane, full guarded snapshot, `--wait-timeout 240m`, concurrently with CI.
+- CI ran 5,389 Assistant Engine tests: 5,388 passed and one existing broad route-plan digest snapshot was stale for the changed prompt. Refreshed only its direct, group, and scheduled-email expected hashes; maintenance and output-only hashes are unchanged. All 106 planner tests and engine typecheck pass locally after the isolated snapshot correction. This changes no production behavior.
+
+## Final candidate handoff
+
+- Round 1 completed with PASS and zero qualifying findings on `94a7964765c0193acd0ee8685adc91bd49079668`. The captured substantive response identifies the exact head and reviewed prompt, skills, canonical owners, and coverage deletions. Capture/model evidence agrees on GPT-6 Pro; the Eragon waited run completed after approximately 19 minutes with `REVIEW_COMPLETE`. No reviewer finding remains unresolved.
+- The resumed completion owner independently reran all 106 planner tests without snapshot updating and the engine typecheck; both pass. Parent review confirms the only executable-file change since review is three expected prompt digest values, with no changed assertion logic or production behavior.
+- Implementation and local proof are complete. This plan closes with the final snapshot correction. A new pushed head still requires final-head ReviewGPT under the current user instructions, green required CI, current-base mergeability, and the authorized protected merge. Track those release gates in the PR evidence rather than amending this archived plan.
+Completed: 2026-09-24
