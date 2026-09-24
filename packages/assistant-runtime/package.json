@@ -11,6 +11,10 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
+    "./hosted-vault-share-capture-worker": {
+      "types": "./dist/hosted-vault-share-capture-worker.d.ts",
+      "default": "./dist/hosted-vault-share-capture-worker.js"
+    },
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",

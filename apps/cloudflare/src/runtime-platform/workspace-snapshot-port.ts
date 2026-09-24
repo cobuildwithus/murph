@@ -507,7 +507,7 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
 
       let dataKey: string;
       let presignedGet: { expiresAtMs: number; getUrl: string };
-      if (input.preparedSnapshotRestore) {
+      if (input.preparedSnapshotRestore && request.usePreparedRestore !== false) {
         const prepared = requireHostedWorkspaceSnapshotPreparedRestoreForRef({
           prepared: input.preparedSnapshotRestore,
           ref: request.ref,
