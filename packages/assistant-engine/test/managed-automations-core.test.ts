@@ -1378,7 +1378,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       routeValidationProfile: 'hosted',
       vaultRoot,
     })).resolves.toEqual({
-      created: 6,
+      created: 7,
       skipped: 0,
       updated: 0,
     })
@@ -1406,6 +1406,15 @@ describe('applyMurphManagedAutomations core integration', () => {
         deliveryTarget: hostedEmailTarget,
         threadIsDirect: true,
       },
+      status: 'active',
+    })
+    await expect(showAutomation({
+      slug: 'onboarding-early-stall-check-in',
+      vaultRoot,
+    })).resolves.toMatchObject({
+      route: { channel: 'email', deliveryTarget: hostedEmailTarget, threadIsDirect: true },
+      schedule: { kind: 'at', at: '2026-06-09T12:15:00.000Z' },
+      activeUntil: '2026-06-09T12:30:00.000Z',
       status: 'active',
     })
   })

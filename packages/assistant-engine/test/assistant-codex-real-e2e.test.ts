@@ -2824,7 +2824,7 @@ describe('real Codex live fixture contracts', () => {
     const prompt = buildDirectConversationDeveloperInstructions(true, null, [], '2030-01-15T14:00:00.000Z', true)
     expect(prompt).toContain('Scheduled automation changes for this conversation are available through `murph.automation`.')
     expect(prompt).not.toContain('Scheduled automation changes are unavailable in this turn.')
-    expect(prompt).toContain('onboarding-early-stall-check-in')
+    expect(prompt).toContain('Do not schedule a check-in during this opening exchange.')
   })
 
   it('aligns Journal automation instructions with its port and uses real canonical CLI writes', async () => {
