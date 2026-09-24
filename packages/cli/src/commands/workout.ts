@@ -438,7 +438,7 @@ export function registerWorkoutCommands(
       },
     ],
     hint:
-      'Positional text is the note only. Pass structured facts through typed flags. Use workout import-json --input @workout.json for bulk/import payloads or advanced nested fields outside the typed surface.',
+      'Positional text is the note only. Pass structured facts through typed flags. An applicable saved duration default fills an omitted duration; use it without asking the member to repeat or confirm it. A newly stated duration overrides the default. Use workout import-json --input @workout.json for bulk/import payloads or advanced nested fields outside the typed surface.',
     options: withBaseOptions({
       note: z
         .string()
