@@ -1,0 +1,17 @@
+{
+  "publishedOn": "2026-09-24",
+  "order": 100,
+  "item": {
+    "id": "imessage-contact-sharing",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Add Murph to your contacts after signup",
+    "summary": "Murph shares its contact card after your first delivered iMessage, whether you start by texting or sign up through the app or website.",
+    "details": "Sharing follows delivered iMessage activity, with at most one automatic attempt per day. Your iPhone controls when it offers to save the contact. Accounts without an iMessage connection wait until one is established.",
+    "relevanceTags": [
+      "messaging",
+      "onboarding"
+    ],
+    "sourcePullRequests": []
+  }
+}

@@ -1,3 +1,4 @@
+import { queueHostedLinqHomeContactCardAfterDelivery } from "./linq-contact-card-delivery";
 import { handleHostedLinqPollWebhook } from "../hosted-polls/linq-webhook";
 import type {
   Prisma,
@@ -1976,6 +1977,13 @@ async function ingestHostedLinqProviderEventDirect(input: {
       prisma: input.prisma,
       scheduleAfterResponse: input.scheduleAfterResponse,
       service: providerResult.restoreOnboardingLink.service,
+    });
+  } else if (!providerResult.duplicate && input.event.deliveryStatus === "delivered") {
+    await queueHostedLinqHomeContactCardAfterDelivery({
+      chatId: input.event.linqChatId,
+      prisma: input.prisma,
+      scheduleAfterResponse: input.scheduleAfterResponse,
+      service: input.event.service,
     });
   }
   return providerResult;
