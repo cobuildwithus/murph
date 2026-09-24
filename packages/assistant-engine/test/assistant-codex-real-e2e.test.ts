@@ -3346,6 +3346,7 @@ describe('real Codex live fixture contracts', () => {
     expect(hasSavedSupportIssueForTriageMeaning(
       'Your issue was saved for triage, and an account-linked support escalation was recorded.',
     )).toBe(true)
+    expect(hasSavedSupportIssueForTriageMeaning('I saved your report for human triage.')).toBe(true)
     expect(hasRecordedAccountLinkedEscalationMeaning(
       'Your issue was saved for triage, and an account-linked support escalation was recorded.',
     )).toBe(true)
@@ -3542,6 +3543,7 @@ describe('real Codex live fixture contracts', () => {
       'I can book it as soon as you send the date.',
       'Once you give me the day, I can reserve it.',
       'Nothing has been booked yet.',
+      'I will not confirm it until you approve the final price.',
       'What date should I book?',
     ]) {
       expect(hasPendingBookingMeaning(text), text).toBe(true)
@@ -34609,8 +34611,8 @@ function hasNoFurtherWearableCheckinMeaning(message: string): boolean {
 
 function hasSavedSupportIssueForTriageMeaning(message: string): boolean {
   return [
-    /\bissue\b[^.?!\n]{0,80}\b(?:saved|recorded)\b[^.?!\n]{0,80}\btriage\b/iu,
-    /\b(?:saved|recorded)\b[^.?!\n]{0,80}\bissue\b[^.?!\n]{0,80}\btriage\b/iu,
+    /\b(?:issue|report)\b[^.?!\n]{0,80}\b(?:saved|recorded)\b[^.?!\n]{0,80}\btriage\b/iu,
+    /\b(?:saved|recorded)\b[^.?!\n]{0,80}\b(?:issue|report)\b[^.?!\n]{0,80}\btriage\b/iu,
   ].some((pattern) => pattern.test(message))
 }
 
@@ -39236,6 +39238,7 @@ function hasPendingBookingMeaning(text: string): boolean {
 
   return [
     /\bneed (?:the |a )?(?:date|day) first\b/iu,
+    /\b(?:will not|won[’']t) (?:book|reserve|confirm)\b[^.!?\n]{0,60}\buntil\b/iu,
     /\b(?:have not|haven[’']t|not yet|still haven[’']t)\b[^.!?\n]{0,24}\b(?:booked|reserved)\b/iu,
     /\b(?:have not|haven[’']t|not yet|still haven[’']t)\b[^.!?\n]{0,32}\bmade (?:the )?reservation\b/iu,
     /\bnothing\b[^.!?\n]{0,24}\b(?:has been|is) (?:booked|reserved)\b/iu,
