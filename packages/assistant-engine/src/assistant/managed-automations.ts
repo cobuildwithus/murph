@@ -55,6 +55,7 @@ import {
 } from './onboarding-followup-automation.js'
 import {
   seedMurphOnboardingFollowupFromStartedOnboarding,
+  seedMurphOnboardingEarlyStallAutomation,
 } from './onboarding-followup-seed.js'
 import { assistantRouteSupportsGroupRoomModel } from './group-room-model.js'
 
@@ -1145,7 +1146,7 @@ export async function applyMurphManagedAutomations(
 
   if (input.seeds === undefined) {
     reportMurphManagedAutomationDiagnosticStage(input, { stage: 'onboarding_followup' })
-    const followup = await reconcileMurphManagedOnboardingFollowup({
+    const followup = await reconcileMurphManagedOnboardingAutomations({
       ...input,
       defaultRoute: createRoute === undefined ? input.defaultRoute : createRoute,
       now,
@@ -1181,6 +1182,29 @@ export async function applyMurphManagedAutomations(
   }
 
   return result
+}
+
+// Background maintenance owns both opportunities. Activation may continue to
+// enroll only the daily recovery before its welcome delivery.
+async function reconcileMurphManagedOnboardingAutomations(
+  input: Parameters<typeof reconcileMurphManagedOnboardingFollowup>[0],
+): Promise<ApplyMurphManagedAutomationsResult> {
+  const followup = await reconcileMurphManagedOnboardingFollowup(input)
+  if (followup.yielded === true || input.shouldYield?.() === true) {
+    return { ...followup, yielded: true }
+  }
+  const route = await resolveMurphManagedAutomationCreateRoute(input)
+  if (!route) return followup
+  const early = await seedMurphOnboardingEarlyStallAutomation({
+    now: input.now, route, vault: input.vaultRoot,
+    routeValidationProfile: input.routeValidationProfile,
+    shouldYield: input.shouldYield,
+  })
+  return {
+    ...followup,
+    created: followup.created + (early === 'created' ? 1 : 0),
+    ...(early === 'yielded' ? { yielded: true as const } : {}),
+  }
 }
 
 export async function reconcileMurphManagedOnboardingFollowup(

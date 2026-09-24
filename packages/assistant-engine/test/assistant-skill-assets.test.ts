@@ -1853,7 +1853,7 @@ describe('assistant skill assets', () => {
       'A vague opener—including bare “Let’s continue” without a visible onboarding referent—and generic saved records—even a goal plus aspiration readiness and all six areas—do not establish onboarding stage.',
     )
     expect(root.replace(/\s+/gu, ' ')).toContain(
-      'This skill may create only the scheduled early-stall check-in defined in the injected onboarding instructions and the post-completion first-personal-read one-shot defined in `references/return-launch-completion.md`.',
+      'This skill may create only the post-completion first-personal-read one-shot defined in `references/return-launch-completion.md`.',
     )
     for (const movedSection of [
       '## Delegating onboarding work',
@@ -1925,7 +1925,7 @@ describe('assistant skill assets', () => {
       },
       {
         owner: 'system-prompt',
-        rule: 'arm only when handling the answer or skip to the bundled identity question actually asked in this conversation, never on a later resume.',
+        rule: 'Do not schedule a check-in during this opening exchange.',
       },
       {
         owner: 'persistence-recovery-follow-up.md',
@@ -2148,15 +2148,9 @@ describe('assistant skill assets', () => {
     expect(onboardingSystemPrompt).toContain('No progress message is needed for this short exchange')
     expect(onboardingSystemPrompt).toContain('If spawning is unavailable or fails')
     expect(root).not.toContain('every minimal-identity answer that continues onboarding requires both')
-    expect(persistenceReference).not.toContain('slug: "onboarding-early-stall-check-in"')
-    expect(onboardingSystemPrompt).toContain('fifteen minutes after that clock')
-    expect(onboardingSystemPrompt).toContain('that question has gone unanswered for at least ten minutes')
-    expect(onboardingSystemPrompt).toContain('the user has not asked to pause or continue later')
-    expect(onboardingSystemPrompt).toContain('This check-in happens at most once')
-    expect(onboardingSystemPrompt).toContain('If the automation tool is absent or its save fails, continue without retrying or mentioning it.')
+    expect(onboardingSystemPrompt).toContain('Do not schedule a check-in during this opening exchange.')
     for (const text of [onboardingSystemPrompt, root, persistenceReference]) {
-      expect(text).not.toContain('Do not schedule a check-in during this opening exchange.')
-      expect(text).not.toContain('Do not schedule a first-minutes nudge.')
+      expect(text).not.toContain('onboarding-early-stall-check-in')
     }
     expect(onboardingSystemPrompt).toContain('What would you most like from your health')
     expect(onboardingSystemPrompt).toContain("Following through is often the hard part. That's where I can help.")
