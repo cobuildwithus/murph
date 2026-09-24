@@ -707,7 +707,8 @@ First-day priority prefetch correction: [`invocation propagation`](exec-plans/co
 
 Concurrent standby replenishment and lightweight per-slot readiness are owned by
 `apps/cloudflare/README.md`; implementation and proof are tracked in
-[`standby refill`](exec-plans/completed/2026-09-23-standby-refill.md).
+[`standby refill`](exec-plans/completed/2026-09-23-standby-refill.md). Its follow-up removes
+per-slot software validation through [normal standby readiness](exec-plans/completed/2026-09-23-standby-normal-readiness.md).
 
 Completed implementation evidence: [signup opening simplification](exec-plans/completed/2026-09-23-signup-latency.md).
 

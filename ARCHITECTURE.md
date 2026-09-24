@@ -2135,9 +2135,12 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   cold target in the same fleet, but never consumes shared ready inventory.
   Pending targets reconcile before new allocation; uncertain binding or stop
   results retain that exact target and cannot create a second execution owner.
-  The inventory coordinator owns all speculative shell prewarming. Readiness
-  warms the image, heavy runtime, and disposable content-free Codex initialization;
-  the member-specific resident process starts only after workspace restore.
+  The inventory coordinator owns speculative container prewarming through the
+  ordinary startup and health path, with exact image/release and unused-slot checks.
+  Runtime hydration starts in the background as for ordinary containers; actual
+  invocation joins it. Standby launches no disposable Codex process. Deployment
+  validates the software; the member-specific resident process starts only after
+  workspace restore.
   Bound slots never return to inventory or change members. Legacy exact-user and
   ENAM standby references retain their original namespace for recovery and drain;
   they are not fresh allocation paths. One fleet budget includes the temporary
