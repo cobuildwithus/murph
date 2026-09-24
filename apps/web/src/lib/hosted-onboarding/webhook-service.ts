@@ -526,7 +526,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
         if (claim.kind === "unavailable") {
           return;
         }
-        instantOpeningContinuation = claim.openingTone !== undefined;
+        instantOpeningContinuation = claim.opening !== undefined;
         const generationTiming = startHostedOnboardingTiming(
           "hosted-onboarding.webhook.linq.first-turn-generation",
           { openingContinuation: instantOpeningContinuation },
