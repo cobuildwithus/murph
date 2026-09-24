@@ -1791,7 +1791,10 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   to GPT-6 Sol. Active members may select GPT-6 Sol or Luna and the existing
   GPT-5.6 Luna; GPT-5.6 Sol and GPT-6 Astra retain their premium gates.
   Saved Terra preferences now resolve to GPT-6 Sol; other explicit choices stay
-  saved, while a null preference follows the default. At scheduled execution,
+  saved, while a null preference follows the default. New managed recipes and
+  automation guidance use GPT-6 Luna for fixed cues and GPT-6 Sol for contextual
+  work, including the Personal Patterns job. Web opening replies
+  also use GPT-6 Luna. At scheduled execution,
   automation pins use a reviewed OpenAI replacement map: GPT-5.6 Luna becomes
   GPT-6 Luna, and GPT-5.6 Sol or Terra becomes GPT-6 Sol. Provider-neutral
   envelopes and canonical records retain the authored pin; resolution happens

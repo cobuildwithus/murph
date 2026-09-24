@@ -146,6 +146,12 @@ privacy, authorization, or provider boundaries.
   through the first aspiration question, including identity persistence. No skill or resume read is needed for those proven
   exchanges. The onboarding skill owns ambiguous/resumed and later-stage
   conversation policy; the managed automation resumes it when useful.
+- When an imported opening already acknowledged identity and asked the aspiration
+  question, the next full assistant turn delegates those retained source facts to
+  the same bounded identity-save child, without repeating the question or waiting
+  for the save. Visible later corrections or omissions win. Conversation evidence
+  stays durable if the member stops; canonical memory waits for a full turn. This
+  rule adds no separate background root wake or Web memory writer.
 - For eligible new direct text-only iMessage, SMS, and RCS conversations, the existing Web
   Luna path may send at most two replies: the welcome and the bundled identity
   question. The second requires the immediately preceding confirmed canonical

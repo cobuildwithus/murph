@@ -306,7 +306,7 @@ admission alongside existing verified and recovered group behavior.
 | --- | --- | --- |
 | `DATABASE_URL="$LOCAL_POSTGRES_URL" MURPH_TEST_POSTGRES_CONCURRENCY=1 pnpm --dir apps/web test -- hosted-mailbox-engagement-postgres.test.ts` | Opt-in local PostgreSQL proof using transaction-local temporary tables and the production mailbox engagement lookup. | Accepted Telegram/email conversations and meal captures qualify within 28 days; consumed/content-retired conversation metadata remains eligible. Old rows, unrelated members, unknown event families, and system-only work do not qualify. Pair with `hosted-orchestration-reconciliation-facts.test.ts` for inactivity and usage authorization. |
 | `DATABASE_URL="$LOCAL_POSTGRES_URL" MURPH_TEST_POSTGRES_CONCURRENCY=1 pnpm --dir apps/web test:prepared test/hosted-onboarding-linq-terminal-retry-postgres.test.ts` | Opt-in real-PostgreSQL proof for one terminal Linq send retry; requires an isolated loopback test database with the current schema. | Concurrent claims, provider ambiguity, direct/group and multipart recovery, both acceptance/receipt arrival orders, replacement receipt projection, and current route/access/line/chat blocks. Exported first-turn completion covers concurrent delivered/failed receipts, no-receipt acceptance, readable durable mailbox handoff, and replay without another provider send. Companion terminal-retry, HTTP, and delivery-route tests prove exact failure matching, preserved payloads, disabled SDK retries, and post-response scheduling. |
-| `pnpm test:assistant:live -- --test "<name-pattern>"` | Required focused local real-Codex journey for assistant-behavior changes after deterministic proof. Defaults to the local ChatGPT/Codex subscription and `gpt-5.6-terra`; `--auth provider` preserves the isolated provider-key lane. | One selected `assistant-codex-real-e2e.test.ts` journey, including exact required/forbidden effects and printed synthetic replies for manual `Ready`/`Hold` UX review. Routine CI leaves the paid gate unset. |
+| `pnpm test:assistant:live -- --test "<name-pattern>"` | Required focused local real-Codex journey for assistant-behavior changes after deterministic proof. Defaults to the local ChatGPT/Codex subscription and `gpt-6-sol`; `--auth provider` preserves the isolated provider-key lane. | One selected `assistant-codex-real-e2e.test.ts` journey, including exact required/forbidden effects and printed synthetic replies for manual `Ready`/`Hold` UX review. Routine CI leaves the paid gate unset. |
 | `.github/workflows/foreground-reply-state-cardinality.yml` | Every-PR asymptotic gate that requires foreground reply filesystem work to saturate as unrelated persisted state grows. | The shared meter, convention-discovered `*-state-cardinality.test.ts` probes, fail-closed primitive coverage, and maintenance rules are specified in `agent-docs/references/README.md#foreground-reply-state-cardinality`. |
 | `pnpm exec vitest run --config packages/cli/vitest.workspace.ts --no-coverage packages/cli/test/release-script-coverage-audit.test.ts -t 'review-gpt runner|ReviewGPT|review-gpt managed|Product UX|attests one fresh|fails closed marked'` | Focused PR review-tool contracts. | Packet vocabulary and completion outcomes, executable preset selection, full/delta packaging, protected config, and response capture. Narrative wording is not frozen; parent readback owns the realistic serious-bug and material Complexity Collapse thresholds, excluding speculation, minor refactoring, and disclosure findings. |
 | `pnpm exec vitest run --config packages/cli/vitest.workspace.ts --no-coverage packages/cli/test/review-gpt-package-concurrency.test.ts` | Hermetic ReviewGPT packaging format guards. | PR-bound default, `--both`, and `--txt` modes fail before invoking packaging tools or producing and reporting incomplete artifacts; private invocation directories remain empty after each rejection. |
@@ -939,7 +939,7 @@ Assistant-behavior changes use
 deterministic prompt/tool/effect proof. The guarded runner selects only
 `assistant-codex-real-e2e.test.ts`, requires a focused Vitest name pattern, and
 defaults to the authenticated local Codex subscription with
-`gpt-5.6-terra`. Its harness unit tests prove that subscription mode leaves
+`gpt-6-sol`. Its harness unit tests prove that subscription mode leaves
 `CODEX_HOME` unset, passes only the minimal normal-home environment, and cannot
 silently replace the existing isolated provider-key mode. Live scenarios print
 only synthetic reply evidence for human UX review; routine CI keeps the live
@@ -953,7 +953,7 @@ before every shard.
 
 The separate `Assistant Real Model` workflow runs three bounded canonical
 journeys daily or by manual recovery on protected `main` only, using a dedicated sandbox Environment key and
-fixed `gpt-5.6-terra` with the production Responses websocket-enabled setting.
+fixed `gpt-6-sol` with the production Responses websocket-enabled setting.
 `scripts/run-assistant-real-model-gate.ts` preflights all exact names and requires
 one executed passing assertion per scenario; missing configuration and skipped
 tests fail. The journeys exercise production assistant service/tool planning,

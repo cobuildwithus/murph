@@ -926,7 +926,7 @@ describe('applyMurphManagedAutomations', () => {
     expect(insightSeed.schedule.expression).toBe('0 12 * * 0')
     expect(insightSeed.instructions).toContain('On this scheduled weekly run')
     expect(insightSeed.assistantTargetOverride).toEqual({
-      model: 'gpt-5.6-sol',
+      model: 'gpt-6-sol',
       reasoningEffort: 'high',
     })
     expect(insightSeed.instructions).not.toContain('Sunday at noon local time')
@@ -983,7 +983,7 @@ describe('applyMurphManagedAutomations', () => {
       'A monthly check for one user-relevant health friction worth offering help with.',
     )
     expect(seed.assistantTargetOverride).toEqual({
-      model: 'gpt-5.6-sol',
+      model: 'gpt-6-sol',
       reasoningEffort: 'high',
     })
     expect(seed.tags).toContain('murph-managed:monthly-improvement-coach')
@@ -1361,7 +1361,7 @@ describe('applyMurphManagedAutomations', () => {
     )
     expect(patternsUpdateRecord).toMatchObject({
       assistantTargetOverride: {
-        model: 'gpt-5.6-luna',
+        model: 'gpt-6-sol',
         reasoningEffort: 'high',
       },
       schedule: { kind: 'dailyLocal', localTime: expect.any(String) },
@@ -1609,7 +1609,7 @@ describe('applyMurphManagedAutomations', () => {
       title: 'Monthly improvement coach',
     })
     expect(improvementCoachRecord?.assistantTargetOverride).toEqual({
-      model: 'gpt-5.6-sol',
+      model: 'gpt-6-sol',
       reasoningEffort: 'high',
     })
     expect(improvementCoachRecord?.schedule).toEqual({
@@ -2315,7 +2315,7 @@ describe('applyMurphManagedAutomations', () => {
     expect(managedAutomationMocks.records.get(MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID))
       .toEqual(expect.objectContaining({
         assistantTargetOverride: {
-          model: 'gpt-5.6-sol',
+          model: 'gpt-6-sol',
           reasoningEffort: 'high',
         },
         schedule: {
