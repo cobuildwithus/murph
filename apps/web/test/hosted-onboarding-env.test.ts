@@ -26,7 +26,7 @@ describe("readHostedOnboardingEnvironment", () => {
     expect(environment.privyVerificationKey).toBe("privy-verification-key");
     expect(environment.inviteTtlHours).toBe(24 * 7);
     expect(environment.linqFirstContactAdmissionMode).toBe("off");
-    expect(environment.linqFirstContactAdmissionModel).toBe("gpt-5.6-luna");
+    expect(environment.linqFirstContactAdmissionModel).toBe("gpt-6-luna");
     expect(environment.linqFirstContactAdmissionOpenAiApiKey).toBeNull();
     expect(environment.linqInstantStartPhonePrefixes).toEqual([
       "+351",

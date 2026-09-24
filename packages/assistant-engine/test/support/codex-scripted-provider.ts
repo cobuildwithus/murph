@@ -11,7 +11,7 @@ import { fileURLToPath } from 'node:url'
 const SCRIPTED_STUB_KEY_ENV = 'MURPH_SCRIPTED_STUB_KEY'
 export const SCRIPTED_MODEL = 'gpt-5.6-sol'
 const SCRIPTED_MODEL_PROVIDER = 'local-stub'
-const codexCommand = path.resolve(
+const codexCommand = process.env.MURPH_TEST_CODEX_COMMAND?.trim() || path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   '../../node_modules/.bin/codex',
 )

@@ -656,6 +656,12 @@ describe("hosted runtime control contracts", () => {
       .toBeNull();
   });
 
+  it.each(["priority", "fast"])("keeps member pricing standard for the platform-funded %s boost", (serviceTier) => {
+    expect(resolveHostedAiUsageTokenPricingBasis({
+      model: "gpt-6-sol", providerName: "hosted-openai", serviceTier,
+    })).toBe("standard");
+  });
+
   it("uses OpenAI flex token pricing only for supported OpenAI flex models", () => {
     expect(resolveHostedAiUsageTokenPricingBasis({
       model: "gpt-5.6-terra",
@@ -759,6 +765,26 @@ describe("hosted runtime control contracts", () => {
     expect(parseHostedWorkspaceInvocationRequest(workspaceInvocationRequest)).toEqual(
       workspaceInvocationRequest,
     );
+    expect(parseHostedWorkspaceInvocationRequest({
+      ...workspaceInvocationRequest, voiceCallId: "call-synthetic",
+    }).voiceCallId).toBe("call-synthetic");
+    for (const processingMode of ["system_mailbox", "inbox_media_retention"]) {
+      expect(() => parseHostedWorkspaceInvocationRequest({
+        ...workspaceInvocationRequest, voiceCallId: "call-synthetic", processingMode,
+      })).toThrow("Voice reservation requires default processing mode.");
+    }
+    expect(() => parseHostedWorkspaceInvocationRequest({
+      ...workspaceInvocationRequest, voiceCallId: "call:invalid",
+    })).toThrow("Hosted voice input identity is invalid.");
+    expect(parseHostedWorkspaceInvocationRequest({
+      ...workspaceInvocationRequest,
+      hostedAssistantPriorityUntil: "2026-09-24T00:00:00Z",
+      workspace: null,
+    }).hostedAssistantPriorityUntil).toBe("2026-09-24T00:00:00Z");
+    expect(() => parseHostedWorkspaceInvocationRequest({
+      ...workspaceInvocationRequest,
+      hostedAssistantPriorityUntil: 123,
+    })).toThrow("hostedAssistantPriorityUntil");
     expect(() => parseHostedWorkspaceInvocationRequest({
       ...workspaceInvocationRequest,
       budget: {
@@ -2578,6 +2604,12 @@ describe("hosted runtime control contracts", () => {
       hostedAssistantReasoningEffortOverride: "high",
       workspace: null,
     });
+    expect(parseHostedWorkspaceReadResponse({
+      fetchedAt: "2026-09-23T00:00:00Z", hostedAssistantPriorityUntil: "2026-09-24T00:00:00Z", workspace: null,
+    }).hostedAssistantPriorityUntil).toBe("2026-09-24T00:00:00Z");
+    expect(parseHostedWorkspaceReadResponse({
+      fetchedAt: "2026-09-23T00:00:00Z", workspace: null,
+    }).hostedAssistantPriorityUntil).toBeUndefined();
     expect(() => parseHostedWorkspaceReadResponse({
       fetchedAt: "2026-04-26T00:00:02.000Z",
       hostedAssistantAstraAllowed: "true",
@@ -3203,6 +3235,11 @@ it("keeps bounded milestone batches additive to the deployed singleton wire cont
   const events = Array.from({ length: 8 }, () => event);
   expect(parseHostedRuntimeLatencyTraceBatchRequest({ events })).toEqual({ events });
   expect(parseHostedRuntimeLatencyTraceRequest({ event })).toEqual({ event });
+  const runtimeEvents = ["email", "linq", "telegram"].map(source => ({
+    type: "runtime_milestone", source, runtimeAttemptId: "synthetic-attempt",
+    at: event.at, milestone: "checkpoint_publication_expected_by",
+  }));
+  expect(parseHostedRuntimeLatencyTraceBatchRequest({ events: runtimeEvents })).toEqual({ events: runtimeEvents });
   expect(() => parseHostedRuntimeLatencyTraceRequest({ events })).toThrow();
   for (const payload of [{ events: [] }, { events: [...events, event] }, { events, event },
     { events: [{ ...event, type: "runtime_milestone" }] }, { events: [{ ...event, privateText: "synthetic" }] }]) {

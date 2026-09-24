@@ -185,6 +185,8 @@ test("Sidebar exposes Journal and Patterns but keeps the internal Overview route
   assert.match(markup, /href="\/home"[^>]*>\s*<svg/);
   assert.match(markup, /href="\/journal"/);
   assert.match(markup, />Journal<\/a>/);
+  assert.match(markup, /href="\/voice"/);
+  assert.match(markup, />Voice<\/a>/);
   assert.match(markup, /href="\/patterns"/);
   assert.match(markup, />Patterns<\/a>/);
   assert.doesNotMatch(markup, /href="\/overview"/);

@@ -1039,17 +1039,50 @@ Deploy smoke pins the 100% Worker version, verifies the response-reported versio
 
 See [DEPLOY.md](./DEPLOY.md) for the exact GitHub environment surface, lifecycle rules, and smoke workflow.
 
+### Patched Codex runner package
+
+The runner base image owns the native Codex build. Its Dockerfile pins the upstream
+release archive, Rust builder, and matching npm helper package, applies
+`patches/codex-public-live.patch`, and replaces only the CLI. The bundled Code Mode
+host, shell resources, and sandbox helper remain from the same release. The image
+records the upstream revision and patch SHA-256 in `murph-source-revision`.
+Cargo concurrency is capped at two jobs so a high CPU count does not expand the
+native build's memory demand; the upstream release optimization profile is kept.
+
+Public WebRTC sessions restrict browser commands to mute, unmute, and close.
+Instructions and delegated results stay on the native trusted connection; the
+browser receives only call state, transcripts, usage, and bounded protocol notices.
+
+`runner:docker:base` fingerprints both the Dockerfile and patch. The protected
+deployment workflow still forces a source build; its shared Docker layer cache
+can reuse unchanged compilation inputs. Application-only edits therefore do not
+require a native rebuild when that cache is available. A cache miss builds from
+source. Cache-writer protection is a prerequisite for activating the private
+workflow companion; cache timing and deployment are separate rollout evidence.
+
+To update the patch, regenerate it against the exact pinned release, retain its
+focused upstream tests and generated protocol schemas, and run
+`pnpm --dir apps/cloudflare verify:codex-upstream-source`. Keep the release's
+matching npm helpers and sandbox checksum aligned when changing the version.
+Focused upstream Rust tests also need that release's Code Mode helper: a partial
+Cargo build may omit it and fail during startup prewarm before voice is exercised.
+Supply the matching package's `bin/codex-code-mode-host` through the test harness's
+`CARGO_BIN_EXE_codex-code-mode-host` environment variable when it is not built locally.
+The runner permission workflow extracts the actual image's CLI and checks native
+voice input ownership, successive tool-backed turns, provider closure, provider-route
+inventory, and sandbox confinement. Local hosted development uses this same
+image recipe; no manual binary installation or separate release service is needed.
+
 ### Astra model catalog
 
-The native runner image has a default Luna/Terra/Sol catalog and an expanded
+The native runner image has a default GPT-6 Sol/Luna and GPT-5.6 Sol/Luna catalog and an expanded
 `.astra` catalog with `gpt-6-astra` and OpenAI Flex support. The runtime chooses
 the latter only from Web's explicit Max/OpenAI workspace authorization. Missing
 authority, Edge, group, and Venice runtimes retain the default catalog and its
 existing delegation choices. The
-pinned Linux Codex 0.151.0 catalog omits Astra, so the image adds a compatibility
-entry using Sol's shared Responses capabilities when Astra is absent. Murph
-supplies its own base instructions for each turn. Existing native Astra metadata
-is preserved; remove the compatibility branch when the Linux catalog includes it.
+pinned Codex 0.156.1 release supplies every entry natively; the image validates
+its bundled catalog without a separate launch supplement. Murph supplies its own base
+instructions for each turn.
 The Astra context window remains at most 272,000 tokens, verified while building the
 image. This bound lets allowance accounting price cumulative Codex turn and
 subagent usage without mistaking multiple requests for one long-context request.

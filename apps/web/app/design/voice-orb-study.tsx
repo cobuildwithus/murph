@@ -1,15 +1,8 @@
 "use client";
 
-import { useEffect, useRef, useState, type CSSProperties } from "react";
-import Image from "next/image";
-import { createOrbRenderer } from "./voice-orb-shader";
+import { useRef, useState, type CSSProperties } from "react";
+import { VoiceOrb, ORB_PALETTES as PALETTES } from "@/src/components/voice-orb/voice-orb";
 import styles from "./voice-orb-study.module.css";
-
-const PALETTES = [
-  { name: "Iris", image: "/design/voice-orb/iris.png", color: "#6557ff", ink: [0.35, 0.27, 1], mist: [0.73, 0.80, 1] },
-  { name: "Ember", image: "/design/voice-orb/ember.png", color: "#d77652", ink: [0.78, 0.24, 0.16], mist: [1, 0.82, 0.63] },
-  { name: "Sage", image: "/design/voice-orb/sage.png", color: "#7a8c6e", ink: [0.28, 0.43, 0.30], mist: [0.80, 0.88, 0.68] },
-] as const;
 
 export function VoiceOrbStudy() {
   const [palette, setPalette] = useState(0);
@@ -20,94 +13,7 @@ export function VoiceOrbStudy() {
   const [detail, setDetail] = useState(0.5);
   const [size, setSize] = useState(200);
   const [graphicsAvailable, setGraphicsAvailable] = useState(true);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
   const pointer = useRef<[number, number]>([0, 0]);
-  const settings = useRef({ palette, active, paused, speed, detail });
-  const redraw = useRef<() => void>(() => {});
-
-  useEffect(() => {
-    settings.current = { palette, active, paused, speed, detail };
-    redraw.current();
-  }, [palette, active, paused, speed, detail]);
-
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    let renderer = createOrbRenderer(canvas);
-    let frameId = 0;
-    let lastTime = 0;
-    let elapsed = 3;
-    let energy = 0;
-    let visible = true;
-    let lost = false;
-    let position: [number, number] = [0, 0];
-    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)");
-
-    function draw(now: number) {
-      frameId = 0;
-      if (!canvas || lost || !visible || document.hidden) return;
-      if (!renderer) {
-        setGraphicsAvailable(false);
-        return;
-      }
-      const current = settings.current;
-      const moving = !current.paused && !reduced.matches;
-      const delta = lastTime ? Math.min((now - lastTime) / 1000, 0.05) : 0;
-      lastTime = now;
-      const targetEnergy = current.active ? 1 : 0;
-      energy = moving ? energy + (targetEnergy - energy) * Math.min(delta * 5, 1) : targetEnergy;
-      if (moving) elapsed += delta * current.speed * (1 + energy * 1.8);
-      position = moving
-        ? [position[0] + (pointer.current[0] - position[0]) * 0.08,
-           position[1] + (pointer.current[1] - position[1]) * 0.08]
-        : [0, 0];
-      renderer.draw({ time: elapsed, energy, detail: current.detail, pointer: position, ...PALETTES[current.palette] });
-      if (canvas.style.opacity !== "1") {
-        canvas.style.opacity = "1";
-        setGraphicsAvailable(true);
-      }
-      if (moving) frameId = requestAnimationFrame(draw);
-    }
-    function wake() {
-      cancelAnimationFrame(frameId);
-      lastTime = 0;
-      frameId = requestAnimationFrame(draw);
-    }
-    function onLost(event: Event) {
-      event.preventDefault();
-      lost = true;
-      setGraphicsAvailable(false);
-      cancelAnimationFrame(frameId);
-      if (canvas) canvas.style.opacity = "0";
-    }
-    function onRestored() {
-      renderer?.dispose();
-      renderer = canvas ? createOrbRenderer(canvas) : null;
-      lost = false;
-      wake();
-    }
-    const observer = new IntersectionObserver(([entry]) => {
-      visible = entry.isIntersecting;
-      wake();
-    });
-    observer.observe(canvas);
-    canvas.addEventListener("webglcontextlost", onLost);
-    canvas.addEventListener("webglcontextrestored", onRestored);
-    document.addEventListener("visibilitychange", wake);
-    reduced.addEventListener("change", wake);
-    redraw.current = wake;
-    wake();
-    return () => {
-      cancelAnimationFrame(frameId);
-      observer.disconnect();
-      document.removeEventListener("visibilitychange", wake);
-      reduced.removeEventListener("change", wake);
-      canvas.removeEventListener("webglcontextlost", onLost);
-      canvas.removeEventListener("webglcontextrestored", onRestored);
-      renderer?.dispose();
-      redraw.current = () => {};
-    };
-  }, []);
 
   function reset() {
     setPalette(0);
@@ -148,8 +54,7 @@ export function VoiceOrbStudy() {
             onPointerCancel={() => { pointer.current = [0, 0]; }}
             style={{ "--orb-size": `${size}px`, "--orb-color": PALETTES[palette].color } as CSSProperties}
           >
-            <Image className={styles.fallback} src={PALETTES[palette].image} width={640} height={640} alt="" aria-hidden="true" unoptimized priority />
-            <canvas ref={canvasRef} width={640} height={640} aria-hidden="true" />
+            <VoiceOrb size="100%" palette={PALETTES[palette].id} energy={active ? 1 : 0} paused={paused} speed={speed} detail={detail} pointer={pointer} onGraphicsAvailable={setGraphicsAvailable} />
           </button>
           <div className={styles.caption}>
             <p role="status">{active ? "Awake" : "At ease"}<span className={styles.statusDot} /></p>

@@ -10,6 +10,7 @@ import {
   FlaskConical,
   Home,
   Leaf,
+  Mic,
 } from "lucide-react";
 import {
   useEffect,
@@ -66,6 +67,7 @@ const navItems: {
   icon?: ElementType;
 }[] = [
   { label: "Home", href: "/home", icon: Home },
+  { label: "Voice", href: "/voice", icon: Mic },
   {
     label: "Journal",
     href: "/journal",

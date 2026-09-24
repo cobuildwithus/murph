@@ -144,6 +144,7 @@ export function startHostedWorkspaceRestorePreparation(
       const workspaceRead = Object.hasOwn(input.job.request, "workspace")
         ? {
             fetchedAt: new Date().toISOString(),
+            hostedAssistantPriorityUntil: input.job.request.hostedAssistantPriorityUntil,
             workspace: input.job.request.workspace ?? null,
           }
         : signal

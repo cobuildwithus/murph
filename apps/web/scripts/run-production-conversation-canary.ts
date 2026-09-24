@@ -29,7 +29,7 @@ export const CANARY_RESET_TIMEOUT_MS = 300_000;
 export const CANARY_OUTCOME_WAIT_MS = HOSTED_EXECUTION_DEFAULT_RUNNER_IDLE_TTL_MS + 120_000;
 const CANARY_OUTCOME_POLL_MS = 1_000;
 const CANARY_TURNS = [
-  { prompt: "Hey Murph", stage: "welcome" },
+  { prompt: "Hey Murph let's get started with my health!", stage: "welcome" },
   { prompt: "Yes, ready.", stage: "identity-question" },
   { prompt: "My name is Robin. I am 32 and a woman.", stage: "runtime-identity" },
   {
@@ -59,6 +59,7 @@ type LinqProductionCanaryResetResult = {
 
 type LinqProductionCanaryTurnResult = {
   latencyMs: number;
+  senderSendMs: number;
   stage: (typeof CANARY_TURNS)[number]["stage"];
   turn: number;
 };
@@ -106,12 +107,13 @@ export async function runLinqProductionCanary(
         void replyPromise.catch(() => undefined);
         throwCanaryFailure("send-unconfirmed");
       }
+      const senderSendMs = Math.round(performance.now() - sentAt);
       const reply = await replyPromise.catch(() => {
         throwCanaryFailure(`reply-unavailable; turn=${turn}; stage=${stage}; wait_limit_ms=${CANARY_REPLY_WAIT_MS}`);
       });
       const replyAt = performance.now();
       const latencyMs = Math.round(replyAt - sentAt);
-      const turnResult = { latencyMs, stage, turn };
+      const turnResult = { latencyMs, senderSendMs, stage, turn };
       reportTurn?.(turnResult);
       if (latencyMs >= CANARY_REPLY_BUDGET_MS) {
         throwCanaryFailure(
@@ -200,8 +202,14 @@ function assertLinqProductionCanaryReply(input: {
   if (input.turn === 5 && !input.reply.includes(LINQ_PRODUCTION_CANARY_GOAL_TITLE)) {
     throwCanaryFailure("goal-readback-reply-invalid");
   }
-  const isIdentityQuestion = Object.values(MURPH_ASSISTANT_ONBOARDING_IDENTITY_QUESTIONS)
+  const questions = Object.values(MURPH_ASSISTANT_ONBOARDING_IDENTITY_QUESTIONS);
+  // Compare the complete word sequence, tolerating only case and separators.
+  const words = (value: string) => value.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+  const isExactIdentityQuestion = questions
     .some((question) => input.reply === question);
+  const identityMatch = isExactIdentityQuestion ? "exact"
+    : questions.some((question) => words(input.reply) === words(question)) ? "format-only" : "different";
+  const isIdentityQuestion = identityMatch !== "different";
   if (
     (input.turn === 2 && !isIdentityQuestion)
     || (input.turn === 3 && isIdentityQuestion)
@@ -212,7 +220,10 @@ function assertLinqProductionCanaryReply(input: {
       && input.reply === MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE
     )
   ) {
-    throwCanaryFailure("reply-semantics-invalid");
+    // Closed diagnostic categories preserve the failed assertion without logging copy.
+    throwCanaryFailure(
+      `reply-semantics-invalid; turn=${input.turn}; identity_copy=${identityMatch}; welcome_copy=${input.reply === MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE}; reply_chars=${Math.min(input.reply.length, 10000)}`,
+    );
   }
 }
 

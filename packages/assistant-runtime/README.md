@@ -296,3 +296,8 @@ manifest shape come from this package.
 Hosted runner executable lookup is also package-owned: `PATH` is projected from
 the canonical runner image entries plus absolute ambient extras, while forwarded
 and per-user env are not allowed to override it.
+
+System-mailbox preparation reads continuation ownership only when the requested
+selection has eligible items. A selection that neither admits work nor retires
+a covered hint leaves mailbox state untouched; idle housekeeping is not a reason
+to rewrite the mailbox on a fresh conversation's path.

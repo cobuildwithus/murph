@@ -356,6 +356,22 @@ and private memory/room-model maintenance retain
 Flex on failed-attempt retries. Ordinary reminders may retry at Standard after
 a failed Flex attempt. The provider boundary validates model and catalog support
 before selecting Flex; existing bounded failure backoff remains controlling.
+Personal managed OpenAI conversation turns request native Priority processing
+for the first 24 elapsed hours after `HostedMember.createdAt`. The existing
+member configuration query projects a derived expiry through the optional
+workspace-read field into the runtime-owned environment; member and producer
+environment overrides cannot supply it. Each provider attempt checks the expiry,
+provider and model catalog, so warm conversations return to Standard at the
+boundary. Group-container identities, custom providers, scheduled turns and
+explicit Flex requests retain their existing policy. The native per-turn tier
+reset prevents a previous Priority selection sticking to later Standard turns.
+This boost, including the Linq instant first reply and Priority child usage,
+uses Standard member allowance pricing: Murph absorbs the provider premium.
+No new database query, persisted grant, timer or provider retry is introduced.
+The Worker carries the optional expiry alongside the
+prefetched workspace in the typed invocation request; restore preserves it
+without another Web read, including when the prefetched workspace is null.
+
 Personal Patterns resolves each vault identity to a stable daily minute between
 09:00 and 16:59 local time. Existing active
 13:00 records migrate under the cron lock only after running, retrying, or
@@ -1521,9 +1537,8 @@ Web exposes the native field only when its existing assistant-configuration
 resolution confirms that the current managed runtime is authorized for the
 full product-model catalog; missing authority and custom inference fail closed.
 The production image defaults to a catalog containing GPT-6 Sol and Luna plus
-GPT-5.6 Luna and Sol. CLI 0.155.1 uses its native catalog plus the exact Sol/Luna
-entries pinned in `apps/cloudflare/config/codex-gpt6-models.json` from OpenAI
-commit `49e95cc73f4eb2999b1d14f863c009168df6122b`. All GPT-6 entries retain
+GPT-5.6 Luna and Sol. CLI 0.156.1 supplies every entry from its native catalog;
+there is no separate launch-catalog supplement. All GPT-6 entries retain
 the native 272K context limit. The image fails validation for missing entries. Web separately derives Astra authority from the canonical available models
 and managed OpenAI provider; only an explicitly authorized workspace selects the
 expanded image-owned Astra catalog. Missing authority retains the four-model
@@ -2689,6 +2704,178 @@ never the workspace path. Hosted restore stops it before any Codex-home
 replacement or sanitization; the stable cwd separately prevents the process
 from anchoring itself to a workspace inode. Threads receive the current
 workspace through the explicit per-thread `cwd` param.
+
+The native voice attachment uses that same process owner and a read-only,
+ephemeral media thread with no Murph tools. Startup holds the existing process
+slot lock so checkpoints and shutdown join attachment instead of reporting a
+busy backing turn. It can attach to a matching active ordinary turn without
+claiming or releasing that turn; conversation lifetime does not occupy a turn. Native normalization
+emits untrusted inputs to the host, which must durably accept them before using
+the ordinary context, turn, tool, and presentation path. The start response must
+confirm managed input ownership before the browser receives SDP. Voice events
+are consumed before another turn's transcript/event capture. Selected speech is
+explicit, and process shutdown closes native voice before terminating the CLI.
+Only native provider receipts establish confirmed closure and cumulative usage;
+the attachment itself owns no mailbox, billing ledger, or replay. Initial sideband
+attachment failure and established transport loss share one same-call close-only
+attachment under the existing five-second deadline, including cancellation during
+the failed initial join. Cleanup never replays speech or admits delegations. The complete
+hosted journey remains a release gate for the website entry.
+The hosted voice entrypoint derives the identical process launch configuration
+used by ordinary turns. Its media thread may select the configured OpenAI provider
+without replacing a Venice or custom-inference backing target or process.
+Local subscription-backed turns also register that credential-based OpenAI
+provider for media; voice cannot silently use the member's ChatGPT authentication.
+
+The invocation's ephemeral call handle expires an unattached reservation after
+30 seconds. A reserved or connected call counts as foreground activity for the
+routine idle/mailbox handoff decision; explicit processing-mode, provider, policy,
+and shutdown transitions retain their existing authority to end the invocation.
+The clean voice wait sends processing-mode changes through the existing handoff
+handler. The call serializes native input admission and wakes the runtime only after
+the mailbox owner accepts each input. It joins pending admission and trusted usage
+settlement when closing, including cancellation during startup. Selected delivery
+requires the exact call and accepted mailbox ids; the hosted outbox checks runtime
+liveness around speech and owns uncertain sends. Progress delivery has no speech
+port. The invocation now retains its clean workspace while a call is reserved or
+open, using its existing wakeable wait; dirty checkpoint timing and post-checkpoint
+delivery remain independent of media lifetime. Before returning, it synchronously
+stops accepting calls, quiesces its existing background owners, and checks for new
+dirty state. Checkpoint preparation preserves media; invocation cleanup joins
+closure and usage before release. Native voice and ordinary work share one Codex
+configuration preparation promise. The Cloudflare invocation now supplies the
+handle with its signed mailbox and usage ports. An opaque call reservation travels
+through the existing fresh invocation or exact-owner wake; SDP is not job state.
+Before runtime readiness, ordinary wakes may coalesce but call reservations are
+rejected for retry. The wrapper exposes connection/close callbacks and joins
+cleanup even if invocation setup fails. The authenticated Web call controller
+checks origin, member access, consent, and allowance before reservation or connect.
+It returns the existing runtime attempt/generation; subsequent commands retain
+that fence and call id. Closing requires the member session and origin but remains
+available after allowance or consent changes. The OIDC-bound Worker route reads
+the current owner and forwards only to its persisted container target. The
+container uses direct TCP without starting a stopped runner, and the invocation
+checks member, attempt, and generation before touching its existing voice handle.
+Old containers without this capability reject the call; connection retries reuse
+the same offer. SDP travels only in bounded control requests, never in job state.
+
+Public Live egress reuses the runner's signed OpenAI credential and existing
+runtime authority. Creation admits only the bounded native WebRTC/client-delegation
+shape, with browser events limited to media controls and closure. The Worker wraps
+the provider's session id in a stateless, signed reference bound to member,
+attempt, and generation; attachment verifies that exact current owner before
+restoring the provider id upstream. An existing resource remains attachable while
+that owner retires or loses allowance so native cancellation can finish closing it.
+Creation still requires current spend authority. The Worker returns WebSocket
+upgrades unaccepted; native Codex owns frames and closure. There is no call table,
+second sideband, or JavaScript frame relay.
+
+Voice calls cannot be durable automation destinations. A voice-origin save or
+explicit retarget lazily resolves the member's current direct messaging route
+through the existing runtime effects port and signed Web callback. Web retains
+canonical routing authority; the model accepts no target fields. Missing or
+group destinations fail before writing. Inspection and ordinary edits preserve
+the stored route without another routing read. The tool returns its delivery
+channel so Murph can truthfully confirm where a future reminder will arrive.
+This uses the existing automation record and scheduler, with no call table or
+separate notification queue.
+
+The notification lookup adds one serial Web-control request per voice automation
+save or explicit retarget, before the canonical write, with no transport replay
+or alternate-destination fallback. It uses the existing commit timeout (30 seconds
+by default) and caller cancellation. Ordinary text turns and voice automation
+inspection or non-retargeting edits add zero routing calls. For one admitted
+private member, the source-derived database bound is 13 statements plus the
+authority transaction's begin/commit: one nonce insert, at most six authority
+statements during cutover, one container lookup, at most three member/identity/
+routing reads, and two envelope-metadata reads. Steady-state authority uses three
+statements instead of six. There is at most one authority transaction, completed
+before crypto; the conservative connection bound is three for relation loading.
+Decryption covers at most seven private fields and seven distinct roots, with
+the existing crypto owner limiting concurrent unwraps to four. These bounds do
+not grow with conversation history, reminder count, or other members.
+
+The dashboard's Voice page owns only browser media. An explicit Start action
+requests microphone permission, reserves an opaque call, and exchanges one SDP
+offer through authenticated Web control. Readiness retries retain that call and
+offer. Mute disables the local audio track; end, page exit, microphone loss, and
+connection failure release local media before awaiting server closure. A late
+startup cannot reopen an ended call or overwrite a newer call's UI/audio. Browser
+provider events supply bounded answer captions and request closure, but never
+establish trusted settlement. The existing native attachment owns final receipts.
+The shared decorative orb also serves the design playground. The browser call
+owns an optional local amplitude meter for microphone and received audio, and
+disposes it with media before awaiting server closure. Levels are transient UI
+state, never persisted or transmitted. Muting suppresses input motion while
+playback can continue; blocked playback suppresses output motion. The orb's
+call action mutes, and a separate end action closes the call. Graphics or meter
+unavailability does not prevent calls; reduced motion also disables speech scaling.
+
+Normalized input admission uses the existing signed Web callback and encrypted
+mailbox. Its narrow request contains only the call id, native input id, original
+timestamp, and bounded text. Web derives the member from authentication and checks
+the exact active runtime attempt/generation inside the append transaction,
+together with foreground platform usage authority, member access, and consent.
+Crypto preparation precedes that transaction. The stable call/input event identity
+deduplicates an exact retry and rejects changed content. The existing mailbox wake
+runs after commit, including on replay; no call table or new work queue is added.
+
+For one normalized voice input, the source-derived admission bound is two signed
+Web requests sharing the existing 30-second commit deadline (one exact-body replay,
+no alternate destination). Each request inserts one nonce and makes at most two
+key-preparation/append attempts, retrying only an exact active-root mismatch.
+One preparation reads one active ingress envelope and unwraps one root before
+opening the transaction. The existing KMS owner permits two decrypt attempts
+within 25 seconds, with a 10-second per-attempt deadline; authentication is inside
+that deadline. No provider call occurs while the append transaction is open.
+
+The conservative per-attempt database bound is one preparation read plus 26
+transaction statements: six runtime-authority statements during cutover, one
+sponsor lock, at most seven member/access relation reads, one consent read, two
+workspace-existence statements, two root-lock/revalidation statements, two dedupe
+statements, three causal/lane allocation statements, and two item/payload or
+conflict-resolution statements. This deliberately includes missing-workspace and
+relation-loading branches; ordinary steady-state private calls use fewer reads.
+Including both preparation attempts and nonce admission gives at most 55
+statements per Web request, or 110 across its single transport replay, excluding
+transaction-control statements. Attempts within a request are serial and use one
+transaction connection; two replayed server requests can overlap. At most four
+root unwraps/eight KMS decrypt attempts and two application-level post-commit
+Temporal signal calls
+belong to this input across all retries. The known mailbox checkpoint avoids an
+extra signal-time database read. These are source bounds, not measured hosted
+latency or a bound on concurrent member requests. Existing text admission gains
+none of these calls.
+
+Normalized voice inputs use the existing `conversation.message` mailbox shape
+with a call and input identity. The ordinary text admission path persists and
+deduplicates them before notifying a running turn. Successive inputs share a
+blinded call conversation; delivery retains the exact opaque call target.
+Accepted work remains eligible after media closes. The ordinary channel adapter
+requires accepted mailbox input identities and an invocation-bound speech port,
+with no ambient provider or other-channel fallback. Speech joins pending admission
+responses before checking local receipts, because the post-commit wake can run
+backing work before Web's response arrives; it rechecks call liveness afterward.
+Speech is non-idempotent, so uncertain delivery remains governed by the existing
+outbox policy. This channel
+contract does not itself admit a browser call or create a new work queue.
+
+Native Live duration uses the existing immutable hosted usage ledger. The call's
+runtime recorder coalesces cumulative provider updates with one request in flight,
+records non-overlapping intervals, and retains an uncertain charge unchanged for
+the final flush to replay. Flush also joins updates arriving during a completed
+write's promise cleanup, so shutdown retains its hold through final settlement
+and observes any failure. Failed accounting or exhausted allowance closes voice;
+usage notices explicitly suppress fallback delivery on another channel. Pricing
+subtracts cumulative costs so event frequency cannot multiply rounding charges.
+A lost call never resumes normal input or replays uncertain speech. Its native
+sideband owner makes one close-only attachment to the same call, bounded together
+with final-usage draining by the existing five-second shutdown deadline. A provider
+close already observed needs no attachment; failed cleanup remains unconfirmed
+and does not fabricate final usage. The Cloudflare invocation supplies the existing
+platform usage port. A synthetic real-provider hosted journey on native Linux
+verifies durable input, a read-only tool, audible output, confirmed closure, and
+trusted usage settlement.
 
 For established hosted conversation work, the first fresh auto-reply-enabled
 pre-pass Linq or Telegram input candidate staged after restore and final Codex

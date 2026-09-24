@@ -416,6 +416,60 @@ function createDeferred<T = void>() {
 }
 
 describe("startHostedContainerEntrypoint", () => {
+  it("binds voice HTTP commands to the active invocation and releases them with it", async () => {
+    const ready = createDeferred();
+    const release = createDeferred();
+    const connect = vi.fn(async () => "v=0\r\nanswer");
+    const closeCall = vi.fn(async () => ({ providerConfirmed: true, providerSessionId: "synthetic-provider", seconds: 12 }));
+    vi.spyOn(hostedInvocation, "runHostedWorkspaceInvocation").mockImplementation(async (_job, options) => {
+      options.onVoiceReady?.({ connect, closeCall });
+      ready.resolve();
+      await release.promise;
+      return buildWorkspaceRunnerResult();
+    });
+    const server = await startHostedContainerEntrypoint({ port: 0 });
+    servers.push(server);
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("TCP listener missing.");
+    const origin = `http://127.0.0.1:${address.port}`;
+    const invocation = fetch(origin + "/internal/workspace-invocation", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify(buildJobBody({ wake: {
+        event: { kind: "runtime.timer", triggerKind: "runtime_timer", userId: "u1" },
+        eventId: "voice-control", occurredAt: "2026-09-21T12:00:00.000Z",
+      } })),
+    });
+    const command = { userId: "u1", attemptId: "attempt_voice-control", leaseGeneration: "1",
+      callId: "call-synthetic", action: "connect", sdp: "v=0\r\noffer" };
+    const post = (body: unknown) => fetch(origin + "/internal/voice-control", {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body),
+    });
+    try {
+      await ready.promise;
+      for (const change of [{ userId: "other" }, { attemptId: "old" }, { leaseGeneration: "2" }]) {
+        expect(await (await post({ ...command, ...change })).json()).toEqual({ kind: "unavailable" });
+      }
+      expect(connect).not.toHaveBeenCalled();
+      expect(await (await post(command)).json()).toEqual({ kind: "connected", sdp: "v=0\r\nanswer" });
+      expect(connect).toHaveBeenCalledExactlyOnceWith("call-synthetic", command.sdp);
+      const { sdp: _sdp, ...close } = { ...command, action: "close" };
+      expect(await (await post(close)).json()).toEqual({ kind: "closed", providerConfirmed: true, seconds: 12 });
+      expect(closeCall).toHaveBeenCalledExactlyOnceWith("call-synthetic");
+      expect((await post({ ...command, extra: true })).status).toBe(400);
+      expect((await post({ ...command, sdp: "x".repeat(74000) })).status).toBe(413);
+      const malformed = await fetch(origin + "/internal/voice-control", {
+        method: "POST", headers: { "content-type": "application/json" }, body: "private-synthetic-offer",
+      });
+      expect(malformed.status).toBe(400);
+      expect(await malformed.text()).not.toContain("private-synthetic-offer");
+      expect(JSON.stringify(mocks.emitHostedExecutionStructuredLog.mock.calls)).not.toContain("private-synthetic-offer");
+    } finally {
+      release.resolve();
+      await invocation;
+    }
+    expect(await (await post(command)).json()).toEqual({ kind: "unavailable" });
+    expect(connect).toHaveBeenCalledTimes(1);
+  });
   it("serves a lightweight health endpoint", async () => {
     const server = await startHostedContainerEntrypoint({
       port: 0,
@@ -1073,6 +1127,16 @@ describe("startHostedContainerEntrypoint", () => {
     });
 
     await invocationStarted.promise;
+    const pendingVoiceWake = await fetch(`http://127.0.0.1:${address.port}/internal/runtime-wake`, {
+      body: JSON.stringify({
+        attemptId: "attempt_evt_runtime_wake_ready", leaseGeneration: "1",
+        userId: "u1", voiceCallId: "call-synthetic",
+      }),
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    });
+    expect(pendingVoiceWake.headers.get("x-runtime-wake-accepted")).toBe("0");
+    expect(pendingVoiceWake.headers.get("x-runtime-wake-pending")).toBeNull();
     const pendingWake = await fetch(`http://127.0.0.1:${address.port}/internal/runtime-wake`, {
       body: JSON.stringify({
         attemptId: "attempt_evt_runtime_wake_ready",
@@ -1109,7 +1173,7 @@ describe("startHostedContainerEntrypoint", () => {
     nowEpochMs = firstWakeAcceptedAtEpochMs;
     const firstWake = await fetch(`http://127.0.0.1:${address.port}/internal/runtime-wake`, {
       body: JSON.stringify({
-        attemptId: "attempt_evt_runtime_wake_ready", leaseGeneration: "1", userId: "u1",
+        attemptId: "attempt_evt_runtime_wake_ready", leaseGeneration: "1", userId: "u1", voiceCallId: "call-synthetic",
         mailboxWakeHighWater: { conversation: "6", system: "3" },
       }),
       headers: { "content-type": "application/json; charset=utf-8" },
@@ -1152,7 +1216,7 @@ describe("startHostedContainerEntrypoint", () => {
         },
         requestedProcessingMode: "default",
       },
-      { notifiedAtEpochMs: firstWakeAcceptedAtEpochMs, mailboxWakeHighWater: { conversation: "6", system: "3" } },
+      { notifiedAtEpochMs: firstWakeAcceptedAtEpochMs, voiceCallId: "call-synthetic", mailboxWakeHighWater: { conversation: "6", system: "3" } },
       { notifiedAtEpochMs: secondWakeAcceptedAtEpochMs },
     ]);
     expect(invocationResponse.status).toBe(200);
@@ -1186,6 +1250,19 @@ describe("startHostedContainerEntrypoint", () => {
           runtimeWakeHandledAtEpochMs: expect.any(Number),
           workspaceAttemptId: null,
           workspacePendingAttemptId: null,
+        },
+        {
+          activeHostedRunnerJobCount: 1,
+          activeRuntimeWakePending: false,
+          activeRuntimeWakePresent: false,
+          runtimeWakeAccepted: false,
+          runtimeWakeAbsent: false,
+          runtimeWakeMismatch: false,
+          runtimeWakePending: false,
+          runtimeWakeReceivedAtEpochMs: expect.any(Number),
+          runtimeWakeHandledAtEpochMs: expect.any(Number),
+          workspaceAttemptId: null,
+          workspacePendingAttemptId: "attempt_evt_runtime_wake_ready",
         },
         {
           activeHostedRunnerJobCount: 1,

@@ -165,6 +165,8 @@ function cloneConversationMessagePayload(
   value: HostedExecutionConversationMessagePayload,
 ): HostedExecutionConversationMessagePayload {
   switch (value.channel) {
+    case "voice":
+      return { ...value };
     case "linq":
       return {
         ...value,

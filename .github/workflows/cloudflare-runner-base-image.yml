@@ -7,6 +7,7 @@ on:
     paths:
       - ".github/workflows/cloudflare-runner-base-image.yml"
       - "Dockerfile.cloudflare-hosted-runner-base"
+      - "patches/codex-public-live.patch"
       - "apps/cloudflare/scripts/runner-base-image.ts"
       - "apps/cloudflare/scripts/runner-base-image-contract.ts"
       - "apps/cloudflare/package.json"
@@ -27,7 +28,7 @@ jobs:
     name: Publish runner base image
     if: ${{ github.ref == 'refs/heads/main' && github.ref_protected }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:

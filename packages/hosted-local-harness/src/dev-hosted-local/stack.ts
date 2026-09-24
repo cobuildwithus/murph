@@ -2357,10 +2357,7 @@ async function prepareHostedLocalCodexModelCatalog(input: {
     throw new Error("Hosted local dev could not read the bundled Codex model catalog.");
   }
 
-  const catalogText = buildHostedLocalOpenAiCodexModelCatalogText(
-    result.stdout,
-    await readFile(path.join(repoRoot, "apps/cloudflare/config/codex-gpt6-models.json"), "utf8"),
-  );
+  const catalogText = buildHostedLocalOpenAiCodexModelCatalogText(result.stdout);
   await mkdir(path.dirname(input.catalogPath), { mode: 0o700, recursive: true });
   await writeFile(input.catalogPath, catalogText, { encoding: "utf8", mode: 0o644 });
   await chmod(input.catalogPath, 0o644);
@@ -2379,12 +2376,10 @@ function buildHostedLocalCodexCatalogCommandEnv(
   };
 }
 
-function buildHostedLocalOpenAiCodexModelCatalogText(rawCatalog: string, rawLaunchCatalog: string): string {
+function buildHostedLocalOpenAiCodexModelCatalogText(rawCatalog: string): string {
   let parsed: unknown;
-  let launch: unknown;
   try {
     parsed = JSON.parse(rawCatalog);
-    launch = JSON.parse(rawLaunchCatalog);
   } catch (error) {
     throw new Error("Hosted local dev received an invalid Codex model catalog.", {
       cause: error,
@@ -2395,15 +2390,8 @@ function buildHostedLocalOpenAiCodexModelCatalogText(rawCatalog: string, rawLaun
     throw new Error("Hosted local dev received a Codex model catalog without a models array.");
   }
 
-  if (!isRecord(launch) || !Array.isArray(launch.models)) {
-    throw new Error("Hosted local dev received an invalid launch model catalog.");
-  }
-  const catalogModels = [
-    ...launch.models.filter(isRecord),
-    ...parsed.models.filter(isRecord).filter((model) =>
-      model.slug !== "gpt-6-sol" && model.slug !== "gpt-6-luna" && model.slug !== "gpt-5.6-terra"
-    ),
-  ];
+  const catalogModels = parsed.models.filter(isRecord)
+    .filter((model) => model.slug !== "gpt-5.6-terra");
   parsed.models = catalogModels;
 
   for (const slug of HOSTED_LOCAL_OPENAI_PRODUCT_MODEL_SLUGS) {

@@ -1,7 +1,8 @@
 import { buildRuntimeProcessingSummaryEntry, recordRuntimeProcessingSummary, type RuntimeProcessingDiagnostics } from "../../user-runner/diagnostics.ts";
-import { readPostgresRunnerStatus, reconcilePostgresRuntimeConsent } from "../../runtime-user-control.ts";
+import { controlPostgresRuntimeVoice, readPostgresRunnerStatus, reconcilePostgresRuntimeConsent } from "../../runtime-user-control.ts";
 import {
   emitHostedExecutionStructuredLog,
+  parseHostedVoiceControlRequest,
 } from "@murphai/hosted-execution";
 import type {
   HostedRuntimeEnsureProcessingRequest,
@@ -75,6 +76,25 @@ const runtimeEnsureProcessingRoute = {
   wrongMethodResponse: "method-not-allowed",
 } satisfies DeclarativeRoute<WorkerRouteContext>;
 
+const voiceControlRoute = {
+  authorizeBeforeMethod: true,
+  authorization: "vercel-oidc",
+  beforeMethod(context, params) {
+    return requireBoundInternalRouteUser(context, params, "voice-control");
+  },
+  async handle(context, params) {
+    const body = await readCachedRequestText(context, { limitBytes: 72 * 1024 });
+    let command;
+    try { command = parseHostedVoiceControlRequest(JSON.parse(body)); }
+    catch { return json({ error: "Invalid voice command." }, 400); }
+    return json(await controlPostgresRuntimeVoice(context.env, decodeRouteParam(params.userId), command));
+  },
+  match: (pathname) => matchCloudflareHostedControlUserRoutePath("voiceControl", pathname),
+  methods: [CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS.voiceControl.method],
+  name: "voice-control",
+  wrongMethodResponse: "method-not-allowed",
+} satisfies DeclarativeRoute<WorkerRouteContext>;
+
 const runtimeHealthDataConsentRoute = {
   authorizeBeforeMethod: true,
   authorization: "vercel-oidc",
@@ -117,6 +137,7 @@ const userStatusRoute = {
 } satisfies DeclarativeRoute<WorkerRouteContext>;
 
 export const runtimeProcessingRoutes = [
+  voiceControlRoute,
   runtimeEnsureProcessingRoute,
   runtimeHealthDataConsentRoute,
 ] as const;
@@ -177,7 +198,7 @@ export async function handleRuntimeEnsureProcessingRoute(
     );
     commandTimeoutMs = readRuntimeEnsureProcessingCommandTimeoutMs(context.request.headers);
     const authorizationKind = readPresentedWorkerRouteAuthorization(context.request);
-    if (ensureRequest.admission && authorizationKind !== "vercel-oidc") {
+    if ((ensureRequest.admission || ensureRequest.voiceCallId) && authorizationKind !== "vercel-oidc") {
       throw new TypeError("Runtime admission may only be supplied by authenticated Web requests.");
     }
     orchestration = readRuntimeEnsureProcessingOrchestrationDiagnostics(

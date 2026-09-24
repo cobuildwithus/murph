@@ -3,6 +3,11 @@
 Workspace-private shared runtime-state helpers for Murph packages that need explicit local state
 next to a vault without turning that state into canonical product truth.
 
+Directory locks publish their complete metadata through one atomic directory
+rename. The unpublished metadata file needs no separate atomic rename; its
+private permissions and the existing ownership and stale-lock checks remain
+required.
+
 ## Scope
 
 - root `@murphai/runtime-state` exports the worker-safe hosted email/env/loopback helpers plus pure hosted bundle identity types/equality used by shared contracts

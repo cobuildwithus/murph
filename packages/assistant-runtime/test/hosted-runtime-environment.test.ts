@@ -104,11 +104,12 @@ test("hosted runtime config copies user and forwarded env maps", () => {
   assert.notEqual(normalized.userEnv, userEnv);
 });
 
-test("hosted runtime config rejects platform-owned asset-root env overrides from every producer", () => {
+test("hosted runtime config rejects platform-owned asset-root and priority env overrides from every producer", () => {
   const platform = createHostedRuntimePlatformStub();
   const normalized = normalizeHostedAssistantRuntimeConfig(
     {
       forwardedEnv: {
+        HOSTED_ASSISTANT_PRIORITY_UNTIL: "2099-01-01T00:00:00Z",
         MURPH_HEALTH_COMMONS_PACKAGE_ROOT: "/tmp/attacker-health-commons",
         MURPH_ASSISTANT_CLI_SURFACE_PREBUILT_ARTIFACT_PATH: "/tmp/attacker-contract.json",
         MURPH_ASSISTANT_SKILLS_ROOT: "/tmp/attacker-skills",
@@ -117,6 +118,7 @@ test("hosted runtime config rejects platform-owned asset-root env overrides from
       resolvedConfig: createHostedRuntimeResolvedConfig(),
       userEnv: {
         ANTHROPIC_API_KEY: "anthropic-secret",
+        HOSTED_ASSISTANT_PRIORITY_UNTIL: "2099-01-01T00:00:00Z",
         MURPH_HEALTH_COMMONS_PACKAGE_ROOT: "/tmp/attacker-health-commons",
         MURPH_ASSISTANT_CLI_SURFACE_PREBUILT_ARTIFACT_PATH: "/tmp/attacker-contract.json",
         MURPH_ASSISTANT_SKILLS_ROOT: "/tmp/attacker-skills",
@@ -354,6 +356,7 @@ test("hosted runtime launch spec owns semantic env split and runtime config", ()
       },
       deviceSync: null,
       managedAutoReplyChannels: [
+        { capabilityReady: true, channel: "voice" },
         {
           capabilityReady: true,
           channel: "email",

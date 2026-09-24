@@ -18,6 +18,26 @@ export function createHostedWebMailboxPort(input: {
   transport: HostedWebControlTransport;
 }) {
   return {
+    async admitVoiceInput(
+      request: Parameters<NonNullable<NonNullable<HostedRuntimePlatform["mailboxPort"]>["admitVoiceInput"]>>[0],
+    ) {
+      const payload = await fetchHostedWebControlPlaneJson({
+        body: request,
+        boundUserId: input.boundUserId,
+        description: "Hosted voice input admission",
+        fetchImpl: input.fetchImpl,
+        route: HOSTED_RUNNER_WEB_CONTROL_ROUTES.voiceInput,
+        replayOnceOnRetryableFailure: true,
+        timeoutMs: input.timeoutMs,
+        transport: input.transport,
+      });
+      if (typeof payload !== "object" || payload === null
+        || !("mailboxItemId" in payload) || typeof payload.mailboxItemId !== "string"
+        || !payload.mailboxItemId.trim()) {
+        throw new TypeError("Hosted voice input admission response is invalid.");
+      }
+      return { mailboxItemId: payload.mailboxItemId };
+    },
     async fetch(
       request: Parameters<NonNullable<HostedRuntimePlatform["mailboxPort"]>["fetch"]>[0],
       context?: Parameters<NonNullable<HostedRuntimePlatform["mailboxPort"]>["fetch"]>[1],

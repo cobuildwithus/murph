@@ -31,6 +31,7 @@ import {
 import {
   type AssistantCodexModelProviderConfig,
   HOSTED_CHATGPT_OPENAI_CODEX_MODEL_PROVIDER_ID,
+  HOSTED_OPENAI_CODEX_MODEL_PROVIDER_ID,
   HOSTED_CUSTOM_INFERENCE_CODEX_MODEL_PROVIDER_ID,
   HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID,
   HOSTED_LOCAL_TEST_VENICE_CODEX_MODEL_PROVIDER_ID,
@@ -629,6 +630,9 @@ export function buildHostedCodexConfigToml(input: {
   const operatorModelProvider = resolveHostedOperatorModelProvider(modelProviderId);
   const providerConfigLines = [
     ...buildHostedCodexProviderTomlLines(input),
+    ...(input.chatGptAuth ? buildHostedCodexProviderTomlLines({
+      provider: { ...OPENAI_CODEX_MODEL_PROVIDER_CONFIG, id: HOSTED_OPENAI_CODEX_MODEL_PROVIDER_ID },
+    }) : []),
     ...(operatorModelProvider === modelProviderId ? [] : buildHostedCodexProviderTomlLines({
       provider: {
         ...OPENAI_CODEX_MODEL_PROVIDER_CONFIG,

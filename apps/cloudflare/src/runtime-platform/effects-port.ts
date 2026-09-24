@@ -8,7 +8,10 @@ import type {
 import {
   parseHostedOperatorTaskControlResponse,
 } from "@murphai/hosted-execution";
-import { parseHostedExternalThreadRouteAuthorityResponse } from "@murphai/hosted-execution/parsers";
+import {
+  parseHostedExternalThreadRouteAuthorityResponse,
+  parseHostedExecutionAssistantNotificationRoute,
+} from "@murphai/hosted-execution/parsers";
 import {
   parseHostedExecutionResolvedLinqDeliveryRoute,
   HOSTED_RUNTIME_LINQ_DELIVERY_BLOCK_CODES,
@@ -337,6 +340,28 @@ export function createCloudflareEffectsPort(input: {
               );
             }
             return deliveryTarget;
+          },
+          async resolveMemberNotificationRoute(context) {
+            const description = "Hosted member notification route";
+            const payload = await fetchHostedWebControlPlaneJson({
+              body: {},
+              boundUserId: input.boundUserId,
+              description,
+              fetchImpl: input.fetchImpl,
+              headers: await requireHostedEffectsRuntimeWriteFenceHeaders({
+                description,
+                workspaceCheckpointBridge: input.workspaceCheckpointBridge ?? null,
+              }),
+              route: HOSTED_RUNNER_WEB_CONTROL_ROUTES.memberNotificationRoute,
+              signal: context?.signal ?? null,
+              timeoutMs: input.timeoutMs,
+              transport: webControlTransport,
+            });
+            if (!payload || typeof payload !== "object" || !("route" in payload)) {
+              throw new TypeError("Hosted member notification route response is invalid.");
+            }
+            return payload.route === null ? null
+              : parseHostedExecutionAssistantNotificationRoute(payload.route, description);
           },
           async assertLinqRecentInboundEngagement(request, context) {
             const payload = await fetchHostedWebControlPlaneJson({

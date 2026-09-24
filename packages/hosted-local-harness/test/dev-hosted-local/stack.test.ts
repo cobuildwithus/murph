@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { constants, readFileSync } from "node:fs";
+import { constants } from "node:fs";
 import { access, copyFile, cp, readFile, rename, rm, symlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { Writable } from "node:stream";
@@ -591,9 +591,6 @@ function createDeferred<T>(): {
 }
 
 function readRunnerBundleManifestFixture(filePath: unknown): string | null {
-  if (String(filePath).endsWith("codex-gpt6-models.json")) {
-    return readFileSync(new URL("../../../../apps/cloudflare/config/codex-gpt6-models.json", import.meta.url), "utf8");
-  }
   return String(filePath).endsWith(".murph-runner-bundle-manifest.json")
     ? defaultRunnerBundleManifestText
     : null;
@@ -3109,7 +3106,7 @@ describe("hosted local dev stack", () => {
       stdout: "{not-json",
     },
     {
-      expectedMessage: "Hosted local dev Codex model catalog is missing gpt-5.6-sol.",
+      expectedMessage: "Hosted local dev Codex model catalog is missing gpt-6-sol.",
       stdout: JSON.stringify({ models: [] }),
     },
   ])(

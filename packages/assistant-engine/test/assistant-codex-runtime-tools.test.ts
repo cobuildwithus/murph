@@ -17,6 +17,7 @@ import {
   readWrittenRpcMessages,
   requireMockChildProcess,
   sentProgressResult,
+  waitForMockCall,
   waitForRpcMessages,
   waitForRpcMethod,
   waitForRpcMethodCount,
@@ -1297,6 +1298,99 @@ describe('assistant codex runtime', () => {it('fails closed on unexpected app-se
       sessionId: 'thread-progress-unsupported',
     })
     expect(progressDelivery.send).not.toHaveBeenCalled()
+  })
+
+  it('establishes fresh and warm turn identity before batched tools and drains their work', async () => {
+    const workingDirectory = await createTempDir('assistant-codex-batched-owner-work-')
+    const codexHome = await createTempDir('assistant-codex-batched-owner-home-')
+    const child = new MockChildProcess()
+    codexMocks.spawn.mockReturnValue(child)
+
+    for (const ordinal of [1, 2]) {
+      const threadId = `thread-batched-owner-${ordinal}`
+      const turnId = `turn-batched-owner-${ordinal}`
+      const toolRequestId = 900 + ordinal
+      const releaseTool = createDeferred<void>()
+      const settled = vi.fn()
+      const deviceRequest = vi.fn(async () => {
+        await releaseTool.promise
+        return {
+          accounts: [],
+          action: 'list_accounts' as const,
+          provider: null,
+          sourceProvider: null,
+        }
+      })
+      const execution = executeCodexAppServerTurn({
+        codexHome,
+        hostedToolContext: {
+          ...createHostedToolContext(),
+          deviceTool: { request: deviceRequest },
+        },
+        prompt: 'Read the connected devices.',
+        workingDirectory,
+      }).then((result) => {
+        settled()
+        return result
+      })
+      if (ordinal === 1) {
+        const initialize = await waitForRpcMethod(child, 'initialize')
+        child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+      }
+      const thread = await waitForRpcMethodCount(child, 'thread/start', ordinal)
+      child.stdout.write(jsonLine({ id: thread.id, result: { thread: { id: threadId } } }))
+      const turn = await waitForRpcMethodCount(child, 'turn/start', ordinal)
+      const response = { id: turn.id, result: { turn: { id: turnId } } }
+      // One physical stdout batch and no turn/started notification: the RPC
+      // response must establish identity synchronously, not in a .then(). A
+      // duplicate response must not replace that identity or enter the journal.
+      child.stdout.write([
+        response,
+        { id: turn.id, result: { turn: { id: 'turn-stale-response' } } },
+        { id: 'unknown-response', error: { code: -32603, message: 'stale response' } },
+        {
+          id: toolRequestId,
+          method: 'item/tool/call',
+          params: {
+            arguments: { action: 'list_accounts' },
+            namespace: 'murph',
+            threadId,
+            tool: 'device',
+            turnId,
+          },
+        },
+        {
+          method: 'item/completed',
+          params: {
+            item: { id: `answer-${ordinal}`, type: 'agentMessage', text: 'Devices checked.' },
+            threadId,
+            turnId,
+          },
+        },
+        { method: 'turn/completed', params: { threadId, turn: { id: turnId, status: 'completed' } } },
+      ].map(jsonLine).join(''))
+
+      try {
+        await waitForMockCall(deviceRequest, 1)
+        expect(settled).not.toHaveBeenCalled()
+        await expect(stopWarmCodexAppServer('batched-tool-still-draining')).rejects.toMatchObject({
+          code: 'ASSISTANT_CODEX_APP_SERVER_BUSY',
+          context: { state: 'running' },
+        })
+      } finally {
+        releaseTool.resolve(undefined)
+      }
+      await expect(waitForRpcResponse(child, toolRequestId)).resolves.toMatchObject({
+        id: toolRequestId,
+        result: { success: true },
+      })
+      const result = await execution
+      expect(result).toMatchObject({ finalMessage: 'Devices checked.', sessionId: threadId, turnId })
+      expect(result.jsonEvents.filter((event) => asRecord(event).id === turn.id)).toEqual([response])
+      expect(result.jsonEvents.some((event) => asRecord(event).id === 'unknown-response')).toBe(false)
+      expect(deviceRequest).toHaveBeenCalledTimes(1)
+    }
+    expect(codexMocks.spawn).toHaveBeenCalledTimes(1)
   })
 
   it('requires exact active-turn identity for invocation-scoped root tools', async () => {

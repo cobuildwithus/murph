@@ -1,4 +1,5 @@
 import {
+  HOSTED_INGRESS_LATENCY_SOURCES,
   HOSTED_RUNTIME_LATENCY_TRACE_BATCH_MAX_EVENTS,
   HOSTED_RUNTIME_LATENCY_TRACE_BODY_LIMIT_BYTES,
 } from "@murphai/hosted-execution/runtime-control";
@@ -8,9 +9,36 @@ import type {
   HostedRuntimeAssistantMilestone,
   HostedRuntimeLatencyTraceAssistantMilestoneEvent,
   HostedRuntimeLatencyTraceRequest,
+  HostedRuntimeLatencyTraceMilestone,
+  HostedRuntimeLatencyTraceMilestoneEvent,
 } from "@murphai/hosted-execution/runtime-control";
 
 import type { HostedRuntimePlatform } from "./platform.ts";
+
+export function recordHostedRuntimeLatencyMilestoneBestEffort(input: {
+  at: string;
+  latencyTracePort?: HostedRuntimePlatform["latencyTracePort"] | null;
+  milestone: HostedRuntimeLatencyTraceMilestone;
+  runtimeAttemptId: string;
+}): void {
+  const port = input.latencyTracePort;
+  if (!port) return;
+  const sources: readonly HostedIngressLatencySource[] = input.milestone === "checkpoint_publication_expected_by"
+    ? HOSTED_INGRESS_LATENCY_SOURCES : ["linq"];
+  const events: HostedRuntimeLatencyTraceMilestoneEvent[] = sources.map(source => ({
+    at: input.at, milestone: input.milestone, runtimeAttemptId: input.runtimeAttemptId,
+    source, type: "runtime_milestone",
+  }));
+  // These events share one timestamp and attempt. Use the existing batch
+  // envelope immediately; no timer or additional telemetry buffer is needed.
+  if (port.recordBatch && events.length > 1) {
+    try { void port.recordBatch({ events }).catch(() => {}); } catch { /* Diagnostic only. */ }
+    return;
+  }
+  for (const event of events) {
+    try { void port.record({ event }).catch(() => {}); } catch { /* Diagnostic only. */ }
+  }
+}
 
 // Keep completion/deadline dependencies in the delivery-only module so shared
 // channel tracing does not add chunks to the runner boot graph.

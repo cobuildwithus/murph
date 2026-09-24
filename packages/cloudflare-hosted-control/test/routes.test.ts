@@ -18,11 +18,15 @@ import {
   buildCloudflareHostedControlTelegramUsageLimitNoticePath,
   buildCloudflareHostedControlUserDataDeletionPath,
   buildCloudflareHostedControlUserStatusPath,
+  buildCloudflareHostedControlVoiceControlPath,
   matchCloudflareHostedControlUserRoutePath,
 } from "../src/routes.ts";
 
 describe("cloudflare hosted control routes", () => {
   it("builds the narrowed internal routes with encoded identifiers", () => {
+    expect(buildCloudflareHostedControlVoiceControlPath("user/a b")).toBe("/internal/users/user%2Fa%20b/runtime/voice");
+    expect(matchCloudflareHostedControlUserRoutePath("voiceControl",
+      buildCloudflareHostedControlVoiceControlPath("user/a b"))).toEqual({ userId: "user%2Fa%20b" });
     expect(buildCloudflareHostedControlBrowserVaultSessionPath("user/a b")).toBe(
       "/internal/users/user%2Fa%20b/browser-vault/session",
     );
@@ -167,6 +171,7 @@ describe("cloudflare hosted control routes", () => {
       mealPhotoDelete: { method: "DELETE", suffix: "meal-photos/delete" },
       mealPhotoStage: { method: "POST", suffix: "meal-photos/stage" },
       runtimeEnsureProcessing: { method: "POST", suffix: "runtime/ensure-processing" },
+      voiceControl: { method: "POST", suffix: "runtime/voice" },
       runtimeResourcePurge: { method: "POST", suffix: "runtime/resource-purge" },
       runtimeHealthDataConsentReconcile: {
         method: "POST",
@@ -239,6 +244,7 @@ describe("cloudflare hosted control routes", () => {
       "buildCloudflareHostedControlTelegramUsageLimitNoticePath",
       "buildCloudflareHostedControlUserDataDeletionPath",
       "buildCloudflareHostedControlUserStatusPath",
+      "buildCloudflareHostedControlVoiceControlPath",
       "matchCloudflareHostedControlUserRoutePath",
     ]);
     expect(routesModule).toMatchObject({

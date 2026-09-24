@@ -5265,6 +5265,65 @@ describe("hosted runtime callbacks", () => {
     vi.useRealTimers();
   });
 
+  it("forwards selected voice delivery through the invocation port and liveness fence", async () => {
+    const effect = createEffect({
+      channel: "voice", bindingDeliveryKind: "thread", bindingDeliveryTarget: "call_synthetic",
+      explicitTarget: "call_synthetic", answeredMailboxItemIds: ["accepted_one", "accepted_two"],
+    });
+    const order: string[] = [];
+    const speak = vi.fn(async () => { order.push("speech"); });
+    const assertLiveness = vi.fn(async () => { order.push("fence"); });
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+      await dependencies.sendVoice({
+        callId: "call_synthetic", message: effect.payload.message,
+        answeredMailboxItemIds: effect.payload.answeredMailboxItemIds,
+      });
+      return createDispatchResult({ delivery: createDelivery({ channel: "voice" }), intentId: effect.effectId, status: "sent" });
+    });
+    await drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect], wake: HOSTED_WAKE.wake,
+      effectsPort: createHostedRuntimeEffectsPortStub(), vaultRoot: HOSTED_WAKE.vaultRoot,
+      platform: { voicePort: { speak } }, assertLiveness,
+    });
+    expect(speak).toHaveBeenCalledExactlyOnceWith({
+      callId: "call_synthetic", message: effect.payload.message,
+      answeredMailboxItemIds: ["accepted_one", "accepted_two"],
+    });
+    expect(order.slice(-3)).toEqual(["fence", "speech", "fence"]);
+  });
+
+  it.each(["missing-call", "revoked-owner"] as const)("refuses voice provider entry for %s", async (reason) => {
+    const speak = vi.fn(async () => {});
+    const abort = new AbortController();
+    const failure = new Error("Synthetic runtime owner revoked");
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+      if (reason === "revoked-owner") abort.abort(failure);
+      const result = dependencies.sendVoice({ callId: "call_synthetic", message: "Selected result", answeredMailboxItemIds: ["accepted_one"] });
+      if (reason === "missing-call") {
+        await expect(result).rejects.toMatchObject({
+          code: "ASSISTANT_VOICE_DELIVERY_UNAVAILABLE", deliveryMayHaveSucceeded: false, retryable: false,
+        });
+      } else {
+        await expect(result).rejects.toBe(failure);
+      }
+      return createDispatchResult({ delivery: null, intentId: "intent_123", status: "failed" });
+    });
+    const drain = drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [createEffect({ channel: "voice" })], wake: HOSTED_WAKE.wake,
+      effectsPort: createHostedRuntimeEffectsPortStub(), vaultRoot: HOSTED_WAKE.vaultRoot,
+      platform: reason === "missing-call" ? null : { voicePort: { speak } }, signal: abort.signal,
+    });
+    if (reason === "revoked-owner") await expect(drain).rejects.toBe(failure);
+    else await drain;
+    expect(mocks.dispatchAssistantOutboxIntent).toHaveBeenCalledOnce();
+    expect(speak).not.toHaveBeenCalled();
+  });
+
+  it("does not expose speech on hosted progress delivery", () => {
+    const dependencies = createHostedAssistantProgressDeliveryDependencies({});
+    expect(dependencies).not.toHaveProperty("sendVoice");
+  });
+
   it("returns sent without re-dispatching when the outbox mirror already has a sent record", async () => {
     const effect = createEffect();
     mocks.readAssistantOutboxIntentMirrorState.mockResolvedValue(

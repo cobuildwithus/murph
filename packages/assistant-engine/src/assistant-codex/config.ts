@@ -67,7 +67,8 @@ export function withHostedCodexModelCatalogConfigOverride(input: {
   ]
 }
 
-export function hasHostedCodexModelCatalogFlexTier(input: {
+export function hasHostedCodexModelCatalogServiceTier(input: {
+  serviceTier: 'flex' | 'priority'
   env?: NodeJS.ProcessEnv
   model?: string | null
 }): boolean {
@@ -96,7 +97,7 @@ export function hasHostedCodexModelCatalogFlexTier(input: {
       : []
     return serviceTiers
       .map(readRecord)
-      .some((tier) => tier?.id === 'flex')
+      .some((tier) => tier?.id === input.serviceTier)
   } catch {
     return false
   }

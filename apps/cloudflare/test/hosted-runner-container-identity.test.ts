@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type {
   HostedWorkspaceState,
 } from "@murphai/hosted-execution/runtime-control";
+import { parseHostedWorkspaceInvocationRequest } from "@murphai/hosted-execution/parsers";
 import {
   HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON,
 } from "@murphai/hosted-execution/orchestration-control";
@@ -121,7 +122,7 @@ describe("hosted runner container identity", () => {
       stateStore,
     });
     const prepared = service.prepareWithFence({
-      input: { orchestrationAttemptId: "parallel-inputs", userId: TEST_USER_ID },
+      input: { orchestrationAttemptId: "parallel-inputs", userId: TEST_USER_ID, voiceCallId: "call-synthetic" },
       token,
     });
     try {
@@ -130,7 +131,7 @@ describe("hosted runner container identity", () => {
     } finally {
       workspaceGate.resolve();
       cryptoGate.resolve();
-      await prepared;
+      expect((await prepared).job.request.voiceCallId).toBe("call-synthetic");
     }
     expect(started).toHaveLength(2);
   });
@@ -407,6 +408,47 @@ describe("hosted runner container identity", () => {
     expect(forwardedEnv?.OPENAI_API_KEY).not.toBe(sourceOpenAiKey);
     expect(forwardedEnv?.VENICE_API_KEY).toEqual(expect.any(String));
     expect(forwardedEnv?.VENICE_API_KEY).not.toBe(sourceVeniceKey);
+  });
+
+  it.each([false, true])("preserves first-day priority through invocation parsing (existing workspace: %s)", async (existing) => {
+    const stateStore = createPreparationOwnerFixture();
+    const workspace = existing ? {
+      createdAt: FIXED_NOW,
+      snapshotRef: null,
+      updatedAt: FIXED_NOW,
+      userId: TEST_USER_ID,
+      version: "0",
+    } : null;
+    const beforeWorkspaceRead = vi.fn(async () => {});
+    for (const hostedAssistantPriorityUntil of ["2026-06-04T00:00:00.000Z", undefined]) {
+      const service = createRuntimeInvocationPreparation({
+        beforeWorkspaceRead,
+        hostedAssistantPriorityUntil,
+        invokedContainerNames: [],
+        runnerRuntimeEnvSource: {
+          HOSTED_ASSISTANT_PROVIDER: "openai",
+          HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET: "synthetic-signing-secret",
+          OPENAI_API_KEY: "test-openai-key",
+        },
+        stateStore,
+        workspace,
+      });
+      const token = await stateStore.beginWriteFence({
+        runnerContainerName: TEST_USER_ID,
+        userId: TEST_USER_ID,
+      });
+      const prepared = await service.prepareWithFence({
+        input: { orchestrationAttemptId: "priority-prefetch", userId: TEST_USER_ID },
+        token,
+      });
+      const request = parseHostedWorkspaceInvocationRequest(JSON.parse(JSON.stringify(prepared.job.request)));
+      expect(request.hostedAssistantPriorityUntil).toBe(hostedAssistantPriorityUntil);
+      if (workspace) expect(request.workspace).toMatchObject(workspace);
+      else expect(request.workspace).toBeNull();
+      expect(Object.hasOwn(request, "workspace")).toBe(true);
+      expect(prepared.job.runtime?.forwardedEnv).not.toHaveProperty("HOSTED_ASSISTANT_PRIORITY_UNTIL");
+    }
+    expect(beforeWorkspaceRead).toHaveBeenCalledTimes(2);
   });
 
   it("projects the saved reasoning effort into the next runtime invocation", async () => {
@@ -943,6 +985,7 @@ function createRuntimeInvocationPreparation(input: {
   runnerContainerNamespace?: HostedExecutionContainerNamespaceLike;
   beforeWorkspaceRead?: () => Promise<void>;
   hostedAssistantCustomInferenceOverride?: HostedAssistantCustomInferenceOverride;
+  hostedAssistantPriorityUntil?: string;
   hostedAssistantModelOverride?: HostedAssistantModelOverride;
   hostedAssistantProviderOverride?: HostedAssistantProviderOverride;
   hostedAssistantReasoningEffortOverride?: HostedAssistantReasoningEffortOverride;
@@ -966,6 +1009,9 @@ function createRuntimeInvocationPreparation(input: {
       await input.beforeWorkspaceRead?.();
       return ({
       fetchedAt: FIXED_NOW,
+      ...(input.hostedAssistantPriorityUntil
+        ? { hostedAssistantPriorityUntil: input.hostedAssistantPriorityUntil }
+        : {}),
       ...(input.platformAiUsageAllowed === undefined
         ? {}
         : { platformAiUsageAllowed: input.platformAiUsageAllowed }),

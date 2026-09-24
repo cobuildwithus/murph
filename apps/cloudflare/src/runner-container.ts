@@ -19,6 +19,11 @@ import {
   type HostedRuntimeFailurePhaseCode,
   type HostedWorkspaceInvocationProcessingMode,
 } from "@murphai/hosted-execution/runtime-control";
+import {
+  parseHostedVoiceControlResponse,
+  type HostedVoiceControlRequest,
+  type HostedVoiceControlResponse,
+} from "@murphai/hosted-execution";
 import { methodNotAllowed } from "./json.ts";
 import {
   HOSTED_RUNNER_OUTBOUND_BY_HOST,
@@ -309,6 +314,7 @@ interface HostedExecutionContainerRunnerInput {
 }
 
 export interface HostedExecutionContainerStubLike extends Partial<HostedRunnerSlotLifecycle> {
+  controlVoice?(input: HostedVoiceControlRequest & { userId: string }): Promise<HostedVoiceControlResponse>;
 
   abortWorkspaceInvocation?(input: {
     attemptId: string;
@@ -580,6 +586,7 @@ export interface RunnerRuntimeWakeDiagnostics {
 }
 
 export interface RunnerRuntimeWakeInput {
+  voiceCallId?: string;
   mailboxWakeHighWater?: import("@murphai/hosted-execution/runtime-control").HostedMailboxWakeHighWater;
   attemptId: string;
   leaseGeneration: string;
@@ -1616,6 +1623,31 @@ export class RunnerContainer extends Container {
         };
       }
       throw error;
+    }
+  }
+
+  async controlVoice(input: HostedVoiceControlRequest & { userId: string }): Promise<HostedVoiceControlResponse> {
+    this.authorizeBoundUser(input.userId);
+    if (this.isPlatformContainerDefinitelyStopped()) return { kind: "unavailable" };
+    const active = this.readWorkspaceInvocationOperation();
+    if (this.workspaceInvocationNoPointerAbort || this.warmShellInvalidatedByUnsettledDestroy
+      || (active && (!runnerWorkspaceInvocationMatchesWake(active, input)
+        || active.abortController.signal.aborted))) return { kind: "unavailable" };
+    const stopGeneration = this.stopGeneration;
+    try {
+      // Direct TCP only: a control command must never start a stopped container.
+      const response = await this.ctx.container!.getTcpPort(RUNNER_PORT).fetch(
+        "http://container/internal/voice-control", {
+          method: "POST", headers: { "content-type": "application/json" },
+          body: JSON.stringify(input), signal: AbortSignal.timeout(40_000),
+        },
+      );
+      if (stopGeneration !== this.stopGeneration) return { kind: "unavailable" };
+      if (!response.ok) return { kind: "unavailable" };
+      return parseHostedVoiceControlResponse(await response.json());
+    } catch {
+      // The native invocation retains the exact offer. A retry cannot create a second call.
+      return { kind: "not_ready" };
     }
   }
 

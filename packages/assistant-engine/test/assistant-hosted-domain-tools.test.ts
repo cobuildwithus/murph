@@ -16,6 +16,12 @@ describe('hosted domain dynamic tools', () => {
     expect(resolveMurphDynamicTools({})).not.toContain(MURPH_DEVICE_TOOL)
     expect(resolveMurphDynamicTools({})).not.toContain(MURPH_AUTOMATION_TOOL)
     expect(MURPH_AUTOMATION_TOOL.deferLoading).toBe(true)
+    expect(MURPH_AUTOMATION_TOOL.description).toContain(
+      'During a voice call, save and explicit retarget use the member\'s connected messaging destination',
+    )
+    expect(MURPH_AUTOMATION_TOOL.description).toContain(
+      'Confirm the returned deliveryChannel without calling it this conversation or promising delivery in the call',
+    )
 
     const enabled = resolveMurphDynamicTools({
       automationAvailable: true,
@@ -1032,6 +1038,7 @@ describe('hosted domain dynamic tools', () => {
       action: 'save' as const,
       automationId: 'automation-weekly-check-in',
       created: true,
+      deliveryChannel: 'telegram',
       contextReferences: [],
       effectiveTimeZone: 'America/New_York',
       lookupId: 'weekly-check-in',
@@ -1074,6 +1081,7 @@ describe('hosted domain dynamic tools', () => {
     expect(readResultPayload(result)).toMatchObject({
       action: 'save',
       effectiveTimeZone: 'America/New_York',
+      deliveryChannel: 'telegram',
       occurrenceProjection: {
         status: 'resolved',
       },
