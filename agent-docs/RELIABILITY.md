@@ -1996,23 +1996,15 @@ to apply after cutover.
   fail-soft to the completed personal import and foreground reply, but they do
   not consume the existing dirty or system-mailbox recording obligation; that
   owner reuses its bounded device-sync continuation before acknowledgement.
-  Active-scope resolution is a side-effect-free network read and receives the
-  owning invocation's abort signal. Once
-  scopes resolve, the runtime materializes all selected records before releasing
-  its restored-vault ownership; a wake during those bounded local reads is
-  observed after capture drains, and the capture is discarded without delivery.
-  Delivery remains owned by the same invocation. Once immutable delivery
-  starts, foreground conversation work may proceed without waiting for
-  publication. The first foreground preemption marks the remaining captured
-  scopes deferred: the current scope reaches a terminal boundary, no later scope
-  starts, and the partial offer reports preempted rather than aggregating its
-  successful prefix as complete. That stop bit belongs only to the active
-  delivery promise; after it settles, a later opportunity starts unpreempted and
-  the existing dirty or recording owner retries every undispatched scope before
-  acknowledgement. The same between-scope predicate observes exact host abort
-  and shutdown before every scope, so those owner-ending conditions drain an
-  active request but never admit a request that has not started. The invocation
-  starts no second projection and does not release its
+  One invocation-owned projection resolves scopes, restores the committed snapshot
+  into private scratch, and captures records in a worker thread. It never reads
+  the live mutable vault. Conversation wakes release the foreground wait without
+  canceling or draining scope lookup, capture, or publication; the task continues
+  across replies. Only one projection may run at a time. Shutdown or exact host
+  abort stops admission, terminates an active capture thread, and drains an active
+  delivery before invocation release. Scratch cleanup follows worker exit. A
+  partial or failed offer leaves the existing dirty or recording obligation
+  replayable; no separate queue or retry owner is added. The invocation retains
   runner ownership until the real proxy-to-Web response is terminal. Web owns a
   finite effect deadline for each delivery, stops admitting destination
   replacements on deadline or request cancellation, and gives the final

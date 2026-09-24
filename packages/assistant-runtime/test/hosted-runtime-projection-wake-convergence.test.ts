@@ -34,10 +34,10 @@ import {
 } from "../src/hosted-runtime/system-mailbox-state.ts";
 import { createCoalescingRuntimeWakeSignal } from "../src/hosted-runtime/runtime-wake.ts";
 
-const completionStages = ["scopes", "delivery", "browser-write", "browser-publish", "acknowledgment", "checkpoint"] as const;
+const completionStages = ["scopes", "capture", "delivery", "browser-write", "browser-publish", "acknowledgment", "checkpoint"] as const;
 type CompletionStage = typeof completionStages[number];
 const scenarios = [
-  ...(["before-completion", "scopes", "delivery"] as const).flatMap((stage) => [
+  ...(["before-completion", "scopes", "capture", "delivery"] as const).flatMap((stage) => [
     { stage, wake: "shutdown" as const },
     { stage, wake: "shutdown without notifications" as const },
   ]),
@@ -101,8 +101,8 @@ test.each(scenarios)(
         id: "mailbox_item_projection_foreground", lane: "conversation", laneSeq: "1",
       }));
       runtimeWakeSignal.notify({ requestedProcessingMode: "default" });
-      if (at === "delivery") {
-        await withRealTimeout(releaseDelivery.promise, 2_000, () => "Foreground waited for projection delivery.");
+      if (at === "delivery" || at === "scopes" || at === "capture") {
+        await withRealTimeout(releaseDelivery.promise, 2_000, () => "Foreground waited for background projection work.");
         return;
       }
       assert.ok(signal, "Interruptible work must receive its owner's cancellation signal.");
@@ -114,7 +114,21 @@ test.each(scenarios)(
     };
     let acknowledgments = 0;
     let scopeReads = 0;
+    let projectionSignal: AbortSignal | null = null;
     let emptyMailboxReads = 0;
+    const withCaptureGate = (platform: ReturnType<typeof createPlatform>) => {
+      const snapshotPort = platform.workspaceSnapshotPort!;
+      return {
+        ...platform,
+        workspaceSnapshotPort: {
+          ...snapshotPort,
+          async restoreWorkspaceSnapshot(request: Parameters<typeof snapshotPort.restoreWorkspaceSnapshot>[0]) {
+            if (request.usePreparedRestore === false) await injectWake("capture", request.signal);
+            return await snapshotPort.restoreWorkspaceSnapshot(request);
+          },
+        },
+      };
+    };
     let settledCheckpointCount = 0;
     const returnedWakes: (string | null)[] = [];
     vi.useFakeTimers({ toFake: ["Date"] });
@@ -185,10 +199,14 @@ test.each(scenarios)(
                 "Import the qualified conversation exactly once before foreground admission.");
               assert.equal(wake, "conversation after empty");
               assert.equal(wakeChecks, 2, "Reuse the prefetched conversation batch for handoff.");
+              if (stage === "scopes" || stage === "capture") {
+                assert.equal(projectionSignal?.aborted, false,
+                  "Foreground must start without canceling the pending projection.");
+              }
               releaseDelivery.resolve();
               throw foregroundReached;
             },
-            platform: createPlatform({
+            platform: withCaptureGate(createPlatform({
               artifactBytesByHash,
               deviceSyncPort: {
                 ...deviceSyncPort,
@@ -235,6 +253,7 @@ test.each(scenarios)(
               vaultSharePort: {
                 async listActiveProjectionScopes(request) {
                   scopeReads += 1;
+                  projectionSignal = request?.signal ?? null;
                   await injectWake("scopes", request?.signal);
                   return {
                     projectionKinds: ["profile-name.v0"],
@@ -270,7 +289,7 @@ test.each(scenarios)(
                   return response;
                 },
               },
-            }),
+            })),
           },
         );
         if (shutdown && invocation === 0 && stage !== "before-completion") {

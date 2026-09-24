@@ -1,0 +1,19 @@
+{
+  "publishedOn": "2026-09-23",
+  "order": 200,
+  "item": {
+    "id": "current-models-for-reminders",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "GPT-6 for opening replies and reminders",
+    "summary": "Murph uses GPT-6 Luna for quick opening replies and simple reminders, with GPT-6 Sol for reminders that need more context.",
+    "details": "Managed check-ins and insights now use GPT-6 defaults. Existing OpenAI reminders already move to the corresponding GPT-6 model when they run; your conversation model and supported alternative-provider choices stay available.",
+    "relevanceTags": [
+      "messaging",
+      "reminders"
+    ],
+    "sourcePullRequests": [
+      3686
+    ]
+  }
+}

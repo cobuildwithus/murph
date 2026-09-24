@@ -146,6 +146,12 @@ privacy, authorization, or provider boundaries.
   through the first aspiration question, including identity persistence. No skill or resume read is needed for those proven
   exchanges. The onboarding skill owns ambiguous/resumed and later-stage
   conversation policy; the managed automation resumes it when useful.
+- When an imported opening already acknowledged identity and asked the aspiration
+  question, the next full assistant turn delegates those retained source facts to
+  the same bounded identity-save child, without repeating the question or waiting
+  for the save. Visible later corrections or omissions win. Conversation evidence
+  stays durable if the member stops; canonical memory waits for a full turn. This
+  rule adds no separate background root wake or Web memory writer.
 - For eligible new direct text-only iMessage conversations, the existing Web
   Luna path may send at most three replies: the welcome, bundled identity
   question, and a brief acknowledgement with the aspiration question. Each
@@ -158,10 +164,8 @@ privacy, authorization, or provider boundaries.
   the full assistant, including goals supplied while accepting the welcome.
   The third reply accepts partial identity or skipping only identity details.
   Existing encrypted conversation import carries both sides and suppresses
-  duplicate replies. The next full assistant turn owns canonical identity saves
-  from that retained transcript through its existing native leaf; if the member
-  stops, memory waits and the source conversation remains durable. Deploy that
-  runtime catch-up instruction before enabling the third Web reply.
+  duplicate replies. Deploy the runtime catch-up instruction above before
+  enabling the third Web reply.
   Container/process warmup retains its existing owner; this flow adds no
   speculative model turn, Web memory writer, or preparation mailbox.
 - The skill uses one package-owned progressive-disclosure asset. Its top-level

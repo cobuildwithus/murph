@@ -77,7 +77,7 @@ export class CacheReplayDiagnostics {
     const input = Array.isArray(body.input) ? body.input.map(object) : []
     const tools = [body.tools ?? [], ...input.filter((item) => item.type === 'additional_tools').map((item) => item.tools)]
     const settings = {
-      model: allowed(body.model, ['gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-5.6-sol', 'gpt-6-astra']),
+      model: allowed(body.model, ['gpt-6-sol', 'gpt-6-luna', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-5.6-sol', 'gpt-6-astra']),
       reasoningEffort: allowed(object(body.reasoning).effort, ['none', 'minimal', 'low', 'medium', 'high', 'xhigh']),
       requestedServiceTier: allowed(body.service_tier, ['auto', 'default', 'flex', 'priority']),
       cacheKeyFingerprint: this.fingerprint(body.prompt_cache_key),

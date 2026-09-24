@@ -6329,7 +6329,7 @@ describe('assistant cron runtime orchestration', () => {
     expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledTimes(1)
   })
 
-  it('skips unchanged Personal Patterns before model entry and resumes Luna high on the next changed occurrence', async () => {
+  it('skips unchanged Personal Patterns before model entry and resumes Sol high on the next changed occurrence', async () => {
     vi.useFakeTimers()
     const occurrenceAt = '2026-04-08T13:00:00.000Z'
     vi.setSystemTime(new Date(occurrenceAt))
@@ -6359,7 +6359,7 @@ describe('assistant cron runtime orchestration', () => {
     vi.setSystemTime(new Date(next.state.nextRunAt!))
     await processDueAssistantCronJobsLocal({ executionContext, limit: 1, vault: vaultRoot })
     expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
-      assistantTargetOverride: { model: 'gpt-5.6-luna', reasoningEffort: 'high' },
+      assistantTargetOverride: { model: 'gpt-6-sol', reasoningEffort: 'high' },
       serviceTier: 'flex',
     }))
   })

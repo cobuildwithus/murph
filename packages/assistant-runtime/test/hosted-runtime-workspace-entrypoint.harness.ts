@@ -1069,7 +1069,7 @@ function createPlatform(input: {
       async completeSnapshotSession() { throw new Error("Snapshot publication is injected by each test."); },
       async putSnapshotObjectDirect() { throw new Error("Snapshot publication is injected by each test."); },
       async startSnapshotSession() { throw new Error("Snapshot publication is injected by each test."); },
-      async restoreWorkspaceSnapshot({ durableRoot, ref }) {
+      async restoreWorkspaceSnapshot({ durableRoot, ref, usePreparedRestore }) {
         // Fixture archives use the portable codec; the runtime sees only the v2 port.
         // Encrypted tar transport and staged installation are covered by Cloudflare tests.
         const bytes = await platform.artifactStore.get(ref.archive.plaintextArchiveSha256, { purpose: "workspace_restore" });
@@ -1079,7 +1079,7 @@ function createPlatform(input: {
           await restoreHostedBundleRoots({
             bytes,
             expectedKind: "vault",
-            roots: { vault: path.join(stagedRoot, input.snapshotFixtureVaultRelativePath ?? "") },
+            roots: { vault: path.join(stagedRoot, input.snapshotFixtureVaultRelativePath ?? (usePreparedRestore === false ? "vault" : "")) },
           });
           await rm(durableRoot, { force: true, recursive: true });
           await rename(stagedRoot, durableRoot);

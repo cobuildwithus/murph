@@ -2502,7 +2502,7 @@ describe("hosted workspace runtime entrypoint", () => {test("fresh foreground in
     }
   });
 
-  test("foreground wake interrupts system projection without starving a failed scope", async () => {
+  test("foreground runs alongside system projection without starving a failed scope", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const events: string[] = [];
@@ -2644,7 +2644,7 @@ describe("hosted workspace runtime entrypoint", () => {test("fresh foreground in
                   projectionStarted.resolve();
                   await projectionRelease.promise;
                 }
-                const status = projectionCalls === 3
+                const status = projectionCalls === 5
                   ? "scope-failed" as const
                   : "delivered" as const;
                 events.push(`vault-share.deliver:done:${projectionCalls}:${status}`);
@@ -2728,7 +2728,7 @@ describe("hosted workspace runtime entrypoint", () => {test("fresh foreground in
       assert.equal(retainedItem?.status, "recording");
       assert.ok(retainedItem?.postCheckpointRecord);
       assert.equal(checkpointRequests.length, 1);
-      assert.equal(projectionCalls, 1);
+      assert.equal(projectionCalls, 3);
       assert.equal(activeProjectionCalls, 0);
       assert.ok(
         events.includes("vault-share.deliver:done:1:delivered"),
@@ -2756,14 +2756,16 @@ describe("hosted workspace runtime entrypoint", () => {test("fresh foreground in
         createRunOptions(createCoalescingRuntimeWakeSignal(), resumedWorkspace),
       );
 
-      assert.equal(projectionCalls, 4);
+      assert.equal(projectionCalls, 6);
       assert.deepEqual(projectedKinds, [
         "profile-name.v0",
+        "time-zone.v0",
+        "sleep-times.v0",
         "profile-name.v0",
         "time-zone.v0",
         "sleep-times.v0",
       ]);
-      assert.deepEqual(projectedWorkspaceVersions, ["1", "2", "2", "2"]);
+      assert.deepEqual(projectedWorkspaceVersions, ["1", "1", "1", "2", "2", "2"]);
       assert.equal(peakActiveProjectionCalls, 1);
       assert.equal(dirtyAckCalls, 0);
       assert.ok(
@@ -2772,8 +2774,8 @@ describe("hosted workspace runtime entrypoint", () => {test("fresh foreground in
         events.join(","),
       );
       assert.ok(
-        requireEventIndex(events, "vault-share.deliver:done:3:scope-failed")
-          < requireEventIndex(events, "vault-share.deliver:start:4"),
+        requireEventIndex(events, "vault-share.deliver:done:5:scope-failed")
+          < requireEventIndex(events, "vault-share.deliver:start:6"),
         events.join(","),
       );
       const failedState = await readHostedSystemMailboxState(vaultRoot);
@@ -2803,17 +2805,17 @@ describe("hosted workspace runtime entrypoint", () => {test("fresh foreground in
         createRunOptions(createCoalescingRuntimeWakeSignal(), recoveredWorkspace),
       );
 
-      assert.equal(projectionCalls, 7);
-      assert.deepEqual(projectedKinds.slice(4), [
+      assert.equal(projectionCalls, 9);
+      assert.deepEqual(projectedKinds.slice(6), [
         "profile-name.v0",
         "time-zone.v0",
         "sleep-times.v0",
       ]);
-      assert.deepEqual(projectedWorkspaceVersions.slice(4), ["4", "4", "4"]);
+      assert.deepEqual(projectedWorkspaceVersions.slice(6), ["4", "4", "4"]);
       assert.equal(peakActiveProjectionCalls, 1);
       assert.equal(dirtyAckCalls, 1);
       assert.ok(
-        requireEventIndex(events, "vault-share.deliver:done:7:delivered")
+        requireEventIndex(events, "vault-share.deliver:done:9:delivered")
           < requireEventIndex(events, "device-sync.dirty-ack"),
         events.join(","),
       );
@@ -3505,7 +3507,7 @@ describe("hosted workspace runtime entrypoint", () => {test("fresh foreground in
     }
   });
 
-  test("system mailbox stops the projection suffix when its assistant cron becomes due", async () => {
+  test("system mailbox retains projection delivery when its assistant cron becomes due", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const events: string[] = [];
@@ -3569,10 +3571,7 @@ describe("hosted workspace runtime entrypoint", () => {test("fresh foreground in
         {
           async createCheckpointSnapshot() {
             return {
-              snapshotRef: createSnapshotFixtureRef({
-                hash: "9".repeat(64),
-                size: 512,
-              }),
+              snapshotRef: restoredWorkspace.snapshotRef,
             };
           },
           async importItem() {
@@ -3634,7 +3633,7 @@ describe("hosted workspace runtime entrypoint", () => {test("fresh foreground in
       assert.equal(result.immediateRecheckRequested, true);
       assert.equal(result.nextWakeAt, reminderAt);
       assert.equal(result.nextWakeReason, "assistant");
-      assert.equal(projectionCalls, 1);
+      assert.equal(projectionCalls, 2);
       expect(mocks.refreshHostedBrowserVaultReplicaFromRuntime).not.toHaveBeenCalled();
       const state = await readHostedSystemMailboxState(vaultRoot);
       const retained = state.pending.find((item) => item.itemId === deviceItem.id);
