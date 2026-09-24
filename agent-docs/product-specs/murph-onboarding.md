@@ -146,17 +146,28 @@ privacy, authorization, or provider boundaries.
   through the first aspiration question, including identity persistence. No skill or resume read is needed for those proven
   exchanges. The onboarding skill owns ambiguous/resumed and later-stage
   conversation policy; the managed automation resumes it when useful.
-- For eligible new direct text-only iMessage, SMS, and RCS conversations, the existing Web
-  Luna path may send at most two replies: the welcome and the bundled identity
-  question. The second requires the immediately preceding confirmed canonical
-  welcome and exactly one earlier opening delivery. Resolve its member through
-  the existing direct identity/home-chat lookup; a thread-container route
-  excludes this private-chat path. Existing delivery rows
-  enforce the cap under the chat lock; there is no stage counter. Supplied
-  identity, a skip, or a concrete request goes directly to the normal runtime.
+- When an imported opening already acknowledged identity and asked the aspiration
+  question, the next full assistant turn delegates those retained source facts to
+  the same bounded identity-save child, without repeating the question or waiting
+  for the save. Visible later corrections or omissions win. Conversation evidence
+  stays durable if the member stops; canonical memory waits for a full turn. This
+  rule adds no separate background root wake or Web memory writer.
+- For eligible new direct text-only iMessage conversations, the existing Web
+  Luna path may send at most three replies: the welcome, bundled identity
+  question, and a brief acknowledgement with the aspiration question. Each
+  continuation requires the immediately preceding confirmed canonical welcome
+  or identity question and the matching count of accepted opening deliveries.
+  Resolve the member through the existing direct identity/home-chat lookup;
+  a thread-container route excludes this private-chat path. Existing delivery
+  rows enforce the cap under the chat lock; there is no stage counter.
+  A substantive health goal, request, ambiguity, or overall pause hands off to
+  the full assistant, including goals supplied while accepting the welcome.
+  The third reply accepts partial identity or skipping only identity details.
   Existing encrypted conversation import carries both sides and suppresses
-  duplicate replies. Container/process warmup retains its existing owner; this
-  flow adds no speculative model turn or preparation mailbox.
+  duplicate replies. Deploy the runtime catch-up instruction above before
+  enabling the third Web reply.
+  Container/process warmup retains its existing owner; this flow adds no
+  speculative model turn, Web memory writer, or preparation mailbox.
 - The skill uses one package-owned progressive-disclosure asset. Its top-level
   `SKILL.md` is a complete router capped at 12 KiB and directly owns the goal,
   bounded resume check, immediate-need override, relationship promise, exact
@@ -886,3 +897,25 @@ active status, revision, and `activeUntil` remain the upper delivery boundary.
     readback. An accepted onboarding lab source gets an immediate natural
     receipt update before slower preservation or extraction, and the evidence
     is durably preserved before the substantive reply.
+
+## Early stall recovery
+
+The existing managed-automation maintenance owner enrolls one canonical
+`onboarding-early-stall-check-in` after onboarding starts on a direct route.
+The timer uses the persisted onboarding start plus fifteen minutes. Enrollment
+must happen before that deadline; old accounts and delayed starts are not
+backfilled. An enrolled occurrence expires thirty minutes after onboarding
+start. Retries preserve any existing slug, including paused, archived, and
+legacy model-created schedules, and never restart the timer.
+
+Fresh conversation input takes priority. Enrollment runs in the existing idle
+or post-delivery maintenance phase, without an opening model tool call or a
+new scheduler, queue, or state field. Existing cron wake projection, evaluation,
+and outbox delivery own the rest of the lifecycle.
+
+At firing, send only while onboarding is open and Murph's latest setup question
+has been unanswered for at least ten minutes, without a pause/later/stop request.
+An answer, recent question, completion, unavailable context, or uncertainty
+means skip. Send at most one brief pressure-free check-in, without repeating
+or adding a setup question. The occurrence is consumed on send or skip.
+The next-day finite recovery window is unchanged and separately owned.

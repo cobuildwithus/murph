@@ -1,5 +1,6 @@
 import { rm } from "node:fs/promises";
 import path from "node:path";
+import { resolveWorkspaceDurableRoot, resolveWorkspaceScratchRoot } from "./workspace-paths.ts";
 
 import {
   HostedRuntimeCheckpointInterruptedByWakeError,
@@ -1556,22 +1557,6 @@ function assertHostedWorkspaceBridgeCheckpointLease(input: {
   if (input.lease.workspaceVersion !== input.request.expectedWorkspaceVersion) {
     throw new HostedRuntimeBridgeCheckpointLeaseError("stale_workspace_version", stage);
   }
-}
-
-function resolveWorkspaceDurableRoot(vaultRoot: string): string {
-  const resolvedVaultRoot = path.resolve(vaultRoot);
-  if (path.basename(resolvedVaultRoot) === "vault") {
-    return path.dirname(resolvedVaultRoot);
-  }
-  return resolvedVaultRoot;
-}
-
-function resolveWorkspaceScratchRoot(vaultRoot: string): string {
-  const durableRoot = resolveWorkspaceDurableRoot(vaultRoot);
-  if (path.basename(durableRoot) === "durable") {
-    return path.join(path.dirname(durableRoot), "scratch");
-  }
-  return path.join(path.dirname(durableRoot), `${path.basename(durableRoot)}-scratch`);
 }
 
 function resolveWorkspaceOperatorHomeRoot(vaultRoot: string): string {

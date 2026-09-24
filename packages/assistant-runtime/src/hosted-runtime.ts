@@ -158,12 +158,8 @@ import {
   buildHostedRuntimeLogContextFields,
   writeHostedRuntimeLogBestEffort,
 } from "./hosted-runtime/runtime-logs.ts";
-import {
-  captureHostedVaultShareProjectionBestEffort,
-  offerCapturedHostedVaultShareProjectionBestEffort,
-  resolveHostedVaultShareProjectionScopesBestEffort,
-  type HostedVaultShareProjectionOfferResult,
-} from "./hosted-runtime/vault-share-projection.ts";
+import { projectHostedVaultShareCheckpoint } from "./hosted-runtime/vault-share-background.ts";
+import type { HostedVaultShareProjectionOfferResult } from "./hosted-runtime/vault-share-projection.ts";
 import { createHostedGroupSharedReader } from "./hosted-runtime/group-shared-reader.ts";
 import type {
   HostedRuntimeDeviceSyncMessagingReturnTarget,
@@ -1651,51 +1647,32 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
     platform: guardedPlatform,
   };
   type OwnedVaultShareProjection = {
-    preemptForForeground(): void;
-    promise: Promise<
-      Awaited<ReturnType<typeof offerCapturedHostedVaultShareProjectionBestEffort>>
-    >;
+    promise: Promise<HostedVaultShareProjectionOfferResult>;
   };
   let pendingOwnedVaultShareProjection: OwnedVaultShareProjection | null = null;
   const startOwnedVaultShareProjection = (
-    offerInput: Omit<
-      Parameters<typeof offerCapturedHostedVaultShareProjectionBestEffort>[0],
-      "shouldStop"
-    >,
-    shouldStop?: () => boolean,
+    projectionInput: Pick<Parameters<typeof projectHostedVaultShareCheckpoint>[0],
+      "workspace" | "vaultRoot" | "vaultSharePort" | "projectionMode">,
   ): OwnedVaultShareProjection["promise"] => {
     if (pendingOwnedVaultShareProjection) {
       throw new Error("Hosted vault-share projection already has an invocation owner.");
     }
-    let foregroundPreempted = false;
-    const projection = offerCapturedHostedVaultShareProjectionBestEffort({
-      ...offerInput,
-      shouldStop: () =>
-        foregroundPreempted
-        || shouldStop?.() === true
-        || hostAbortObserved
+    const projection = projectHostedVaultShareCheckpoint({
+      ...projectionInput,
+      snapshotPort: guardedRuntime.platform.workspaceSnapshotPort,
+      signal: options.shutdownSignal
+        ? AbortSignal.any([runtimeAbortController.signal, options.shutdownSignal])
+        : runtimeAbortController.signal,
+      shouldStop: () => hostAbortObserved
         || runtimeAbortController.signal.aborted
         || options.shutdownSignal?.aborted === true,
     });
-    const owner: OwnedVaultShareProjection = {
-      preemptForForeground() {
-        foregroundPreempted = true;
-      },
-      promise: projection,
-    };
+    const owner: OwnedVaultShareProjection = { promise: projection };
     pendingOwnedVaultShareProjection = owner;
-    void projection.then(
-      () => {
-        if (pendingOwnedVaultShareProjection === owner) {
-          pendingOwnedVaultShareProjection = null;
-        }
-      },
-      () => {
-        if (pendingOwnedVaultShareProjection === owner) {
-          pendingOwnedVaultShareProjection = null;
-        }
-      },
-    );
+    const settled = () => {
+      if (pendingOwnedVaultShareProjection === owner) pendingOwnedVaultShareProjection = null;
+    };
+    void projection.then(settled, settled);
     return projection;
   };
   const drainOwnedVaultShareProjection = async (): Promise<void> => {
@@ -2658,9 +2635,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
     assertRuntimeNotAborted();
     let initialMailboxImportPostCheckpointEffectsFinished = false;
     const logHostedVaultShareProjectionOfferOutcome = (
-      vaultShareOffer: Awaited<
-        ReturnType<typeof offerCapturedHostedVaultShareProjectionBestEffort>
-      >,
+      vaultShareOffer: HostedVaultShareProjectionOfferResult,
     ): void => {
       if (vaultShareOffer.outcome !== "error") {
         return;
@@ -3157,17 +3132,12 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           : runtimeAbortController.signal;
         const runtimeWakeSignal = systemMailboxWakeSignal;
         const waitForOwnedProjectionStage = async <T,>(
-          runStage: (signal: AbortSignal) => Promise<T>,
-          preemption: "cancel_and_drain" | "retain" = "cancel_and_drain",
+          runStage: () => Promise<T>,
         ): Promise<
           | { kind: "completed"; value: T }
           | { kind: "preempted"; notification: RuntimeWakeNotification | null }
         > => {
-          const ownedStage = startOwnedHostedProjectionStage({
-            ownerSignals: [workSignal],
-            runStage,
-          });
-          const stage = ownedStage.promise;
+          const stage = runStage();
           if (!runtimeWakeSignal) {
             const value = await stage;
             if (runtimeAbortController.signal.aborted) {
@@ -3199,13 +3169,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           try {
             result = await Promise.race([stageResult, wakeResult]);
           } catch (error) {
-            await ownedStage.cancelAndDrain(
-              workSignal.aborted
-                ? readHostedRuntimeAbortReason(workSignal)
-                : error instanceof Error
-                  ? error
-                  : new Error("Hosted vault-share projection stage failed."),
-            );
+            await stage.catch(() => undefined);
             if (runtimeAbortController.signal.aborted) {
               throw readHostedRuntimeAbortReason(runtimeAbortController.signal);
             }
@@ -3218,13 +3182,6 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           }
 
           if (result.kind === "preempted") {
-            if (preemption === "cancel_and_drain") {
-              await ownedStage.cancelAndDrain(
-                new Error("Hosted vault-share projection yielded to foreground work."),
-              );
-            } else {
-              pendingOwnedVaultShareProjection?.preemptForForeground();
-            }
             if (runtimeAbortController.signal.aborted) {
               throw readHostedRuntimeAbortReason(runtimeAbortController.signal);
             }
@@ -3234,64 +3191,13 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           return result;
         };
 
-        const resolveProjectionScopes = (signal: AbortSignal) =>
-          resolveHostedVaultShareProjectionScopesBestEffort({
-            ...(projectionMode ? { projectionMode } : {}),
-            signal,
-            sourceWorkspaceVersion:
-              activeWorkspace?.version ?? input.request.workspaceVersion,
-            vaultSharePort,
-          });
-        const scopeResolutionResult = await waitForOwnedProjectionStage(
-          resolveProjectionScopes,
-        );
-        if (scopeResolutionResult.kind === "preempted") {
-          observeForegroundWake(scopeResolutionResult.notification);
-          return { outcome: "preempted" };
-        }
-        if (scopeResolutionResult.value.outcome !== "active-scopes") {
-          const result = { outcome: scopeResolutionResult.value.outcome };
-          if (result.outcome === "error") {
-            logHostedVaultShareProjectionOfferOutcome(result);
-          }
-          return shouldYieldSystemMailboxWork()
-            ? { outcome: "preempted" }
-            : { outcome: "completed", result };
-        }
-
-        const capture = await captureHostedVaultShareProjectionBestEffort({
-          generationTokensByProjectionScopeKey:
-            scopeResolutionResult.value.generationTokensByProjectionScopeKey,
-          hasDeferredProjectionWork:
-            scopeResolutionResult.value.hasDeferredProjectionWork,
-          ...(scopeResolutionResult.value.projectionMode
-            ? { projectionMode: scopeResolutionResult.value.projectionMode }
-            : {}),
-          projectionScopes: scopeResolutionResult.value.projectionScopes,
-          sourceWorkspaceVersion:
-            activeWorkspace?.version ?? input.request.workspaceVersion,
-          vaultRoot: restored.vaultRoot,
-        });
-        if (workSignal.aborted) {
-          throw readHostedRuntimeAbortReason(workSignal);
-        }
-        if (shouldYieldSystemMailboxWork()) {
-          return { outcome: "preempted" };
-        }
-        if (capture.outcome !== "captured") {
-          const result = { outcome: capture.outcome };
-          if (result.outcome === "error") {
-            logHostedVaultShareProjectionOfferOutcome(result);
-          }
-          return { outcome: "completed", result };
-        }
-
         const offerResult = await waitForOwnedProjectionStage(
           () => startOwnedVaultShareProjection({
-            capture: capture.capture,
+            ...(projectionMode ? { projectionMode } : {}),
+            workspace: activeWorkspace,
+            vaultRoot: restored.vaultRoot,
             vaultSharePort,
-          }, shouldYieldSystemMailboxWork),
-          "retain",
+          }),
         );
         if (offerResult.kind === "preempted") {
           observeForegroundWake(offerResult.notification);
@@ -5368,28 +5274,16 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         | { kind: "finished" }
         | { kind: "stage"; value: T };
       const waitForOwnedProjectionStage = async <T,>(
-        runStage: (signal: AbortSignal) => Promise<T>,
-        preemption: "cancel_and_drain" | "retain" = "cancel_and_drain",
+        runStage: () => Promise<T>,
       ): Promise<
         | { kind: "completed"; value: T }
         | { kind: "preempted"; wake: HostedVaultShareOfferWake | null }
       > => {
-        const ownedStage = startOwnedHostedProjectionStage({
-          ownerSignals: [
-            runtimeAbortController.signal,
-            ...(options.shutdownSignal ? [options.shutdownSignal] : []),
-          ],
-          runStage,
-        });
-        const stage = ownedStage.promise;
+        const stage = runStage();
         const finishAfterCancellation = async (): Promise<
           { kind: "preempted"; wake: HostedVaultShareOfferWake | null }
         > => {
-          await ownedStage.cancelAndDrain(
-            options.shutdownSignal?.reason instanceof Error
-              ? options.shutdownSignal.reason
-              : new Error("Hosted vault-share projection stage was cancelled."),
-          );
+          await stage.catch(() => undefined);
           if (runtimeAbortController.signal.aborted) {
             throw readHostedRuntimeAbortReason(runtimeAbortController.signal);
           }
@@ -5425,9 +5319,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
             return await finishAfterCancellation();
           }
           if (runtimeAbortController.signal.aborted) {
-            await ownedStage.cancelAndDrain(
-              readHostedRuntimeAbortReason(runtimeAbortController.signal),
-            );
+            await stage.catch(() => undefined);
             throw readHostedRuntimeAbortReason(runtimeAbortController.signal);
           }
 
@@ -5471,13 +5363,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
             try {
               waitResult = await Promise.race([stageResult, wake]);
             } catch (error) {
-              await ownedStage.cancelAndDrain(
-                runtimeAbortController.signal.aborted
-                  ? readHostedRuntimeAbortReason(runtimeAbortController.signal)
-                  : error instanceof Error
-                    ? error
-                    : new Error("Hosted vault-share projection stage failed."),
-              );
+              await stage.catch(() => undefined);
               if (runtimeAbortController.signal.aborted) {
                 throw readHostedRuntimeAbortReason(runtimeAbortController.signal);
               }
@@ -5501,13 +5387,6 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
             }
             const classification = await classifyWake(latencySeed);
             if (!classification.mayWaitForProjection) {
-              if (preemption === "cancel_and_drain") {
-                await ownedStage.cancelAndDrain(
-                  new Error("Hosted vault-share projection yielded to foreground work."),
-                );
-              } else {
-                pendingOwnedVaultShareProjection?.preemptForForeground();
-              }
               if (runtimeAbortController.signal.aborted) {
                 throw readHostedRuntimeAbortReason(runtimeAbortController.signal);
               }
@@ -5567,67 +5446,12 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         };
       }
 
-      const scopeResolutionStage = await waitForOwnedProjectionStage(
-        (signal) => resolveHostedVaultShareProjectionScopesBestEffort({
-          signal,
-          sourceWorkspaceVersion:
-            committedWorkspace?.version ?? invocationWorkspaceVersion,
-          vaultSharePort,
-        }),
-      );
-      if (scopeResolutionStage.kind === "preempted") {
-        return {
-          result: { outcome: "preempted" },
-          wake: scopeResolutionStage.wake,
-        };
-      }
-      if (scopeResolutionStage.value.outcome !== "active-scopes") {
-        if (scopeResolutionStage.value.outcome === "error") {
-          logHostedVaultShareProjectionOfferOutcome({ outcome: "error" });
-        }
-        return {
-          result: { outcome: scopeResolutionStage.value.outcome },
-          wake: deferredDeviceSyncWake,
-        };
-      }
-
-      const capture = await captureHostedVaultShareProjectionBestEffort({
-        generationTokensByProjectionScopeKey:
-          scopeResolutionStage.value.generationTokensByProjectionScopeKey,
-        hasDeferredProjectionWork:
-          scopeResolutionStage.value.hasDeferredProjectionWork,
-        ...(scopeResolutionStage.value.projectionMode
-          ? { projectionMode: scopeResolutionStage.value.projectionMode }
-          : {}),
-        projectionScopes: scopeResolutionStage.value.projectionScopes,
-        sourceWorkspaceVersion:
-          committedWorkspace?.version ?? invocationWorkspaceVersion,
-        vaultRoot: restored.vaultRoot,
-      });
-      assertRuntimeNotAborted();
-      const captureWake = await consumePendingProjectionWake();
-      if (captureWake || shutdownWasSignaled()) {
-        return {
-          result: { outcome: "preempted" },
-          wake: captureWake ?? deferredDeviceSyncWake,
-        };
-      }
-      if (capture.outcome !== "captured") {
-        if (capture.outcome === "error") {
-          logHostedVaultShareProjectionOfferOutcome({ outcome: "error" });
-        }
-        return {
-          result: { outcome: capture.outcome },
-          wake: deferredDeviceSyncWake,
-        };
-      }
-
       const offerStage = await waitForOwnedProjectionStage(
         () => startOwnedVaultShareProjection({
-          capture: capture.capture,
+          workspace: committedWorkspace,
+          vaultRoot: restored.vaultRoot,
           vaultSharePort,
         }),
-        "retain",
       );
       if (offerStage.kind === "preempted") {
         return {
@@ -9037,29 +8861,6 @@ function assertHostedWorkspaceCheckpointAccepted(
     }
     throw new HostedMailboxImportCheckpointConflictError(checkpoint);
   }
-}
-
-function startOwnedHostedProjectionStage<T>(input: {
-  ownerSignals: readonly AbortSignal[];
-  runStage: (signal: AbortSignal) => Promise<T>;
-}): {
-  cancelAndDrain(reason: unknown): Promise<void>;
-  promise: Promise<T>;
-} {
-  const stageAbortController = new AbortController();
-  const promise = input.runStage(AbortSignal.any([
-    ...input.ownerSignals,
-    stageAbortController.signal,
-  ]));
-  return {
-    async cancelAndDrain(reason) {
-      if (!stageAbortController.signal.aborted) {
-        stageAbortController.abort(reason);
-      }
-      await promise.catch(() => undefined);
-    },
-    promise,
-  };
 }
 
 function assertHostedWorkspaceRuntimeBudgetSupported(maxRuntimeMs: number | null | undefined): void {

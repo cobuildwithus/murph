@@ -694,7 +694,7 @@ describe('applyMurphManagedAutomations core integration', () => {
     })
     expectCronSchedule(insightRecord?.schedule)
     expect(insightRecord?.assistantTargetOverride).toEqual({
-      model: 'gpt-5.6-sol',
+      model: 'gpt-6-sol',
       reasoningEffort: 'high',
     })
     expect(insightRecord?.tags).toContain('murph-managed:weekly-health-insight')
@@ -811,7 +811,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       title: 'Monthly improvement coach',
     })
     expect(improvementCoachRecord?.assistantTargetOverride).toEqual({
-      model: 'gpt-5.6-sol',
+      model: 'gpt-6-sol',
       reasoningEffort: 'high',
     })
     expect(improvementCoachRecord?.tags).toContain('murph-managed:monthly-improvement-coach')
@@ -1378,7 +1378,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       routeValidationProfile: 'hosted',
       vaultRoot,
     })).resolves.toEqual({
-      created: 6,
+      created: 7,
       skipped: 0,
       updated: 0,
     })
@@ -1406,6 +1406,15 @@ describe('applyMurphManagedAutomations core integration', () => {
         deliveryTarget: hostedEmailTarget,
         threadIsDirect: true,
       },
+      status: 'active',
+    })
+    await expect(showAutomation({
+      slug: 'onboarding-early-stall-check-in',
+      vaultRoot,
+    })).resolves.toMatchObject({
+      route: { channel: 'email', deliveryTarget: hostedEmailTarget, threadIsDirect: true },
+      schedule: { kind: 'at', at: '2026-06-09T12:15:00.000Z' },
+      activeUntil: '2026-06-09T12:30:00.000Z',
       status: 'active',
     })
   })
@@ -2373,7 +2382,7 @@ describe('applyMurphManagedAutomations core integration', () => {
     expect(migrated).toMatchObject({
       automationId: MURPH_MONTHLY_IMPROVEMENT_COACH_AUTOMATION_ID,
       assistantTargetOverride: {
-        model: 'gpt-5.6-sol',
+        model: 'gpt-6-sol',
         reasoningEffort: 'high',
       },
       route: existingRoute,

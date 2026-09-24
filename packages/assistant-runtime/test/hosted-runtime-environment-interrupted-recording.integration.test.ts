@@ -1,6 +1,7 @@
 import {
   TEST_NOW,
   createBrowserVaultReplicaRef,
+  createDeferred,
   createMailboxItem,
   createMailboxPort,
   createPlatform,
@@ -86,6 +87,7 @@ test.each([
     },
   }));
   const events: string[] = [];
+  const projectionRelease = createDeferred<void>();
   const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
   let assistantPasses = 0;
   let idleCheckpoints = 0;
@@ -129,6 +131,7 @@ test.each([
       assert.equal(retained[0]?.lastErrorCode, null);
       assert.equal(retained[0]?.nextAttemptAt, null);
       events.push("foreground.provider");
+      if (repliedInputIds.size === 2) projectionRelease.resolve();
       const intent = await createAssistantOutboxIntent({
         channel: "linq", createdAt: TEST_NOW, dedupeToken: "synthetic-environment-reply-" + repliedInputIds.size,
         explicitTarget: "thread_1", identityId: "synthetic-member", message: "Your message is received.",
@@ -248,11 +251,8 @@ test.each([
             runtimeWakeSignal.notify({ requestedProcessingMode: "default" });
             const signal = request?.signal;
             assert.ok(signal);
-            await new Promise<void>((resolve) => {
-              if (signal.aborted) resolve();
-              else signal.addEventListener("abort", () => resolve(), { once: true });
-            });
-            signal.throwIfAborted();
+            await projectionRelease.promise;
+            assert.equal(signal.aborted, false, "Foreground work must not cancel projection scopes.");
           }
           return { projectionKinds: [], projectionScopes: [] };
         },
@@ -424,6 +424,7 @@ test.each([
   } finally {
     systemWorkObserver.mockRestore();
     controller.abort();
+    projectionRelease.resolve();
     await runtimeCompletion?.catch(() => undefined);
     if (originalAutomation) mocks.runAssistantAutomationPass.mockImplementation(originalAutomation);
     vi.unstubAllGlobals();

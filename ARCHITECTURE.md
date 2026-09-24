@@ -79,7 +79,7 @@ authenticated group join page or route-bound group-chat offer flow.
 After a successful personal checkpoint, the runtime offers complete replacement
 snapshots before a complete device-sync-only maintenance prefix may resume;
 the dedicated system-mailbox lane likewise offers before acknowledging imported
-dirty state. Conversation work still preempts the offer. Group reads query the
+dirty state. Conversation work releases the wait while the offer continues. Group reads query the
 current Web-owned snapshot on demand, so publication adds no per-group wake,
 cache invalidation, fanout, or second projection owner.
 
@@ -97,18 +97,15 @@ runtime. The runtime stores a canonical `manual` daily observation beside, not
 over, wearable evidence and reuses the system-mailbox post-checkpoint projection
 opportunity to replace any already-granted group snapshots. There is no Web
 health-value table, override row, correction join, or projection-specific queue.
-The runtime resolves active Web-owned scopes without touching the vault, then
-materializes every selected record while the invocation still owns the restored
-vault path. Scope resolution receives the invocation's abort signal, so a
-foreground wake cancels and drains that read. An already-started immutable
-delivery instead remains owned and
-finishes its current scope. A foreground wake, exact host abort, or shutdown
-prevents admission of every undispatched captured scope, including the first,
-and that offer reports
-preempted instead of treating its successful prefix as complete. Foreground's
-stop bit belongs only to the active delivery owner, so
-a later opportunity begins fresh and can retry every scope before the existing
-dirty or recording obligation is acknowledged. Web
+The runtime resolves active Web-owned scopes and restores the committed checkpoint
+into a private scratch read view through the existing snapshot port. A dedicated
+worker thread captures selected records from that view, keeping synchronous vault
+queries off the conversation event loop. It never reads the mutable live vault.
+A conversation wake releases the foreground wait without canceling the projection;
+scope lookup, capture, and delivery continue under one invocation-owned promise.
+There is at most one projection at a time. Shutdown and exact host abort stop
+new work, terminate the owned capture thread, and drain any active delivery.
+The scratch view is removed only after its reader exits. Web
 owns a finite effect deadline for that current scope, stops admitting destination
 replacements on deadline or request cancellation, and bounds the final database
 transaction by the remaining deadline. Runtime creates that one absolute
@@ -124,15 +121,14 @@ crypto/provider, access-query, database, transaction, deadline, transport, and
 owner-ending failures stop the undispatched suffix.
 Finalization drains that owner
 before release or retry, so projection work never overlaps a successor
-invocation. Local capture is bounded and likewise drains before its result is
-either delivered or discarded. Every captured offer names
+invocation. Every captured offer names
 the committed personal-workspace version that produced those bytes. Web
 serializes only the final replacement against that existing workspace row; an
 older in-flight offer becomes a no-op after a newer checkpoint instead of
 overwriting the newer group snapshot. One opportunity has at most one active
 request. One destination's explicitly typed missing-root failure does not starve
 healthy scopes behind it; the aggregate failure retains the durable retry.
-Unclassified or shared-infrastructure failure, foreground preemption, exact host
+Unclassified or shared-infrastructure failure, exact host
 abort, shutdown, deadline exhaustion, or ambiguous transport instead drains only
 the active request before leaving the undispatched suffix to the existing continuation.
 Projection
@@ -1030,6 +1026,14 @@ of production CPU or latency improvement.
 
 ### Canonical Automation Support Lifecycles
 
+Early onboarding stall recovery is a canonical one-shot enrolled by existing
+idle or post-delivery managed maintenance. It uses the persisted onboarding
+start plus fifteen minutes, has a thirty-minute cutoff, and uses the registry's
+create-only lock so retries preserve existing, paused, archived, and legacy
+sources. It adds no opening model call or onboarding state. Ordinary cron wake
+projection, contextual send/skip evaluation, and outbox authority own execution;
+see [the onboarding contract](agent-docs/product-specs/murph-onboarding.md#early-stall-recovery).
+
 The vault automation record is the only owner of a support automation's schedule, status, route, optional finite `activeUntil`, exact plan-support `supportKind`, optional `plannedOccurrenceOffsetMs`, and reserved `system:support-series:<seriesId>` ownership tag. The offset preserves the relationship between a reminder and its planned event; execution resolves it against the exact scheduled occurrence and copies the resulting `plannedOccurrenceAt` into the outbox. Reminder-backed experiment completion identifies the canonical effect by experiment plus `plannedOccurrenceAt`, so multiple accepted notifications for one session still produce one event. Legacy reminder context without that planned time remains conversational only and uses ordinary plan-based session resolution. An automation may have at most one support-series tag. Once assigned, ordinary patch or upsert operations cannot remove or replace it; legacy unowned records may receive their first owner. Exact-series reconciliation atomically archives every active member outside the desired automation-id set while leaving user-paused members paused, and namespace reconciliation rejects duplicate ownership or one desired id assigned to two series. Plan-owned experiment, habit, and supplement support revalidates the immutable owner and its active status before provider work, immediately before delivery, and before commit. The active automation's typed support kind is the exact persisted support consent for habit and supplement plans; experiment support also requires its matching live `assistantSupport` switch. Execution re-reads canonical state immediately before delivery, archives an elapsed record when `now >= activeUntil`, and never sends after that boundary. A one-shot `activeUntil` must be later than its scheduled instant. Required-send retries remain eligible only while that finite window is open.
 
 Automation evidence distinguishes intent, dispatch, and receipt. Enqueue state, generated transcript, provider transcript, and a delivery attempt prove intent only. Provider acceptance or a runtime `sent` state proves dispatch, not handset receipt or reading. Only channel delivery/read evidence or a later member reply that refers to the message proves receipt. Silence without receipt evidence must not become ignored support, non-adherence, or refusal.
@@ -1795,7 +1799,10 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   to GPT-6 Sol. Active members may select GPT-6 Sol or Luna and the existing
   GPT-5.6 Luna; GPT-5.6 Sol and GPT-6 Astra retain their premium gates.
   Saved Terra preferences now resolve to GPT-6 Sol; other explicit choices stay
-  saved, while a null preference follows the default. At scheduled execution,
+  saved, while a null preference follows the default. New managed recipes and
+  automation guidance use GPT-6 Luna for fixed cues and GPT-6 Sol for contextual
+  work, including the Personal Patterns job. Web opening replies
+  also use GPT-6 Luna. At scheduled execution,
   automation pins use a reviewed OpenAI replacement map: GPT-5.6 Luna becomes
   GPT-6 Luna, and GPT-5.6 Sol or Terra becomes GPT-6 Sol. Provider-neutral
   envelopes and canonical records retain the authored pin; resolution happens
@@ -2135,9 +2142,12 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   cold target in the same fleet, but never consumes shared ready inventory.
   Pending targets reconcile before new allocation; uncertain binding or stop
   results retain that exact target and cannot create a second execution owner.
-  The inventory coordinator owns all speculative shell prewarming. Readiness
-  warms the image, heavy runtime, and disposable content-free Codex initialization;
-  the member-specific resident process starts only after workspace restore.
+  The inventory coordinator owns speculative container prewarming through the
+  ordinary startup and health path, with exact image/release and unused-slot checks.
+  Runtime hydration starts in the background as for ordinary containers; actual
+  invocation joins it. Standby launches no disposable Codex process. Deployment
+  validates the software; the member-specific resident process starts only after
+  workspace restore.
   Bound slots never return to inventory or change members. Legacy exact-user and
   ENAM standby references retain their original namespace for recovery and drain;
   they are not fresh allocation paths. One fleet budget includes the temporary
