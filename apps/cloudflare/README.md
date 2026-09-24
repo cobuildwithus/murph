@@ -154,14 +154,21 @@ authenticated request carrying `conversationWorkPending: true` may claim a slot.
 Temporal derives that fact from fresh admitted conversation lag. Background-only
 work reuses its own warm target or starts a cold target in the same fleet.
 A missed or unavailable claim falls back to that same cold allocation lifecycle.
-The coordinator fills a deficit in bounded parallel work; it owns only pristine
-inventory and abandoned handoff cleanup, not member execution or capacity leases.
+Each claim immediately fills a deficit using any free preparation lane, including
+while another preparation is pending. At most two preparations run concurrently;
+SQLite reservations and recovery alarms retain reset and retry ownership. The
+coordinator owns only pristine inventory and abandoned handoff cleanup, not member
+execution or capacity leases.
 The public banner and health response expose the effective mode, and deployment
 smoke checks the newly deployed Worker version against the rendered mode.
 
 Readiness verifies the exact release, bundle/source fingerprints, architecture,
 heavy runtime hydration, pristine job counters, and a disposable content-free
-Codex initialization probe. Global eligibility imposes no ENAM health requirement.
+Codex initialization and shell-environment probe. Standby requests the existing
+container smoke endpoint with `scope=readiness`; CLI contract and goal mutation
+checks run only in the default deployment scope. Older containers ignore this
+query and safely run the full suite; old Workers still request the full suite
+from new containers. Global eligibility imposes no ENAM health requirement.
 No member, workspace, or provider credential enters a slot before binding.
 The member-specific resident Codex process starts after encrypted-workspace restore.
 

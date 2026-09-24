@@ -741,7 +741,7 @@ export class RunnerContainer extends Container {
       }, signal, { surfaceCleanupUnsettled: true });
       let health = await this.readStandbyHealth(deadlineAtEpochMs);
       if (health.codexShellPreflightStatus !== "ready") {
-        const response = await this.containerFetch(RUNNER_CODEX_SHELL_SMOKE_URL, {
+        const response = await this.containerFetch(`${RUNNER_CODEX_SHELL_SMOKE_URL}?scope=readiness`, {
           method: "POST",
           signal: AbortSignal.timeout(requireRunnerSlotRemainingTime(deadlineAtEpochMs)),
         });

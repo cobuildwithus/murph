@@ -695,3 +695,7 @@ The current read contract is owned by `apps/web/README.md`.
 First-day priority implementation: [`onboarding priority`](exec-plans/completed/2026-09-23-onboarding-priority.md).
 
 First-day priority prefetch correction: [`invocation propagation`](exec-plans/completed/2026-09-23-onboarding-priority-prefetch.md).
+
+Concurrent standby replenishment and lightweight per-slot readiness are owned by
+`apps/cloudflare/README.md`; implementation and proof are tracked in
+[`standby refill`](exec-plans/completed/2026-09-23-standby-refill.md).

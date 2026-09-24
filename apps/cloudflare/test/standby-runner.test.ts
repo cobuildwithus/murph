@@ -866,7 +866,45 @@ describe("StandbyRunnerCoordinatorDurableObject", () => {
     assert.equal(h.coordinator.readStandbyCoordinatorState().readySlotNames.length, 5);
   });
 
-  it("retains the fill owner when one worker fails before its peer finishes", async () => {
+  it("refills staggered claims immediately while another preparation is pending", async () => {
+    const gates: ReturnType<typeof createDeferred<void>>[] = [];
+    let active = 0;
+    let peak = 0;
+    let prepared = 0;
+    const h = createCoordinatorHarness({ async prepare() {
+      prepared += 1;
+      if (prepared <= 2) return;
+      const gate = createDeferred<void>();
+      gates.push(gate);
+      active += 1;
+      peak = Math.max(peak, active);
+      await gate.promise;
+      active -= 1;
+    } });
+    h.ensure();
+    await h.flush();
+    assert.equal(h.claim().outcome, "claimed");
+    await until(() => gates.length === 1);
+    assert.equal(h.claim().outcome, "claimed");
+    try {
+      await until(() => gates.length === 2);
+      assert.equal(active, 2);
+      assert.equal(h.coordinator.readStandbyCoordinatorState().readySlotNames.length, 0);
+      gates[1]?.resolve(undefined);
+      await until(() => h.coordinator.readStandbyCoordinatorState().readySlotNames.length === 1);
+      assert.equal(h.claim().outcome, "claimed");
+      await until(() => gates.length === 3);
+      assert.equal(active, 2);
+      assert.equal(peak, 2);
+    } finally {
+      // End demand before draining every owned preparation, including failures.
+      h.environment.HOSTED_EXECUTION_STANDBY_MODE = "off";
+      for (const gate of gates) gate.resolve(undefined);
+      await h.flush();
+    }
+  });
+
+  it("recovers a failed preparation lane without exceeding the shared concurrency cap", async () => {
     const gate = createDeferred<void>();
     let active = 0;
     let peak = 0;
@@ -879,12 +917,12 @@ describe("StandbyRunnerCoordinatorDurableObject", () => {
     h.setAlarm.mockRejectedValueOnce(new Error("alarm unavailable"));
     h.ensure();
     await until(() => active === 1);
-    // Let the rejected worker settle while its peer remains in external I/O.
+    // Let the rejected lane settle while its peer remains in external I/O.
     for (let turn = 0; turn < 50; turn += 1) await Promise.resolve();
     h.ensure();
     for (let turn = 0; turn < 50; turn += 1) await Promise.resolve();
     try {
-      assert.equal(active, 1);
+      assert.equal(active, 2);
     } finally {
       gate.resolve(undefined);
       await h.flush();
@@ -1589,7 +1627,7 @@ function createStandbyContainerHarness(input: {
     store.bind({ ...identity, ...input.bound });
   }
   const containerFetch = vi.fn(async (url: string) => {
-    if (url.endsWith("/internal/deploy-codex-shell-smoke")) {
+    if (url.endsWith("/internal/deploy-codex-shell-smoke?scope=readiness")) {
       return await codexPreflight();
     }
     if (url.endsWith("/health")) {
