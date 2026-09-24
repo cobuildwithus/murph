@@ -1649,32 +1649,8 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
           hostedToolContext: {
             automationTool: {
               request: async (request) => {
-                if (request.action !== 'save' || request.schedule.kind !== 'at') {
-                  throw new Error('Expected one opening check-in save.')
-                }
                 automationRequests.push(request)
-                const saved = await upsertAutomation({
-                  vaultRoot: workingDirectory,
-                  slug: request.slug,
-                  title: request.title,
-                  summary: request.summary,
-                  instructions: request.instructions,
-                  schedule: request.schedule,
-                  tags: [...(request.tags ?? [])],
-                  status: 'active',
-                  continuityPolicy: 'fresh',
-                  route: {
-                    channel: 'linq', deliveryTarget: 'synthetic-opening', identityId: null,
-                    participantId: null, threadId: 'synthetic-opening', threadIsDirect: true,
-                  },
-                })
-                return {
-                  action: 'save', automationId: saved.record.automationId, created: saved.created,
-                  effectiveTimeZone: 'America/New_York', lookupId: saved.record.slug,
-                  occurrenceProjection: { nextOccurrenceAt: request.schedule.at, status: 'resolved' },
-                  routeBinding: 'current_conversation', schedule: request.schedule,
-                  status: 'active', updatedAt: saved.record.updatedAt,
-                }
+                throw new Error('Opening identity must not schedule a check-in.')
               },
             },
             computerToolsAvailable: false,
@@ -1706,14 +1682,7 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
         expect(result.finalMessage).not.toMatch(/saved|recorded|subagent|checkpoint|still working/iu)
         expect(await readOnboardingPolicyFiles(actions, path.join(workingDirectory, 'skills'))).toEqual([])
         expect(actions.filter((action) => action.kind === 'command' && /memory (?:set-name|upsert|update)/u.test(action.command))).toEqual([])
-        expect(automationRequests).toHaveLength(1)
-        expect(automationRequests[0]).toMatchObject({ action: 'save', slug: 'onboarding-early-stall-check-in' })
-        const checkIn = automationRequests[0]
-        expect(checkIn?.action).toBe('save')
-        if (checkIn?.action !== 'save' || checkIn.schedule.kind !== 'at') {
-          throw new Error('Expected the opening one-shot schedule.')
-        }
-        expect(Math.abs(Date.parse(checkIn.schedule.at) - (startedAt + 15 * 60_000))).toBeLessThan(60_000)
+        expect(automationRequests).toHaveLength(0)
         await waitForWarmCodexBackgroundWork()
         const memory = await readMemoryDocument(workingDirectory)
         const identity = memory.records.map((record) => record.text).join('\n')
@@ -1723,7 +1692,7 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
         expect(identity).toMatch(/guy|male|man/iu)
         const commands = await readFile(commandLogPath, 'utf8')
         expect(commands).toMatch(/memory set-name/u)
-        expect((await showAutomation({ vaultRoot: workingDirectory, slug: 'onboarding-early-stall-check-in' }))?.status).toBe('active')
+        expect(await showAutomation({ vaultRoot: workingDirectory, slug: 'onboarding-early-stall-check-in' })).toBeNull()
         process.stdout.write(`[onboarding-opening-saved-e2e] ${JSON.stringify({
           replyMs, allWritesVerifiedMs: Date.now() - startedAt,
           childCount: childUsages.length, memoryRecordCount: memory.records.length, checkInCount: automationRequests.length,
