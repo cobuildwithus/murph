@@ -715,6 +715,9 @@ per-slot software validation through [normal standby readiness](exec-plans/compl
 
 Completed implementation evidence: [signup opening simplification](exec-plans/completed/2026-09-23-signup-latency.md).
 
+Native voice reuse simplification and verification:
+[`2026-09-23-voice-native-reuse.md`](exec-plans/completed/2026-09-23-voice-native-reuse.md).
+
 Early onboarding recovery restoration: [one-time stall check-in](exec-plans/completed/2026-09-23-restore-onboarding-check-in.md).
 
 Deterministic onboarding recovery: [background enrollment](exec-plans/completed/2026-09-24-deterministic-onboarding-check-in.md).

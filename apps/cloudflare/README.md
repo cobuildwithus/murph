@@ -1057,6 +1057,14 @@ records the upstream revision and patch SHA-256 in `murph-source-revision`.
 Cargo concurrency is capped at two jobs so a high CPU count does not expand the
 native build's memory demand; the upstream release optimization profile is kept.
 
+Public Live transcript fragments use Codex's native normalized event stream and
+bounded transcript collection. Handoffs without separate task text use upstream
+transcript fallback and delegation formatting, including escaped, bounded input
+and transcript fields. Raw transcript/delegation notifications are not duplicated
+onto App Server; browser captions still arrive through the provider data channel.
+Outgoing results reuse the native context-message builders and UTF-8 chunking;
+only the final serialization maps those frames to public Live append events.
+
 Public WebRTC sessions restrict browser commands to mute, unmute, and close.
 Instructions and delegated results stay on the native trusted connection; the
 browser receives only call state, transcripts, usage, and bounded protocol notices.
