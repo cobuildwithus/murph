@@ -897,3 +897,25 @@ active status, revision, and `activeUntil` remain the upper delivery boundary.
     readback. An accepted onboarding lab source gets an immediate natural
     receipt update before slower preservation or extraction, and the evidence
     is durably preserved before the substantive reply.
+
+## Early stall recovery
+
+The existing managed-automation maintenance owner enrolls one canonical
+`onboarding-early-stall-check-in` after onboarding starts on a direct route.
+The timer uses the persisted onboarding start plus fifteen minutes. Enrollment
+must happen before that deadline; old accounts and delayed starts are not
+backfilled. An enrolled occurrence expires thirty minutes after onboarding
+start. Retries preserve any existing slug, including paused, archived, and
+legacy model-created schedules, and never restart the timer.
+
+Fresh conversation input takes priority. Enrollment runs in the existing idle
+or post-delivery maintenance phase, without an opening model tool call or a
+new scheduler, queue, or state field. Existing cron wake projection, evaluation,
+and outbox delivery own the rest of the lifecycle.
+
+At firing, send only while onboarding is open and Murph's latest setup question
+has been unanswered for at least ten minutes, without a pause/later/stop request.
+An answer, recent question, completion, unavailable context, or uncertainty
+means skip. Send at most one brief pressure-free check-in, without repeating
+or adding a setup question. The occurrence is consumed on send or skip.
+The next-day finite recovery window is unchanged and separately owned.
