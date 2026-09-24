@@ -725,3 +725,6 @@ Deterministic onboarding recovery: [background enrollment](exec-plans/completed/
 KMS REST transport and Web control connection timing are owned by `apps/web/README.md`;
 local implementation and verification are recorded in
 [`first-use crypto latency`](exec-plans/completed/2026-09-24-kms-wake-latency.md).
+
+Native turn cancellation and voice continuity proof:
+[`2026-09-24-voice-turn-lifecycle.md`](exec-plans/completed/2026-09-24-voice-turn-lifecycle.md).
