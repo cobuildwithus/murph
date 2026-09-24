@@ -64,7 +64,7 @@ const USAGE = [
   'Options:',
   '  --auth subscription|provider  Use local ChatGPT auth (default) or provider env.',
   '  --codex-home <absolute-path>   Use a dedicated local Codex home for subscription auth.',
-  '  --model <model>               Override the default gpt-5.6-terra model.',
+  '  --model <model>               Override the default gpt-6-sol model.',
   '  -h, --help                    Show this help.',
 ].join('\n')
 
@@ -307,7 +307,7 @@ export function executeAssistantRealCodexRun(
   const effectiveModel =
     options.model
     ?? dependencies.sourceEnv.MURPH_REAL_CODEX_MODEL?.trim()
-    ?? 'gpt-5.6-terra'
+    ?? 'gpt-6-sol'
   dependencies.writeStdout(
     `Running one real Murph assistant journey with ${effectiveModel} via ${options.authMode} auth.\n`,
   )

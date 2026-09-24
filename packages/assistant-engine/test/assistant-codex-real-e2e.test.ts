@@ -14982,7 +14982,7 @@ describeRealCodex('real Codex adaptive wearable no-data outreach e2e', () => {
   )
 })
 
-describeRealCodex('real Codex Personal Patterns typed-ledger Luna high digest e2e', () => {
+describeRealCodex('real Codex Personal Patterns typed-ledger GPT-6 Sol high digest e2e', () => {
   it.each([false, true])('sends exactly one Personal Pattern without a link (initial digest sent: %s)', async (initialDigestSent) => {
     const config = await resolveRealCodexE2eConfig()
     const automation = MURPH_MANAGED_AUTOMATIONS.find(
@@ -29075,7 +29075,7 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
         /4(?::20)?\s*p\.?m\.?|16:20/iu,
       ],
       expectedInstructions: [/library book/iu],
-      expectedModel: 'gpt-5.6-luna',
+      expectedModel: 'gpt-6-luna',
       expectedScheduleKind: 'at',
       occurrenceProjection: {
         nextOccurrenceAt: '2031-01-15T21:20:00.000Z',
@@ -29084,7 +29084,7 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
       prompt:
         'On January 15, 2031 at 4:20 PM, remind me here to bring the library book. Please save it now.',
       scenario: 'fixed-library-cue',
-      testName: 'fixed library cue uses Luna',
+      testName: 'fixed library cue uses GPT-6 Luna',
     },
     {
       expectedFinalMessage: [
@@ -29108,7 +29108,7 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
         'decide whether I should train or recover, and remind me here with that recommendation. Save it now.',
       ].join(' '),
       scenario: 'contextual-recovery-reminder',
-      testName: 'context reminder uses Terra',
+      testName: 'context reminder uses GPT-6 Sol',
     },
   ] as const)(
     '$testName',
