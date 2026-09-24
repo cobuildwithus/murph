@@ -31757,6 +31757,54 @@ describeRealCodex('real Codex latest-context nutrition-card e2e', () => {
 })
 
 describeRealCodex('real Codex live native reply prefix e2e', () => {
+  it('real model foreground answer after native turn cancellation', { timeout: 480_000 }, async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-interrupted-turn-real-e2e-'))
+    const abort = new AbortController()
+    const trace = vi.fn()
+    const input = {
+      approvalPolicy: 'never' as const,
+      baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+      codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+      codexHome: config.codexHome,
+      developerInstructions: buildDirectConversationDeveloperInstructions(),
+      dynamicTools: [MURPH_FINISH_WITHOUT_REPLY_TOOL],
+      env: config.env,
+      model: config.model,
+      modelProvider: config.modelProvider,
+      reasoningEffort: 'low' as const,
+      sandbox: 'read-only' as const,
+      workingDirectory,
+    }
+    try {
+      await expect(executeRealCodexAppServerTurn({
+        ...input,
+        abortSignal: abort.signal,
+        onLiveTurn: () => abort.abort(),
+        prompt: 'Explain the water cycle.',
+      })).rejects.toThrow(/interrupt/iu)
+      const result = await executeRealCodexAppServerTurn({
+        ...input,
+        onTraceEvent: trace,
+        prompt: 'What is 17 plus 26? A short answer is all I need.',
+      })
+      expect(trace).toHaveBeenCalledWith(expect.objectContaining({
+        rawEvent: expect.objectContaining({ codexTimingStage: 'warm-reused' }),
+      }))
+      expect(trace).not.toHaveBeenCalledWith(expect.objectContaining({
+        rawEvent: expect.objectContaining({ codexTimingStage: 'initialized' }),
+      }))
+      expect(readDynamicToolAttempts(result.jsonEvents)).toEqual([])
+      expect(result.precedingAgentMessageSegments).toEqual([])
+      expect(result.finalMessage).toMatch(/\b43\b/u)
+      expect(result.finalMessage).not.toMatch(/water cycle|interrupt|reconnect|restart|unable|cannot/iu)
+      process.stdout.write(`[native-turn-cancellation-reply] ${JSON.stringify({ reply: result.finalMessage })}\n`)
+    } finally {
+      await stopWarmCodexAppServer('synthetic-interruption-journey-complete')
+      await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+    }
+  })
+
   it('selects an earlier accepted message after later live input', {
     timeout: 480_000,
   }, async () => {

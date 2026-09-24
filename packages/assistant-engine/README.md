@@ -26,6 +26,14 @@ runtime/container. A turn is an RPC into that process rather than a per-turn
 app-server subprocess. Overlapping turns fail busy instead of spawning parallel
 app-server processes.
 
+Cancelling an active turn uses native `turn/interrupt`. An acknowledged
+interruption drains host-owned effects, releases the turn, and reports cancellation
+without retiring the resident process or its independent realtime media session.
+A normal completion racing cancellation also leaves the process reusable. Missing
+terminal acknowledgement retains the bounded interruption timeout and process
+cleanup; cancellation before a turn has an addressable native ID still uses
+process shutdown. Workspace shutdown remains the owner of closing live media.
+
 Process launch identity contains only process-stable settings such as the
 command, args, stable working directory, Codex home, and sanitized stable env.
 Prompts, session/thread/turn ids, delivery routes, invocation credentials, and

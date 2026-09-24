@@ -3685,6 +3685,7 @@ async function runCodexAppServerTurnOnProcess(
   let failTurn: ((error: unknown) => void) | null = null
   let liveTurnOpen = false
   let turnTerminal = false
+  let interruptedTurnError: VaultCliError | null = null
   let providerRequestStartedNotified = false
   let contextCompactionProgressNotified = false
   let contextCompactionProgressPending = false
@@ -4096,7 +4097,6 @@ async function runCodexAppServerTurnOnProcess(
     abortSignal: input.abortSignal,
     onAbort: () => {
       abortRequested = true
-      codexProcess.noteTurnAbort()
       if (codexThreadId && turnId) {
         codexProcess.sendUntrackedRequest(
           'turn/interrupt',
@@ -4105,9 +4105,11 @@ async function runCodexAppServerTurnOnProcess(
             turnId,
           }),
         )
+      } else {
+        codexProcess.noteTurnAbort()
+        terminationSignalSent = 'SIGINT'
+        codexProcess.signal('SIGINT')
       }
-      terminationSignalSent = 'SIGINT'
-      codexProcess.signal('SIGINT')
       scheduleInterruptCleanupTimeout()
     },
   })
@@ -5661,10 +5663,17 @@ async function runCodexAppServerTurnOnProcess(
     }
 
     const status = extractCodexTurnStatus(message)
-    if (
-      status === 'interrupted' &&
-      terminalNoReplyInterruptRequested
-    ) {
+    if (status === 'interrupted') {
+      if (!terminalNoReplyInterruptRequested) {
+        interruptedTurnError = buildCodexTurnFailedError({
+          errorInfo: null,
+          fallback: null,
+          providerActionCount,
+          codexThreadId,
+          status,
+        })
+        dynamicToolAbortController.abort()
+      }
       turnTerminal = true
       completeTurn?.()
       return
@@ -6259,26 +6268,18 @@ async function runCodexAppServerTurnOnProcess(
     if (stdinFailure) {
       throw stdinFailure
     }
-    await settleNoReplyFinalActions()
-    if (abortRequested || terminationSignalSent) {
-      normalShutdown = true
-      lifecycleStage = 'abort_cleanup'
-      await codexProcess.poison('turn-completed-after-abort')
-      lifecycleStage = 'shutdown_complete'
-      emitAppServerTimingTrace(
-        input.processLifetime === 'one-shot'
-          ? 'one-shot-abort-stopped'
-          : 'warm-abort-poisoned',
-      )
-    } else {
-      lifecycleStage = 'idle'
-      codexProcess.releaseTurn(activeTurnBinding)
-      emitAppServerTimingTrace(
-        input.processLifetime === 'one-shot'
-          ? 'one-shot-complete'
-          : 'warm-idle',
-      )
+    const terminationError = buildRecordedTerminationError(lastEventError)
+    if (terminationError) {
+      throw terminationError
     }
+    await settleNoReplyFinalActions()
+    lifecycleStage = 'idle'
+    codexProcess.releaseTurn(activeTurnBinding)
+    emitAppServerTimingTrace(
+      input.processLifetime === 'one-shot'
+        ? 'one-shot-complete'
+        : 'warm-idle',
+    )
   } catch (error) {
     const recordedEndReason = codexProcess.recordedEndReason
     const preserveInterruptCleanupTimeout =
@@ -6331,6 +6332,13 @@ async function runCodexAppServerTurnOnProcess(
     codexProcess.noteBoundThreadId(codexThreadId)
     codexProcess.releaseTurn(activeTurnBinding)
     codexProcess.releaseReservation()
+  }
+
+  // Native interruption is a terminal turn result, not a process failure.
+  // Drain effects and release the resident process before reporting it upstream.
+  if (interruptedTurnError) {
+    annotateTurnFailureContext(interruptedTurnError)
+    throw interruptedTurnError
   }
 
   const extractedFinalMessage =
