@@ -1,5 +1,6 @@
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import path from "node:path";
+import { resolveWorkspaceScratchRoot } from "./workspace-paths.ts";
 import { Worker } from "node:worker_threads";
 
 import { isHostedWorkspaceSnapshotV2Ref } from "@murphai/hosted-execution/parsers";
@@ -42,11 +43,7 @@ export async function projectHostedVaultShareCheckpoint(input: {
     });
     if (scopes.outcome !== "active-scopes") return { outcome: scopes.outcome };
     if (input.shouldStop()) return { outcome: "preempted" };
-    const vaultRoot = path.resolve(input.vaultRoot);
-    const durableRoot = path.basename(vaultRoot) === "vault" ? path.dirname(vaultRoot) : vaultRoot;
-    const scratchRoot = path.basename(durableRoot) === "durable"
-      ? path.join(path.dirname(durableRoot), "scratch")
-      : path.join(path.dirname(durableRoot), `${path.basename(durableRoot)}-scratch`);
+    const scratchRoot = resolveWorkspaceScratchRoot(input.vaultRoot);
     await mkdir(scratchRoot, { mode: 0o700, recursive: true });
     temporaryRoot = await mkdtemp(path.join(scratchRoot, "vault-share-"));
     const readRoot = path.join(temporaryRoot, "durable");
