@@ -70,6 +70,19 @@ receipts and prove an inactive fence before release. Retiring owners and
 retention work that needs replacement follow the existing recovery path without
 a wake. Unknown wake acknowledgments never authorize replacement by themselves.
 
+After exact completed-receipt and inactive-fence proof, recovery uses the existing
+combined completion/release command. A stale acknowledgment requests fresh
+canonical admission rather than assuming failure: another caller may already
+have released the completed owner. An unusable retained target likewise permits
+fresh admission after its existing exact retirement path. One ensure request
+visits at most three admitted generations (completed owner, expired target,
+fresh successor), within its existing command deadline. A repeated generation,
+uncertain liveness or stop, denied admission, or further contention returns the
+existing retry response. Successful warm wakes and fresh starts add no reads;
+completion recovery removes the separate release callback. Each fresh-start
+attempt retains its own bounded, overlapping workspace and native readiness
+preparation; abandoned target reads are not execution authority.
+
 The owner row has a monotonically increasing generation and one attempt. Its
 phases are `idle -> starting -> active -> retiring -> idle`. Claim records an
 allocation ID before an external allocation call. Target selection records the
