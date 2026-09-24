@@ -141,7 +141,7 @@ export function buildOnboardingGoalCheckinSeed(
   return {
     activeUntil: window.activeUntil,
     assistantTargetOverride: {
-      model: 'gpt-5.6-sol',
+      model: 'gpt-6-sol',
       reasoningEffort: 'medium',
     },
     automationId: MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID,

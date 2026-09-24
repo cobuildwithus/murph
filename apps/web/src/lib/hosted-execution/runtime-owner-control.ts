@@ -1,7 +1,4 @@
-import { notifyHostedRuntimeOwnerCompletion } from "../hosted-orchestration/runtime-owner-release";
-import { resolveHostedLegacyMaterialization } from "./runtime-materialization";
 import { readHostedRuntimeMemberBackend } from "./runtime-cutover";
-import { reconcileHostedRuntimeUploads } from "./runtime-upload-recovery";
 import type { HostedRuntimeOwner, PrismaClient } from "@prisma/client";
 import { parseHostedRuntimeOwnerResponse, type HostedRuntimeOwnerCommand, type HostedRuntimeOwnerResponse } from "@murphai/hosted-execution/runtime-owner";
 import {
@@ -15,9 +12,10 @@ type CommandInput = { prisma: PrismaClient; userId: string; command: HostedRunti
 type CommandResult = { status: HostedRuntimeOwnerResponse["status"]; owner: HostedRuntimeOwner | null };
 type IdentityCommand = Extract<HostedRuntimeOwnerCommand, { attemptId: string }>;
 
-/** Coarse ownership commands. Container and provider work stays in the Worker. */
+/** Durable ownership commands. The HTTP boundary owns advisory completion hints. */
 export async function executeHostedRuntimeOwnerCommand(input: CommandInput): Promise<HostedRuntimeOwnerResponse> {
   if (input.command.operation === "resolve_legacy") {
+    const { resolveHostedLegacyMaterialization } = await import("./runtime-materialization");
     const result = await resolveHostedLegacyMaterialization({ ...input.command, prisma: input.prisma, userId: input.userId });
     return parseHostedRuntimeOwnerResponse({ cutover: result.cutover, status: "observed", owner: projectOwner(result.owner) });
   }
@@ -38,9 +36,11 @@ async function executeCommand(input: Omit<CommandInput, "command"> & { command: 
   switch (command.operation) {
     case "reconcile":
       return { status: "observed", owner: await prisma.hostedRuntimeOwner.findUnique({ where: { userId } }) };
-    case "deletion_ready":
+    case "deletion_ready": {
+      const { reconcileHostedRuntimeUploads } = await import("./runtime-upload-recovery");
       await reconcileHostedRuntimeUploads({ prisma, now: new Date(), deadlineAtMs: Date.now() + 5_000, deletedUserId: userId });
       return authorized(await isHostedRuntimeDeletionReady(input));
+    }
     case "claim": {
       const result = await claimHostedRuntime({ prisma, userId, processingMode: command.processingMode });
       return { status: result.status, owner: result.status === "blocked" ? null : result.owner };
@@ -73,8 +73,6 @@ async function executeIdentityCommand(input: Omit<CommandInput, "command"> & { c
       if (command.settledRunnerContainerName !== null && !await releaseHostedRuntimeAfterCompletion({
         prisma, identity, runnerContainerName: command.settledRunnerContainerName,
       })) return mutated(false);
-      await notifyHostedRuntimeOwnerCompletion({ userId, runtimeAttemptId: command.attemptId,
-        immediateRecheckRequested: command.immediateRecheckRequested });
       return mutated(true);
     }
     case "retire":

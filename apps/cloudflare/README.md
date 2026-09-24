@@ -154,14 +154,22 @@ authenticated request carrying `conversationWorkPending: true` may claim a slot.
 Temporal derives that fact from fresh admitted conversation lag. Background-only
 work reuses its own warm target or starts a cold target in the same fleet.
 A missed or unavailable claim falls back to that same cold allocation lifecycle.
-The coordinator fills a deficit in bounded parallel work; it owns only pristine
-inventory and abandoned handoff cleanup, not member execution or capacity leases.
+Each claim immediately fills a deficit using any free preparation lane, including
+while another preparation is pending. At most two preparations run concurrently;
+SQLite reservations and recovery alarms retain reset and retry ownership. The
+coordinator owns only pristine inventory and abandoned handoff cleanup, not member
+execution or capacity leases.
 The public banner and health response expose the effective mode, and deployment
 smoke checks the newly deployed Worker version against the rendered mode.
 
-Readiness verifies the exact release, bundle/source fingerprints, architecture,
-heavy runtime hydration, pristine job counters, and a disposable content-free
-Codex initialization probe. Global eligibility imposes no ENAM health requirement.
+Standby uses ordinary container startup and health, then verifies the exact release,
+bundle/source fingerprints, architecture, and pristine job counters. Heavy runtime
+hydration begins automatically at startup; standby does not wait for it or launch a
+throwaway Codex process. Actual invocation joins hydration through the normal path.
+Full Codex and CLI validation stays in deployment smoke. Its health receipt remains
+compatible with preceding Workers that still request a per-slot preflight; their
+legacy readiness query is ignored and runs the full smoke. Global eligibility
+imposes no ENAM health requirement.
 No member, workspace, or provider credential enters a slot before binding.
 The member-specific resident Codex process starts after encrypted-workspace restore.
 
@@ -1048,6 +1056,14 @@ host, shell resources, and sandbox helper remain from the same release. The imag
 records the upstream revision and patch SHA-256 in `murph-source-revision`.
 Cargo concurrency is capped at two jobs so a high CPU count does not expand the
 native build's memory demand; the upstream release optimization profile is kept.
+
+Public Live transcript fragments use Codex's native normalized event stream and
+bounded transcript collection. Handoffs without separate task text use upstream
+transcript fallback and delegation formatting, including escaped, bounded input
+and transcript fields. Raw transcript/delegation notifications are not duplicated
+onto App Server; browser captions still arrive through the provider data channel.
+Outgoing results reuse the native context-message builders and UTF-8 chunking;
+only the final serialization maps those frames to public Live append events.
 
 Public WebRTC sessions restrict browser commands to mute, unmute, and close.
 Instructions and delegated results stay on the native trusted connection; the

@@ -241,6 +241,12 @@ source adapter -> AssistantInputEvent -> AssistantInputSource -> scanner / activ
 
 ### Resident Codex And Detached Enrichment Boundary
 
+The container's SIGTERM handler owns graceful drain: finish the active reply,
+checkpoint, then exit. Codex's detached-process cleanup defers to an existing
+signal owner and remains armed for actual parent exit. Without a shutdown
+owner, the same helper cleans only its owned process group and forwards the
+termination signal; multiple Codex cleanup listeners are not shutdown owners.
+
 The container owns one resident Codex App Server and keeps it warm across
 ordinary turns while one restored workspace remains active. Turn completion,
 invocation completion, and invocation-scoped credential rotation do not by
@@ -473,25 +479,21 @@ acknowledgement owner: it reuses the bounded device-sync continuation while the
 already-committed personal import and conversation path remain available.
 
 Each replacement request carries the committed grantor workspace version that
-produced its complete snapshot. Before delivery, the runtime
-resolves active scopes through the Web control plane and then captures every
-selected scope while it still owns the restored vault path. Side-effect-free
-scope resolution receives the owning invocation's abort signal. Capture performs
-only bounded local reads; a wake waits for the current capture to drain,
-discards it, and releases no lazy vault reader. Once immutable delivery starts,
-a foreground conversation may enter the provider without waiting for
-publication, but that invocation starts no second projection and retains runner
-ownership until the forwarded Web request is terminal. Abort and shutdown
-finalization join the same end-to-end request before a successor invocation or
-durable continuation may retry, but their between-scope stop condition prevents
-every undispatched scope, including the first, from starting; an active request
-still drains to its terminal boundary. Foreground
-preemption is local to that active delivery owner. If any owner-ending condition
-skips later captured scopes, the offer reports preempted;
-the next opportunity starts with a fresh stop state and cannot acknowledge the
-dirty or recording obligation until its complete scope set succeeds. No
-projection work outlives that owner. A marked actual-Web failure received before
-its effect deadline is a terminal disposition for that scope only when Web has
+produced its complete snapshot. One invocation-owned task resolves active scopes,
+restores that committed checkpoint into private scratch through the existing
+snapshot port, and captures its selected scopes in a worker thread. Background
+restores obtain fresh restore authorization instead of reusing launch preparation
+for a potentially different snapshot. The reader never touches the live vault;
+its scratch view is removed after the thread exits. Foreground conversation wakes
+release the wait immediately without canceling scope lookup, capture, or delivery.
+The invocation starts no second projection while that task remains active.
+Shutdown and exact host abort stop further work, terminate an active capture
+thread, and drain an active forwarded Web request to its terminal boundary before
+runner release. Those owner-ending conditions prevent every undispatched scope,
+including the first, from starting. A partial offer reports preempted and retains
+the existing dirty or recording continuation; a later opportunity retries with a
+fresh stop state. No projection work outlives the invocation owner. A marked
+actual-Web failure received before its effect deadline is a terminal disposition for that scope only when Web has
 classified an explicitly typed missing destination ingress-root envelope. The
 same sequential owner continues the healthy captured suffix, aggregates the
 attempt as failed, and therefore retains the existing dirty or recording
@@ -2285,6 +2287,17 @@ existing source enum, the runtime attempt ID, and the bounded milestone enum.
 They contain no message, prompt, transcript, route, phone number, email
 address, identity, health value, provider payload, credential, or scenario label. They inherit the
 existing seven-day trace retention and add no retention or state owner.
+
+The bounded latency batch envelope accepts assistant and runtime milestones.
+Checkpoint deadline publication sends its already-available email, Linq, and
+Telegram runtime milestones in one request with the original timestamps. The
+Web route validates every attempt fence before writing and persists each event
+serially through its existing owner. Singleton requests remain supported; a
+platform without a batch port uses them. Ship the additive Web parser before
+the new runtime producer and retain it until those producers retire. An older
+Web parser rejects runtime milestone batches, so that reverse skew can lose
+best-effort diagnostic events; it does not affect checkpoint authority. No
+buffer, timer, log suppression, or new telemetry owner is introduced.
 
 For a later bounded production occurrence, verification must select only staged
 trace rows inside an explicit accepted-time window and fixed row limit where

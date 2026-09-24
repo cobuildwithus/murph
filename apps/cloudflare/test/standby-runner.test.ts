@@ -107,7 +107,6 @@ describe("retained small namespace", () => {
     await expect(h.container.prepareStandbySlot({ ...identity, timeoutMs: 1000 })).rejects.toThrow("drain-only");
     await expect(h.container.bindStandbySlot({ ...identity, ...owner })).rejects.toThrow("drain-only");
     expect(h.startAndWaitForPorts).not.toHaveBeenCalled();
-    expect(h.codexPreflight).not.toHaveBeenCalled();
   });
 
   it("preserves the exact persisted binding and retires it through the existing owner", async () => {
@@ -149,7 +148,6 @@ describe("RunnerContainer slot lifecycle", () => {
       });
       const prepare = { releaseId: RELEASE_ID, region: HOSTED_RUNNER_REGION, slotName: h.slotName, timeoutMs: 75_000 };
       await expect(h.container.prepareStandbySlot(prepare)).resolves.toMatchObject({ prepared: true, runnerImage: { bundleFingerprint: image.bundleFingerprint, sourceFingerprint: image.sourceFingerprint } });
-      expect(h.codexPreflight).toHaveBeenCalledOnce();
       expect(h.destroy).not.toHaveBeenCalled();
       expect(h.startAndWaitForPorts).not.toHaveBeenCalled();
       await expect(h.container.readStandbySlotBinding()).resolves.toMatchObject({ state: "unbound", userId: null });
@@ -173,7 +171,7 @@ describe("RunnerContainer slot lifecycle", () => {
     ["missing image", undefined],
   ])("rejects %s in the final pristine proof even after ordinary health passed", async (_name, runnerBundle) => {
     const h = createStandbyContainerHarness({
-      environment: TRANSITION_ENV, preflightReady: true,
+      environment: TRANSITION_ENV,
       healthOverrides: (read) => ({ runnerBundle: read === 1 ? CANDIDATE_IMAGE : runnerBundle }),
     });
     await expect(h.container.prepareStandbySlot({ releaseId: RELEASE_ID, region: HOSTED_RUNNER_REGION,
@@ -186,14 +184,11 @@ describe("RunnerContainer slot lifecycle", () => {
     ["active_job_count", { activeJobCount: 1 }],
     ["poisoned", { poisoned: true }],
     ["workspace_invocation_accepted_count", { workspaceInvocationAcceptedCount: 1 }],
-    ["heavy_runtime_hydration_status", { heavyRuntimeHydrationStatus: "pending" }],
     ["hosted_runtime_architecture_version", { hostedRuntimeArchitectureVersion: "other" }],
     ["hosted_worker_release_id", { hostedWorkerReleaseId: "other" }],
-    ["codex_shell_preflight_status", { codexShellPreflightStatus: "failed" }],
-    ["codex_shell_preflight_completed_at", { codexShellPreflightCompletedAtEpochMs: null }],
   ] as const)("preserves the %s pristine gate during a transition", async (check, health) => {
     const h = createStandbyContainerHarness({
-      environment: TRANSITION_ENV, preflightReady: true,
+      environment: TRANSITION_ENV,
       healthOverrides: (read) => ({ runnerBundle: ACTIVE_IMAGE, ...(read === 1 ? {} : health) }),
     });
     await expect(h.container.prepareStandbySlot({ releaseId: RELEASE_ID, region: HOSTED_RUNNER_REGION,
@@ -203,7 +198,7 @@ describe("RunnerContainer slot lifecycle", () => {
   it.each([undefined, "", " "])("requires configured fingerprints even when the health pair is absent (%s)", async (missing) => {
     const h = createStandbyContainerHarness({
       environment: { HOSTED_EXECUTION_RUNNER_BUNDLE_FINGERPRINT: missing, HOSTED_EXECUTION_RUNNER_SOURCE_FINGERPRINT: missing },
-      preflightReady: true, healthOverrides: () => ({ runnerBundle: undefined }),
+      healthOverrides: () => ({ runnerBundle: undefined }),
     });
     await expect(h.container.prepareStandbySlot({ releaseId: RELEASE_ID, region: HOSTED_RUNNER_REGION,
       slotName: h.slotName, timeoutMs: 75_000 })).rejects.toThrow("is required for hosted standby readiness");
@@ -216,11 +211,9 @@ describe("RunnerContainer slot lifecycle", () => {
     await h.container.prepareStandbySlot(input);
     image = CANDIDATE_IMAGE;
     h.setNativeStatus("stopped");
-    h.setPreflightReady(false);
     h.container.onStop({ exitCode: 0, reason: "exit" });
     await expect(h.container.prepareStandbySlot(input)).resolves.toMatchObject({ prepared: true, slotName: h.slotName });
     expect(h.startAndWaitForPorts).toHaveBeenCalledOnce();
-    expect(h.codexPreflight).toHaveBeenCalledTimes(2);
     expect(h.destroy).not.toHaveBeenCalled();
     await expect(h.container.readStandbySlotBinding()).resolves.toMatchObject({ state: "unbound", userId: null, releaseId: RELEASE_ID });
   });
@@ -255,7 +248,7 @@ describe("RunnerContainer slot lifecycle", () => {
   it.each(["ENAM", "WEUR", "APAC", "REGN"])(
     "prepares global inventory when native placement is %s",
     async (healthRegion) => {
-      const harness = createStandbyContainerHarness({ healthRegion, preflightReady: true });
+      const harness = createStandbyContainerHarness({ healthRegion });
       await expect(harness.container.prepareStandbySlot({
         releaseId: RELEASE_ID,
         region: HOSTED_RUNNER_REGION,
@@ -265,8 +258,10 @@ describe("RunnerContainer slot lifecycle", () => {
     },
   );
 
-  it("proves heavy hydration and a content-free Codex initialize/stop preflight before binding once", async () => {
-    const harness = createStandbyContainerHarness();
+  it.each(["running", "stopped"])("prepares a %s container through ordinary health while hydration is pending", async (nativeStatus) => {
+    const harness = createStandbyContainerHarness({ nativeStatus,
+      healthOverrides: () => ({ heavyRuntimeHydrationStatus: "pending", heavyRuntimeHydrationCompletedAtEpochMs: null }),
+    });
     const slotName = harness.slotName;
     const prepared = await harness.container.prepareStandbySlot({
       releaseId: RELEASE_ID,
@@ -282,8 +277,9 @@ describe("RunnerContainer slot lifecycle", () => {
       region: HOSTED_RUNNER_REGION,
       slotName,
     });
-    expect(harness.codexPreflight).toHaveBeenCalledTimes(1);
-    expect(harness.startAndWaitForPorts).not.toHaveBeenCalled();
+    expect(harness.containerFetch.mock.calls.map(([url]) => new URL(url).pathname))
+      .toEqual(["/health", "/health"]);
+    expect(harness.startAndWaitForPorts).toHaveBeenCalledTimes(nativeStatus === "stopped" ? 1 : 0);
 
     const claimId = createHostedStandbyClaimId();
     await expect(harness.container.bindStandbySlot({
@@ -431,7 +427,7 @@ describe("RunnerContainer slot lifecycle", () => {
   });
 
   it("keeps an unbound ready slot alive at ordinary activity expiry", async () => {
-    const harness = createStandbyContainerHarness({ preflightReady: true });
+    const harness = createStandbyContainerHarness();
     const slotName = harness.slotName;
     await harness.container.prepareStandbySlot({
       releaseId: RELEASE_ID,
@@ -700,7 +696,6 @@ describe("StandbyRunnerCoordinatorDurableObject", () => {
     expect(coordinator.readStandbyCoordinatorState().readySlotNames).toHaveLength(2);
     expect(slots.size).toBe(3);
     for (const slot of slots.values()) {
-      expect(slot.codexPreflight).toHaveBeenCalledOnce();
       expect(slot.destroy).not.toHaveBeenCalled();
     }
   });
@@ -866,7 +861,47 @@ describe("StandbyRunnerCoordinatorDurableObject", () => {
     assert.equal(h.coordinator.readStandbyCoordinatorState().readySlotNames.length, 5);
   });
 
-  it("retains the fill owner when one worker fails before its peer finishes", async () => {
+  it("refills staggered claims immediately while another preparation is pending", async () => {
+    const gates: ReturnType<typeof createDeferred<void>>[] = [];
+    let active = 0;
+    let peak = 0;
+    let prepared = 0;
+    const h = createCoordinatorHarness({ async prepare() {
+      prepared += 1;
+      if (prepared <= 2) return;
+      const gate = createDeferred<void>();
+      gates.push(gate);
+      active += 1;
+      peak = Math.max(peak, active);
+      await gate.promise;
+      active -= 1;
+    } });
+    h.ensure();
+    await h.flush();
+    assert.equal(h.claim().outcome, "claimed");
+    // Refill reservation work stays outside the synchronous claim handler.
+    assert.equal(h.coordinator.readStandbyCoordinatorState().provisioningSlotNames.length, 0);
+    await until(() => gates.length === 1);
+    assert.equal(h.claim().outcome, "claimed");
+    try {
+      await until(() => gates.length === 2);
+      assert.equal(active, 2);
+      assert.equal(h.coordinator.readStandbyCoordinatorState().readySlotNames.length, 0);
+      gates[1]?.resolve(undefined);
+      await until(() => h.coordinator.readStandbyCoordinatorState().readySlotNames.length === 1);
+      assert.equal(h.claim().outcome, "claimed");
+      await until(() => gates.length === 3);
+      assert.equal(active, 2);
+      assert.equal(peak, 2);
+    } finally {
+      // End demand before draining every owned preparation, including failures.
+      h.environment.HOSTED_EXECUTION_STANDBY_MODE = "off";
+      for (const gate of gates) gate.resolve(undefined);
+      await h.flush();
+    }
+  });
+
+  it("recovers a failed preparation lane without exceeding the shared concurrency cap", async () => {
     const gate = createDeferred<void>();
     let active = 0;
     let peak = 0;
@@ -879,12 +914,12 @@ describe("StandbyRunnerCoordinatorDurableObject", () => {
     h.setAlarm.mockRejectedValueOnce(new Error("alarm unavailable"));
     h.ensure();
     await until(() => active === 1);
-    // Let the rejected worker settle while its peer remains in external I/O.
+    // Let the rejected lane settle while its peer remains in external I/O.
     for (let turn = 0; turn < 50; turn += 1) await Promise.resolve();
     h.ensure();
     for (let turn = 0; turn < 50; turn += 1) await Promise.resolve();
     try {
-      assert.equal(active, 1);
+      assert.equal(active, 2);
     } finally {
       gate.resolve(undefined);
       await h.flush();
@@ -1562,19 +1597,13 @@ function createStandbyContainerHarness(input: {
   environment?: Record<string, unknown>;
   healthRegion?: string;
   healthOverrides?: (read: number) => Record<string, unknown>;
-  preflightReady?: boolean;
   slotName?: string;
 } = {}) {
   const db = new DatabaseSync(":memory:");
   const pending: Promise<unknown>[] = [];
   const state = createDurableObjectState(db, pending);
-  let preflightReady = input.preflightReady ?? false;
   let healthReadCount = 0;
   let nativeStatus = input.nativeStatus ?? "running";
-  const codexPreflight = vi.fn(async () => {
-    preflightReady = true;
-    return new Response(JSON.stringify({ ok: true }), { status: 200 });
-  });
   const slotName = input.slotName ?? createHostedRunnerSlotName(RELEASE_ID);
   const environment: Record<string, unknown> = {
     CF_VERSION_METADATA: { id: RELEASE_ID },
@@ -1589,12 +1618,9 @@ function createStandbyContainerHarness(input: {
     store.bind({ ...identity, ...input.bound });
   }
   const containerFetch = vi.fn(async (url: string) => {
-    if (url.endsWith("/internal/deploy-codex-shell-smoke")) {
-      return await codexPreflight();
-    }
     if (url.endsWith("/health")) {
       return new Response(JSON.stringify({
-        ...createStandbyHealth(preflightReady, input.healthRegion),
+        ...createStandbyHealth(input.healthRegion),
         ...input.healthOverrides?.(++healthReadCount),
       }), {
         headers: { "content-type": "application/json; charset=utf-8" },
@@ -1632,7 +1658,7 @@ function createStandbyContainerHarness(input: {
   });
   return {
     async flushWaitUntil() { await Promise.all(pending.splice(0)); },
-    codexPreflight,
+    containerFetch,
     container,
     environment,
     destroy,
@@ -1640,20 +1666,18 @@ function createStandbyContainerHarness(input: {
     setNativeStatus(status: string) {
       nativeStatus = status;
     },
-    setPreflightReady(ready: boolean) { preflightReady = ready; },
     slotName,
     startAndWaitForPorts,
   };
 }
 
 function createStandbyHealth(
-  preflightReady: boolean,
   cloudflareRegion: string = HOSTED_STANDBY_REGION,
 ): Record<string, unknown> {
   return {
     activeJobCount: 0,
-    codexShellPreflightCompletedAtEpochMs: preflightReady ? Date.now() : null,
-    codexShellPreflightStatus: preflightReady ? "ready" : "pending",
+    codexShellPreflightCompletedAtEpochMs: null,
+    codexShellPreflightStatus: "pending",
     cloudflareRegion,
     conversationWarmActivityCompletedAtEpochMs: null,
     heavyRuntimeHydrationCompletedAtEpochMs: Date.now(),

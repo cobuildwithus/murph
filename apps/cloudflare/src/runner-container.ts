@@ -739,16 +739,7 @@ export class RunnerContainer extends Container {
         timeoutMs: requireRunnerSlotRemainingTime(deadlineAtEpochMs),
         userId: "standby-unbound",
       }, signal, { surfaceCleanupUnsettled: true });
-      let health = await this.readStandbyHealth(deadlineAtEpochMs);
-      if (health.codexShellPreflightStatus !== "ready") {
-        const response = await this.containerFetch(RUNNER_CODEX_SHELL_SMOKE_URL, {
-          method: "POST",
-          signal: AbortSignal.timeout(requireRunnerSlotRemainingTime(deadlineAtEpochMs)),
-        });
-        await response.body?.cancel().catch(() => undefined);
-        if (!response.ok) throw new Error("Hosted standby Codex CLI preflight failed.");
-        health = await this.readStandbyHealth(deadlineAtEpochMs);
-      }
+      const health = await this.readStandbyHealth(deadlineAtEpochMs);
       const runnerImage = this.assertPristineStandbyHealth(health, input);
       const after = store.read();
       if (after.state !== "unbound") {
@@ -981,15 +972,6 @@ export class RunnerContainer extends Container {
     }
     const failedChecks: string[] = [];
     if (payload.activeJobCount !== 0) failedChecks.push("active_job_count");
-    if (payload.codexShellPreflightStatus !== "ready") {
-      failedChecks.push("codex_shell_preflight_status");
-    }
-    if (typeof payload.codexShellPreflightCompletedAtEpochMs !== "number") {
-      failedChecks.push("codex_shell_preflight_completed_at");
-    }
-    if (payload.heavyRuntimeHydrationStatus !== "ready") {
-      failedChecks.push("heavy_runtime_hydration_status");
-    }
     if (payload.hostedRuntimeArchitectureVersion !== HOSTED_RUNTIME_ARCHITECTURE_VERSION) {
       failedChecks.push("hosted_runtime_architecture_version");
     }

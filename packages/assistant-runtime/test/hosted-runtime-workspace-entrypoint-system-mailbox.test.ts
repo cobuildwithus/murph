@@ -5758,6 +5758,8 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       laneSeq: "1",
     });
 
+    // The capture worker has its own clock; keep the daily metric within its retention window.
+    const metricDate = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10);
     vi.useFakeTimers({ toFake: ["Date"] });
     try {
       vi.setSystemTime(new Date(TEST_NOW));
@@ -5772,7 +5774,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
           },
         };
         const dailyMetricWake = buildHostedExecutionDailyMetricReportedWake({
-          date: "2026-04-26",
+          date: metricDate,
           eventId: maintenanceItem.dedupeKey,
           memberId: TEST_USER_ID,
           metric: "steps",
@@ -5836,6 +5838,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       const restoredWorkspace = await createVaultSnapshotBundle({
         vaultRoot,
       });
+      const artifactBytesByHash = new Map([[restoredWorkspace.hash, restoredWorkspace.bytes]]);
 
       const result = await runHostedWorkspaceRuntimeJobInProcess(
         createWorkspaceRuntimeJobInput({
@@ -5848,18 +5851,15 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
         }),
         {
           async createCheckpointSnapshot() {
-            return {
-              snapshotRef: createSnapshotFixtureRef({
-                hash: "a".repeat(64),
-                size: 512,
-              }),
-            };
+            const snapshot = await createVaultSnapshotBundle({ vaultRoot });
+            artifactBytesByHash.set(snapshot.hash, snapshot.bytes);
+            return { snapshotRef: snapshot.snapshotRef };
           },
           async importItem() {
             throw new Error("Already-imported operator maintenance must not import a new row.");
           },
           platform: createPlatform({
-            artifactBytesByHash: new Map([[restoredWorkspace.hash, restoredWorkspace.bytes]]),
+            artifactBytesByHash,
             deviceSyncPort,
             mailboxPort: createMailboxPort({ events, items: [] }),
             vaultSharePort: {
@@ -5929,12 +5929,12 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
         expect(delivery.records).toEqual([
           expect.objectContaining({
             data: expect.objectContaining({
-              date: "2026-04-26",
+              date: metricDate,
               metricKey: "steps",
               unit: "count",
               value: 8_000,
             }),
-            recordKey: "2026-04-26.manual",
+            recordKey: `${metricDate}.manual`,
             source: { label: "Manual", source: "manual" },
           }),
         ]);
@@ -8886,6 +8886,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       const restoredWorkspace = await createVaultSnapshotBundle({
         vaultRoot,
       });
+      const artifactBytesByHash = new Map([[restoredWorkspace.hash, restoredWorkspace.bytes]]);
       const result = await runHostedWorkspaceRuntimeJobInProcess(
         createWorkspaceRuntimeJobInput({
           request: {
@@ -8897,18 +8898,15 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
         }),
         {
           async createCheckpointSnapshot() {
-            return {
-              snapshotRef: createSnapshotFixtureRef({
-                hash: "9".repeat(64),
-                size: 512,
-              }),
-            };
+            const snapshot = await createVaultSnapshotBundle({ vaultRoot });
+            artifactBytesByHash.set(snapshot.hash, snapshot.bytes);
+            return { snapshotRef: snapshot.snapshotRef };
           },
           async importItem() {
             throw new Error("Already-imported system mailbox work should not import a new row.");
           },
           platform: createPlatform({
-            artifactBytesByHash: new Map([[restoredWorkspace.hash, restoredWorkspace.bytes]]),
+            artifactBytesByHash,
             browserVaultReplicaPort: {
               async publishRef({ replicaRef }) {
                 browserPublishCalls += 1;

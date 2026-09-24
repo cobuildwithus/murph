@@ -235,7 +235,7 @@ describe('automation model input schema', () => {
     },
   )
 
-  it('advertises Terra as the reminder default and Luna only for a fixed cue', () => {
+  it('advertises GPT-6 Sol as the reminder default and Luna only for a fixed cue', () => {
     const schemaDescriptions = collectKeys(
       MURPH_AUTOMATION_TOOL.inputSchema,
       'description',
@@ -258,13 +258,16 @@ describe('automation model input schema', () => {
         'use luna only when the complete future turn is a fixed, fully self-contained cue',
       )
       expect(normalizedGuidance).toContain(
-        'use terra for all reminders that do not meet that luna exception; when unsure, use terra.',
+        'use sol for all reminders that do not meet that luna exception; when unsure, use sol.',
       )
       expect(normalizedGuidance).toContain('for a non-reminder automation')
       expect(normalizedGuidance).not.toContain(
         'use luna for self-contained cues and reminders',
       )
     }
+    expect(MURPH_AUTOMATION_TOOL.description).toContain('Luna and Sol mean GPT-6 Luna and GPT-6 Sol')
+    expect(schemaDescriptions.join(' ')).not.toMatch(/Terra|high for Luna/iu)
+    expect(MURPH_AUTOMATION_TOOL.description).not.toContain('GPT-5.6')
     expect(MURPH_AUTOMATION_TOOL.description).toContain(
       'when its instructions or context requirements materially change or the member explicitly asks to change its model or reasoning',
     )

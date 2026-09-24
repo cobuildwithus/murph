@@ -526,12 +526,16 @@ export async function handleHostedOnboardingLinqWebhook(input: {
         if (claim.kind === "unavailable") {
           return;
         }
-        instantOpeningContinuation = claim.openingTone !== undefined;
+        instantOpeningContinuation = claim.opening !== undefined;
+        const generationTiming = startHostedOnboardingTiming(
+          "hosted-onboarding.webhook.linq.first-turn-generation",
+          { openingContinuation: instantOpeningContinuation },
+        );
         const generation = startHostedLinqInstantFirstTurnGeneration({
           claim,
           request,
           ...(input.signal ? { signal: input.signal } : {}),
-        });
+        }).finally(() => finishHostedOnboardingTiming(generationTiming, "settled"));
         // Enrollment or later planning can still choose the ordinary signup
         // path. Observe a rejected speculative generation even when there is
         // then no active-member handoff to await it; the original promise is
@@ -758,6 +762,9 @@ export async function handleHostedOnboardingLinqWebhook(input: {
             // Reply generation has no side effects, so it can run beside the
             // classifier while provider work still waits for persisted allow.
             await startInstantFirstTurnGeneration();
+            const admissionTiming = startHostedOnboardingTiming(
+              "hosted-onboarding.webhook.linq.first-contact-admission",
+            );
             let classifiedAdmission: Awaited<ReturnType<typeof classifyHostedLinqFirstContactAdmission>>;
             try {
               classifiedAdmission = await classifyHostedLinqFirstContactAdmission({
@@ -769,6 +776,8 @@ export async function handleHostedOnboardingLinqWebhook(input: {
                 throw error;
               }
               classifiedAdmission = buildHostedLinqFirstContactAdmissionClassifierUnavailableDecision();
+            } finally {
+              finishHostedOnboardingTiming(admissionTiming, "settled");
             }
             firstContactAdmissionClassified = true;
 
@@ -799,6 +808,9 @@ export async function handleHostedOnboardingLinqWebhook(input: {
         instantStartTypingHint = startHostedLinqInstantStartTypingHintBestEffort({
           event: planningEvent,
         });
+        const enrollmentTiming = startHostedOnboardingTiming(
+          "hosted-onboarding.webhook.linq.starter-enrollment",
+        );
         let enrollmentFailed = false;
         try {
           const enrollment = await ensureHostedLinqInstantStartStarterUsageEnrollment({
@@ -831,6 +843,8 @@ export async function handleHostedOnboardingLinqWebhook(input: {
               eventIdSuffix: toHostedOnboardingLogIdSuffix(event.event_id),
             },
           );
+        } finally {
+          finishHostedOnboardingTiming(enrollmentTiming, "settled");
         }
         plan = await runPlan({
           instantStartAllowed: !enrollmentFailed,

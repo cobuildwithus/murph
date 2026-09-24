@@ -1563,7 +1563,7 @@ describe("startHostedContainerEntrypoint", () => {
     expect(readFile).toHaveBeenCalledTimes(1);
   });
 
-  it("runs the managed-container Codex shell smoke through the app-server hook", async () => {
+  it.each(["", "?scope=readiness"])("runs deployment smoke and publishes its legacy health receipt for query=%s", async (query) => {
     const runCodexShellSmoke = vi.fn(async () => ({
       client: "codex-app-server" as const,
       cliSurfaceContractBytes: 37282,
@@ -1591,7 +1591,7 @@ describe("startHostedContainerEntrypoint", () => {
 
     const response = await sendHostedContainerJsonRequest({
       body: "",
-      path: "/internal/deploy-codex-shell-smoke",
+      path: "/internal/deploy-codex-shell-smoke" + query,
       port: address.port,
     });
 
@@ -1614,6 +1614,84 @@ describe("startHostedContainerEntrypoint", () => {
     expect(runCodexShellSmoke).toHaveBeenCalledWith({
       signal: expect.any(AbortSignal),
     });
+    const health = await sendHostedContainerGetRequest({ path: "/health", port: address.port });
+    expect(health.json).toMatchObject({
+      codexShellPreflightStatus: "ready",
+      codexShellPreflightCompletedAtEpochMs: expect.any(Number),
+    });
+  });
+
+  it.each([
+    ["", false],
+    ["?scope=readiness", false],
+    ["", true],
+  ] as const)("runs full deployment proof for query=%s with invalid environment=%s", async (query, invalidEnvironment) => {
+    const smokeHomeParent = await mkdtemp(path.join("/var/tmp", "murph-standby-proof-"));
+    vi.stubEnv("HOSTED_HOME", smokeHomeParent);
+    vi.stubEnv("MURPH_HEALTH_COMMONS_PACKAGE_ROOT", "/app/node_modules/@murphai/health-commons");
+    const methods: string[] = [];
+    const commands: string[][] = [];
+    const kill = vi.fn(() => true);
+    mocks.spawn.mockImplementationOnce(() => {
+      const stdout = new EventEmitter();
+      return Object.assign(new EventEmitter(), {
+        stdout,
+        stderr: new EventEmitter(),
+        kill,
+        stdin: {
+          end() {},
+          write(line: string, callback?: (error?: Error) => void) {
+            const request = JSON.parse(line) as {
+              id?: number; method: string; params: { command?: string[] };
+            };
+            methods.push(request.method);
+            const command = request.params.command;
+            if (command) commands.push(command);
+            // Every deployment request must continue into the CLI suite.
+            // Stop at that boundary so this test never launches real commands.
+            const result = command ? {
+              exitCode: command[0] === "node" ? 0 : 1,
+              stderr: "",
+              stdout: JSON.stringify({
+                murphPathBytes: 20, vaultCliPathBytes: 24,
+                providerCredentialPresent: invalidEnvironment,
+                vaultRootInherited: true,
+              }),
+            } : {};
+            callback?.();
+            if (request.id !== undefined) queueMicrotask(() => {
+              stdout.emit("data", JSON.stringify({ id: request.id, result }) + "\n");
+            });
+          },
+        },
+      });
+    });
+    try {
+      const server = await startHostedContainerEntrypoint({ port: 0 });
+      servers.push(server);
+      const address = server.address();
+      if (!address || typeof address === "string") throw new Error("Expected TCP listener");
+      const response = await sendHostedContainerJsonRequest({
+        body: "", port: address.port,
+        path: "/internal/deploy-codex-shell-smoke" + query,
+      });
+      expect(response.status).toBe(500);
+      expect(commands.map((command) => command[0])).toEqual(
+        invalidEnvironment ? ["node"] : ["node", "vault-cli"],
+      );
+      expect(methods).toEqual([
+        "initialize", "initialized", "command/exec",
+        ...(invalidEnvironment ? [] : ["command/exec"]),
+      ]);
+      expect(kill).toHaveBeenCalledOnce();
+      const health = await sendHostedContainerGetRequest({ path: "/health", port: address.port });
+      expect(health.json).toMatchObject({
+        codexShellPreflightStatus: "failed",
+      });
+    } finally {
+      vi.unstubAllEnvs();
+      await rm(smokeHomeParent, { force: true, recursive: true });
+    }
   });
 
   it("surfaces content-free Codex shell smoke failure diagnostics", async () => {

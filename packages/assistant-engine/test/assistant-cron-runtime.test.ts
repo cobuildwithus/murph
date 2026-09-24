@@ -232,12 +232,14 @@ import {
   buildAssistantDeviceActivityDeliveryIdempotencyKey,
 } from '../src/assistant/device-activity-cron-tags.ts'
 import {
+  startAssistantOnboarding,
   completeAssistantOnboarding,
   reopenAssistantOnboarding,
   resolveAssistantOnboardingStatePath,
 } from '../src/assistant/onboarding-state.ts'
 import {
   seedMurphOnboardingFollowupAutomation,
+  seedMurphOnboardingEarlyStallAutomation,
 } from '../src/assistant/onboarding-followup-seed.ts'
 import {
   ASSISTANT_BOUNDED_CONVERSATION_HISTORY_INCOMPLETE_TEXT,
@@ -875,6 +877,52 @@ describe('assistant cron runtime orchestration', () => {
       'archived',
     )
     expect(cronMocks.upsertAutomation).toHaveBeenCalledTimes(3)
+  })
+
+  it.each(['send_message', 'skip'] as const)('consumes the deterministic early stall occurrence once on %s', async kind => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T15:00:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext('assistant-cron-early-stall-')
+    await startAssistantOnboarding({ vault: vaultRoot, startedAt: new Date().toISOString() })
+    expect(await seedMurphOnboardingEarlyStallAutomation({
+      vault: vaultRoot, now: new Date(),
+      route: { channel: 'telegram', deliveryTarget: 'room-1', identityId: null,
+        participantId: null, threadId: null, threadIsDirect: true },
+    })).toBe('created')
+    expect((await getAssistantCronStatus(vaultRoot)).nextRunAt).toBe('2026-04-08T15:15:00.000Z')
+    cronMocks.sendAssistantMessageLocal.mockResolvedValueOnce(kind === 'skip' ? {
+      decision: { kind, privateSummary: 'The member is already continuing.' },
+      response: null, session: { sessionId: 'session_early_stall' },
+    } : {
+      decision: { kind, privateSummary: 'An unanswered setup question has stalled.', text: 'Still around whenever you want to continue.' },
+      deliveryOutcome: {
+        kind: 'sent', media: [], intentId: 'outbox_early_stall',
+        delivery: { channel: 'telegram', target: 'room-1', targetKind: 'explicit', sentAt: '2026-04-08T15:15:05.000Z' },
+        session: { sessionId: 'session_early_stall' },
+      },
+      response: 'Still around whenever you want to continue.', session: { sessionId: 'session_early_stall' },
+    })
+    vi.setSystemTime(new Date('2026-04-08T15:15:05.000Z'))
+    await expect(processDueAssistantCronJobsLocal({ vault: vaultRoot, limit: 1 })).resolves.toEqual({ failed: 0, processed: 1, succeeded: 1 })
+    await expect(processDueAssistantCronJobsLocal({ vault: vaultRoot, limit: 1 })).resolves.toEqual({ failed: 0, processed: 0, succeeded: 0 })
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledTimes(1)
+    expect((await getAssistantCronStatus(vaultRoot)).nextRunAt).toBeNull()
+  })
+
+  it('expires an enrolled early stall check-in without evaluating after its opening window', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T15:00:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext('assistant-cron-early-stall-expired-')
+    await startAssistantOnboarding({ vault: vaultRoot, startedAt: new Date().toISOString() })
+    await seedMurphOnboardingEarlyStallAutomation({
+      vault: vaultRoot, now: new Date(),
+      route: { channel: 'telegram', deliveryTarget: 'room-1', identityId: null,
+        participantId: null, threadId: null, threadIsDirect: true },
+    })
+    vi.setSystemTime(new Date('2026-04-08T15:31:00.000Z'))
+    await processDueAssistantCronJobsLocal({ vault: vaultRoot, limit: 1 })
+    expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
+    expect((await getAssistantCronStatus(vaultRoot)).nextRunAt).toBeNull()
   })
 
   it('persists hosted email onboarding follow-up and delivers a due occurrence', async () => {
@@ -6329,7 +6377,7 @@ describe('assistant cron runtime orchestration', () => {
     expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledTimes(1)
   })
 
-  it('skips unchanged Personal Patterns before model entry and resumes Luna high on the next changed occurrence', async () => {
+  it('skips unchanged Personal Patterns before model entry and resumes Sol high on the next changed occurrence', async () => {
     vi.useFakeTimers()
     const occurrenceAt = '2026-04-08T13:00:00.000Z'
     vi.setSystemTime(new Date(occurrenceAt))
@@ -6359,7 +6407,7 @@ describe('assistant cron runtime orchestration', () => {
     vi.setSystemTime(new Date(next.state.nextRunAt!))
     await processDueAssistantCronJobsLocal({ executionContext, limit: 1, vault: vaultRoot })
     expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
-      assistantTargetOverride: { model: 'gpt-5.6-luna', reasoningEffort: 'high' },
+      assistantTargetOverride: { model: 'gpt-6-sol', reasoningEffort: 'high' },
       serviceTier: 'flex',
     }))
   })

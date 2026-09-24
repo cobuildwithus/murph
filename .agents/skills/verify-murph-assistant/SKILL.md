@@ -38,7 +38,7 @@ the acceptance result.
    ```
 
    The command requires a focused name pattern and defaults to
-   `gpt-5.6-terra` with the authenticated local ChatGPT/Codex subscription. Use
+   `gpt-6-sol` with the authenticated local ChatGPT/Codex subscription. Use
    `--model <model>` only when the product target differs. Use
    `--auth provider` only for an explicitly configured supported provider-key
    lane. Never print, copy, or persist auth material.

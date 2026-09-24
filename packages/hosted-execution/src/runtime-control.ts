@@ -3605,7 +3605,7 @@ export interface HostedRuntimeLatencyTraceRequest {
 }
 
 export interface HostedRuntimeLatencyTraceBatchRequest {
-  events: HostedRuntimeLatencyTraceAssistantMilestoneEvent[];
+  events: Array<HostedRuntimeLatencyTraceAssistantMilestoneEvent | HostedRuntimeLatencyTraceMilestoneEvent>;
 }
 
 export interface HostedRuntimeLatencyTraceBatchResponse {

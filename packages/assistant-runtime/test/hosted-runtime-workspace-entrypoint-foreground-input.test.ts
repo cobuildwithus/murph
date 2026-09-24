@@ -3412,10 +3412,7 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
         {
           async createCheckpointSnapshot() {
             return {
-              snapshotRef: createSnapshotFixtureRef({
-                hash: "7".repeat(64),
-                size: 640,
-              }),
+              snapshotRef: initialSnapshot.snapshotRef,
             };
           },
           async importItem() {
@@ -3608,10 +3605,7 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
           async createCheckpointSnapshot(snapshotInput) {
             events.push(`snapshot:${snapshotInput.reason}`);
             return {
-              snapshotRef: createSnapshotFixtureRef({
-                hash: "a".repeat(64),
-                size: 640,
-              }),
+              snapshotRef: initialSnapshot.snapshotRef,
             };
           },
           async importItem(item) {
@@ -4106,10 +4100,7 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
           async createCheckpointSnapshot(snapshotInput) {
             events.push(`snapshot:${snapshotInput.reason}`);
             return {
-              snapshotRef: createSnapshotFixtureRef({
-                hash: "d".repeat(64),
-                size: 640,
-              }),
+              snapshotRef: initialSnapshot.snapshotRef,
             };
           },
           async importItem(item) {
@@ -4605,10 +4596,7 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
           async createCheckpointSnapshot(snapshotInput) {
             events.push(`snapshot:${snapshotInput.reason}`);
             return {
-              snapshotRef: createSnapshotFixtureRef({
-                hash: "c".repeat(64),
-                size: 640,
-              }),
+              snapshotRef: initialSnapshot.snapshotRef,
             };
           },
           async importItem(item) {

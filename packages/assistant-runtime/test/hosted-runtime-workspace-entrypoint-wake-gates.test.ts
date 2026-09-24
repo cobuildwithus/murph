@@ -139,6 +139,7 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps one projectio
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
       // Restore canonical timezone metadata instead of a null/empty workspace.
       const initialSnapshot = await createVaultSnapshotBundle({ vaultRoot });
+      const artifactBytesByHash = new Map([[initialSnapshot.hash, initialSnapshot.bytes]]);
 
       resultPromise = runHostedWorkspaceRuntimeJobInProcess(
         createWorkspaceRuntimeJobInput({
@@ -153,12 +154,9 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps one projectio
         {
           async createCheckpointSnapshot(snapshotInput) {
             events.push(`snapshot:${snapshotInput.reason}`);
-            return {
-              snapshotRef: createSnapshotFixtureRef({
-                hash: "b".repeat(64),
-                size: 640,
-              }),
-            };
+            const snapshot = await createVaultSnapshotBundle({ vaultRoot });
+            artifactBytesByHash.set(snapshot.hash, snapshot.bytes);
+            return { snapshotRef: snapshot.snapshotRef };
           },
           async importItem(item) {
             events.push(`mailbox.importItem:${item.item.id}`);
@@ -175,7 +173,7 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps one projectio
             };
           },
           platform: createPlatform({
-            artifactBytesByHash: new Map([[initialSnapshot.hash, initialSnapshot.bytes]]),
+            artifactBytesByHash,
             mailboxPort: createMailboxPort({
               events,
               fetchRequests,
@@ -438,9 +436,11 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps one projectio
       assert.ok(events.includes("vault-share.deliver:done"), events.join(","));
       assert.equal(activeProjectionDeliveries, 0);
       assert.ok(activeScopeReads >= 2);
-      assert.equal(projectionDeliveryCalls, 4);
+      assert.equal(projectionDeliveryCalls, 6);
       assert.deepEqual(projectionKinds, [
         "sleep-times.v0",
+        "profile-name.v0",
+        "time-zone.v0",
         "sleep-times.v0",
         "profile-name.v0",
         "time-zone.v0",
