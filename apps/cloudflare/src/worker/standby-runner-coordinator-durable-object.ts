@@ -174,7 +174,7 @@ export class StandbyRunnerCoordinatorDurableObject extends DurableObject {
     // Each trigger can occupy a free lane while earlier preparations are pending.
     // SQLite owns reservations; this set only bounds this invocation's I/O.
     for (let lane = this.fillWork.size; lane < STANDBY_PARALLELISM; lane += 1) {
-      const work = this.fillInventory().catch(async () => {
+      const work = Promise.resolve().then(() => this.fillInventory()).catch(async () => {
         await this.state.storage.setAlarm(Date.now() + HOSTED_STANDBY_RETRY_MS);
       }).finally(() => {
         this.fillWork.delete(work);

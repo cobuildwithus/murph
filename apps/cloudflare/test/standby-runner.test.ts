@@ -884,6 +884,8 @@ describe("StandbyRunnerCoordinatorDurableObject", () => {
     h.ensure();
     await h.flush();
     assert.equal(h.claim().outcome, "claimed");
+    // Refill reservation work stays outside the synchronous claim handler.
+    assert.equal(h.coordinator.readStandbyCoordinatorState().provisioningSlotNames.length, 0);
     await until(() => gates.length === 1);
     assert.equal(h.claim().outcome, "claimed");
     try {
