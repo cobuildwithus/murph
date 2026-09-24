@@ -1,6 +1,6 @@
 # Preserve voice across native turn cancellation
 
-Status: active
+Status: completed
 Created: 2026-09-24
 Updated: 2026-09-24
 
@@ -36,9 +36,13 @@ Keep a connected voice call usable when foreground work interrupts a background 
 - Assistant-engine typecheck passed.
 - Real-model journey `real model foreground answer after native turn cancellation`: passed with gpt-6-sol and local subscription auth. Same process reused; no dynamic tool calls; next reply correct and concise. UX verdict: Ready.
 - Complexity guard passed: maximum 76 to 75; debt 183 to 182. Existing recorded termination ownership replaces a duplicate condition.
-- Hosted voice tests, changelog proof, ReviewGPT and exact-head CI remain pending.
+- Hosted voice and workspace-entrypoint tests: 19 passed; final recovery rerun: 45 passed.
+- Changelog generation and production archive rendering: 10 tests passed. Web typecheck passed.
+- Parent candidate review: Ready. Privacy checked; no provider input, auth, state, or scheduler changes. No task-owned Frog entry required.
+- PR #3693 owns final ReviewGPT, exact-head CI, merge and rollout evidence; these external gates remain pending at archive time.
 
 ## Architecture and compatibility
 
 The resident App Server remains the sole process owner; native turn completion is the authority for releasing its existing slot. Interruption reports failure only after pending host effects drain and the healthy process is released. Transport failure and unacknowledged cancellation retain existing process poisoning and timeout behavior. No new scheduler, process, queue, persisted state, provider input, database call, or public protocol is introduced. Existing Web/Worker and native protocol versions remain compatible; rollout only replaces the runtime adapter.
 
+Completed: 2026-09-24

@@ -722,5 +722,5 @@ Early onboarding recovery restoration: [one-time stall check-in](exec-plans/comp
 
 Deterministic onboarding recovery: [background enrollment](exec-plans/completed/2026-09-24-deterministic-onboarding-check-in.md).
 
-Native turn cancellation and voice continuity work:
-[`2026-09-24-voice-turn-lifecycle.md`](exec-plans/active/2026-09-24-voice-turn-lifecycle.md).
+Native turn cancellation and voice continuity proof:
+[`2026-09-24-voice-turn-lifecycle.md`](exec-plans/completed/2026-09-24-voice-turn-lifecycle.md).
