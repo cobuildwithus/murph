@@ -2249,7 +2249,9 @@ describe('assistant system prompt cache stability', () => {
     // Pattern-ready Journal tags add 1,178 characters. Complete native-provider
     // direct/group captures and live Sol capture/query proof cover this cost;
     // retain the previous margin without changing the unchanged group surface.
-    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(75_689)
+    // Saved-duration and support-privacy clarifications add 583 characters;
+    // focused Sol journeys retain no-reconfirmation and de-identification checks.
+    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(76_300)
   })
 
   it('passes the injected CLI contract through byte-for-byte at the stable-route tail', () => {

@@ -1,0 +1,18 @@
+{
+  "publishedOn": "2026-09-24",
+  "order": 100,
+  "item": {
+    "id": "saved-workout-defaults",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Less repetition when logging workouts",
+    "summary": "Murph uses your saved workout duration and repetition instructions more consistently when you report later activity.",
+    "details": "A duration you give for the current workout overrides your default. Repetition instructions apply only to the workout and exercise you chose, and a cleared instruction stays cleared.",
+    "relevanceTags": [
+      "workouts",
+      "assistant",
+      "reliability"
+    ],
+    "sourcePullRequests": []
+  }
+}
