@@ -38,6 +38,8 @@ For any multi-day or repeated comparison intended as an experiment, use `experim
 
 When acute stress, overload, trouble winding down, or symptom fear is the immediate bottleneck, read `stress-regulation` first and use its brief state- or load-shifting action before building a recurring loop. Return here only if ongoing support is still useful. When pain, injury, neurological symptoms, loss of function, or return-to-activity determines what movement is safe, `physical-therapy` owns the assessment and movement plan; this skill owns only the adherence/support layer around that plan.
 
+For a selected repeated-action plan, advice alone is not the finished proposal: include a practical cue, a bounded review point, and an offer of reminders and a check-in that the member can accept or edit. Reuse known timing; if timing is missing, ask one narrow schedule question after giving the useful plan. Respect declined support and urgent-care priorities; never claim future outreach before it is scheduled.
+
 ## Success criteria
 
 For a repeated-behavior support loop Murph is helping design, satisfy the
@@ -96,9 +98,11 @@ schedule question. "Any day you have time" is unresolved.
 
 When several outcomes are open, Murph may suggest one with a concise rationale,
 but the user chooses the thread before Murph asks its baseline, obstacle,
-prior-attempt, or support-fit questions. If only one outcome is open, confirm
-that the user wants to work on it now. Do not infer authorization from “keep
-going,” “continue,” or another reply that only advances an intake or setup flow.
+prior-attempt, or support-fit questions. If only one outcome is open and the
+user has not already asked for help with it, confirm that they want to work on
+it now. A current request for help already selects that outcome; do not ask
+them to select it again. Do not infer authorization from “keep going,”
+“continue,” or another reply that only advances an intake or setup flow.
 
 ## Constraints
 
@@ -194,7 +198,8 @@ editable recommendation rather than a menu. A useful internal shape is:
 beginning [next occurrence]. I'll send [specific actionable reminder] [when],
 and after [early review] I'll [specific adaptation]. Want me to set that up?"
 
-For the first onboarding launch, this offer is the authorization boundary, not
+For any private repeated-behavior launch, including a plan arising during an
+ordinary health conversation, this offer is the authorization boundary, not
 a teaser. Put the exact finite reminder and review actions in it. A clear yes
 authorizes the named plan and support writes together; do not ask again whether
 the user wants reminders. If the user accepts a behavior proposal that omitted
