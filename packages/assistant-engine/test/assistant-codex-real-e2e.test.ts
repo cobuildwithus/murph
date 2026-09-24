@@ -21498,7 +21498,7 @@ describeRealCodex('real Codex public goal setup e2e', () => {
           prompt: [
             'Earlier Murph showed me this plan, but I no longer have that chat open:',
             'The public outcome was “improve my deep sleep.”',
-            'move bedtime 30 minutes earlier, keep wake time steady, track total sleep and whether I wake rested for 14 nights, then review it on September 13.',
+            'move bedtime 30 minutes earlier, keep wake time steady, track total sleep and whether I wake rested for 14 nights, then review it after those 14 nights.',
             'There was no reminder, check-in, or experiment in the plan. Yes, save it now.',
           ].join(' '),
         })
