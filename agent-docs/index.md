@@ -526,6 +526,7 @@ is recorded in [`2026-09-18-ios-canary-deployment-continuity.md`](exec-plans/com
 | `agent-docs/exec-plans/completed/2026-09-18-food-search-ranking.md` | PR #3564: implementation and final review complete; 134-test PostgreSQL 17 owner passed; final exact-head CI gate remains on the open PR. | Completed implementation evidence | Medium | 2026-09-18 |
 | `agent-docs/exec-plans/completed/2026-09-18-automation-list-validation-telemetry.md` | Finite automation-list validation attribution, parent native/local proof and old-reader compatibility; final PR records review, CI and deployment outcomes. | Historical implementation evidence | Medium | 2026-09-18 |
 | `agent-docs/exec-plans/completed/2026-09-23-gpt6-defaults.md` | GPT-6 managed inference defaults and focused model-selection proof. | Completed execution plan | Medium | 2026-09-23 |
+| `agent-docs/exec-plans/completed/2026-09-23-vault-share-background.md` | Isolated checkpoint projection that continues across foreground replies; ownership and verification. | Hosted vault-share background execution | Medium | 2026-09-23 |
 | `agent-docs/exec-plans/active/` | Task-owned in-flight execution plans. | Active plan lifecycle | Medium | 2026-08-20 |
 | `agent-docs/exec-plans/completed/2026-09-17-research-scout-failure-telemetry.md` | Three exact research error codes, parent-native verification and old-reader compatibility; rollout tracked separately. | Historical implementation evidence | Medium | 2026-09-17 |
 | `agent-docs/exec-plans/completed/2026-09-15-vercel-memory-headroom.md` | Vercel typecheck OOM recovery verification, native compiler memory comparisons, and compilation-only esbuild memory target. | Build memory investigation and local proof | Medium | 2026-09-15 |
@@ -708,6 +709,7 @@ First-day priority prefetch correction: [`invocation propagation`](exec-plans/co
 
 Concurrent standby replenishment and lightweight per-slot readiness are owned by
 `apps/cloudflare/README.md`; implementation and proof are tracked in
-[`standby refill`](exec-plans/completed/2026-09-23-standby-refill.md).
+[`standby refill`](exec-plans/completed/2026-09-23-standby-refill.md). Its follow-up removes
+per-slot software validation through [normal standby readiness](exec-plans/completed/2026-09-23-standby-normal-readiness.md).
 
 Completed implementation evidence: [signup opening simplification](exec-plans/completed/2026-09-23-signup-latency.md).
