@@ -2282,6 +2282,17 @@ They contain no message, prompt, transcript, route, phone number, email
 address, identity, health value, provider payload, credential, or scenario label. They inherit the
 existing seven-day trace retention and add no retention or state owner.
 
+The bounded latency batch envelope accepts assistant and runtime milestones.
+Checkpoint deadline publication sends its already-available email, Linq, and
+Telegram runtime milestones in one request with the original timestamps. The
+Web route validates every attempt fence before writing and persists each event
+serially through its existing owner. Singleton requests remain supported; a
+platform without a batch port uses them. Ship the additive Web parser before
+the new runtime producer and retain it until those producers retire. An older
+Web parser rejects runtime milestone batches, so that reverse skew can lose
+best-effort diagnostic events; it does not affect checkpoint authority. No
+buffer, timer, log suppression, or new telemetry owner is introduced.
+
 For a later bounded production occurrence, verification must select only staged
 trace rows inside an explicit accepted-time window and fixed row limit where
 provider start, reply attempt, accepted delivery, terminal non-reply, and durable

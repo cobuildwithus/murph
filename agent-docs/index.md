@@ -1,5 +1,14 @@
 # Murph Agent Docs Index
 
+Runtime ownership response timing is tracked in
+[the response plan](exec-plans/completed/2026-09-23-runtime-owner-response.md);
+its durable contract remains in the hosted Postgres runtime reference.
+
+Runtime HTTP request reductions are tracked in
+[`runtime request reduction`](exec-plans/completed/2026-09-23-runtime-request-reduction.md).
+Retry/completion and telemetry contracts remain in the hosted runtime references.
+Reminder timers retain their existing recovery behavior.
+
 Workspace callback phase, database and pool timing semantics are owned by
 `apps/web/README.md` under "Workspace read timing". Implementation and proof are
 tracked in `exec-plans/completed/2026-09-22-workspace-read-latency.md`.
@@ -493,6 +502,7 @@ is recorded in [`2026-09-18-ios-canary-deployment-continuity.md`](exec-plans/com
 | `agent-docs/PLANS.md` | Execution-plan lifecycle and storage rules. | Plan workflow | Medium | 2026-03-31 |
 | `agent-docs/exec-plans/completed/2026-09-13-cli-validation-diagnostics.md` | Bounded optional schema diagnostics, three existing knowledge source classifications and consumer-first rollout contract. | CLI diagnostics execution plan | High | 2026-09-13 |
 | `agent-docs/exec-plans/completed/2026-09-13-browser-vault-source-read-telemetry.md` | Fixed source-operation timing through existing Browser Vault timeout telemetry, with behavior-preserving proof and rollout gates. | Completed diagnostic implementation | High | 2026-09-13 |
+| `agent-docs/exec-plans/completed/2026-09-23-opening-history.md` | Current-account opening allowance, retained delivery evidence and PostgreSQL regression proof. | Completed implementation evidence | Medium | 2026-09-23 |
 | `agent-docs/exec-plans/completed/README.md` | Completed-plan archive interpretation. | Completed-plan archive interpretation | Medium | 2026-07-22 |
 | `agent-docs/exec-plans/completed/2026-09-11-junction-temporal-efficiency.md` | PR #3311: daily queued temporal sweeps, targeted day refreshes, checkpoint-safe recovery, no-op counters, and resolved final review. | Historical implementation evidence | Low | 2026-09-11 |
 | `agent-docs/exec-plans/completed/2026-09-14-parallel-audio-preparation.md` | Bounded consecutive audio preparation patch, ordered publication and replay proof, and local validation. | Historical implementation evidence | Low | 2026-09-14 |
@@ -688,6 +698,16 @@ Mailbox dependency loading and joined sponsorship allowance reads are tracked in
 [`mailbox read path`](exec-plans/completed/2026-09-23-mailbox-read-path.md).
 The current read contract is owned by `apps/web/README.md`.
 
+Bounded same-request foreground ownership recovery is owned by
+`references/hosted-postgres-runtime.md`; implementation and synthetic proof are
+tracked in `exec-plans/completed/2026-09-23-foreground-owner-handoff.md`.
+
 First-day priority implementation: [`onboarding priority`](exec-plans/completed/2026-09-23-onboarding-priority.md).
 
 First-day priority prefetch correction: [`invocation propagation`](exec-plans/completed/2026-09-23-onboarding-priority-prefetch.md).
+
+Concurrent standby replenishment and lightweight per-slot readiness are owned by
+`apps/cloudflare/README.md`; implementation and proof are tracked in
+[`standby refill`](exec-plans/completed/2026-09-23-standby-refill.md).
+
+Completed implementation evidence: [signup opening simplification](exec-plans/completed/2026-09-23-signup-latency.md).

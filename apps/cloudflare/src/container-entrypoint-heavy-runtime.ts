@@ -88,7 +88,7 @@ export interface HostedContainerHeavyRuntimeCore {
   deployLiveModelTurnSmokeModel: string;
   drainFatalRuntimeBestEffort(input: { timeoutMs: number }): Promise<void>;
   drainShutdownRuntimeBestEffort(input: { timeoutMs: number }): Promise<void>;
-  runCodexShellSmoke(input: { signal: AbortSignal }): Promise<HostedContainerCodexShellSmokeResult>;
+  runCodexShellSmoke(input: { signal: AbortSignal; readinessOnly?: boolean }): Promise<HostedContainerCodexShellSmokeResult>;
   runDirectR2PresignedPutSmoke(input: {
     byteLength: number;
     presignedPutUrl: string;
@@ -231,6 +231,7 @@ async function putHostedContainerDirectR2SmokePayload(input: {
 }
 
 async function runHostedContainerCodexShellSmoke(input: {
+  readinessOnly?: boolean;
   signal: AbortSignal;
 }): Promise<HostedContainerCodexShellSmokeResult> {
   return await withHostedContainerCodexSmokeWorkspace(
@@ -239,6 +240,7 @@ async function runHostedContainerCodexShellSmoke(input: {
       await runHostedContainerCodexShellAppServerProbe({
         ...workspace,
         signal: input.signal,
+        readinessOnly: input.readinessOnly,
       }),
   );
 }
@@ -583,6 +585,7 @@ function readHostedCodexModelCatalogJsonPath(): string | null {
 }
 
 async function runHostedContainerCodexShellAppServerProbe(input: {
+  readinessOnly?: boolean;
   codexHome: string;
   signal: AbortSignal;
   smokeVaultRoot: string;
@@ -768,6 +771,23 @@ async function runHostedContainerCodexShellAppServerProbe(input: {
           input.smokeVaultRoot,
         ])).stdout,
       );
+      // Every slot proves initialization and its shell environment. The full
+      // CLI regression suite belongs to deployment, not inventory replenishment.
+      if (input.readinessOnly) {
+        finish(undefined, {
+          client: "codex-app-server",
+          cliSurfaceContractBytes: 0,
+          cliSurfaceHotPathProofCount: 0,
+          healthCommonsCliGoalProofCount: 0,
+          murphPathBytes: environmentProbe.murphPathBytes,
+          noteAddBytes: 0,
+          stderrBytes,
+          vaultCliLlmsBytes: 0,
+          vaultCliPathBytes: environmentProbe.vaultCliPathBytes,
+          vaultShowBytes: 0,
+        });
+        return;
+      }
       const vaultCliLlms = await execCommand("vault-cli-llms", [
         "vault-cli",
         "--llms",

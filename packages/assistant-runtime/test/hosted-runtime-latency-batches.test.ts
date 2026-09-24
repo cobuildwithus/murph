@@ -4,7 +4,7 @@ import {
   HOSTED_RUNTIME_LATENCY_TRACE_BODY_LIMIT_BYTES,
   type HostedRuntimeLatencyTraceAssistantMilestoneEvent,
 } from "@murphai/hosted-execution/runtime-control";
-import { guardHostedRuntimeLatencyTracePort, recordHostedAssistantMilestonesBestEffort } from "../src/hosted-runtime/assistant-latency-trace.ts";
+import { guardHostedRuntimeLatencyTracePort, recordHostedAssistantMilestonesBestEffort, recordHostedRuntimeLatencyMilestoneBestEffort } from "../src/hosted-runtime/assistant-latency-trace.ts";
 
 const ok = { matchedCount: 1, recorded: true, unmatchedCount: 0 };
 const unmatched = { matchedCount: 0, recorded: false, unmatchedCount: 1 };
@@ -16,6 +16,38 @@ const milestones = [
 const expectedEvents = milestones.map(milestone => ({ ...context, ...milestone, type: "assistant_milestone" }));
 beforeEach(() => { vi.useFakeTimers(); });
 afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
+
+it.each([true, false])("records the checkpoint deadline for all channels without delaying publication (batch=%s)", async batch => {
+  const record = vi.fn().mockResolvedValue(ok);
+  const recordBatch = vi.fn().mockResolvedValue({ results: [ok, ok, ok] });
+  const at = "2026-01-01T00:00:00.000Z";
+  recordHostedRuntimeLatencyMilestoneBestEffort({
+    at, milestone: "checkpoint_publication_expected_by", runtimeAttemptId: "synthetic-attempt",
+    latencyTracePort: { record, ...(batch ? { recordBatch } : {}) },
+  });
+  const events = ["email", "linq", "telegram"].map(source => ({
+    at, milestone: "checkpoint_publication_expected_by", runtimeAttemptId: "synthetic-attempt", source, type: "runtime_milestone",
+  }));
+  if (batch) {
+    expect(recordBatch).toHaveBeenCalledExactlyOnceWith({ events });
+    expect(record).not.toHaveBeenCalled();
+  } else {
+    expect(record.mock.calls).toEqual(events.map(event => [{ event }]));
+  }
+  expect(vi.getTimerCount()).toBe(0);
+});
+
+it.each(["throw", "reject"])("keeps failed checkpoint telemetry out of runtime control flow (%s)", async failure => {
+  const recordBatch = vi.fn(() => {
+    if (failure === "throw") throw new Error("synthetic telemetry failure");
+    return Promise.reject(new Error("synthetic telemetry failure"));
+  });
+  expect(() => recordHostedRuntimeLatencyMilestoneBestEffort({
+    at: "2026-01-01T00:00:00.000Z", milestone: "checkpoint_publication_expected_by",
+    runtimeAttemptId: "synthetic-attempt", latencyTracePort: { record: vi.fn(), recordBatch },
+  })).not.toThrow();
+  await Promise.resolve();
+});
 
 it("sends simultaneous first-output and first-text in one immediate batch with original timestamps", async () => {
   const record = vi.fn().mockResolvedValue(ok);

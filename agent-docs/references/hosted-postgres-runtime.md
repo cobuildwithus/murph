@@ -70,6 +70,19 @@ receipts and prove an inactive fence before release. Retiring owners and
 retention work that needs replacement follow the existing recovery path without
 a wake. Unknown wake acknowledgments never authorize replacement by themselves.
 
+After exact completed-receipt and inactive-fence proof, recovery uses the existing
+combined completion/release command. A stale acknowledgment requests fresh
+canonical admission rather than assuming failure: another caller may already
+have released the completed owner. An unusable retained target likewise permits
+fresh admission after its existing exact retirement path. One ensure request
+visits at most three admitted generations (completed owner, expired target,
+fresh successor), within its existing command deadline. A repeated generation,
+uncertain liveness or stop, denied admission, or further contention returns the
+existing retry response. Successful warm wakes and fresh starts add no reads;
+completion recovery removes the separate release callback. Each fresh-start
+attempt retains its own bounded, overlapping workspace and native readiness
+preparation; abandoned target reads are not execution authority.
+
 The owner row has a monotonically increasing generation and one attempt. Its
 phases are `idle -> starting -> active -> retiring -> idle`. Claim records an
 allocation ID before an external allocation call. Target selection records the
@@ -89,6 +102,10 @@ Provider effects continue to require their own live authorization.
 Registered/completed receipts survive activation loss. A duplicate registration
 cannot execute the attempt twice. An uncertain launch or stop retains the exact
 target; age can schedule reconciliation but cannot authorize its replacement.
+While the existing starting fence is preserved, retry at its 30-second deadline
+instead of polling every three seconds. An independent wake can still reach a
+ready child sooner. Expiry starts the ordinary exact retirement proof; it does
+not establish stoppedness or release authority.
 
 Completion revokes ordinary effects and records completion before the adapter
 releases ownership. Reuse additionally requires the exact native completed
@@ -110,11 +127,16 @@ native receipt and Web `complete` command. Each stage uses one HTTP request for
 conditional retirement, optional exact native-settlement release, and the
 advisory Temporal hint. The early callback still reads the owner to route its
 native receipt, and cannot release the still-running outer invocation. The
-settled outer result releases ownership before signaling outside the database
-transactions. The hint has a two-second best-effort budget; failure leaves
+settled outer result releases ownership before the HTTP response. Only an
+updated `complete` response schedules the advisory hint through Next `after`,
+so neither its dependency loading nor its network wait delays acknowledgement.
+The hint has a two-second best-effort budget; failure leaves
 durable completion for the normal recheck. Lost responses replay the same exact
 identity and cannot retire or release a successor. Pending upload drains remain
 owned by the existing release transaction.
+Recovery from a lost completion acknowledgment uses that same settled `complete`
+command after proving the exact completed receipt and inactive fence, replacing
+the separate completion and release requests.
 
 Deploy the additive Web completion consumer before the Worker producer. The
 existing live Web protocol admission includes both early and settled command

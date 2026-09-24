@@ -19,7 +19,7 @@ const mocks = vi.hoisted(() => ({
   hasConflictingHostedLinqInstantFirstTurnForChatTx: vi.fn(),
   hostedMemberRoutingRecordsEqual: vi.fn(),
   hostedLinqDeliveryFindUnique: vi.fn(),
-  hostedLinqDeliveryFindMany: vi.fn(),
+  readOpeningDeliveries: vi.fn(),
   hostedMemberFindUnique: vi.fn(),
   hostedThreadRouteFindMany: vi.fn(),
   readHostedMailboxRecentLiveConversationItemIds: vi.fn(),
@@ -177,10 +177,10 @@ const WAKE_HANDOFF = {
 
 function createPrisma(): PrismaClient {
   const transaction = {
+    $queryRaw: mocks.readOpeningDeliveries,
     hostedThreadRoute: { findMany: mocks.hostedThreadRouteFindMany },
     hostedLinqDelivery: {
       findUnique: mocks.hostedLinqDeliveryFindUnique,
-      findMany: mocks.hostedLinqDeliveryFindMany,
       update: mocks.hostedLinqDeliveryUpdate,
       updateMany: mocks.hostedLinqDeliveryUpdateMany,
     },
@@ -189,13 +189,13 @@ function createPrisma(): PrismaClient {
     },
   };
   const prisma = {
+    $queryRaw: mocks.readOpeningDeliveries,
     hostedThreadRoute: { findMany: mocks.hostedThreadRouteFindMany },
     hostedMember: { findUnique: mocks.hostedMemberFindUnique },
     $transaction: vi.fn(async (operation: (tx: typeof transaction) => unknown) =>
       operation(transaction)),
     hostedLinqDelivery: {
       findUnique: mocks.hostedLinqDeliveryFindUnique,
-      findMany: mocks.hostedLinqDeliveryFindMany,
       updateMany: mocks.hostedLinqDeliveryUpdateMany,
     },
   };
@@ -263,7 +263,7 @@ function buildUsageResponse(
 describe("hosted Linq instant first turn", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.hostedLinqDeliveryFindMany.mockResolvedValue([]);
+    mocks.readOpeningDeliveries.mockResolvedValue([]);
     mocks.hostedMemberFindUnique.mockResolvedValue({ assistantTone: "formal" });
     mocks.readHostedMailboxRecentLiveConversationItemIds.mockResolvedValue(["mailbox_welcome"]);
     mocks.readHostedMailboxWakeByItemId.mockResolvedValue({
@@ -336,7 +336,7 @@ describe("hosted Linq instant first turn", () => {
   });
 
   function prepareContinuation() {
-    mocks.hostedLinqDeliveryFindMany.mockResolvedValue([
+    mocks.readOpeningDeliveries.mockResolvedValue([
       { acceptedAt: new Date("2026-09-01T12:00:00Z"), messageLookupKey: "message:welcome_message" },
     ]);
   }
@@ -410,8 +410,8 @@ describe("hosted Linq instant first turn", () => {
       continuationMemberId: WAKE_HANDOFF.userId, linqChatId: "chat_123", prisma: createPrisma(), request: { ...REQUEST, text: "yes" },
     });
     expect(claim).toEqual({ kind: "generate", openingTone: "formal" });
-    expect(mocks.hostedLinqDeliveryFindMany).toHaveBeenCalledWith(expect.objectContaining({ take: 2 }));
-    mocks.hostedLinqDeliveryFindMany.mockResolvedValue([
+    expect(mocks.readOpeningDeliveries.mock.calls[0]).toContain(WAKE_HANDOFF.userId);
+    mocks.readOpeningDeliveries.mockResolvedValue([
       { acceptedAt: new Date(), messageLookupKey: "message:welcome_message" },
       { acceptedAt: new Date(), messageLookupKey: "message:identity_message" },
     ]);
@@ -442,7 +442,7 @@ describe("hosted Linq instant first turn", () => {
 
   it("rechecks the two-reply cap under the existing chat lock", async () => {
     prepareContinuation();
-    mocks.hostedLinqDeliveryFindMany.mockResolvedValueOnce([
+    mocks.readOpeningDeliveries.mockResolvedValueOnce([
       { acceptedAt: new Date(), messageLookupKey: "message:welcome_message" },
     ]).mockResolvedValueOnce([
       { acceptedAt: new Date(), messageLookupKey: "message:welcome_message" },

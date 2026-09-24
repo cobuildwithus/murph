@@ -769,6 +769,7 @@ export async function startHostedContainerEntrypoint(input: {
         try {
           heavyRuntime = await hydrateHeavyRuntime();
           const result = await heavyRuntime.runCodexShellSmoke({
+            readinessOnly: requestUrl.searchParams.get("scope") === "readiness",
             signal: requestAbort.signal,
           });
           codexShellPreflightCompletedAtEpochMs = Date.now();

@@ -4816,8 +4816,10 @@ release; a process-origin receipt alone does not release the outer operation. Th
 second receipt. A checkpoint, elapsed time, or container lifecycle event is not
 a completion receipt. Each completion stage makes one signed Web ownership
 command that conditionally retires the exact attempt, releases only when native
-settlement names its exact target, and then sends the best-effort Temporal hint
-outside the database transactions. The early callback retains its owner-routing
+settlement names its exact target. The Web HTTP boundary sends the best-effort
+Temporal hint through Next `after` only for an updated completion, after the
+response and outside the database transactions. Provider authorization does not
+load this notification dependency or the legacy/upload recovery command helpers. The early callback retains its owner-routing
 read, reducing the usual two-stage path from six Web requests to three. A known
 future mailbox retry continuation skips the hint unless the invocation newly
 committed an unserviced default or retention schedule. The hint retains its
