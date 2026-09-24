@@ -114,8 +114,10 @@ native receipt and Web `complete` command. Each stage uses one HTTP request for
 conditional retirement, optional exact native-settlement release, and the
 advisory Temporal hint. The early callback still reads the owner to route its
 native receipt, and cannot release the still-running outer invocation. The
-settled outer result releases ownership before signaling outside the database
-transactions. The hint has a two-second best-effort budget; failure leaves
+settled outer result releases ownership before the HTTP response. Only an
+updated `complete` response schedules the advisory hint through Next `after`,
+so neither its dependency loading nor its network wait delays acknowledgement.
+The hint has a two-second best-effort budget; failure leaves
 durable completion for the normal recheck. Lost responses replay the same exact
 identity and cannot retire or release a successor. Pending upload drains remain
 owned by the existing release transaction.

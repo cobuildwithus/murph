@@ -1,5 +1,9 @@
 # Murph Agent Docs Index
 
+Runtime ownership response timing is tracked in
+[the response plan](exec-plans/active/2026-09-23-runtime-owner-response.md);
+its durable contract remains in the hosted Postgres runtime reference.
+
 Runtime HTTP request reductions are tracked in
 [`runtime request reduction`](exec-plans/completed/2026-09-23-runtime-request-reduction.md).
 Retry/completion and telemetry contracts remain in the hosted runtime references.
