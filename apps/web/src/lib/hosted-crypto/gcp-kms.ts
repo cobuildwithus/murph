@@ -1,7 +1,6 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { Buffer } from "node:buffer";
 
-import type { KeyManagementServiceClient, protos } from "@google-cloud/kms";
 import type {
   IdentityPoolClient,
   OAuth2Client,
@@ -53,6 +52,14 @@ const GOOGLE_RPC_STATUS_REASONS = new Set([
   "UNAVAILABLE",
   "UNIMPLEMENTED",
   "UNKNOWN",
+]);
+const KMS_REST_TRANSIENT_HTTP_REASONS = new Map([
+  [503, "UNAVAILABLE"],
+  [504, "DEADLINE_EXCEEDED"],
+]);
+const KMS_REST_CONNECTION_ERROR_CODES = new Set([
+  "ECONNRESET", "ECONNREFUSED", "EPIPE", "EAI_AGAIN", "ENETUNREACH",
+  "EHOSTUNREACH", "ETIMEDOUT", "UND_ERR_CONNECT_TIMEOUT", "UND_ERR_SOCKET",
 ]);
 const GRPC_STATUS_REASONS = new Map<number, string>([
   [1, "CANCELLED"],
@@ -148,13 +155,13 @@ export interface GcpKmsMacSignInput {
   signal?: AbortSignal;
 }
 
-export interface HostedGcpKmsSdkCallOptions {
+export interface HostedGcpKmsCallOptions {
   retry: false;
   signal: AbortSignal;
   timeoutMs: number;
 }
 
-export interface HostedGcpKmsSdkEncryptRequest {
+export interface HostedGcpKmsEncryptRequest {
   additionalAuthenticatedData: Uint8Array;
   additionalAuthenticatedDataCrc32c: number;
   name: string;
@@ -162,7 +169,7 @@ export interface HostedGcpKmsSdkEncryptRequest {
   plaintextCrc32c: number;
 }
 
-export interface HostedGcpKmsSdkEncryptResponse {
+export interface HostedGcpKmsEncryptResponse {
   ciphertext: Uint8Array | null;
   ciphertextCrc32c: number | null;
   name: string | null;
@@ -170,7 +177,7 @@ export interface HostedGcpKmsSdkEncryptResponse {
   verifiedPlaintextCrc32c: boolean | null;
 }
 
-export interface HostedGcpKmsSdkDecryptRequest {
+export interface HostedGcpKmsDecryptRequest {
   additionalAuthenticatedData: Uint8Array;
   additionalAuthenticatedDataCrc32c: number;
   ciphertext: Uint8Array;
@@ -178,55 +185,55 @@ export interface HostedGcpKmsSdkDecryptRequest {
   name: string;
 }
 
-export interface HostedGcpKmsSdkDecryptResponse {
+export interface HostedGcpKmsDecryptResponse {
   plaintext: Uint8Array | null;
   plaintextCrc32c: number | null;
   usedPrimary: boolean | null;
 }
 
-export interface HostedGcpKmsSdkAsymmetricSignRequest {
+export interface HostedGcpKmsAsymmetricSignRequest {
   digest: Uint8Array;
   digestCrc32c: number;
   name: string;
 }
 
-export interface HostedGcpKmsSdkAsymmetricSignResponse {
+export interface HostedGcpKmsAsymmetricSignResponse {
   name: string | null;
   signature: Uint8Array | null;
   signatureCrc32c: number | null;
   verifiedDigestCrc32c: boolean | null;
 }
 
-export interface HostedGcpKmsSdkMacSignRequest {
+export interface HostedGcpKmsMacSignRequest {
   data: Uint8Array;
   dataCrc32c: number;
   name: string;
 }
 
-export interface HostedGcpKmsSdkMacSignResponse {
+export interface HostedGcpKmsMacSignResponse {
   mac: Uint8Array | null;
   macCrc32c: number | null;
   name: string | null;
   verifiedDataCrc32c: boolean | null;
 }
 
-export interface HostedGcpKmsSdkTransport {
+export interface HostedGcpKmsTransport {
   asymmetricSign(
-    request: HostedGcpKmsSdkAsymmetricSignRequest,
-    options: HostedGcpKmsSdkCallOptions,
-  ): Promise<HostedGcpKmsSdkAsymmetricSignResponse>;
+    request: HostedGcpKmsAsymmetricSignRequest,
+    options: HostedGcpKmsCallOptions,
+  ): Promise<HostedGcpKmsAsymmetricSignResponse>;
   decrypt(
-    request: HostedGcpKmsSdkDecryptRequest,
-    options: HostedGcpKmsSdkCallOptions,
-  ): Promise<HostedGcpKmsSdkDecryptResponse>;
+    request: HostedGcpKmsDecryptRequest,
+    options: HostedGcpKmsCallOptions,
+  ): Promise<HostedGcpKmsDecryptResponse>;
   encrypt(
-    request: HostedGcpKmsSdkEncryptRequest,
-    options: HostedGcpKmsSdkCallOptions,
-  ): Promise<HostedGcpKmsSdkEncryptResponse>;
+    request: HostedGcpKmsEncryptRequest,
+    options: HostedGcpKmsCallOptions,
+  ): Promise<HostedGcpKmsEncryptResponse>;
   macSign(
-    request: HostedGcpKmsSdkMacSignRequest,
-    options: HostedGcpKmsSdkCallOptions,
-  ): Promise<HostedGcpKmsSdkMacSignResponse>;
+    request: HostedGcpKmsMacSignRequest,
+    options: HostedGcpKmsCallOptions,
+  ): Promise<HostedGcpKmsMacSignResponse>;
 }
 
 export interface HostedGcpKmsStaticCredentialConfiguration {
@@ -248,16 +255,14 @@ export type HostedGcpKmsCredentialConfiguration =
   | HostedGcpKmsStaticCredentialConfiguration
   | HostedGcpKmsWorkloadIdentityCredentialConfiguration;
 
-export interface HostedGcpKmsSdkClientConfiguration {
+export interface HostedGcpKmsTransportConfiguration {
   apiEndpoint: string;
   credentials: HostedGcpKmsCredentialConfiguration;
-  fallback: boolean;
   port: number;
-  scopes: readonly string[];
 }
 
 export interface HostedGcpKmsClientDependencies {
-  createSdkTransport(config: HostedGcpKmsSdkClientConfiguration): HostedGcpKmsSdkTransport;
+  createTransport(config: HostedGcpKmsTransportConfiguration): HostedGcpKmsTransport;
 }
 
 export class HostedGcpKmsProviderError extends Error {
@@ -368,13 +373,10 @@ interface HostedGcpAuthStageToken {
   stage: HostedGcpKmsInnerAuthFailureStage;
 }
 
-interface CancellablePromise<T> extends Promise<T> {
-  cancel(): void;
-}
+
 
 interface HostedGcpKmsEndpointConfiguration {
   apiEndpoint: string;
-  fallback: boolean;
   port: number;
 }
 
@@ -383,7 +385,7 @@ const hostedGcpKmsAttemptDiagnosticsContext =
   new AsyncLocalStorage<HostedGcpKmsAttemptDiagnostics>();
 const hostedGcpAuthRequestStageTokens = new WeakMap<object, HostedGcpAuthStageToken>();
 const defaultHostedGcpKmsDependencies: HostedGcpKmsClientDependencies = {
-  createSdkTransport: createOfficialGcpKmsSdkTransport,
+  createTransport: createGcpKmsRestTransport,
 };
 
 export function createHostedGcpKmsClientFromEnv(
@@ -416,18 +418,16 @@ export function createHostedGcpKmsClientFromEnv(
   assertGoogleSdkLoggingDisabled(source);
 
   const endpoint = readHostedGcpKmsEndpointConfiguration(apiRoot);
-  const config: HostedGcpKmsSdkClientConfiguration = {
+  const config: HostedGcpKmsTransportConfiguration = {
     apiEndpoint: endpoint.apiEndpoint,
     credentials: readHostedGcpKmsCredentialConfiguration(source),
-    fallback: endpoint.fallback,
     port: endpoint.port,
-    scopes: [GCP_CLOUD_KMS_SCOPE],
   };
-  return new HostedGcpKmsSdkClient(dependencies.createSdkTransport(config));
+  return new ManagedHostedGcpKmsClient(dependencies.createTransport(config));
 }
 
-class HostedGcpKmsSdkClient implements HostedGcpKmsClient {
-  constructor(private readonly transport: HostedGcpKmsSdkTransport) {}
+class ManagedHostedGcpKmsClient implements HostedGcpKmsClient {
+  constructor(private readonly transport: HostedGcpKmsTransport) {}
 
   async encrypt(input: GcpKmsEncryptInput): Promise<{ ciphertext: string; keyName: string }> {
     throwIfCallerAborted(input.signal);
@@ -455,7 +455,7 @@ class HostedGcpKmsSdkClient implements HostedGcpKmsClient {
         );
       }
 
-      const request: HostedGcpKmsSdkEncryptRequest = {
+      const request: HostedGcpKmsEncryptRequest = {
         additionalAuthenticatedData,
         additionalAuthenticatedDataCrc32c: crc32c(additionalAuthenticatedData),
         name: keyName,
@@ -534,7 +534,7 @@ class HostedGcpKmsSdkClient implements HostedGcpKmsClient {
         GCP_KMS_MAX_PLAINTEXT_AND_AAD_BYTES,
         "GCP KMS Decrypt additionalAuthenticatedData",
       );
-      const request: HostedGcpKmsSdkDecryptRequest = {
+      const request: HostedGcpKmsDecryptRequest = {
         additionalAuthenticatedData,
         additionalAuthenticatedDataCrc32c: crc32c(additionalAuthenticatedData),
         ciphertext,
@@ -589,7 +589,7 @@ class HostedGcpKmsSdkClient implements HostedGcpKmsClient {
 
     try {
       digest = new Uint8Array(await crypto.subtle.digest("SHA-256", message));
-      const request: HostedGcpKmsSdkAsymmetricSignRequest = {
+      const request: HostedGcpKmsAsymmetricSignRequest = {
         digest,
         digestCrc32c: crc32c(digest),
         name: keyVersionName,
@@ -656,7 +656,7 @@ class HostedGcpKmsSdkClient implements HostedGcpKmsClient {
     let responseMac: OwnedBytes | null = null;
 
     try {
-      const request: HostedGcpKmsSdkMacSignRequest = {
+      const request: HostedGcpKmsMacSignRequest = {
         data,
         dataCrc32c: crc32c(data),
         name: keyVersionName,
@@ -714,7 +714,7 @@ class HostedGcpKmsSdkClient implements HostedGcpKmsClient {
   private async callProvider<TResponse>(
     operation: HostedGcpKmsOperation,
     callerSignal: AbortSignal | undefined,
-    invoke: (options: HostedGcpKmsSdkCallOptions) => Promise<TResponse>,
+    invoke: (options: HostedGcpKmsCallOptions) => Promise<TResponse>,
     requestMetrics: HostedGcpKmsRequestMetrics,
   ): Promise<TResponse> {
     const retryTransientDecrypt = operation === "decrypt";
@@ -731,7 +731,7 @@ class HostedGcpKmsSdkClient implements HostedGcpKmsClient {
     for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
       throwIfOperationAborted(context);
       const attemptContext = createProviderAttemptContext(context);
-      const options: HostedGcpKmsSdkCallOptions = {
+      const options: HostedGcpKmsCallOptions = {
         retry: false,
         signal: attemptContext.signal,
         timeoutMs: attemptContext.timeoutMs,
@@ -1072,15 +1072,15 @@ class HostedLocalGcpKmsClient implements HostedGcpKmsClient {
   }
 }
 
-class OfficialHostedGcpKmsSdkTransport implements HostedGcpKmsSdkTransport {
-  private client: Promise<KeyManagementServiceClient> | null = null;
+class HostedGcpKmsRestTransport implements HostedGcpKmsTransport {
+  private client: Promise<IdentityPoolClient | OAuth2Client> | null = null;
 
-  constructor(private readonly config: HostedGcpKmsSdkClientConfiguration) {}
+  constructor(private readonly config: HostedGcpKmsTransportConfiguration) {}
 
-  private getClient(): Promise<KeyManagementServiceClient> {
+  private getClient(): Promise<IdentityPoolClient | OAuth2Client> {
     // Envelope verification does not need Google auth or KMS. Load the SDKs
     // only for a real operation, sharing initialization across concurrent calls.
-    this.client ??= createOfficialGcpKmsSdkClient(this.config).catch((error: unknown) => {
+    this.client ??= createOfficialGoogleAuthClient(this.config.credentials).catch((error: unknown) => {
       this.client = null;
       throw error;
     });
@@ -1088,162 +1088,189 @@ class OfficialHostedGcpKmsSdkTransport implements HostedGcpKmsSdkTransport {
   }
 
   async encrypt(
-    request: HostedGcpKmsSdkEncryptRequest,
-    options: HostedGcpKmsSdkCallOptions,
-  ): Promise<HostedGcpKmsSdkEncryptResponse> {
-    const sdkRequest: protos.google.cloud.kms.v1.IEncryptRequest = {
-      additionalAuthenticatedData: request.additionalAuthenticatedData,
-      additionalAuthenticatedDataCrc32c: { value: request.additionalAuthenticatedDataCrc32c },
+    request: HostedGcpKmsEncryptRequest,
+    options: HostedGcpKmsCallOptions,
+  ): Promise<HostedGcpKmsEncryptResponse> {
+    const restRequest = {
+      additionalAuthenticatedData: encodeBase64(request.additionalAuthenticatedData),
+      additionalAuthenticatedDataCrc32c: String(request.additionalAuthenticatedDataCrc32c),
       name: request.name,
-      plaintext: request.plaintext,
-      plaintextCrc32c: { value: request.plaintextCrc32c },
+      plaintext: encodeBase64(request.plaintext),
+      plaintextCrc32c: String(request.plaintextCrc32c),
     };
-    const response = await this.callUnary<protos.google.cloud.kms.v1.IEncryptResponse>(
+    const response = await this.callUnary(
       "encrypt",
-      sdkRequest,
+      restRequest,
       options,
     );
     return {
-      ciphertext: normalizeSdkBytes(response.ciphertext),
-      ciphertextCrc32c: normalizeSdkCrc32c(response.ciphertextCrc32c),
-      name: normalizeSdkString(response.name),
+      ciphertext: normalizeRestBytes(response.ciphertext),
+      ciphertextCrc32c: normalizeRestCrc32c(response.ciphertextCrc32c),
+      name: normalizeRestString(response.name),
       verifiedAdditionalAuthenticatedDataCrc32c:
-        normalizeSdkBoolean(response.verifiedAdditionalAuthenticatedDataCrc32c),
-      verifiedPlaintextCrc32c: normalizeSdkBoolean(response.verifiedPlaintextCrc32c),
+        normalizeRestBoolean(response.verifiedAdditionalAuthenticatedDataCrc32c),
+      verifiedPlaintextCrc32c: normalizeRestBoolean(response.verifiedPlaintextCrc32c),
     };
   }
 
   async decrypt(
-    request: HostedGcpKmsSdkDecryptRequest,
-    options: HostedGcpKmsSdkCallOptions,
-  ): Promise<HostedGcpKmsSdkDecryptResponse> {
-    const sdkRequest: protos.google.cloud.kms.v1.IDecryptRequest = {
-      additionalAuthenticatedData: request.additionalAuthenticatedData,
-      additionalAuthenticatedDataCrc32c: { value: request.additionalAuthenticatedDataCrc32c },
-      ciphertext: request.ciphertext,
-      ciphertextCrc32c: { value: request.ciphertextCrc32c },
+    request: HostedGcpKmsDecryptRequest,
+    options: HostedGcpKmsCallOptions,
+  ): Promise<HostedGcpKmsDecryptResponse> {
+    const restRequest = {
+      additionalAuthenticatedData: encodeBase64(request.additionalAuthenticatedData),
+      additionalAuthenticatedDataCrc32c: String(request.additionalAuthenticatedDataCrc32c),
+      ciphertext: encodeBase64(request.ciphertext),
+      ciphertextCrc32c: String(request.ciphertextCrc32c),
       name: request.name,
     };
-    const response = await this.callUnary<protos.google.cloud.kms.v1.IDecryptResponse>(
+    const response = await this.callUnary(
       "decrypt",
-      sdkRequest,
+      restRequest,
       options,
     );
     return {
-      plaintext: normalizeSdkBytes(response.plaintext),
-      plaintextCrc32c: normalizeSdkCrc32c(response.plaintextCrc32c),
-      usedPrimary: normalizeSdkBoolean(response.usedPrimary),
+      plaintext: normalizeRestBytes(response.plaintext),
+      plaintextCrc32c: normalizeRestCrc32c(response.plaintextCrc32c),
+      usedPrimary: normalizeRestBoolean(response.usedPrimary),
     };
   }
 
   async asymmetricSign(
-    request: HostedGcpKmsSdkAsymmetricSignRequest,
-    options: HostedGcpKmsSdkCallOptions,
-  ): Promise<HostedGcpKmsSdkAsymmetricSignResponse> {
-    const sdkRequest: protos.google.cloud.kms.v1.IAsymmetricSignRequest = {
-      digest: { sha256: request.digest },
-      digestCrc32c: { value: request.digestCrc32c },
+    request: HostedGcpKmsAsymmetricSignRequest,
+    options: HostedGcpKmsCallOptions,
+  ): Promise<HostedGcpKmsAsymmetricSignResponse> {
+    const restRequest = {
+      digest: { sha256: encodeBase64(request.digest) },
+      digestCrc32c: String(request.digestCrc32c),
       name: request.name,
     };
-    const response = await this.callUnary<protos.google.cloud.kms.v1.IAsymmetricSignResponse>(
+    const response = await this.callUnary(
       "asymmetricSign",
-      sdkRequest,
+      restRequest,
       options,
     );
     return {
-      name: normalizeSdkString(response.name),
-      signature: normalizeSdkBytes(response.signature),
-      signatureCrc32c: normalizeSdkCrc32c(response.signatureCrc32c),
-      verifiedDigestCrc32c: normalizeSdkBoolean(response.verifiedDigestCrc32c),
+      name: normalizeRestString(response.name),
+      signature: normalizeRestBytes(response.signature),
+      signatureCrc32c: normalizeRestCrc32c(response.signatureCrc32c),
+      verifiedDigestCrc32c: normalizeRestBoolean(response.verifiedDigestCrc32c),
     };
   }
 
   async macSign(
-    request: HostedGcpKmsSdkMacSignRequest,
-    options: HostedGcpKmsSdkCallOptions,
-  ): Promise<HostedGcpKmsSdkMacSignResponse> {
-    const sdkRequest: protos.google.cloud.kms.v1.IMacSignRequest = {
-      data: request.data,
-      dataCrc32c: { value: request.dataCrc32c },
+    request: HostedGcpKmsMacSignRequest,
+    options: HostedGcpKmsCallOptions,
+  ): Promise<HostedGcpKmsMacSignResponse> {
+    const restRequest = {
+      data: encodeBase64(request.data),
+      dataCrc32c: String(request.dataCrc32c),
       name: request.name,
     };
-    const response = await this.callUnary<protos.google.cloud.kms.v1.IMacSignResponse>(
+    const response = await this.callUnary(
       "macSign",
-      sdkRequest,
+      restRequest,
       options,
     );
     return {
-      mac: normalizeSdkBytes(response.mac),
-      macCrc32c: normalizeSdkCrc32c(response.macCrc32c),
-      name: normalizeSdkString(response.name),
-      verifiedDataCrc32c: normalizeSdkBoolean(response.verifiedDataCrc32c),
+      mac: normalizeRestBytes(response.mac),
+      macCrc32c: normalizeRestCrc32c(response.macCrc32c),
+      name: normalizeRestString(response.name),
+      verifiedDataCrc32c: normalizeRestBoolean(response.verifiedDataCrc32c),
     };
   }
 
-  private async callUnary<TResponse>(
+  private async callUnary(
     method: HostedGcpKmsOperation,
-    request: object,
-    options: HostedGcpKmsSdkCallOptions,
-  ): Promise<TResponse> {
+    request: { name: string },
+    options: HostedGcpKmsCallOptions,
+  ): Promise<Record<string, unknown>> {
     const client = await runHostedGcpKmsFailureStage(
       "sdk_initialize",
-      async () => {
-        const loaded = await waitForAbortablePromise(this.getClient(), options.signal);
-        await waitForAbortablePromise(loaded.initialize(), options.signal);
-        return loaded;
-      },
+      () => waitForAbortablePromise(this.getClient(), options.signal),
     );
-    const invoke = client.innerApiCalls[method];
-    if (typeof invoke !== "function") {
-      throw new TypeError(`Google Cloud KMS SDK method ${method} is unavailable.`);
-    }
-    const name = Reflect.get(request, "name");
-    if (typeof name !== "string" || name.length === 0) {
-      throw new TypeError(`Google Cloud KMS SDK method ${method} requires a resource name.`);
-    }
-    const call = requireCancellablePromise<[TResponse, unknown, unknown]>(
-      Reflect.apply(invoke, client.innerApiCalls, [
-        request,
-        {
-          otherArgs: {
-            headers: { "x-goog-request-params": `name=${encodeURIComponent(name)}` },
-          },
-          retry: null,
-          timeout: options.timeoutMs,
-        },
-      ]),
-      method,
-    );
-    const [response] = await runHostedGcpKmsFailureStage(
-      "kms_rpc",
-      async () => await waitForAbortablePromise(call, options.signal),
-    );
-    return response;
+    return runHostedGcpKmsFailureStage("kms_rpc", async () => {
+      // Authentication refresh is shared by the Google client. Cancelling one
+      // operation stops its wait, not another operation's credential refresh.
+      const headers = new Headers(await waitForAbortablePromise(
+        client.getRequestHeaders(), options.signal,
+      ));
+      options.signal.throwIfAborted();
+      headers.set("content-type", "application/json");
+      headers.set("x-goog-request-params", `name=${encodeURIComponent(request.name)}`);
+      const { name, ...body } = request;
+      const url = new URL(`https://${this.config.apiEndpoint}:${this.config.port}/v1/${name}:${method}`);
+      const response = await fetch(url, {
+        method: "POST", headers, body: JSON.stringify(body),
+        redirect: "error", signal: options.signal,
+      }).catch((error: unknown) => { throw normalizeKmsRestTransportError(error); });
+      const payload: Record<string, unknown> = await readKmsRestResponse(response, options.signal).catch((error: unknown) => {
+        if (response.ok || options.signal.aborted) throw normalizeKmsRestTransportError(error);
+        return {};
+      });
+      if (!response.ok) {
+        // Keep only the finite provider status. Error messages and payloads
+        // may contain private request details and never cross this boundary.
+        const status = isRecord(payload.error) ? payload.error.status : undefined;
+        throw Object.assign(new Error("Google Cloud KMS request failed."), {
+          status: typeof status === "string" && GOOGLE_RPC_STATUS_REASONS.has(status)
+            ? status : KMS_REST_TRANSIENT_HTTP_REASONS.get(response.status),
+          response: { status: response.status },
+        });
+      }
+      return payload;
+    });
   }
 }
 
-function createOfficialGcpKmsSdkTransport(
-  config: HostedGcpKmsSdkClientConfiguration,
-): HostedGcpKmsSdkTransport {
-  return new OfficialHostedGcpKmsSdkTransport(config);
+function normalizeKmsRestTransportError(error: unknown): unknown {
+  // Native fetch reports socket failures in cause.code. Match only known
+  // connection failures; TLS, redirect, input and integrity errors stay terminal.
+  if (isRecord(error) && isRecord(error.cause)
+    && typeof error.cause.code === "string"
+    && KMS_REST_CONNECTION_ERROR_CODES.has(error.cause.code)) {
+    return Object.assign(new Error("Google Cloud KMS connection failed."), {
+      status: "UNAVAILABLE",
+    });
+  }
+  return error;
 }
 
-async function createOfficialGcpKmsSdkClient(
-  config: HostedGcpKmsSdkClientConfiguration,
-): Promise<KeyManagementServiceClient> {
-  const [{ KeyManagementServiceClient }, authClient] = await Promise.all([
-    import("@google-cloud/kms"),
-    createOfficialGoogleAuthClient(config.credentials),
-  ]);
-  const clientOptions: NonNullable<ConstructorParameters<typeof KeyManagementServiceClient>[0]> = {
-    apiEndpoint: config.apiEndpoint,
-    authClient,
-    fallback: config.fallback,
-    port: config.port,
-    scopes: Array.from(config.scopes),
-    universeDomain: "googleapis.com",
-  };
-  return new KeyManagementServiceClient(clientOptions);
+async function readKmsRestResponse(
+  response: Response,
+  signal: AbortSignal,
+): Promise<Record<string, unknown>> {
+  const reader = response.body?.getReader();
+  if (!reader) throw new TypeError("Google Cloud KMS response body is missing.");
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  try {
+    for (;;) {
+      const chunk = await waitForAbortablePromise(reader.read(), signal);
+      if (chunk.done) break;
+      size += chunk.value.byteLength;
+      chunks.push(chunk.value);
+      if (size > 128 * 1024) throw new TypeError("Google Cloud KMS response is too large.");
+    }
+    const bytes = Buffer.concat(chunks);
+    let payload: unknown;
+    try {
+      payload = JSON.parse(bytes.toString("utf8"));
+    } finally {
+      bytes.fill(0);
+    }
+    if (!isRecord(payload)) throw new TypeError("Google Cloud KMS response is invalid.");
+    return payload;
+  } finally {
+    void reader.cancel().catch(() => undefined);
+    for (const chunk of chunks) chunk.fill(0);
+  }
+}
+
+function createGcpKmsRestTransport(
+  config: HostedGcpKmsTransportConfiguration,
+): HostedGcpKmsTransport {
+  return new HostedGcpKmsRestTransport(config);
 }
 
 async function createOfficialGoogleAuthClient(
@@ -1497,7 +1524,6 @@ function readHostedGcpKmsEndpointConfiguration(
   if (!configuredApiRoot) {
     return {
       apiEndpoint: DEFAULT_KMS_API_ENDPOINT,
-      fallback: false,
       port: DEFAULT_KMS_API_PORT,
     };
   }
@@ -1508,7 +1534,6 @@ function readHostedGcpKmsEndpointConfiguration(
   );
   return {
     apiEndpoint: url.hostname,
-    fallback: true,
     port: url.port ? requirePort(url.port, "HOSTED_CRYPTO_GCP_KMS_API_ROOT") : 443,
   };
 }
@@ -2180,22 +2205,6 @@ function cancelPromise<T>(promise: Promise<T>): void {
   }
 }
 
-function requireCancellablePromise<T>(
-  value: unknown,
-  operation: HostedGcpKmsOperation,
-): CancellablePromise<T> {
-  if (!isCancellablePromise<T>(value)) {
-    throw new TypeError(`Google Cloud KMS SDK method ${operation} is not cancellable.`);
-  }
-  return value;
-}
-
-function isCancellablePromise<T>(value: unknown): value is CancellablePromise<T> {
-  return isRecord(value)
-    && typeof value.then === "function"
-    && typeof value.cancel === "function";
-}
-
 function requireVerifiedFlag(
   value: boolean | null,
   operation: HostedGcpKmsOperation,
@@ -2241,10 +2250,7 @@ function createCrc32cTable(): Uint32Array {
   return table;
 }
 
-function normalizeSdkBytes(value: Uint8Array | string | null | undefined): Uint8Array | null {
-  if (value instanceof Uint8Array) {
-    return value;
-  }
+function normalizeRestBytes(value: unknown): Uint8Array | null {
   if (
     typeof value !== "string"
     || value.length > Math.ceil(GCP_KMS_MAX_CIPHERTEXT_BYTES / 3) * 4
@@ -2260,38 +2266,22 @@ function normalizeSdkBytes(value: Uint8Array | string | null | undefined): Uint8
   return decoded;
 }
 
-function normalizeSdkCrc32c(value: unknown): number | null {
-  if (isRecord(value) && "value" in value) {
-    return normalizeSdkCrc32c(value.value);
-  }
+function normalizeRestCrc32c(value: unknown): number | null {
   if (typeof value === "number") {
-    return Number.isInteger(value) && value >= 0 && value <= 0xffffffff
-      ? value
-      : null;
-  }
-  if (typeof value === "bigint") {
-    return value >= 0n && value <= 0xffffffffn ? Number(value) : null;
+    return Number.isInteger(value) && value >= 0 && value <= 0xffffffff ? value : null;
   }
   if (typeof value === "string" && /^[0-9]{1,10}$/u.test(value)) {
     const parsed = Number(value);
     return parsed <= 0xffffffff ? parsed : null;
   }
-  if (
-    isRecord(value)
-    && typeof value.low === "number"
-    && typeof value.high === "number"
-    && value.high === 0
-  ) {
-    return value.low >>> 0;
-  }
   return null;
 }
 
-function normalizeSdkString(value: unknown): string | null {
+function normalizeRestString(value: unknown): string | null {
   return typeof value === "string" && value.length > 0 ? value : null;
 }
 
-function normalizeSdkBoolean(value: unknown): boolean | null {
+function normalizeRestBoolean(value: unknown): boolean | null {
   return typeof value === "boolean" ? value : null;
 }
 

@@ -1498,8 +1498,9 @@ to apply after cutover.
   a local/provider deadline or provider `UNAVAILABLE` result may trigger the
   second attempt, after 100–300 ms of abortable jitter. Encrypt, sign, MAC,
   permission/authentication, quota, input, and integrity failures remain
-  single-attempt and fail closed; the official SDK's broad default retry budget
-  stays disabled. Retry, provider-response, and terminal-failure logs contain
+  single-attempt and fail closed. The REST transport adds no retry loop; known
+  connection failures and HTTP 503/504 without a valid Google status map to
+  the same unavailable/deadline reasons. Google auth retries stay disabled. Retry, provider-response, and terminal-failure logs contain
   only the operation and outcome, normalized provider reason, exact bounded
   auth/RPC stage, attempt and aggregate budget state, per-stage elapsed
   milliseconds, workload-refresh presence, and provider-payload/AAD byte

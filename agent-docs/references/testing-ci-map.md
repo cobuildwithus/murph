@@ -34,8 +34,12 @@ opt-in local PostgreSQL suites `prisma-store-pool-timing-postgres.test.ts` and
 execution remains in the collector scope, actual checkout queuing, composed
 signed-callback diagnostics and unchanged replay/fence/access rejection.
 `hosted-crypto-lazy-sdk.test.ts` rejects eager SDK evaluation while loading the
-actual route; the GCP KMS official/real-SDK suites cover deferred operation,
-concurrent first-use client reuse, integrity, cancellation and auth lifetimes.
+actual route; the GCP KMS official/real-SDK suites cover the REST wire boundary
+and installed Google auth library: deferred operation, concurrent first-use
+client reuse, CRC/resource integrity, cancellation, shared auth lifetimes,
+bounded connection/503/504 decrypt retries and terminal TLS failures.
+`hosted-execution-control.test.ts` covers privacy-safe connection timing and
+callback completion when optional logging fails.
 
 ## Current Repo Checks
 

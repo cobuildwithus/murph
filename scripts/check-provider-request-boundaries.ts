@@ -273,6 +273,16 @@ interface ApprovedRawHttpOwner {
 // guard owns only where a raw transport capability may exist.
 export const approvedProviderRawHttpOwners = Object.freeze([
   {
+    // The dynamic KMS URL inherits the file's Google-auth/STS import heuristic.
+    // Runtime validation pins this single call to the configured KMS endpoint;
+    // auth refresh itself continues through the official Google auth client.
+    ownerName: "callUnary",
+    providerIds: ["google-cloud-kms", "google-sts"],
+    reason: "existing-provider-boundary",
+    relativePath: "apps/web/src/lib/hosted-crypto/gcp-kms.ts",
+    requiredRuntimeModule: "google-auth-library",
+  },
+  {
     ownerName: "fetchHostedLinqAttachmentDownloadUrl",
     providerIds: ["linq"],
     reason: "existing-provider-boundary",
