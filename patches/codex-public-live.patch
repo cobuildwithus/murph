@@ -4897,10 +4897,10 @@ index 112422da70..54b91074e3 100644
              flush_transcript_tail_on_session_end: None,
 diff --git a/codex-rs/app-server/tests/suite/v2/realtime_public_live_tests.rs b/codex-rs/app-server/tests/suite/v2/realtime_public_live_tests.rs
 new file mode 100644
-index 0000000000..478b84469f
+index 0000000000..cd9f018456
 --- /dev/null
 +++ b/codex-rs/app-server/tests/suite/v2/realtime_public_live_tests.rs
-@@ -0,0 +1,731 @@
+@@ -0,0 +1,736 @@
 +//! Real sideband sockets exercise native and host-managed input ownership.
 +use super::*;
 +use codex_app_server_protocol::JSONRPCMessage;
@@ -5291,10 +5291,10 @@ index 0000000000..478b84469f
 +            request,
 +            "<transcript_delta>"
 +        ));
-+        assert!(
-+            !response_request_contains_text(request, "<input>"),
-+            "public metadata supplied no task text"
-+        );
++        assert!(response_request_contains_text(
++            request,
++            "<input>user: Run the shell check for Friday."
++        ));
 +    }
 +    assert!(response_request_contains_text(
 +        &requests[2],
@@ -5562,7 +5562,12 @@ index 0000000000..478b84469f
 +        let input = read_public_item(&mut harness.mcp, "input.requested").await?;
 +        let text = input["text"].as_str().context("normalized input")?;
 +        assert!(text.contains("Actually Thursday, not Friday."));
-+        assert!(!text.contains("<input>"));
++        assert!(text.contains("<input>user: Check Friday."));
++        assert!(text.contains("assistant: For Friday?"));
++        assert!(
++            !text.contains(&format!("managed_{index}")),
++            "transport metadata is not task text"
++        );
 +        assert_eq!(
 +            input["source"],
 +            json!({"type": "handoff", "handoffId": format!("managed_{index}")})
@@ -5945,7 +5950,7 @@ index 0000000000..0aa3fb747b
 +    assert_eq!(transport.requests.lock().unwrap().len(), 1);
 +}
 diff --git a/codex-rs/codex-api/src/endpoint/realtime_websocket/methods.rs b/codex-rs/codex-api/src/endpoint/realtime_websocket/methods.rs
-index 655c89fe20..ce4c89dcc5 100644
+index 655c89fe20..8afe4fbd13 100644
 --- a/codex-rs/codex-api/src/endpoint/realtime_websocket/methods.rs
 +++ b/codex-rs/codex-api/src/endpoint/realtime_websocket/methods.rs
 @@ -318,6 +318,11 @@ impl RealtimeWebsocketWriter {
@@ -5973,52 +5978,22 @@ index 655c89fe20..ce4c89dcc5 100644
          let session_mode = normalized_session_mode(self.event_parser, session_mode);
          let message = session_update_message(
              self.event_parser,
-@@ -438,6 +449,23 @@ impl RealtimeWebsocketWriter {
+@@ -472,8 +483,12 @@ impl RealtimeWebsocketWriter {
+     }
 
-     async fn send_json(&self, message: &RealtimeOutboundMessage) -> Result<(), ApiError> {
-         match message {
-+            RealtimeOutboundMessage::PublicAppend {
-+                event_type,
-+                delegation_id,
-+                content,
-+            } => {
-+                // The existing 500-byte UTF-8 chunks are a conservative bound for the
-+                // public 500-token limit. Never replay ambiguous appends on reconnect.
-+                for chunk in context_append_chunks(content) {
-+                    self.send_json_frame(&RealtimeOutboundMessage::PublicAppend {
-+                        event_type,
-+                        delegation_id: delegation_id.clone(),
-+                        content: chunk,
-+                    })
-+                    .await?;
-+                }
-+                return Ok(());
-+            }
-             RealtimeOutboundMessage::DelegationContextAppend {
-                 delegation_item_id,
-                 channel,
-@@ -540,6 +568,20 @@ impl RealtimeWebsocketEvents {
-                     trace!(target: REALTIME_WIRE_LOG_TARGET, "realtime websocket event: {text}");
-                     if let Some(mut event) = parse_realtime_event(&text, self.event_parser) {
-                         self.update_active_transcript(&mut event).await;
-+                        if self.event_parser == RealtimeEventParser::PublicLive
-+                            && matches!(
-+                                event,
-+                                RealtimeEvent::InputTranscriptDelta(_)
-+                                    | RealtimeEvent::OutputTranscriptDelta(_)
-+                                    | RealtimeEvent::HandoffRequested(_)
-+                            )
-+                            && let Ok(raw) = serde_json::from_str(&text)
-+                        {
-+                            self.pending_events
-+                                .lock()
-+                                .await
-+                                .push_back(RealtimeEvent::ConversationItemAdded(raw));
-+                        }
-                         debug!(?event, "realtime websocket parsed event");
-                         return Ok(Some(event));
-                     }
-@@ -731,9 +773,9 @@ fn append_transcript_delta(
+     async fn send_json_frame(&self, message: &RealtimeOutboundMessage) -> Result<(), ApiError> {
+-        let payload = serde_json::to_string(message)
+-            .map_err(|err| ApiError::Stream(format!("failed to encode realtime request: {err}")))?;
++        let payload = if self.event_parser == RealtimeEventParser::PublicLive {
++            super::public_live::encode_message(message)
++        } else {
++            serde_json::to_string(message)
++        }
++        .map_err(|err| ApiError::Stream(format!("failed to encode realtime request: {err}")))?;
+         debug!(?message, "realtime websocket request");
+         self.send_payload(payload).await
+     }
+@@ -731,9 +746,9 @@ fn append_transcript_delta(
          RealtimeEventParser::FramelessBidi => {
              entries.iter_mut().rev().find(|entry| entry.role == role)
          }
@@ -6031,7 +6006,7 @@ index 655c89fe20..ce4c89dcc5 100644
      };
      if !force_new && let Some(last_entry) = entry {
          last_entry.text.push_str(delta);
-@@ -763,9 +805,9 @@ fn apply_transcript_done(
+@@ -763,9 +778,9 @@ fn apply_transcript_done(
          RealtimeEventParser::FramelessBidi => {
              entries.iter_mut().rev().find(|entry| entry.role == role)
          }
@@ -6044,7 +6019,7 @@ index 655c89fe20..ce4c89dcc5 100644
      };
      if !force_new && let Some(last_entry) = entry {
          // A delayed V3 final can arrive after deltas from the next utterance.
-@@ -803,7 +845,7 @@ fn contains_transcript_entry(entries: &[RealtimeTranscriptEntry], role: &str, te
+@@ -803,7 +818,7 @@ fn contains_transcript_entry(entries: &[RealtimeTranscriptEntry], role: &str, te
 
  pub struct RealtimeWebsocketClient {
      provider: Provider,
@@ -6053,7 +6028,7 @@ index 655c89fe20..ce4c89dcc5 100644
  }
 
  #[derive(Clone, Copy)]
-@@ -817,13 +859,13 @@ impl RealtimeWebsocketClient {
+@@ -817,13 +832,13 @@ impl RealtimeWebsocketClient {
      pub fn new(provider: Provider) -> Self {
          Self {
              provider,
@@ -6069,7 +6044,7 @@ index 655c89fe20..ce4c89dcc5 100644
          self
      }
 
-@@ -833,6 +875,11 @@ impl RealtimeWebsocketClient {
+@@ -833,6 +848,11 @@ impl RealtimeWebsocketClient {
          extra_headers: HeaderMap,
          default_headers: HeaderMap,
      ) -> Result<RealtimeWebsocketConnection, ApiError> {
@@ -6081,7 +6056,7 @@ index 655c89fe20..ce4c89dcc5 100644
          let ws_url = websocket_url_from_api_url(
              self.provider.base_url.as_str(),
              self.provider.query_params.as_ref(),
-@@ -964,8 +1011,40 @@ impl RealtimeWebsocketClient {
+@@ -964,8 +984,40 @@ impl RealtimeWebsocketClient {
          session_mode: RealtimeSessionMode,
          call_id: &str,
      ) -> Result<Url, ApiError> {
@@ -6123,7 +6098,7 @@ index 655c89fe20..ce4c89dcc5 100644
              /*query_params*/ None,
              event_parser,
              session_mode,
-@@ -1035,9 +1114,10 @@ impl RealtimeWebsocketClient {
+@@ -1035,9 +1087,10 @@ impl RealtimeWebsocketClient {
          );
          let initialize_session = match session_initialization {
              RealtimeSessionInitialization::NewSession => true,
@@ -6137,7 +6112,7 @@ index 655c89fe20..ce4c89dcc5 100644
              RealtimeSessionInitialization::ExistingCall => false,
          };
          if initialize_session {
-@@ -1188,6 +1268,9 @@ fn websocket_url_from_api_url_for_call(
+@@ -1188,6 +1241,9 @@ fn websocket_url_from_api_url_for_call(
          session_mode,
      )?;
      match event_parser {
@@ -6147,7 +6122,7 @@ index 655c89fe20..ce4c89dcc5 100644
          RealtimeEventParser::FramelessBidi => {
              if matches!(call_id, "." | "..") {
                  return Err(ApiError::InvalidRequest {
-@@ -3129,3 +3212,7 @@ mod tests {
+@@ -3129,3 +3185,7 @@ mod tests {
          server.await.expect("server task");
      }
  }
@@ -6156,7 +6131,7 @@ index 655c89fe20..ce4c89dcc5 100644
 +#[path = "public_live_tests.rs"]
 +mod public_live_tests;
 diff --git a/codex-rs/codex-api/src/endpoint/realtime_websocket/methods_common.rs b/codex-rs/codex-api/src/endpoint/realtime_websocket/methods_common.rs
-index e5482e0134..7b4d7b25ea 100644
+index e5482e0134..ca446b0174 100644
 --- a/codex-rs/codex-api/src/endpoint/realtime_websocket/methods_common.rs
 +++ b/codex-rs/codex-api/src/endpoint/realtime_websocket/methods_common.rs
 @@ -31,9 +31,9 @@ pub(super) fn normalized_session_mode(
@@ -6172,53 +6147,63 @@ index e5482e0134..7b4d7b25ea 100644
          RealtimeWireAdapter::RealtimeV2 => session_mode,
      }
  }
-@@ -45,6 +45,11 @@ pub(super) fn conversation_item_create_message(
-     context_append_channel: Option<RealtimeContextAppendChannel>,
+@@ -46,7 +46,7 @@ pub(super) fn conversation_item_create_message(
  ) -> RealtimeOutboundMessage {
      match wire_adapter {
-+        RealtimeWireAdapter::PublicLive => super::public_live::context_append(
-+            /*delegation_id*/ None,
-+            text,
-+            context_append_channel,
-+        ),
          RealtimeWireAdapter::V1 => v1_conversation_item_create_message(text, role),
-         RealtimeWireAdapter::FramelessBidi => {
+-        RealtimeWireAdapter::FramelessBidi => {
++        RealtimeWireAdapter::FramelessBidi | RealtimeWireAdapter::PublicLive => {
              frameless_session_context_append_message(text, context_append_channel)
-@@ -60,6 +65,11 @@ pub(super) fn conversation_handoff_append_message(
-     context_append_channel: Option<RealtimeContextAppendChannel>,
+         }
+         RealtimeWireAdapter::RealtimeV2 => v2_conversation_item_create_message(text, role),
+@@ -61,11 +61,13 @@ pub(super) fn conversation_handoff_append_message(
  ) -> RealtimeOutboundMessage {
      match wire_adapter {
-+        RealtimeWireAdapter::PublicLive => super::public_live::context_append(
-+            Some(handoff_id),
-+            output_text,
-+            context_append_channel,
-+        ),
          RealtimeWireAdapter::V1 => v1_conversation_handoff_append_message(handoff_id, output_text),
-         RealtimeWireAdapter::FramelessBidi => frameless_delegation_context_append_message(
-             handoff_id,
-@@ -79,6 +89,11 @@ pub(super) fn standalone_handoff_message(
-     context_append_channel: Option<RealtimeContextAppendChannel>,
- ) -> RealtimeOutboundMessage {
-     match wire_adapter {
-+        RealtimeWireAdapter::PublicLive => super::public_live::context_append(
-+            /*delegation_id*/ None,
-+            output_text,
-+            context_append_channel,
-+        ),
-         RealtimeWireAdapter::V1 => v1_conversation_handoff_append_message(handoff_id, output_text),
-         RealtimeWireAdapter::FramelessBidi => {
-             frameless_session_context_append_message(output_text, context_append_channel)
-@@ -96,6 +111,9 @@ pub(super) fn conversation_function_call_output_message(
-     context_append_channel: Option<RealtimeContextAppendChannel>,
- ) -> RealtimeOutboundMessage {
-     match wire_adapter {
-+        RealtimeWireAdapter::PublicLive => {
-+            super::public_live::context_append(Some(call_id), output_text, context_append_channel)
+-        RealtimeWireAdapter::FramelessBidi => frameless_delegation_context_append_message(
+-            handoff_id,
+-            output_text,
+-            context_append_channel,
+-        ),
++        RealtimeWireAdapter::FramelessBidi | RealtimeWireAdapter::PublicLive => {
++            frameless_delegation_context_append_message(
++                handoff_id,
++                output_text,
++                context_append_channel,
++            )
 +        }
-         RealtimeWireAdapter::V1 => v1_conversation_handoff_append_message(
+         RealtimeWireAdapter::RealtimeV2 => {
+             unreachable!("realtime v2 does not send conversation handoff output")
+         }
+@@ -80,7 +82,7 @@ pub(super) fn standalone_handoff_message(
+ ) -> RealtimeOutboundMessage {
+     match wire_adapter {
+         RealtimeWireAdapter::V1 => v1_conversation_handoff_append_message(handoff_id, output_text),
+-        RealtimeWireAdapter::FramelessBidi => {
++        RealtimeWireAdapter::FramelessBidi | RealtimeWireAdapter::PublicLive => {
+             frameless_session_context_append_message(output_text, context_append_channel)
+         }
+         RealtimeWireAdapter::RealtimeV2 => {
+@@ -100,11 +102,13 @@ pub(super) fn conversation_function_call_output_message(
              call_id,
              format!("{AGENT_FINAL_MESSAGE_PREFIX}{output_text}"),
-@@ -122,6 +140,9 @@ pub(super) fn session_update_message(
+         ),
+-        RealtimeWireAdapter::FramelessBidi => frameless_delegation_context_append_message(
+-            call_id,
+-            output_text,
+-            context_append_channel,
+-        ),
++        RealtimeWireAdapter::FramelessBidi | RealtimeWireAdapter::PublicLive => {
++            frameless_delegation_context_append_message(
++                call_id,
++                output_text,
++                context_append_channel,
++            )
++        }
+         RealtimeWireAdapter::RealtimeV2 => {
+             v2_conversation_function_call_output_message(call_id, output_text)
+         }
+@@ -122,6 +126,9 @@ pub(super) fn session_update_message(
  ) -> RealtimeOutboundMessage {
      let session_mode = normalized_session_mode(wire_adapter, session_mode);
      match wire_adapter {
@@ -6228,7 +6213,7 @@ index e5482e0134..7b4d7b25ea 100644
          RealtimeWireAdapter::V1 => RealtimeOutboundMessage::SessionUpdate {
              session: v1_session_update_session(instructions, voice),
          },
-@@ -150,12 +171,30 @@ pub fn session_update_session_json(config: RealtimeSessionConfig) -> JsonResult<
+@@ -150,12 +157,30 @@ pub fn session_update_session_json(config: RealtimeSessionConfig) -> JsonResult<
                      config.output_modality,
                      config.voice,
                  ),
@@ -6260,7 +6245,7 @@ index e5482e0134..7b4d7b25ea 100644
          RealtimeWireAdapter::FramelessBidi => Ok(frameless_session_json(
              config.model,
              config.instructions,
-@@ -169,7 +208,7 @@ pub fn session_update_session_json(config: RealtimeSessionConfig) -> JsonResult<
+@@ -169,7 +194,7 @@ pub fn session_update_session_json(config: RealtimeSessionConfig) -> JsonResult<
  pub(super) fn websocket_intent(wire_adapter: RealtimeWireAdapter) -> Option<&'static str> {
      match wire_adapter {
          RealtimeWireAdapter::V1 => v1_websocket_intent(),
@@ -6312,7 +6297,7 @@ index e954e489a5..bde158aada 100644
  pub use methods::RealtimeTranscriptState;
  pub use methods::RealtimeWebsocketClient;
 diff --git a/codex-rs/codex-api/src/endpoint/realtime_websocket/protocol.rs b/codex-rs/codex-api/src/endpoint/realtime_websocket/protocol.rs
-index b7fc073dfa..0434aec207 100644
+index b7fc073dfa..91dff884d7 100644
 --- a/codex-rs/codex-api/src/endpoint/realtime_websocket/protocol.rs
 +++ b/codex-rs/codex-api/src/endpoint/realtime_websocket/protocol.rs
 @@ -15,6 +15,8 @@ use serde_json::Value;
@@ -6324,22 +6309,7 @@ index b7fc073dfa..0434aec207 100644
      RealtimeV2,
  }
 
-@@ -82,6 +84,14 @@ pub(super) enum RealtimeOutboundMessage {
-     FramelessSessionUpdate { session: Value },
-     #[serde(rename = "conversation.item.create")]
-     ConversationItemCreate { item: ConversationItemPayload },
-+    // The type is selected by the public codec; content is a string, not private V3 parts.
-+    #[serde(untagged)]
-+    PublicAppend {
-+        #[serde(rename = "type")]
-+        event_type: &'static str,
-+        delegation_id: Option<String>,
-+        content: String,
-+    },
- }
-
- #[derive(Debug, Clone, Serialize)]
-@@ -267,6 +277,7 @@ pub(super) fn parse_realtime_event(
+@@ -267,6 +269,7 @@ pub(super) fn parse_realtime_event(
      match event_parser {
          RealtimeEventParser::V1 => parse_realtime_event_v1(payload),
          RealtimeEventParser::FramelessBidi => parse_frameless_bidi_event(payload),
@@ -6349,10 +6319,10 @@ index b7fc073dfa..0434aec207 100644
  }
 diff --git a/codex-rs/codex-api/src/endpoint/realtime_websocket/public_live.rs b/codex-rs/codex-api/src/endpoint/realtime_websocket/public_live.rs
 new file mode 100644
-index 0000000000..fc6110640d
+index 0000000000..23a623e4b9
 --- /dev/null
 +++ b/codex-rs/codex-api/src/endpoint/realtime_websocket/public_live.rs
-@@ -0,0 +1,90 @@
+@@ -0,0 +1,98 @@
 +//! Public GPT-Live codec only. Transcript collection, routing and shutdown remain native owners.
 +use super::protocol::RealtimeContextAppendChannel;
 +use super::protocol::RealtimeOutboundMessage;
@@ -6364,19 +6334,28 @@ index 0000000000..fc6110640d
 +use codex_protocol::protocol::RealtimeHandoffRequested;
 +use codex_protocol::protocol::RealtimeTranscriptDelta;
 +
-+pub(super) fn context_append(
-+    delegation_id: Option<String>,
-+    content: String,
-+    channel: Option<RealtimeContextAppendChannel>,
-+) -> RealtimeOutboundMessage {
-+    RealtimeOutboundMessage::PublicAppend {
-+        event_type: match channel {
++// Translate only at serialization: native message construction and UTF-8 chunking
++// stay shared with the internal protocol.
++pub(super) fn encode_message(message: &RealtimeOutboundMessage) -> serde_json::Result<String> {
++    let (delegation_id, channel, content) = match message {
++        RealtimeOutboundMessage::DelegationContextAppend {
++            delegation_item_id,
++            channel,
++            content,
++        } => (Some(delegation_item_id), channel, content),
++        RealtimeOutboundMessage::SessionContextAppend { channel, content } => {
++            (None, channel, content)
++        }
++        _ => return serde_json::to_string(message),
++    };
++    serde_json::to_string(&serde_json::json!({
++        "type": match channel {
 +            Some(RealtimeContextAppendChannel::Commentary) | None => "session.thinking.append",
 +            Some(RealtimeContextAppendChannel::Speakable) => "session.commentary.append",
 +        },
-+        delegation_id,
-+        content,
-+    }
++        "delegation_id": delegation_id,
++        "content": content.first().map(|part| part.text.as_str()).unwrap_or_default(),
++    }))
 +}
 +
 +pub(super) fn parse_event(payload: &str) -> Option<RealtimeEvent> {
@@ -6384,8 +6363,7 @@ index 0000000000..fc6110640d
 +    match event_type.as_str() {
 +        "session.started" | "session.updated" => parse_session_updated_event(&parsed),
 +        "session.input_transcript.delta" | "session.output_transcript.delta" => {
-+            // These are fragments, not completed turns. The reader preserves the raw
-+            // timing on itemAdded and feeds these deltas to its bounded transcript owner.
++            // Feed fragments to the native bounded transcript owner, not completed turns.
 +            let delta = RealtimeTranscriptDelta {
 +                delta: parsed["delta"].as_str()?.to_string(),
 +            };
@@ -6445,10 +6423,10 @@ index 0000000000..fc6110640d
 +}
 diff --git a/codex-rs/codex-api/src/endpoint/realtime_websocket/public_live_tests.rs b/codex-rs/codex-api/src/endpoint/realtime_websocket/public_live_tests.rs
 new file mode 100644
-index 0000000000..cbcffb27df
+index 0000000000..8902bbadb3
 --- /dev/null
 +++ b/codex-rs/codex-api/src/endpoint/realtime_websocket/public_live_tests.rs
-@@ -0,0 +1,273 @@
+@@ -0,0 +1,289 @@
 +use super::*;
 +use crate::provider::RetryConfig;
 +use codex_protocol::protocol::RealtimeHandoffRequested;
@@ -6574,7 +6552,7 @@ index 0000000000..cbcffb27df
 +        )
 +        .await
 +        .unwrap();
-+    let mut raw_timing = Vec::new();
++    let mut fragments = Vec::new();
 +    let handoff = loop {
 +        match timeout(LIMIT, connection.next_event())
 +            .await
@@ -6583,7 +6561,13 @@ index 0000000000..cbcffb27df
 +            .unwrap()
 +        {
 +            RealtimeEvent::HandoffRequested(handoff) => break handoff,
-+            RealtimeEvent::ConversationItemAdded(item) => raw_timing.push(item),
++            RealtimeEvent::InputTranscriptDelta(delta) => fragments.push(("user", delta.delta)),
++            RealtimeEvent::OutputTranscriptDelta(delta) => {
++                fragments.push(("assistant", delta.delta))
++            }
++            RealtimeEvent::ConversationItemAdded(_) => {
++                panic!("transcript and handoff events must not be duplicated as raw items")
++            }
 +            RealtimeEvent::InputTranscriptDone(_) | RealtimeEvent::OutputTranscriptDone(_) => {
 +                panic!("fragments must not become completed turns")
 +            }
@@ -6612,7 +6596,14 @@ index 0000000000..cbcffb27df
 +            ],
 +        }
 +    );
-+    assert_eq!(raw_timing[2]["end_ms"], 300);
++    assert_eq!(
++        fragments,
++        vec![
++            ("user", "Check Friday ".to_string()),
++            ("assistant", "Which time?".to_string()),
++            ("user", "at two. Actually Thursday, not Friday.".to_string()),
++        ]
++    );
 +    connection
 +        .writer()
 +        .send_conversation_function_call_output(
@@ -6645,6 +6636,9 @@ index 0000000000..cbcffb27df
 +            RealtimeEvent::ConversationItemAdded(item) if item["type"] == "session.closed" => {
 +                usage.push(item["usage"]["seconds"].clone());
 +                break;
++            }
++            RealtimeEvent::ConversationItemAdded(_) => {
++                panic!("handoffs must not be duplicated as raw items")
 +            }
 +            _ => {}
 +        }
@@ -6847,59 +6841,8 @@ index 24b785a6fa..546d12c19d 100644
 +        codex_api::RealtimeEventParser::PublicLive
 +    );
 +}
-diff --git a/codex-rs/core/src/context/realtime_delegation.rs b/codex-rs/core/src/context/realtime_delegation.rs
-index eba3ee70f4..a87d0d6eaa 100644
---- a/codex-rs/core/src/context/realtime_delegation.rs
-+++ b/codex-rs/core/src/context/realtime_delegation.rs
-@@ -58,6 +58,11 @@ impl ContextualUserFragment for RealtimeDelegation<'_> {
-         };
-         if let Some(transcript_delta) = self.transcript_delta.filter(|text| !text.is_empty()) {
-             let transcript_delta = escape_xml_text_bounded(transcript_delta, Retain::End);
-+            if self.input.is_empty() {
-+                return format!(
-+                    "\n{source}  <transcript_delta>{transcript_delta}</transcript_delta>\n"
-+                );
-+            }
-             return format!(
-                 "\n{source}  <input>{input}</input>\n  <transcript_delta>{transcript_delta}</transcript_delta>\n"
-             );
-@@ -103,3 +108,7 @@ fn escape_xml_text(input: &str) -> String {
-         .replace('<', "&lt;")
-         .replace('>', "&gt;")
- }
-+
-+#[cfg(test)]
-+#[path = "realtime_delegation_tests.rs"]
-+mod tests;
-diff --git a/codex-rs/core/src/context/realtime_delegation_tests.rs b/codex-rs/core/src/context/realtime_delegation_tests.rs
-new file mode 100644
-index 0000000000..e95c6f260a
---- /dev/null
-+++ b/codex-rs/core/src/context/realtime_delegation_tests.rs
-@@ -0,0 +1,21 @@
-+use super::*;
-+
-+#[test]
-+fn public_live_delegation_bounds_context_without_inventing_task_text() {
-+    let transcript = format!(
-+        "{}\nuser: correction: & <Thursday>",
-+        "old transcript ".repeat(1000)
-+    );
-+    let body =
-+        RealtimeDelegation::new("", Some(&transcript), RealtimeDelegationSource::Handoff).body();
-+    assert!(!body.contains("<input>"));
-+    assert!(body.ends_with("user: correction: &amp; &lt;Thursday&gt;</transcript_delta>\n"));
-+    let content = body
-+        .split_once("<transcript_delta>")
-+        .unwrap()
-+        .1
-+        .split_once("</transcript_delta>")
-+        .unwrap()
-+        .0;
-+    assert!(content.len() <= MAX_REALTIME_DELEGATION_FIELD_BYTES);
-+}
 diff --git a/codex-rs/core/src/realtime_conversation.rs b/codex-rs/core/src/realtime_conversation.rs
-index 5ef019d75e..8410c19c42 100644
+index 5ef019d75e..5f6f1d8376 100644
 --- a/codex-rs/core/src/realtime_conversation.rs
 +++ b/codex-rs/core/src/realtime_conversation.rs
 @@ -480,14 +480,18 @@ struct RealtimeInputChannels {
@@ -7045,15 +6988,7 @@ index 5ef019d75e..8410c19c42 100644
          api_provider,
          realtime_sideband_base_url,
          extra_headers,
-@@ -1583,6 +1626,7 @@ async fn handle_start_inner(
-         session_config,
-         transport,
-     } = prepared_start;
-+    let event_parser = session_config.event_parser;
-     info!("starting realtime conversation");
-     let (sdp, existing_call_id) = match transport {
-         ConversationStartTransport::Websocket => (None, None),
-@@ -1616,7 +1660,7 @@ async fn handle_start_inner(
+@@ -1616,7 +1659,7 @@ async fn handle_start_inner(
      sess.send_event_raw(Event {
          id: sub_id.to_string(),
          msg: EventMsg::RealtimeConversationStarted(RealtimeConversationStartedEvent {
@@ -7062,7 +6997,7 @@ index 5ef019d75e..8410c19c42 100644
              version,
          }),
      })
-@@ -1645,6 +1689,34 @@ async fn handle_start_inner(
+@@ -1645,6 +1688,34 @@ async fn handle_start_inner(
              id: sub_id.clone(),
              msg,
          };
@@ -7097,25 +7032,7 @@ index 5ef019d75e..8410c19c42 100644
          let mut end = RealtimeConversationEnd::TransportClosed;
          let mut handoff_error = None;
          // Drain already-parsed events so a queued handoff is routed before the final tail.
-@@ -1661,15 +1733,33 @@ async fn handle_start_inner(
-                 end = RealtimeConversationEnd::Error;
-             }
-             let maybe_routed_text = match &event {
-+                RealtimeEvent::HandoffRequested(handoff)
-+                    if event_parser == RealtimeEventParser::PublicLive =>
-+                {
-+                    realtime_transcript_delta_from_handoff(handoff).map(|transcript| {
-+                        // No task was supplied by Live. Preserve all collected speaker
-+                        // context, including corrections, without fabricating an <input>.
-+                        wrap_realtime_delegation_input(
-+                            "",
-+                            Some(&transcript),
-+                            RealtimeDelegationSource::Handoff,
-+                        )
-+                    })
-+                }
-                 RealtimeEvent::HandoffRequested(handoff) => {
-                     realtime_delegation_from_handoff(handoff)
+@@ -1666,10 +1737,15 @@ async fn handle_start_inner(
                  }
                  _ => None,
              };
@@ -7135,7 +7052,7 @@ index 5ef019d75e..8410c19c42 100644
              }
              sess_clone
                  .send_event_raw(ev(EventMsg::RealtimeConversationRealtime(
-@@ -1685,7 +1775,9 @@ async fn handle_start_inner(
+@@ -1685,7 +1761,9 @@ async fn handle_start_inner(
          if handoff_error.is_none()
              && let Ok(text) = transcript_tail_rx.recv().await
          {
@@ -7146,7 +7063,7 @@ index 5ef019d75e..8410c19c42 100644
          }
          if let Some(error) = handoff_error {
              end = RealtimeConversationEnd::Error;
-@@ -1811,7 +1903,7 @@ fn realtime_request_headers(
+@@ -1811,7 +1889,7 @@ fn realtime_request_headers(
          RealtimeEventParser::FramelessBidi => {
              headers.insert("openai-alpha", HeaderValue::from_static("quicksilver=v2"));
          }
@@ -7155,7 +7072,7 @@ index 5ef019d75e..8410c19c42 100644
      }
 
      if let Some(realtime_session_id) = realtime_session_id
-@@ -1888,6 +1980,7 @@ fn spawn_realtime_input_task(
+@@ -1888,6 +1966,7 @@ fn spawn_realtime_input_task(
 
  enum RealtimeInputTaskExit {
      Terminal,
@@ -7163,7 +7080,7 @@ index 5ef019d75e..8410c19c42 100644
      TransportLost {
          err: ApiError,
          pending_outbound: Option<Box<RealtimePendingOutbound>>,
-@@ -1962,6 +2055,12 @@ async fn run_realtime_input_task(
+@@ -1962,6 +2041,12 @@ async fn run_realtime_input_task(
              realtime_event = events.next_event() => {
                  match realtime_event {
                      Ok(Some(event)) => {
@@ -7176,7 +7093,7 @@ index 5ef019d75e..8410c19c42 100644
                          handle_realtime_server_event(
                              event,
                              &writer,
-@@ -2223,73 +2322,75 @@ async fn handle_handoff_output(
+@@ -2223,73 +2308,75 @@ async fn handle_handoff_output(
              }
              RealtimeOutbound::HandoffCompleteAck { .. } => Ok(()),
          },

@@ -17,6 +17,7 @@ import {
   renderAssistantHostedImageCompletionSystemText,
 } from '../src/assistant/hosted-image-completion.js'
 import { getAssistantCronAutomationInspection } from '../src/assistant/cron/inspection.js'
+import { getAssistantCronJob } from '../src/assistant/cron.js'
 import { computeAssistantCronNextRunAt } from '../src/assistant/cron/schedule.js'
 import { appendAssistantCronRun } from '../src/assistant/cron/store.js'
 import { WORKFLOW_SKILL_REFERENCES } from './support/workflow-skill-policy.js'
@@ -636,6 +637,47 @@ describeRealCodex('real model canonical production journeys', () => {
     const config = await resolveRealCodexE2eConfig({ productionTransport: true })
     try { await runCanonicalReminderJourney({ ...config, onProviderRequestStarted: recordCanonicalProviderRequest }) }
     finally { await removeRealCodexTemporaryPaths(config.temporaryPaths) }
+  }, 600_000)
+  it('real model native voice transcript fallback saves only the corrected reminder', async () => {
+    const config = await resolveRealCodexE2eConfig({ productionTransport: true })
+    const fixture = await createCanonicalLiveFixture({ ...config, onProviderRequestStarted: recordCanonicalProviderRequest })
+    try {
+      // Upstream Codex's missing-task fallback includes the collected transcript
+      // in both bounded fields. Native Rust tests prove this wire-to-input shape.
+      const transcript = [
+        'user: Remind me to stretch every Friday at 14:00 UTC in this chat.',
+        'assistant: Every Friday?',
+        'user: Actually Thursday, not Friday. Save just the Thursday reminder.',
+      ].join('\n')
+      const result = await fixture.message([
+        '<realtime_delegation>',
+        `  <input>${transcript}</input>`,
+        `  <transcript_delta>${transcript}</transcript_delta>`,
+        '</realtime_delegation>',
+      ].join('\n'))
+      const reminders = await listAutomations({ vaultRoot: fixture.vault })
+      expect(reminders.count).toBe(1)
+      const reminder = reminders.items[0]!
+      expect(reminder.status).toBe('active')
+      expect(reminder.route.channel).toBe('telegram')
+      expect(reminder.instructions).toMatch(/stretch/iu)
+      expect(reminder.schedule.kind).toBe('cron')
+      const job = await getAssistantCronJob(fixture.vault, reminder.automationId)
+      expect(job.state.nextRunAt).toBeTruthy()
+      const next = new Date(job.state.nextRunAt!)
+      expect(next.getUTCDay()).toBe(4)
+      expect(next.getUTCHours()).toBe(14)
+      expect(next.getUTCMinutes()).toBe(0)
+      expect(computeAssistantCronNextRunAt(job.schedule, next)).toBe(
+        new Date(next.getTime() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+      )
+      expect(reminder.route.threadId ?? reminder.route.deliveryTarget).toBe('canonical-live-synthetic-thread')
+      expect(await fixture.commandCount()).toBeGreaterThan(0)
+      expect(result.response).toMatch(/Thursday/iu)
+    } finally {
+      await fixture.close()
+      await removeRealCodexTemporaryPaths(config.temporaryPaths)
+    }
   }, 600_000)
   it('real model group privacy and quiet boundary', async () => {
     const config = await resolveRealCodexE2eConfig({ productionTransport: true })
