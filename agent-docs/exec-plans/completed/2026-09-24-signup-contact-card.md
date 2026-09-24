@@ -1,6 +1,6 @@
 # Share contact cards across Linq signup paths
 
-Status: active
+Status: completed
 Created: 2026-09-24
 Updated: 2026-09-24
 
@@ -50,3 +50,29 @@ day can retry. Linq cannot guarantee handset display or contact saving.
 
 Web-only rollout; existing reservations and provider events remain compatible.
 No production messages, bulk backfill, or deployment is part of local proof.
+
+## Completion evidence
+
+- Implemented shared home-chat delivery follow-up and receipt-before-acceptance
+  recovery. Native sends retain provider preflight and atomic daily suppression;
+  explicit vCards retain their original throttle.
+- Product UX: Ready. Seven focused files passed 395 tests, including current
+  owner/service boundaries, invitation compatibility, daily concurrency, failure
+  containment, explicit vCard privacy, and changelog rendering.
+- Web typecheck and lint passed (zero lint errors; existing warnings only).
+  Complexity, docs drift, and whitespace checks passed. No model-input changes.
+- Parent reviewed the complete diff, privacy, bounded background query flow,
+  unchanged protocol/schema, and mergeability with the verified current base.
+- PR #3695: ReviewGPT round 1 PASS at
+  `1358a5d11d5b7802045900a591e4eb60af75a889`; exact snapshot and all 12 changed
+  paths verified by the review. Hercules selected `gpt-6-pro`, confirmed one
+  attached snapshot, and captured the matching model/response identity and
+  `REVIEW_COMPLETE` after more than 353 seconds. Static review covered the
+  affected receipt, callback, routing, provider, and reservation paths; no
+  qualifying findings or unresolved dispositions. Capture is in ignored
+  `audit-packages/pr-3695-round-1.md` and its metadata sidecars.
+- This closeout changes documentation only and does not require a new substantive
+  review. Required CI remains the exact-final-head readiness gate. No live
+  provider send or handset presentation was verified; merge and deploy remain
+  separate actions.
+Completed: 2026-09-24

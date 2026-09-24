@@ -734,4 +734,4 @@ Native turn cancellation and voice continuity proof:
 
 Signup-wide native contact-card sharing and daily attempt suppression are owned by
 `operations/imessage-deliverability.md`; implementation and receipt-order proof
-are tracked in `exec-plans/active/2026-09-24-signup-contact-card.md`.
+are tracked in `exec-plans/completed/2026-09-24-signup-contact-card.md`.
