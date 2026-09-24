@@ -12,7 +12,7 @@ import {
   requireSingleAssistantRealCodexTest,
 } from './run-assistant-real-codex-e2e.ts'
 
-export const ASSISTANT_REAL_MODEL_GATE_MODEL = 'gpt-5.6-terra'
+export const ASSISTANT_REAL_MODEL_GATE_MODEL = 'gpt-6-sol'
 export const ASSISTANT_REAL_MODEL_GATE_SCENARIOS = [
   'real model canonical meal persists across assistant restart',
   'real model canonical reminder create fire and cancel',

@@ -1633,9 +1633,9 @@ describeRealCodex('real Codex child model selection e2e', () => {
 })
 
 describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
-  it(
-    'continues the opening without scheduling while a deterministic stall check-in respects silence',
-    async () => {
+  it.each(['identity answer', 'Web aspiration reply'] as const)(
+    'continues after %s without scheduling while a deterministic stall check-in respects silence',
+    async (opening) => {
       const config = await resolveRealCodexE2eConfig()
       const workingDirectory = await prepareRealCodexOnboardingDirectory()
       const childUsages: AssistantProviderUsageDraft[] = []
@@ -1663,6 +1663,10 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
             `Murph: ${ASSISTANT_FIRST_CONTACT_WELCOME_MESSAGE}`,
             'Member: Yes, ready.',
             `Murph: ${MURPH_ASSISTANT_ONBOARDING_IDENTITY_QUESTIONS.formal}`,
+            ...(opening === 'Web aspiration reply' ? [
+              "Member: Call me Robin. I'm 34 and a guy.",
+              'Murph: Good to meet you, Robin. I can help with following through. What would you most like from your health—something you want to improve, understand, handle, or be able to do?',
+            ] : []),
           ].join('\n\n'), [], new Date(startedAt).toISOString(), true),
           dynamicTools: [MURPH_AUTOMATION_TOOL],
           env: {
@@ -1697,7 +1701,9 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
             }
           },
           onAdditionalUsage: async (usage) => { childUsages.push(usage) },
-          prompt: "Call me Robin. I'm 34 and a guy.",
+          prompt: opening === 'Web aspiration reply'
+            ? "I'd like to have more energy for weekend walks."
+            : "Call me Robin. I'm 34 and a guy.",
         })
         const replyMs = Date.now() - startedAt
         const actions = readCapabilityRoutingActions(result.jsonEvents)
@@ -1705,10 +1711,15 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
           replyMs, providerActionCount: result.providerActionCount, reply: result.finalMessage.trim(),
           actionTimings,
         })}\n`)
-        expect(result.finalMessage).toMatch(/Robin/iu)
-        expect(result.finalMessage).toMatch(/what.*health/iu)
+        if (opening === 'Web aspiration reply') {
+          expect(result.finalMessage).not.toMatch(/what would you most like from your health/iu)
+          expect(result.finalMessage).toMatch(/energy|walk|weekend/iu)
+        } else {
+          expect(result.finalMessage).toMatch(/Robin/iu)
+          expect(result.finalMessage).toMatch(/what.*health/iu)
+        }
         expect(result.finalMessage).not.toMatch(/saved|recorded|subagent|checkpoint|still working/iu)
-        expect(await readOnboardingPolicyFiles(actions, path.join(workingDirectory, 'skills'))).toEqual([])
+        if (opening === 'identity answer') expect(await readOnboardingPolicyFiles(actions, path.join(workingDirectory, 'skills'))).toEqual([])
         expect(actions.filter((action) => action.kind === 'command' && /memory (?:set-name|upsert|update)/u.test(action.command))).toEqual([])
         expect(automationRequests).toHaveLength(0)
         // Exercise the production deterministic owner after the visible reply.
@@ -15072,7 +15083,7 @@ describeRealCodex('real Codex adaptive wearable no-data outreach e2e', () => {
   )
 })
 
-describeRealCodex('real Codex Personal Patterns typed-ledger Luna high digest e2e', () => {
+describeRealCodex('real Codex Personal Patterns typed-ledger GPT-6 Sol high digest e2e', () => {
   it.each([false, true])('sends exactly one Personal Pattern without a link (initial digest sent: %s)', async (initialDigestSent) => {
     const config = await resolveRealCodexE2eConfig()
     const automation = MURPH_MANAGED_AUTOMATIONS.find(
@@ -29165,7 +29176,7 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
         /4(?::20)?\s*p\.?m\.?|16:20/iu,
       ],
       expectedInstructions: [/library book/iu],
-      expectedModel: 'gpt-5.6-luna',
+      expectedModel: 'gpt-6-luna',
       expectedScheduleKind: 'at',
       occurrenceProjection: {
         nextOccurrenceAt: '2031-01-15T21:20:00.000Z',
@@ -29174,7 +29185,7 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
       prompt:
         'On January 15, 2031 at 4:20 PM, remind me here to bring the library book. Please save it now.',
       scenario: 'fixed-library-cue',
-      testName: 'fixed library cue uses Luna',
+      testName: 'fixed library cue uses GPT-6 Luna',
     },
     {
       expectedFinalMessage: [
@@ -29198,7 +29209,7 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
         'decide whether I should train or recover, and remind me here with that recommendation. Save it now.',
       ].join(' '),
       scenario: 'contextual-recovery-reminder',
-      testName: 'context reminder uses Terra',
+      testName: 'context reminder uses GPT-6 Sol',
     },
   ] as const)(
     '$testName',

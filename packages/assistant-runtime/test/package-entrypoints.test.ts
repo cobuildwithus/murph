@@ -106,6 +106,7 @@ const expectedAssistantRuntimePublicExportKeys = [
   "./hosted-provider-effects",
   "./hosted-runtime-contracts",
   "./hosted-runtime-worker-contracts",
+  "./hosted-vault-share-capture-worker",
   "./hosted-workspace-restore-preparation",
 ] as const;
 

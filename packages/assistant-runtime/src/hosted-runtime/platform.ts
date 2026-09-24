@@ -826,6 +826,8 @@ export interface HostedRuntimeWorkspaceSnapshotPort {
     durableRoot: string;
     ref: HostedWorkspaceSnapshotV2Ref;
     signal?: AbortSignal | null;
+    /** Later checkpoint readers obtain fresh authorization instead of launch preparation. */
+    usePreparedRestore?: boolean;
   }): Promise<HostedRuntimeWorkspaceSnapshotRestoreTimingDetails | void>;
   startSnapshotSession(input: {
     expectedWorkspaceVersion: string;

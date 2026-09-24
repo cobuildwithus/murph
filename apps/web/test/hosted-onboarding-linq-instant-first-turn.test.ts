@@ -687,7 +687,7 @@ describe("hosted Linq instant first turn", () => {
     const body = JSON.parse(String(requestInit.body));
     expect(body).toMatchObject({
       input: [{ content: REQUEST.text, role: "user" }],
-      model: "gpt-5.6-luna",
+      model: "gpt-6-luna",
       reasoning: { effort: "medium" },
       service_tier: "priority",
       store: false,
@@ -848,7 +848,7 @@ describe("hosted Linq instant first turn", () => {
         kind: "reply",
         message: "Hey! What would you like help with?",
         usage: {
-          requestedModel: "gpt-5.6-luna",
+          requestedModel: "gpt-6-luna",
           response: buildUsageResponse("default"),
         },
       },
@@ -917,7 +917,7 @@ describe("hosted Linq instant first turn", () => {
         kind: "reply",
         message: "Hey! What would you like help with?",
         usage: {
-          requestedModel: "gpt-5.6-luna",
+          requestedModel: "gpt-6-luna",
           response: buildUsageResponse(),
         },
       },
@@ -957,7 +957,7 @@ describe("hosted Linq instant first turn", () => {
         kind: "reply",
         message: "Hey! What would you like help with?",
         usage: {
-          requestedModel: "gpt-5.6-luna",
+          requestedModel: "gpt-6-luna",
           response: buildUsageResponse(),
         },
       },
@@ -1002,7 +1002,7 @@ describe("hosted Linq instant first turn", () => {
         kind: "reply",
         message: "Hey! What would you like help with?",
         usage: {
-          requestedModel: "gpt-5.6-luna",
+          requestedModel: "gpt-6-luna",
           response: buildUsageResponse(),
         },
       },
@@ -1040,7 +1040,7 @@ describe("hosted Linq instant first turn", () => {
         kind: "reply",
         message: "Hey! What would you like help with?",
         usage: {
-          requestedModel: "gpt-5.6-luna",
+          requestedModel: "gpt-6-luna",
           response: buildUsageResponse(),
         },
       },
@@ -1092,7 +1092,7 @@ describe("hosted Linq instant first turn", () => {
         kind: "reply",
         message: "Hey! What would you like help with?",
         usage: {
-          requestedModel: "gpt-5.6-luna",
+          requestedModel: "gpt-6-luna",
           response: buildUsageResponse(),
         },
       },
@@ -1160,7 +1160,7 @@ describe("hosted Linq instant first turn", () => {
         kind: "reply",
         message: "Hey! What would you like help with?",
         usage: {
-          requestedModel: "gpt-5.6-luna",
+          requestedModel: "gpt-6-luna",
           response: buildUsageResponse(),
         },
       },
@@ -1196,7 +1196,7 @@ describe("hosted Linq instant first turn", () => {
         kind: "reply",
         message: "Hey! What would you like help with?",
         usage: {
-          requestedModel: "gpt-5.6-luna",
+          requestedModel: "gpt-6-luna",
           response: buildUsageResponse(),
         },
       },
