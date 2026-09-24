@@ -1930,10 +1930,11 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
     600_000,
   )
 
-  it(
-    'uses the visible-welcome first-reply fast path without tools or a progress update',
-    async () => {
+  it.each(['configured-model', 'linq-canary-luna'] as const)(
+    '%s uses the visible-welcome first-reply fast path without tools or a progress update',
+    async (target) => {
       const config = await resolveRealCodexE2eConfig()
+      if (target === 'linq-canary-luna') config.model = 'gpt-6-luna'
       const temporaryPaths = [...config.temporaryPaths]
       const progressUpdates: string[] = []
 
