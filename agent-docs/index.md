@@ -714,4 +714,4 @@ Completed implementation evidence: [signup opening simplification](exec-plans/co
 
 Early onboarding recovery restoration: [one-time stall check-in](exec-plans/completed/2026-09-23-restore-onboarding-check-in.md).
 
-Deterministic onboarding recovery: [background enrollment](exec-plans/active/2026-09-24-deterministic-onboarding-check-in.md).
+Deterministic onboarding recovery: [background enrollment](exec-plans/completed/2026-09-24-deterministic-onboarding-check-in.md).

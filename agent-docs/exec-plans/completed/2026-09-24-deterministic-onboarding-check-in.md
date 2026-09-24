@@ -1,6 +1,6 @@
 # Deterministic onboarding stall check-in
 
-Status: active
+Status: completed
 Created: 2026-09-24
 Updated: 2026-09-24
 
@@ -44,3 +44,20 @@ Feature restoration. Cover stalled setup, active replies, requested pauses, comp
 ## Parent candidate review
 
 Existing canonical state and create-only registry locking suffice. No schema, tool contract, scheduler, queue, dependency, initial provider input, or foreground awaited operation is added. Enrollment failures use existing maintenance retry; a missed enrollment deadline skips rather than backfills. Existing canonical at/activeUntil readers support old/new runtime skew. The old prompt-restoration commit is fully superseded: no restored model scheduling instruction remains in the candidate.
+
+## Final review and implementation completion
+
+Final ReviewGPT round 1 passed on `d2bf5d7cf0c6f4dc7b54b8569660e3e66091bba3`.
+The full snapshot covered all thirteen changed-file postimages and the coupled
+enrollment, cron, expiry, and outbox paths. Captured GPT-6 Pro model identity,
+exact accepted turn and response hash matched; marked response elapsed 486
+seconds on the Eragon lane. No findings required remediation. The first
+browser startup attempt failed before submission; the healthy-lane retry is
+the only substantive review.
+
+Parent final review: Ready. The implementation, focused evidence, and review
+are complete. This closeout changes only explanatory plan/index documentation;
+no production source, tests, runtime configuration, schema, or contract changed
+after review. PR #3687 tracks remaining exact-head CI, merge, and protected
+runtime deployment. No production deployment is claimed by this archived plan.
+Completed: 2026-09-24
