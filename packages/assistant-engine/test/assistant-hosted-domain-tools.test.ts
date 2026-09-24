@@ -153,7 +153,7 @@ describe('hosted domain dynamic tools', () => {
       'both camel-case keys are required on every entry',
     )
     expect(MURPH_AUTOMATION_TOOL.description).toContain(
-      'pass an object such as {"model":"gpt-5.6-luna"}',
+      'pass an object such as {"model":"gpt-6-luna"}',
     )
     expect(MURPH_AUTOMATION_TOOL.description).toContain(
       'Never pass a bare string or Luna or Sol.',
