@@ -692,6 +692,10 @@ Mailbox dependency loading and joined sponsorship allowance reads are tracked in
 [`mailbox read path`](exec-plans/completed/2026-09-23-mailbox-read-path.md).
 The current read contract is owned by `apps/web/README.md`.
 
+Bounded same-request foreground ownership recovery is owned by
+`references/hosted-postgres-runtime.md`; implementation and synthetic proof are
+tracked in `exec-plans/completed/2026-09-23-foreground-owner-handoff.md`.
+
 First-day priority implementation: [`onboarding priority`](exec-plans/completed/2026-09-23-onboarding-priority.md).
 
 First-day priority prefetch correction: [`invocation propagation`](exec-plans/completed/2026-09-23-onboarding-priority-prefetch.md).
