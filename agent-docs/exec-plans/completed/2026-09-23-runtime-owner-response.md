@@ -1,6 +1,6 @@
 # Shorten runtime ownership responses
 
-Status: active
+Status: completed
 Created: 2026-09-23
 Updated: 2026-09-23
 
@@ -54,13 +54,16 @@ receive the same wire response; Web can deploy or roll back independently.
 
 ## Verification
 
-- Focused route, notification, and isolated Postgres ownership tests: 67 passed.
+- Focused route, notification, isolated Postgres ownership, and changelog tests:
+  77 passed on the updated main base.
 - Web typecheck passed after adapting the test latch to the existing ES library.
 - Provider dependency regression fails against the original controller.
 - In-memory esbuild ESM split probe: eager graph 2,552,540 to 635,500 bytes;
   no eager Temporal client. This measures dependency shape, not production latency.
-- Complexity guard passes; final comparison will use the current main base.
+- Web ESLint and complexity guard pass against main; no source hotspots above 20.
 - Parent review: durable writes and exact identity remain the only success
   authority; HTTP response lifetime is the sole deferred-effect owner.
 - Product UX: Ready for this bounded timing patch; no new visible state or input.
-- Remaining: changelog, draft PR, final ReviewGPT, and exact-head CI.
+- Implementation and public release note complete in PR #3681. Required
+  ReviewGPT and exact-head CI results are recorded on the PR.
+Completed: 2026-09-23
