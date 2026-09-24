@@ -732,4 +732,4 @@ are tracked in [`2026-09-24-natural-onboarding-canary`](exec-plans/completed/202
 Native turn cancellation and voice continuity proof:
 [`2026-09-24-voice-turn-lifecycle.md`](exec-plans/completed/2026-09-24-voice-turn-lifecycle.md).
 
-Personal Patterns bounded capacity recovery: [`capacity recovery`](exec-plans/active/2026-09-24-personal-patterns-capacity.md).
+Personal Patterns bounded capacity recovery: [`capacity recovery`](exec-plans/completed/2026-09-24-personal-patterns-capacity.md).
