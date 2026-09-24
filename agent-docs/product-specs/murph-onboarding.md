@@ -146,17 +146,24 @@ privacy, authorization, or provider boundaries.
   through the first aspiration question, including identity persistence. No skill or resume read is needed for those proven
   exchanges. The onboarding skill owns ambiguous/resumed and later-stage
   conversation policy; the managed automation resumes it when useful.
-- For eligible new direct text-only iMessage, SMS, and RCS conversations, the existing Web
-  Luna path may send at most two replies: the welcome and the bundled identity
-  question. The second requires the immediately preceding confirmed canonical
-  welcome and exactly one earlier opening delivery. Resolve its member through
-  the existing direct identity/home-chat lookup; a thread-container route
-  excludes this private-chat path. Existing delivery rows
-  enforce the cap under the chat lock; there is no stage counter. Supplied
-  identity, a skip, or a concrete request goes directly to the normal runtime.
+- For eligible new direct text-only iMessage conversations, the existing Web
+  Luna path may send at most three replies: the welcome, bundled identity
+  question, and a brief acknowledgement with the aspiration question. Each
+  continuation requires the immediately preceding confirmed canonical welcome
+  or identity question and the matching count of accepted opening deliveries.
+  Resolve the member through the existing direct identity/home-chat lookup;
+  a thread-container route excludes this private-chat path. Existing delivery
+  rows enforce the cap under the chat lock; there is no stage counter.
+  A substantive health goal, request, ambiguity, or overall pause hands off to
+  the full assistant, including goals supplied while accepting the welcome.
+  The third reply accepts partial identity or skipping only identity details.
   Existing encrypted conversation import carries both sides and suppresses
-  duplicate replies. Container/process warmup retains its existing owner; this
-  flow adds no speculative model turn or preparation mailbox.
+  duplicate replies. The next full assistant turn owns canonical identity saves
+  from that retained transcript through its existing native leaf; if the member
+  stops, memory waits and the source conversation remains durable. Deploy that
+  runtime catch-up instruction before enabling the third Web reply.
+  Container/process warmup retains its existing owner; this flow adds no
+  speculative model turn, Web memory writer, or preparation mailbox.
 - The skill uses one package-owned progressive-disclosure asset. Its top-level
   `SKILL.md` is a complete router capped at 12 KiB and directly owns the goal,
   bounded resume check, immediate-need override, relationship promise, exact

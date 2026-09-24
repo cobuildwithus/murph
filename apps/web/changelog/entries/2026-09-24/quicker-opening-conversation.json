@@ -1,0 +1,17 @@
+{
+  "publishedOn": "2026-09-24",
+  "order": 100,
+  "item": {
+    "id": "quicker-opening-conversation",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "A quicker introduction",
+    "summary": "Murph can acknowledge your name and move to your first health question through the quick reply path.",
+    "details": "Partial answers and skipped identity details work too. If you already have a health goal or need help with something, Murph continues from that context. Your conversation stays intact, and your details carry forward as you continue.",
+    "relevanceTags": [
+      "messaging",
+      "onboarding"
+    ],
+    "sourcePullRequests": []
+  }
+}
