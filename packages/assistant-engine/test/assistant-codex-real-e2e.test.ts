@@ -1945,17 +1945,26 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
           config,
           workingDirectory,
         })
-        const welcome = await executeRealCodexOnboardingProbe({
+        // The Linq canary receives the instant reply before its Luna runtime starts.
+        const welcome = target === 'linq-canary-luna' ? null : await executeRealCodexOnboardingProbe({
           ...turnInput,
           prompt: 'Hey',
           scenario: 'fresh_greeting',
         })
-        expect(welcome.finalMessage.trim()).toBe(
-          ASSISTANT_FIRST_CONTACT_WELCOME_MESSAGE,
-        )
+        if (welcome) {
+          expect(welcome.finalMessage.trim()).toBe(
+            ASSISTANT_FIRST_CONTACT_WELCOME_MESSAGE,
+          )
+        }
 
         const result = await executeRealCodexOnboardingProbe({
           ...turnInput,
+          ...(target === 'linq-canary-luna' ? {
+            developerInstructions: buildDirectConversationDeveloperInstructions(true, [
+              'Visible direct conversation imported from confirmed Web replies:',
+              `Murph: ${ASSISTANT_FIRST_CONTACT_WELCOME_MESSAGE}`,
+            ].join('\n\n')),
+          } : {}),
           dynamicTools: [MURPH_SEND_PROGRESS_UPDATE_TOOL],
           progressDelivery: {
             async send(text) {
@@ -1967,7 +1976,7 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
             "Yeah, I'm ready to continue.",
             "I'd like Murph's help building a steadier evening routine.",
           ].join(' '),
-          resumeSessionId: welcome.sessionId,
+          resumeSessionId: welcome?.sessionId,
           scenario: 'minimal_identity_prompt',
         })
         const actions = result.actions
