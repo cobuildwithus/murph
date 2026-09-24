@@ -712,4 +712,4 @@ Concurrent standby replenishment and lightweight per-slot readiness are owned by
 Completed implementation evidence: [signup opening simplification](exec-plans/completed/2026-09-23-signup-latency.md).
 
 Native voice reuse simplification and verification:
-[`2026-09-23-voice-native-reuse.md`](exec-plans/active/2026-09-23-voice-native-reuse.md).
+[`2026-09-23-voice-native-reuse.md`](exec-plans/completed/2026-09-23-voice-native-reuse.md).
