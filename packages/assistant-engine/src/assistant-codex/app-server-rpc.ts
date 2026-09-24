@@ -62,6 +62,9 @@ export function attachCodexAbortListener(input: {
   }
 }
 
+// Distinguish fallback cleanup listeners from a host's graceful shutdown owner.
+const codexProcessSignalHandlers = new WeakSet<object>()
+
 export function attachCodexAppServerProcessExitCleanup(input: {
   processGroupPid?: number | null
 }): () => void {
@@ -94,10 +97,17 @@ export function attachCodexAppServerProcessExitCleanup(input: {
 
   for (const signal of ['SIGINT', 'SIGTERM'] as const) {
     const handler = () => {
+      if (process.listeners(signal).some((listener) => !codexProcessSignalHandlers.has(listener))) {
+        // The container/CLI owns drain and exit. Keep exit cleanup armed and
+        // leave repeated signals to that owner instead of killing its reply.
+        return
+      }
       forwardSignalAfterCleanup(signal)
     }
+    codexProcessSignalHandlers.add(handler)
     signalHandlers.set(signal, handler)
-    process.once(signal, handler)
+    // Inspect the owner before a once-listener can remove itself on delivery.
+    process.prependListener(signal, handler)
   }
 
   process.once('exit', cleanup)

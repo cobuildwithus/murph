@@ -241,6 +241,12 @@ source adapter -> AssistantInputEvent -> AssistantInputSource -> scanner / activ
 
 ### Resident Codex And Detached Enrichment Boundary
 
+The container's SIGTERM handler owns graceful drain: finish the active reply,
+checkpoint, then exit. Codex's detached-process cleanup defers to an existing
+signal owner and remains armed for actual parent exit. Without a shutdown
+owner, the same helper cleans only its owned process group and forwards the
+termination signal; multiple Codex cleanup listeners are not shutdown owners.
+
 The container owns one resident Codex App Server and keeps it warm across
 ordinary turns while one restored workspace remains active. Turn completion,
 invocation completion, and invocation-scoped credential rotation do not by

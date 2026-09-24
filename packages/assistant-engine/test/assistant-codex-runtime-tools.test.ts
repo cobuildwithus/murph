@@ -28,6 +28,7 @@ import {
 } from "./assistant-codex-runtime.harness.ts";
 
 import path from 'node:path'
+import { EventEmitter } from 'node:events'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   buildCodexAppServerSteerRequest,
@@ -3081,11 +3082,12 @@ describe('assistant codex runtime', () => {it('fails closed on unexpected app-se
     const killSpy = vi.mocked(process.kill)
     const onceSpy = vi.spyOn(process, 'once')
     const offSpy = vi.spyOn(process, 'off')
+    const prependSpy = vi.spyOn(process, 'prependListener')
     const cleanup = attachCodexAppServerProcessExitCleanup({
       processGroupPid: 515_151,
     })
     const exitListener = onceSpy.mock.calls.find(([eventName]) => eventName === 'exit')?.[1]
-    const sigtermListener = onceSpy.mock.calls.find(([eventName]) => eventName === 'SIGTERM')?.[1]
+    const sigtermListener = prependSpy.mock.calls.find(([eventName]) => eventName === 'SIGTERM')?.[1]
     expect(exitListener).toBeTypeOf('function')
     expect(sigtermListener).toBeTypeOf('function')
 
@@ -3097,4 +3099,80 @@ describe('assistant codex runtime', () => {it('fails closed on unexpected app-se
     expect(offSpy).toHaveBeenCalledWith('exit', exitListener)
     expect(offSpy).toHaveBeenCalledWith('SIGTERM', sigtermListener)
   })
+
+  it.each(['SIGTERM', 'SIGINT'] as const)('lets the existing %s owner drain before exit cleanup', (signal) => {
+    if (process.platform === 'win32') return
+    const owner = vi.fn()
+    process.on(signal, owner)
+    const onceSpy = vi.spyOn(process, 'once')
+    const prependSpy = vi.spyOn(process, 'prependListener')
+    const cleanup = attachCodexAppServerProcessExitCleanup({ processGroupPid: 515_152 })
+    const exitListener = onceSpy.mock.calls.find(([name]) => name === 'exit')?.[1]
+    const signalListener = [...onceSpy.mock.calls, ...prependSpy.mock.calls]
+      .find(([name]) => name === signal)?.[1]
+    try {
+      expect(signalListener).toBeTypeOf('function')
+      ;(signalListener as () => void)()
+      ;(signalListener as () => void)()
+      expect(process.kill).not.toHaveBeenCalled()
+      ;(exitListener as () => void)()
+      expect(process.kill).toHaveBeenCalledExactlyOnceWith(-515_152, 'SIGKILL')
+    } finally {
+      cleanup()
+      process.off(signal, owner)
+    }
+  })
+
+
+  it('does not mistake another Codex cleanup listener for a graceful shutdown owner', () => {
+    if (process.platform === 'win32') return
+    const prependSpy = vi.spyOn(process, 'prependListener')
+    const firstCleanup = attachCodexAppServerProcessExitCleanup({ processGroupPid: 515_153 })
+    const secondCleanup = attachCodexAppServerProcessExitCleanup({ processGroupPid: 515_154 })
+    const handlers = prependSpy.mock.calls.filter(([name]) => name === 'SIGTERM').map(([, handler]) => handler)
+    try {
+      for (const handler of handlers) (handler as () => void)()
+      expect(process.kill).toHaveBeenCalledWith(-515_153, 'SIGKILL')
+      expect(process.kill).toHaveBeenCalledWith(-515_154, 'SIGKILL')
+      expect(vi.mocked(process.kill).mock.calls.filter(([pid]) => pid === process.pid)).toHaveLength(2)
+    } finally {
+      firstCleanup()
+      secondCleanup()
+    }
+  })
+
+
+  it('defers before a one-shot host signal listener is consumed by Node event delivery', () => {
+    if (process.platform === 'win32') return
+    const events = new EventEmitter()
+    const spies = [
+      vi.spyOn(process, 'listeners').mockImplementation((name) => events.listeners(name)),
+      vi.spyOn(process, 'once').mockImplementation((name, listener) => {
+        events.once(name, listener)
+        return process
+      }),
+      vi.spyOn(process, 'prependListener').mockImplementation((name, listener) => {
+        events.prependListener(name, listener)
+        return process
+      }),
+      vi.spyOn(process, 'off').mockImplementation((name, listener) => {
+        events.off(name, listener)
+        return process
+      }),
+    ]
+    const owner = vi.fn()
+    events.once('SIGTERM', owner)
+    const cleanup = attachCodexAppServerProcessExitCleanup({ processGroupPid: 515_155 })
+    try {
+      events.emit('SIGTERM')
+      expect(owner).toHaveBeenCalledOnce()
+      expect(process.kill).not.toHaveBeenCalled()
+      events.emit('exit')
+      expect(process.kill).toHaveBeenCalledExactlyOnceWith(-515_155, 'SIGKILL')
+    } finally {
+      cleanup()
+      for (const spy of spies) spy.mockRestore()
+    }
+  })
+
 })
