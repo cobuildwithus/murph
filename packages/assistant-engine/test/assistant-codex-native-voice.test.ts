@@ -302,7 +302,7 @@ it.each(['native', 'host'] as const)('native V3 voice creates successive tool-ba
   }
 })
 
-it.skipIf(!publicLive).each(['checkpoint', 'active turn'] as const)('keeps native media on the resident process across %s startup overlap and ordinary host turns', { timeout: 60_000 }, async (overlap) => {
+it.skipIf(!publicLive).each(['checkpoint', 'active turn', 'interrupted turn'] as const)('keeps native media on the resident process across %s startup overlap and ordinary host turns', { timeout: 60_000 }, async (overlap) => {
   const stub = await startScriptedResponsesStub()
   const inputs: CodexRealtimeInput[] = []
   const usage: number[] = []
@@ -348,14 +348,17 @@ it.skipIf(!publicLive).each(['checkpoint', 'active turn'] as const)('keeps nativ
   }
   const turnObserved = createSignal()
   const releaseTurn = createSignal()
+  const turnAbort = new AbortController()
+  const lifecycle = vi.fn()
   let overlappingTurn: ReturnType<typeof executeCodexAppServerTurn> | undefined
   try {
-    if (overlap === 'active turn') {
+    if (overlap !== 'checkpoint') {
       stub.queue({
         text: 'Existing turn completed.',
         beforeRespond: async () => { turnObserved.resolve(); await releaseTurn.promise },
       })
-      overlappingTurn = executeCodexAppServerTurn({ ...launch, dynamicTools: [], prompt: 'Existing ordinary request.' })
+      overlappingTurn = executeCodexAppServerTurn({ ...launch, abortSignal: turnAbort.signal, dynamicTools: [], prompt: 'Existing ordinary request.' })
+      void overlappingTurn.catch(() => {})
       await turnObserved.promise
     }
     const starting = startCodexAppServerRealtime({
@@ -375,8 +378,16 @@ it.skipIf(!publicLive).each(['checkpoint', 'active turn'] as const)('keeps nativ
     const [voice, checkpointResult] = await Promise.all([starting, checkpoint.catch((error: unknown) => error)])
     expect(checkpointResult).toBeUndefined()
     expect(voice.sdp).toContain('resident-answer')
+    await vi.waitFor(() => expect(sideband).toBeDefined())
+    if (overlap === 'interrupted turn') {
+      turnAbort.abort()
+      await expect(overlappingTurn).rejects.toMatchObject({ code: 'ASSISTANT_CODEX_INTERRUPTED' })
+      expect(forwarded.filter((event) => event.type === 'session.close')).toEqual([])
+    } else {
+      releaseTurn.resolve()
+      if (overlappingTurn) expect((await overlappingTurn).finalMessage).toBe('Existing turn completed.')
+    }
     releaseTurn.resolve()
-    if (overlappingTurn) expect((await overlappingTurn).finalMessage).toBe('Existing turn completed.')
     await vi.waitFor(() => expect(sideband).toBeDefined())
     let threadId: string | null = null
     for (let index = 1; index <= 2; index += 1) {
@@ -389,7 +400,7 @@ it.skipIf(!publicLive).each(['checkpoint', 'active turn'] as const)('keeps nativ
         delegation: { id: `resident_${index}`, type: 'delegation', target: 'client' },
       }))
       await vi.waitFor(() => expect(inputs).toHaveLength(index))
-      expect(stub.requestCountSinceBaseline()).toBe(index - 1 + (overlap === 'active turn' ? 1 : 0))
+      expect(stub.requestCountSinceBaseline()).toBe(index - 1 + (overlap === 'checkpoint' ? 0 : 1))
       stub.queue({
         text: `Selected answer ${index}.`,
         requestIncludes: ['Prepared host context', `Synthetic request ${index}.`],
@@ -404,6 +415,7 @@ it.skipIf(!publicLive).each(['checkpoint', 'active turn'] as const)('keeps nativ
         dynamicTools: [],
         prompt: `Prepared host context\n${inputs[index - 1]!.text}`,
         resumeSessionId: threadId,
+        onTraceEvent: lifecycle,
       })
       if (threadId) expect(result.threadId).toBe(threadId)
       threadId = result.threadId
@@ -417,6 +429,14 @@ it.skipIf(!publicLive).each(['checkpoint', 'active turn'] as const)('keeps nativ
     }
     await vi.waitFor(() => expect(forwarded.filter((event) => event.type === 'session.commentary.append').map((event) => event.content))
       .toEqual(['Selected answer 1.', 'Selected answer 2.']))
+    if (overlap !== 'checkpoint') {
+      expect(lifecycle).toHaveBeenCalledWith(expect.objectContaining({
+        rawEvent: expect.objectContaining({ codexTimingStage: 'warm-reused' }),
+      }))
+      expect(lifecycle).not.toHaveBeenCalledWith(expect.objectContaining({
+        rawEvent: expect.objectContaining({ codexTimingStage: 'initialized' }),
+      }))
+    }
     await stopWarmCodexAppServer('synthetic-voice-shutdown')
     expect(await voice.closed).toEqual({ providerConfirmed: true, providerSessionId: 'rtc_resident', seconds: 15 })
     expect(forwarded.filter((event) => event.type === 'session.close')).toHaveLength(1)
