@@ -162,13 +162,14 @@ execution or capacity leases.
 The public banner and health response expose the effective mode, and deployment
 smoke checks the newly deployed Worker version against the rendered mode.
 
-Readiness verifies the exact release, bundle/source fingerprints, architecture,
-heavy runtime hydration, pristine job counters, and a disposable content-free
-Codex initialization and shell-environment probe. Standby requests the existing
-container smoke endpoint with `scope=readiness`; CLI contract and goal mutation
-checks run only in the default deployment scope. Older containers ignore this
-query and safely run the full suite; old Workers still request the full suite
-from new containers. Global eligibility imposes no ENAM health requirement.
+Standby uses ordinary container startup and health, then verifies the exact release,
+bundle/source fingerprints, architecture, and pristine job counters. Heavy runtime
+hydration begins automatically at startup; standby does not wait for it or launch a
+throwaway Codex process. Actual invocation joins hydration through the normal path.
+Full Codex and CLI validation stays in deployment smoke. Its health receipt remains
+compatible with preceding Workers that still request a per-slot preflight; their
+legacy readiness query is ignored and runs the full smoke. Global eligibility
+imposes no ENAM health requirement.
 No member, workspace, or provider credential enters a slot before binding.
 The member-specific resident Codex process starts after encrypted-workspace restore.
 

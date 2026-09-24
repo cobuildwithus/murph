@@ -79,7 +79,7 @@ function runnerHarness(input: {
   const { state, sql } = input.durable ?? durableState();
   let running = input.running ?? false;
   let status = input.status ?? (running ? "running" : "stopped");
-  const calls = { start: 0, destroy: 0, fetch: 0, preflight: 0, renew: 0 };
+  const calls = { start: 0, destroy: 0, fetch: 0, renew: 0 };
   const ContainerClass = input.legacy ? StandbyRunnerContainer : RunnerContainer;
   const container = new ContainerClass({
     ...state, id: { name: slotName }, container: {
@@ -99,15 +99,10 @@ function runnerHarness(input: {
     renewActivityTimeout() { calls.renew++; },
     async containerFetch(url: string) {
       calls.fetch++;
-      if (url.endsWith("/internal/deploy-codex-shell-smoke")) {
-        calls.preflight++;
-        return Response.json({ ok: true });
-      }
       assert.ok(url.endsWith("/health"), `Unexpected container fetch: ${url}`);
       await input.fetchHealth?.();
       return Response.json({
-        ok: true, activeJobCount: 0, codexShellPreflightStatus: "ready",
-        codexShellPreflightCompletedAtEpochMs: Date.now(),
+        ok: true, activeJobCount: 0,
         cloudflareRegion: input.legacy ? "ENAM" : "WNAM",
         heavyRuntimeHydrationStatus: "ready", heavyRuntimeHydrationCompletedAtEpochMs: Date.now(),
         hostedRuntimeArchitectureVersion: HOSTED_RUNTIME_ARCHITECTURE_VERSION,
@@ -191,7 +186,7 @@ describe("unified runner identity and binding", () => {
     const { container, calls, sql } = runnerHarness();
     const input = claimInput();
     await container.bindStandbySlot(input);
-    assert.deepEqual(calls, { start: 0, destroy: 0, fetch: 0, preflight: 0, renew: 0 });
+    assert.deepEqual(calls, { start: 0, destroy: 0, fetch: 0, renew: 0 });
     assert.deepEqual(await container.bindStandbySlot(input), { bound: true, ...input });
     for (const conflict of [
       { userId: "member-b" }, { claimId: createHostedStandbyClaimId() },
@@ -218,13 +213,13 @@ describe("unified runner identity and binding", () => {
     await container.bindStandbySlot(claimInput());
     await container.ensureReadyForProcessing({ userId: MEMBER, timeoutMs: 1_000 });
     assert.equal(calls.start, 1);
-    assert.equal(calls.preflight, 0);
   });
 
-  it("prepares global pristine inventory without geographic gating or member ownership", async () => {
-    const { container, calls } = runnerHarness();
+  it("prepares global pristine inventory through ordinary health without waiting for hydration", async () => {
+    const { container, calls } = runnerHarness({ health: { heavyRuntimeHydrationStatus: "pending" } });
     await container.prepareStandbySlot({ releaseId: RELEASE, region: HOSTED_RUNNER_REGION, slotName: GLOBAL_SLOT, timeoutMs: 1_000 });
     assert.equal(calls.start, 1);
+    assert.equal(calls.fetch, 2);
     assert.deepEqual(await container.readStandbySlotBinding(), {
       claimId: null, releaseId: RELEASE, region: HOSTED_RUNNER_REGION,
       slotName: GLOBAL_SLOT, state: "unbound", userId: null,
@@ -240,7 +235,6 @@ describe("unified runner identity and binding", () => {
     pristine: { workspaceInvocationAcceptedCount: 1 },
     active: { activeJobCount: 1 },
     poisoned: { poisoned: true },
-    hydration: { heavyRuntimeHydrationStatus: "pending" },
   })) it(`still rejects invalid global inventory ${label} proof`, async () => {
     const { container } = runnerHarness({ health });
     await assert.rejects(container.prepareStandbySlot({ releaseId: RELEASE, region: HOSTED_RUNNER_REGION, slotName: GLOBAL_SLOT, timeoutMs: 50 }));

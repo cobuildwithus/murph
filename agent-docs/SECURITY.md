@@ -1691,8 +1691,9 @@ never adopt them or bypass a replay conflict.
   after native destruction and durable identity scrubbing. A successful
   acknowledgement needs no binding readback. A claimed slot is never reusable across members;
   terminal retirement destroys the container and scrubs claim/member identity.
-  Codex standby preflight uses a disposable content-free home and must not make
-  a provider request or retain a resident member-configured App Server.
+  Standby preparation uses ordinary container health and unused-slot checks; it
+  does not start Codex or inject member/workspace/provider authority. Deployment's
+  Codex shell smoke uses a disposable content-free home and makes no provider request.
 - The same protected-main Cloudflare workflow may attach the GitHub `Preview`
   Environment only for the explicit `preview` target. That environment must
   contain staging-only credentials and must not duplicate production database,
