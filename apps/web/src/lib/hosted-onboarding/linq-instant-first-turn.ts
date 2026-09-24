@@ -2,7 +2,7 @@ import "server-only";
 
 import { createHash } from "node:crypto";
 
-import type { Prisma, PrismaClient } from "@prisma/client";
+import { Prisma, type PrismaClient } from "@prisma/client";
 import {
   containsHttpUrlText,
   MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
@@ -155,24 +155,26 @@ export function isHostedLinqInstantFirstTurnRequestEligible(
     && Boolean(request.text?.trim());
 }
 
-function readPriorOpeningDeliveries(input: {
+export function readHostedLinqOpeningDeliveries(input: {
   linqChatId: string;
+  memberId: string;
   prisma: PrismaClient | Prisma.TransactionClient;
   request: HostedLinqFirstContactAdmissionRequest;
 }) {
-  return input.prisma.hostedLinqDelivery.findMany({
-    select: { acceptedAt: true, messageLookupKey: true },
-    take: 2,
-    where: {
-      linqChatLookupKey: {
-        in: createHostedLinqChatLookupKeyReadCandidates(input.linqChatId),
-      },
-      sourceRef: {
-        not: createHostedLinqDeliverySourceRefLookupKey(input.request.eventId),
-      },
-      template: HOSTED_LINQ_INSTANT_FIRST_TURN_TEMPLATE,
-    },
-  });
+  // Accepted delivery evidence survives account deletion. Only this account's
+  // lifetime can consume its opening allowance; pending current claims count too.
+  return input.prisma.$queryRaw<Array<{
+    acceptedAt: Date | null;
+    messageLookupKey: string | null;
+  }>>`
+    SELECT accepted_at AS "acceptedAt", message_lookup_key AS "messageLookupKey"
+    FROM hosted_linq_delivery
+    WHERE linq_chat_lookup_key IN (${Prisma.join(createHostedLinqChatLookupKeyReadCandidates(input.linqChatId))})
+      AND source_ref <> ${createHostedLinqDeliverySourceRefLookupKey(input.request.eventId)}
+      AND template = ${HOSTED_LINQ_INSTANT_FIRST_TURN_TEMPLATE}
+      AND attempted_at >= (SELECT created_at FROM hosted_member WHERE id = ${input.memberId})
+    LIMIT 2
+  `;
 }
 
 async function hasReplayableOpeningDelivery(input: {
@@ -211,7 +213,7 @@ async function readHostedLinqOpeningContinuationTone(input: {
   // Replays recover the existing obligation even after the conversation advanced.
   // The persisted body is reused; this tone is never used to regenerate it.
   if (await hasReplayableOpeningDelivery(input)) return "casual";
-  const prior = await readPriorOpeningDeliveries(input);
+  const prior = await readHostedLinqOpeningDeliveries(input);
   if (prior.length !== 1 || !prior[0]?.acceptedAt || !prior[0].messageLookupKey) {
     return undefined;
   }
@@ -317,7 +319,10 @@ export async function claimHostedLinqInstantFirstTurn(input: {
       // Existing delivery rows are the cap; there is no onboarding counter.
       if (
         openingTone
-        && (await readPriorOpeningDeliveries({ ...input, prisma: tx })).length !== 1
+        && input.continuationMemberId
+        && (await readHostedLinqOpeningDeliveries({
+          ...input, memberId: input.continuationMemberId, prisma: tx,
+        })).length !== 1
         && !await hasReplayableOpeningDelivery({ ...input, prisma: tx })
       ) {
         return { kind: "unavailable" } as const;

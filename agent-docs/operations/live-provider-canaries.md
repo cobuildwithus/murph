@@ -22,6 +22,10 @@ age of an executed run; this system adds no product-state receipt database.
   protected-main ancestry and exact deployment, and repeats deployment validation
   after execution. A manual requested SHA must match the deployed revision.
   The fixed canary account is reset through its existing input-free owner.
+  Phone-account creation saves an explicit GPT-6 Luna preference only for the
+  server-configured Linq canary number. Each reset recreates that preference;
+  ordinary member defaults and existing saved model choices are unchanged.
+  The canary retains the normal first-day priority policy and member pricing.
   After onboarding, the journey requires zero goals, one canonical fixed-goal
   write, a later model readback, and exactly one persisted goal. Pending
   conversation work or a checkpoint change during the read prevents accepting

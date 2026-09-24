@@ -198,9 +198,14 @@ describe("hosted-onboarding member-identity-service", () => {
     }));
   });
 
-  it("reports creation while persisting a provider-verified phone identity", async () => {
-    process.env.HOSTED_ONBOARDING_LINQ_PRODUCTION_CANARY_PHONE_NUMBER =
-      "+15551234567";
+  it.each([
+    { configuredPhone: "+15551234567", expectedModel: "gpt-6-luna" },
+    { configuredPhone: "+1 555 123 4567", expectedModel: "gpt-6-luna" },
+    { configuredPhone: "+15551234568", expectedModel: undefined },
+    { configuredPhone: "", expectedModel: undefined },
+    { configuredPhone: "invalid", expectedModel: undefined },
+  ])("creates a verified phone member with only the configured canary pinned: $configuredPhone", async ({ configuredPhone, expectedModel }) => {
+    process.env.HOSTED_ONBOARDING_LINQ_PRODUCTION_CANARY_PHONE_NUMBER = configuredPhone;
     const createdMember = makeMember({
       id: "member_created",
     });
@@ -239,8 +244,13 @@ describe("hosted-onboarding member-identity-service", () => {
       }),
       skipDuplicates: true,
     });
-    expect(memberCreate.mock.calls[0]?.[0]?.data)
-      .not.toHaveProperty("assistantModelPreference");
+    if (expectedModel) {
+      expect(memberCreate.mock.calls[0]?.[0]?.data)
+        .toHaveProperty("assistantModelPreference", expectedModel);
+    } else {
+      expect(memberCreate.mock.calls[0]?.[0]?.data)
+        .not.toHaveProperty("assistantModelPreference");
+    }
     expect(participantContactLock).toHaveBeenCalledTimes(1);
     expect(participantContactLock.mock.invocationCallOrder[0])
       .toBeLessThan(identityCreateMany.mock.invocationCallOrder[0] ?? 0);
