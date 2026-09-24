@@ -12,7 +12,7 @@ if (enabled && !["127.0.0.1", "localhost", "[::1]"].includes(new URL(databaseUrl
 }
 
 describe.skipIf(!enabled)("Linq opening history PostgreSQL proof", () => {
-  it("ignores a prior account while retaining pending current claims and the two-row bound", async () => {
+  it("ignores a prior account while retaining pending current claims and the three-row bound", async () => {
     const prisma = createPrismaClient({ databaseUrl, poolMax: 1 });
     const request = {
       eventId: "synthetic-current-inbound", participantContactKind: "phone" as const,
@@ -46,7 +46,9 @@ describe.skipIf(!enabled)("Linq opening history PostgreSQL proof", () => {
         await insert("concurrent-question", new Date("2030-01-02T00:00:00Z"), null, null);
         expect(await read()).toHaveLength(2);
         await insert("third-current-claim", current, null, null);
-        expect(await read()).toHaveLength(2);
+        expect(await read()).toHaveLength(3);
+        await insert("fourth-current-claim", current, null, null);
+        expect(await read()).toHaveLength(3);
         await tx.$executeRaw`DELETE FROM hosted_member WHERE id = 'synthetic-member'`;
         expect(await read()).toEqual([]);
       });
