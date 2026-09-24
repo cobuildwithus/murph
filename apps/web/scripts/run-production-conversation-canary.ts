@@ -12,10 +12,8 @@ import {
   MURPH_ASSISTANT_ONBOARDING_IDENTITY_QUESTIONS,
   MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
 } from "@murphai/contracts";
-import {
-  LINQ_PRODUCTION_CANARY_GOAL_TITLE,
-  type LinqProductionCanaryOutcome,
-} from "../src/lib/hosted-onboarding/linq-production-canary-contract";
+import type { LinqProductionCanaryOutcome } from "../src/lib/hosted-onboarding/linq-production-canary-contract";
+import CANARY_TURNS from "./fixtures/linq-production-conversation.json";
 
 const CANARY_RESET_PATH =
   "/api/internal/hosted-onboarding/linq/production-canary/reset";
@@ -28,19 +26,6 @@ export const CANARY_RESET_TIMEOUT_MS = 300_000;
 // This budget is independent of the twenty-second reply latency requirement.
 export const CANARY_OUTCOME_WAIT_MS = HOSTED_EXECUTION_DEFAULT_RUNNER_IDLE_TTL_MS + 120_000;
 const CANARY_OUTCOME_POLL_MS = 1_000;
-const CANARY_TURNS = [
-  { prompt: "Hey Murph let's get started with my health!", stage: "welcome" },
-  { prompt: "Yes, ready.", stage: "identity-question" },
-  { prompt: "My name is Robin. I am 32 and a woman.", stage: "runtime-identity" },
-  {
-    prompt: `Please save a new active health goal with the exact title "${LINQ_PRODUCTION_CANARY_GOAL_TITLE}". I want to walk for twenty minutes before lunch each day, starting today. Save it now and tell me when it is saved.`,
-    stage: "save-goal",
-  },
-  {
-    prompt: "What is the exact title of the walking goal I just asked you to save? Please read my saved goals and tell me its title; do not create or change anything.",
-    stage: "read-goal",
-  },
-] as const;
 
 type LinqProductionCanaryConfig = {
   productionBaseUrl: string;
@@ -68,7 +53,7 @@ export async function runLinqProductionCanary(
   source: NodeJS.ProcessEnv = process.env,
   reportTurn?: (result: LinqProductionCanaryTurnResult) => void,
 ): Promise<{
-  canonicalOutcome: { baselineGoalCount: number; savedGoalCount: number; readbackGoalCount: number };
+  canonicalOutcome: { baselineGoalCount: number; savedGoalCount: number; proposalGoalCount: number };
   reset: LinqProductionCanaryResetResult;
   turns: LinqProductionCanaryTurnResult[];
 }> {
@@ -88,7 +73,7 @@ export async function runLinqProductionCanary(
     const target = await provider.user(config.targetPhoneNumber);
     const space = await provider.space.create(target);
     const turns: LinqProductionCanaryTurnResult[] = [];
-    const canonicalOutcome = { baselineGoalCount: 0, savedGoalCount: 0, readbackGoalCount: 0 };
+    const canonicalOutcome = { baselineGoalCount: 0, savedGoalCount: 0, proposalGoalCount: 0 };
     let previousReplyAt: number | null = null;
 
     for (const [index, { prompt, stage }] of CANARY_TURNS.entries()) {
@@ -134,12 +119,12 @@ export async function runLinqProductionCanary(
       assertLinqProductionCanaryReply({ reply, turn });
       turns.push(turnResult);
       previousReplyAt = replyAt;
-      if (stage === "runtime-identity" || stage === "save-goal" || stage === "read-goal") {
-        const expectedCount = stage === "runtime-identity" ? 0 : 1;
+      if (stage === "runtime-identity" || stage === "goal-proposal" || stage === "accept-goal") {
+        const expectedCount = stage === "accept-goal" ? 1 : 0;
         const outcome = await waitForCanonicalGoalOutcome(config, expectedCount, stage);
         if (stage === "runtime-identity") canonicalOutcome.baselineGoalCount = outcome.matchingGoalCount;
-        if (stage === "save-goal") canonicalOutcome.savedGoalCount = outcome.matchingGoalCount;
-        if (stage === "read-goal") canonicalOutcome.readbackGoalCount = outcome.matchingGoalCount;
+        if (stage === "accept-goal") canonicalOutcome.savedGoalCount = outcome.matchingGoalCount;
+        if (stage === "goal-proposal") canonicalOutcome.proposalGoalCount = outcome.matchingGoalCount;
         // Observation deliberately waits for publication. It is outside reply latency.
         previousReplyAt = null;
       }
@@ -198,9 +183,6 @@ function assertLinqProductionCanaryReply(input: {
 }): void {
   if (!input.reply) {
     throwCanaryFailure("reply-empty");
-  }
-  if (input.turn === 5 && !input.reply.includes(LINQ_PRODUCTION_CANARY_GOAL_TITLE)) {
-    throwCanaryFailure("goal-readback-reply-invalid");
   }
   const questions = Object.values(MURPH_ASSISTANT_ONBOARDING_IDENTITY_QUESTIONS);
   // Compare the complete word sequence, tolerating only case and separators.

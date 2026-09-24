@@ -26,8 +26,17 @@ age of an executed run; this system adds no product-state receipt database.
   server-configured Linq canary number. Each reset recreates that preference;
   ordinary member defaults and existing saved model choices are unchanged.
   The canary retains the normal first-day priority policy and member pricing.
-  After onboarding, the journey requires zero goals, one canonical fixed-goal
-  write, a later model readback, and exactly one persisted goal. Pending
+  After the identity exchange, the person asks for a manageable walking plan
+  and accepts the proposal in ordinary language. Canonical observations require
+  zero Goals after identity and proposal, then exactly one active Goal after
+  acceptance, with valid bank/goal provenance and a distinct canonical ID. The
+  model may choose its title. The conversation contains no storage command or
+  exact-title readback demand; exact save/readback is covered separately by
+  `packages/cli/test/health-goal-save.test.ts`. A focused real-model journey
+  shares the canary messages and checks the walking plan and linked Goal;
+  production counts alone prove lifecycle and provenance, not plan semantics.
+  Deploy the active-Goal observer before running the new conversation controller.
+  Pending
   conversation work or a checkpoint change during the read prevents accepting
   the result. The observer parses the live v2 checkpoint and compares its complete
   fingerprint before and after decryption. Published-replica freshness uses the
