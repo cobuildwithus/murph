@@ -3,7 +3,7 @@
   "order": 200,
   "item": {
     "id": "replies-through-service-updates",
-    "kind": "fix",
+    "kind": "improvement",
     "priority": 2,
     "title": "Fewer interrupted replies during updates",
     "summary": "Murph can finish an active reply while a service update is rolling out.",
@@ -12,6 +12,8 @@
       "messaging",
       "reliability"
     ],
-    "sourcePullRequests": []
+    "sourcePullRequests": [
+      3690
+    ]
   }
 }

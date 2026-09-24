@@ -1,6 +1,6 @@
 # Preserve active replies during container drain
 
-Status: active
+Status: completed
 Created: 2026-09-24
 Updated: 2026-09-24
 
@@ -51,4 +51,24 @@ is authorized by this plan.
 
 ## Verification
 
-Pending.
+- Base regression: both SIGTERM and SIGINT cases fail on premature group kill.
+- Engine process/tool suite: 81 tests passed, including owner deferral, repeated
+  signals, exact parent-exit cleanup, multiple groups, and Node once delivery.
+- Container shutdown/drain suite: 6 focused tests passed.
+- Assistant-engine typecheck, complexity (maximum 11, no debt), docs drift and
+  gardening passed. No engine lint command exists; an attempted root ESLint
+  invocation was unavailable. Typecheck and focused tests cover this source.
+- Changelog generation initially rejected the unsupported kind; corrected to
+  the existing improvement kind. Final changelog/page proof: 49 tests passed.
+- Parent review found no new provider calls, prompt changes, data writes,
+  cross-version schema dependency, or unrelated edits.
+- PR #3690 owns final ReviewGPT, exact-head CI, deployment and runtime evidence.
+
+## Final design
+
+The existing helper inspects registered signal listeners and defers to the host.
+A WeakSet identifies its own fallback callbacks so multiple detached groups do
+not deadlock each other. Prepending the callback observes one-shot host owners
+before Node removes them. Actual parent exit still cleans exact owned groups.
+
+Completed: 2026-09-24
