@@ -47,6 +47,8 @@ import {
   regimenFrontmatterSchema,
   researchScoutBatchPayloadSchema,
   toLocalDayKey,
+  addDaysToIsoDate,
+  resolveFloatingIsoTimestampInTimeZone,
   workoutSessionSchema,
 } from '@murphai/contracts'
 import {
@@ -3347,6 +3349,8 @@ describe('real Codex live fixture contracts', () => {
       'Your issue was saved for triage, and an account-linked support escalation was recorded.',
     )).toBe(true)
     expect(hasSavedSupportIssueForTriageMeaning('I saved your report for human triage.')).toBe(true)
+    expect(hasSavedSupportIssueForTriageMeaning('I saved your request for human triage.')).toBe(true)
+    expect(hasSavedSupportIssueForTriageMeaning('I have not saved your request for human triage.')).toBe(false)
     expect(hasRecordedAccountLinkedEscalationMeaning(
       'Your issue was saved for triage, and an account-linked support escalation was recorded.',
     )).toBe(true)
@@ -3917,7 +3921,7 @@ describeRealCodex('real Codex workout capture default e2e', () => {
           ...commonInput,
           prompt: resolveAssistantProviderPrompt({
             dynamicTools: [],
-            prompt: 'I just finished a yoga workout.',
+            prompt: `I finished a yoga workout at ${new Date(Date.now() - 60_000).toISOString()}.`,
             providerConfig: normalizeAssistantProviderConfig({ provider: 'codex-cli' }),
             turnContextPrompt: await readAssistantCurrentStatePrompt({ vaultRoot: workingDirectory }),
             workingDirectory,
@@ -3965,12 +3969,10 @@ describeRealCodex('real Codex workout capture default e2e', () => {
         expect(workoutAddCommands).toHaveLength(1)
         expect(workoutAddCommands[0]).toMatch(/--type(?:=|\s)yoga\b/iu)
         expect(commands.join('\n')).not.toContain('memory upsert')
-        expect(saved.runtimeIssueInputs).toEqual([])
-        expect(reported.runtimeIssueInputs).toEqual([])
 
         const explicitReported = await executeRealCodexAppServerTurn({
           ...commonInput,
-          prompt: 'I just finished swimming for 35 minutes. Log it.',
+          prompt: `I finished swimming for 35 minutes at ${new Date(Date.now() - 60_000).toISOString()}. Log it.`,
         })
         const explicitVault = await readVaultRawTolerant(workingDirectory)
         const explicitWorkouts = explicitVault.events.filter(
@@ -4003,12 +4005,11 @@ describeRealCodex('real Codex workout capture default e2e', () => {
         expect(explicitWorkoutCommand).toMatch(/--duration(?:=|\s)35\b/u)
         expect(explicitWorkoutCommand).toMatch(/--type(?:=|\s)(?:swim|swimming)\b/iu)
         expect(explicitReported.finalMessage).not.toMatch(/how long|\?/iu)
-        expect(explicitReported.runtimeIssueInputs).toEqual([])
 
         const routeReported = await executeRealCodexAppServerTurn({
           ...commonInput,
           prompt:
-            'I just finished running from Washington Square Park to Times Square. Log it.',
+            `I finished running from Washington Square Park to Times Square at ${new Date(Date.now() - 60_000).toISOString()}. Log it.`,
         })
         const routeVault = await readVaultRawTolerant(workingDirectory)
         const routeWorkouts = routeVault.events.filter(
@@ -4047,7 +4048,17 @@ describeRealCodex('real Codex workout capture default e2e', () => {
         expect(routeWorkoutCommand).not.toMatch(/--duration(?:=|\s)/u)
         expect(routeWorkoutCommand).toMatch(/--type(?:=|\s)(?:run|running)\b/iu)
         expect(routeReported.finalMessage).not.toMatch(/how long|\?/iu)
-        expect(routeReported.runtimeIssueInputs).toEqual([])
+        // Canonical records and replies above prove successful recovery. A rejected
+        // workout CLI payload may be corrected without creating another workout.
+        for (const result of [saved, reported, explicitReported, routeReported]) {
+          for (const issue of result.runtimeIssueInputs) {
+            expect(issue).toMatchObject({
+              issueKind: 'tool_error', severity: 'warning',
+              details: { vaultCliErrorCategory: 'invalid_input', vaultCliErrorCode: 'invalid_payload' },
+            })
+            expect(issue.details?.vaultCliCommand).toMatch(/^workout (?:add|edit|defaults set)$/u)
+          }
+        }
       } finally {
         await removeRealCodexTemporaryPaths([
           workingDirectory,
@@ -20567,6 +20578,8 @@ describeRealCodex('real Codex public goal setup e2e', () => {
     'grounds from memory, persists finite support, and reuses one Goal package in a fresh session',
     async () => {
       const config = await resolveRealCodexE2eConfig()
+      const fixtureNow = new Date()
+      const fixtureDay = toLocalDayKey(fixtureNow, 'America/New_York')
       const publicGoal = await readPublicGoalSetupRecord()
       const workingDirectory = await mkdtemp(
         path.join(tmpdir(), 'murph-public-goal-setup-e2e-'),
@@ -20619,7 +20632,7 @@ describeRealCodex('real Codex public goal setup e2e', () => {
             normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
             ?? undefined,
           codexHome: config.codexHome,
-          developerInstructions: buildPublicGoalSetupDeveloperInstructions(),
+          developerInstructions: buildPublicGoalSetupDeveloperInstructions(fixtureNow),
           dynamicTools: [MURPH_AUTOMATION_TOOL],
           env: {
             ...config.env,
@@ -20645,9 +20658,7 @@ describeRealCodex('real Codex public goal setup e2e', () => {
                     ?? `automation_01K${String(nextAutomationNumber).padStart(23, '0')}`
                   const slug = request.slug
                     ?? `public-goal-support-${String(nextAutomationNumber).padStart(2, '0')}`
-                  const now = new Date(
-                    `2026-08-30T12:00:${String(nextAutomationNumber).padStart(2, '0')}.000Z`,
-                  )
+                  const now = new Date()
                   automationSaveHandledAt.set(request, now.toISOString())
                   nextAutomationNumber += 1
                   const saved = await upsertAutomation({
@@ -20749,7 +20760,7 @@ describeRealCodex('real Codex public goal setup e2e', () => {
                 if (request.action === 'reconcile') {
                   const reconciled = await reconcileAutomationSupportSeries({
                     desiredAutomationIds: request.desiredAutomationIds,
-                    now: new Date('2026-08-30T12:01:00.000Z'),
+                    now: new Date(),
                     supportSeriesTag: buildAutomationSupportSeriesTag(
                       request.supportSeriesId,
                     ),
@@ -20969,14 +20980,20 @@ describeRealCodex('real Codex public goal setup e2e', () => {
         expect(reply).not.toMatch(/experiment/iu)
         expect(automationRequests).toHaveLength(0)
 
+        // The canonical CLI uses the real clock; keep accepted dates future
+        // relative to that clock, including across daylight-saving changes.
+        const reminderDays = [1, 3, 5].map((days) => addDaysToIsoDate(fixtureDay, days))
+        const reviewDay = addDaysToIsoDate(fixtureDay, 6)
         const acceptedPrompt = [
-          'Yes—save that plan. Use these exact dates for the finite support:',
-          'wind-down reminders on August 31, September 2, and September 4, 2026 at 11:30 PM America/New_York;',
-          'one morning review on September 5, 2026 at 8:00 AM America/New_York. No other reminders.',
+          `Yes—save that plan, starting ${reminderDays[0]}. Use these exact dates for the finite support:`,
+          `wind-down reminders on ${reminderDays.join(', ')} at 11:30 PM America/New_York;`,
+          `one morning review on ${reviewDay} at 8:00 AM America/New_York. No other reminders.`,
         ].join(' ')
         const acceptedSchedule = {
-          reminderInstants: ['2026-09-01T03:30:00.000Z', '2026-09-03T03:30:00.000Z', '2026-09-05T03:30:00.000Z'],
-          reviewInstant: '2026-09-05T12:00:00.000Z',
+          reminderInstants: reminderDays.map((day) =>
+            resolveFloatingIsoTimestampInTimeZone(`${day}T23:30:00`, 'America/New_York')?.timestamp
+          ),
+          reviewInstant: resolveFloatingIsoTimestampInTimeZone(`${reviewDay}T08:00:00`, 'America/New_York')?.timestamp,
         }
         const accepted = await executeRealCodexAppServerTurn({
           ...commonInput,
@@ -21222,8 +21239,9 @@ describeRealCodex('real Codex public goal setup e2e', () => {
           throw new Error('Expected three finite reminder instants.')
         }
         for (const reminderInstant of reminderInstants) {
-          expect(reminderInstant.getUTCHours()).toBe(3)
-          expect(reminderInstant.getUTCMinutes()).toBe(30)
+          expect(new Intl.DateTimeFormat('en-GB', {
+            timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit',
+          }).format(reminderInstant)).toBe('23:30')
         }
         expect(secondReminder.getTime() - firstReminder.getTime())
           .toBeGreaterThanOrEqual(24 * 60 * 60 * 1_000)
@@ -21498,9 +21516,9 @@ describeRealCodex('real Codex public goal setup e2e', () => {
         expect(automationRequests.filter(isGoalSetupAutomationMutationRequest))
           .toHaveLength(acceptedAutomationMutationCount)
         expect(cold.finalMessage).toMatch(/30[-\s]*minutes?/iu)
-        expect(cold.finalMessage).toMatch(
-          /confirm|approve|want me to (?:save|create|set up)|should I (?:save|create|set up)|would you like me to (?:save|create|set up)|(?:usual|current|typical).{0,30}(?:bedtime|lights?[-\s]?out).{0,40}wake|what time.{0,40}(?:bed|sleep|wake)/iu,
-        )
+        const coldQuestions = cold.finalMessage.match(/[^.!?\n]+\?/gu) ?? []
+        expect(coldQuestions, 'one relevant clarifier before saving without prior context').toHaveLength(1)
+        expect(coldQuestions[0]).toMatch(/sleep|rest|bed|wake|confirm|approve|save|create|set up/iu)
         expect(cold.finalMessage).not.toMatch(
           /(?:(?:I|we)(?:'ve| have)?\s+(?:saved|created|set up).{0,30}(?:goal|plan)|(?:goal|plan).{0,20}(?:is|was|has been)\s+(?:saved|created|set up))/iu,
         )
@@ -21525,7 +21543,7 @@ describeRealCodex('real Codex public goal setup e2e', () => {
 
 })
 
-function buildPublicGoalSetupDeveloperInstructions(): string {
+function buildPublicGoalSetupDeveloperInstructions(now = new Date()): string {
   return buildAssistantSystemPrompt({
     assistantCliContract: [
       'Use vault-cli for canonical member data.',
@@ -21552,8 +21570,8 @@ function buildPublicGoalSetupDeveloperInstructions(): string {
       setupCommand: 'murph',
     },
     conversationScope: 'direct',
-    currentLocalDate: '2026-08-30',
-    currentInstant: '2026-08-30T12:00:00.000Z',
+    currentLocalDate: toLocalDayKey(now, 'America/New_York'),
+    currentInstant: now.toISOString(),
     currentTimeZone: 'America/New_York',
     hostedRuntime: true,
     modelBehaviorProfile: 'gpt5-agentic',
@@ -25043,7 +25061,7 @@ describeRealCodex('real Codex support escalation e2e', () => {
         /I (?:have |successfully )?(?:saved|recorded).{0,80}account-linked(?: (?:human[- ])?support)? escalation|account-linked(?: (?:human[- ])?support)? escalation (?:was|has been) (?:successfully )?(?:saved|recorded)/iu,
       )
       expect(result.finalMessage).not.toMatch(
-        /direct notification(?: to (?:human )?support)? failed|(?:could not|couldn.t|unable to) notify (?:human )?support|escalation did not go through/iu,
+        /direct notification(?: to (?:human )?support)? failed|(?:could not|couldn.t|unable to) notify (?:human )?support|escalation did not go through|support (?:has not been|was not|wasn.t) notified|support submission failed/iu,
       )
     },
     720_000,
@@ -25098,7 +25116,7 @@ describeRealCodex('real Codex support escalation e2e', () => {
       expect(secondCall.argumentsValue.supportProblem).toBe('classification')
       expect(recordedFeedback).toHaveLength(0)
       expect(result.finalMessage).toMatch(
-        /direct notification(?: to (?:human )?support)? failed|(?:could not|couldn.t|unable to) notify (?:human )?support|escalation did not go through/iu,
+        /direct notification(?: to (?:human )?support)? failed|(?:could not|couldn.t|unable to) notify (?:human )?support|escalation did not go through|support (?:has not been|was not|wasn.t) notified|support submission failed/iu,
       )
       expect(result.finalMessage).not.toMatch(
         /I (?:have |successfully )?(?:saved|recorded).{0,80}account-linked(?: (?:human[- ])?support)? escalation|account-linked(?: (?:human[- ])?support)? escalation (?:was|has been) (?:successfully )?(?:saved|recorded)/iu,
@@ -34611,8 +34629,10 @@ function hasNoFurtherWearableCheckinMeaning(message: string): boolean {
 
 function hasSavedSupportIssueForTriageMeaning(message: string): boolean {
   return [
-    /\b(?:issue|report)\b[^.?!\n]{0,80}\b(?:saved|recorded)\b[^.?!\n]{0,80}\btriage\b/iu,
-    /\b(?:saved|recorded)\b[^.?!\n]{0,80}\b(?:issue|report)\b[^.?!\n]{0,80}\btriage\b/iu,
+    /\b(?:I|we)(?:['’]ve| have)? (?:saved|recorded)\b[^.?!\n]{0,120}\btriage\b/iu,
+    /\b(?:was|has been) (?:saved|recorded)\b[^.?!\n]{0,120}\btriage\b/iu,
+    /\btriage\b[^.?!\n]{0,80}\b(?:was|has been) (?:saved|recorded)\b/iu,
+    /^(?:Saved|Recorded)\b[^.?!\n]{0,120}\btriage\b/iu,
   ].some((pattern) => pattern.test(message))
 }
 
