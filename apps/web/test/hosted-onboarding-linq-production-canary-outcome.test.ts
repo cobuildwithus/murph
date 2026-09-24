@@ -35,7 +35,6 @@ vi.mock("@/src/lib/hosted-workspace/store", async (importOriginal) => ({
 import * as browserVaultLoader from "@/src/lib/browser-vault/loader";
 import { HostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { jsonError } from "@/src/lib/hosted-onboarding/http";
-import { LINQ_PRODUCTION_CANARY_GOAL_TITLE } from "@/src/lib/hosted-onboarding/linq-production-canary-contract";
 import { readHostedLinqProductionCanaryOutcome } from "@/src/lib/hosted-onboarding/linq-production-canary-outcome";
 import type { HostedWorkspaceRecord } from "@/src/lib/hosted-workspace/store";
 
@@ -72,7 +71,9 @@ describe("production canary canonical outcome observer", () => {
     { entities: [goal(), goal()], total: 2, count: 2, ids: 1 },
     { entities: [goal({ recordClass: "ledger" })], total: 1, count: 1, ids: 0 },
     { entities: [goal({ id: "invented-goal-id" })], total: 1, count: 1, ids: 0 },
-    { entities: [goal({ title: "Unrelated synthetic goal" }), goal({ family: "event" })], total: 1, count: 0, ids: 0 },
+    { entities: [goal({ title: "Walk more consistently" }), goal({ family: "event" })], total: 1, count: 1, ids: 1 },
+    { entities: [goal({ status: "paused" })], total: 1, count: 0, ids: 0 },
+    { entities: [goal({ status: "completed" })], total: 1, count: 0, ids: 0 },
   ])("decrypts the actual replica protocol and reports canonical cardinality ($count/$ids)", async ({ entities, total, count, ids }) => {
     await installEncryptedReplica(entities);
     expect(await readHostedLinqProductionCanaryOutcome({ prisma })).toEqual({
@@ -445,7 +446,7 @@ function goal(overrides: Partial<BrowserVaultEntity> = {}): BrowserVaultEntity {
     attributes: {}, bodyPreview: null, date: null, experimentSlug: null,
     family: "goal", id: goalId, kind: "goal", links: [], lookupIds: [goalId],
     occurredAt: null, recordClass: "bank", status: "active", stream: null, tags: [],
-    title: LINQ_PRODUCTION_CANARY_GOAL_TITLE, ...overrides,
+    title: "A lunchtime walking habit", ...overrides,
   };
 }
 

@@ -726,5 +726,8 @@ KMS REST transport and Web control connection timing are owned by `apps/web/READ
 local implementation and verification are recorded in
 [`first-use crypto latency`](exec-plans/completed/2026-09-24-kms-wake-latency.md).
 
+Natural Linq planning/acceptance canary and separate canonical goal readback proof
+are tracked in [`2026-09-24-natural-onboarding-canary`](exec-plans/completed/2026-09-24-natural-onboarding-canary.md).
+
 Native turn cancellation and voice continuity proof:
 [`2026-09-24-voice-turn-lifecycle.md`](exec-plans/completed/2026-09-24-voice-turn-lifecycle.md).

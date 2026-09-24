@@ -1,0 +1,22 @@
+[
+  {
+    "prompt": "Hey Murph let's get started with my health!",
+    "stage": "welcome"
+  },
+  {
+    "prompt": "Yes, ready.",
+    "stage": "identity-question"
+  },
+  {
+    "prompt": "My name is Robin. I am 32 and a woman.",
+    "stage": "runtime-identity"
+  },
+  {
+    "prompt": "I’d like more energy in the afternoon. I sit at a desk all day and mostly just walk to the bus. Could you help me set a walking goal and a simple plan for this week? I can do twenty minutes before lunch on weekdays. No reminders, please.",
+    "stage": "goal-proposal"
+  },
+  {
+    "prompt": "Yes, that sounds good. Let’s start tomorrow.",
+    "stage": "accept-goal"
+  }
+]

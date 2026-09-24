@@ -5,7 +5,6 @@ import {
 } from "@murphai/contracts";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { HOSTED_EXECUTION_DEFAULT_RUNNER_IDLE_TTL_MS } from "@murphai/hosted-execution/contracts";
-import { LINQ_PRODUCTION_CANARY_GOAL_TITLE } from "@/src/lib/hosted-onboarding/linq-production-canary-contract";
 
 const mocks = vi.hoisted(() => ({
   messages: [] as Array<[Record<string, unknown>, Record<string, unknown>]>,
@@ -100,7 +99,7 @@ describe("production conversation canary runner", () => {
     let outcomeReads = 0;
     vi.stubGlobal("fetch", vi.fn(async (url: URL) => new Response(JSON.stringify(url.pathname.endsWith("/outcome") ? {
       ok: true,
-      outcome: { ready: true, totalGoalCount: outcomeReads === 0 ? 0 : 1, matchingGoalCount: outcomeReads === 0 ? 0 : 1, matchingGoalIdCount: outcomeReads++ === 0 ? 0 : 1 },
+      outcome: { ready: true, totalGoalCount: outcomeReads < 2 ? 0 : 1, matchingGoalCount: outcomeReads < 2 ? 0 : 1, matchingGoalIdCount: outcomeReads++ < 2 ? 0 : 1 },
     } : {
       ok: true,
       reset: {
@@ -123,7 +122,7 @@ describe("production conversation canary runner", () => {
     });
   });
 
-  it("runs five reciprocal turns and proves a fresh canonical save and readback", async () => {
+  it("runs a natural proposal and acceptance with canonical checks outside the conversation", async () => {
     vi.mocked(Date.now)
       .mockReturnValueOnce(1_000)
       .mockReturnValueOnce(2_000)
@@ -139,12 +138,12 @@ describe("production conversation canary runner", () => {
       inboundMessage({ text: MURPH_ASSISTANT_ONBOARDING_IDENTITY_QUESTIONS.formal, timestampMs: 2_000 }),
       inboundMessage({ text: "A retained earlier reply.", timestampMs: 2_000 }),
       inboundMessage({ text: "What would you most like to improve about your health?", timestampMs: 3_000 }),
-      inboundMessage({ text: "Saved your walking goal.", timestampMs: 4_000 }),
-      inboundMessage({ text: `Your saved goal is ${LINQ_PRODUCTION_CANARY_GOAL_TITLE}.`, timestampMs: 5_000 }),
+      inboundMessage({ text: "How about twenty minutes before lunch on weekdays for a week?", timestampMs: 4_000 }),
+      inboundMessage({ text: "Your walking plan is set for tomorrow.", timestampMs: 5_000 }),
     ];
 
     await expect(runLinqProductionCanary(TEST_ENV)).resolves.toEqual({
-      canonicalOutcome: { baselineGoalCount: 0, savedGoalCount: 1, readbackGoalCount: 1 },
+      canonicalOutcome: { baselineGoalCount: 0, savedGoalCount: 1, proposalGoalCount: 0 },
       reset: {
         accountDeleted: true,
         admissionBudgetCount: 1,
@@ -155,8 +154,8 @@ describe("production conversation canary runner", () => {
         { latencyMs: 15_000, senderSendMs: 0, stage: "welcome", turn: 1 },
         { latencyMs: 15_000, senderSendMs: 0, stage: "identity-question", turn: 2 },
         { latencyMs: 15_000, senderSendMs: 0, stage: "runtime-identity", turn: 3 },
-        { latencyMs: 15_000, senderSendMs: 0, stage: "save-goal", turn: 4 },
-        { latencyMs: 15_000, senderSendMs: 0, stage: "read-goal", turn: 5 },
+        { latencyMs: 15_000, senderSendMs: 0, stage: "goal-proposal", turn: 4 },
+        { latencyMs: 15_000, senderSendMs: 0, stage: "accept-goal", turn: 5 },
       ],
     });
     expect(mocks.messages).toEqual([]);
@@ -165,8 +164,11 @@ describe("production conversation canary runner", () => {
       "Yes, ready.",
       "My name is Robin. I am 32 and a woman.",
     ]);
-    expect(mocks.spaceSend.mock.calls[3]?.[0]).toContain(LINQ_PRODUCTION_CANARY_GOAL_TITLE);
-    expect(mocks.spaceSend.mock.calls[4]?.[0]).not.toContain(LINQ_PRODUCTION_CANARY_GOAL_TITLE);
+    expect(mocks.spaceSend.mock.calls[3]?.[0]).toContain("Could you help me set a walking goal");
+    expect(mocks.spaceSend.mock.calls[4]?.[0]).toBe("Yes, that sounds good. Let’s start tomorrow.");
+    for (const [prompt] of mocks.spaceSend.mock.calls) {
+      expect(prompt).not.toMatch(/exact title|save it now|tell me when|read my saved goals/iu);
+    }
     expect(vi.mocked(fetch).mock.calls.slice(1).map(([url, options]) => ({
       path: new URL(String(url)).pathname,
       method: options?.method,
@@ -283,7 +285,7 @@ describe("production conversation canary runner", () => {
     prepareCompleteConversation();
     mocks.messages[1] = inboundMessage({ text: reply });
     await expect(runLinqProductionCanary(TEST_ENV)).resolves.toMatchObject({
-      canonicalOutcome: { baselineGoalCount: 0, savedGoalCount: 1, readbackGoalCount: 1 },
+      canonicalOutcome: { baselineGoalCount: 0, savedGoalCount: 1, proposalGoalCount: 0 },
       turns: expect.arrayContaining([{ latencyMs: 1_000, senderSendMs: 0, stage: "identity-question", turn: 2 }]),
     });
     expect(mocks.spaceSend).toHaveBeenCalledTimes(5);
@@ -342,15 +344,17 @@ describe("production conversation canary runner", () => {
     prepareCompleteConversation();
     vi.mocked(fetch).mockResolvedValueOnce(resetResponse())
       .mockResolvedValueOnce(outcomeResponse({ ready: true, matchingGoalCount: 0, matchingGoalIdCount: 0 }))
+      .mockResolvedValueOnce(outcomeResponse({ ready: true, matchingGoalCount: 0, matchingGoalIdCount: 0 }))
       .mockResolvedValueOnce(outcomeResponse(outcome));
-    await expect(runLinqProductionCanary(TEST_ENV)).rejects.toMatchObject({ name: "outcome-cardinality-invalid; stage=save-goal" });
-    expect(mocks.spaceSend).toHaveBeenCalledTimes(4);
+    await expect(runLinqProductionCanary(TEST_ENV)).rejects.toMatchObject({ name: "outcome-cardinality-invalid; stage=accept-goal" });
+    expect(mocks.spaceSend).toHaveBeenCalledTimes(5);
     expect(mocks.stop).toHaveBeenCalledOnce();
   });
 
   it("waits for a fresh publication before accepting the saved canonical goal", async () => {
     prepareCompleteConversation();
     vi.mocked(fetch).mockResolvedValueOnce(resetResponse())
+      .mockResolvedValueOnce(outcomeResponse({ ready: true, matchingGoalCount: 0, matchingGoalIdCount: 0 }))
       .mockResolvedValueOnce(outcomeResponse({ ready: true, matchingGoalCount: 0, matchingGoalIdCount: 0 }))
       .mockResolvedValueOnce(outcomeResponse({ ready: false, matchingGoalCount: 0, matchingGoalIdCount: 0 }))
       .mockImplementation(async () => outcomeResponse({ ready: true, matchingGoalCount: 1, matchingGoalIdCount: 1 }));
@@ -367,13 +371,13 @@ describe("production conversation canary runner", () => {
       if (clock.elapsedMs() - stageStartedAt < HOSTED_EXECUTION_DEFAULT_RUNNER_IDLE_TTL_MS + 5_000) {
         return outcomeResponse({ ready: false, matchingGoalCount: 0, matchingGoalIdCount: 0 });
       }
-      const count = stage++ === 0 ? 0 : 1;
+      const count = stage++ < 2 ? 0 : 1;
       stageStartedAt = clock.elapsedMs();
       return outcomeResponse({ ready: true, matchingGoalCount: count, matchingGoalIdCount: count });
     });
 
     const result = await runLinqProductionCanary(TEST_ENV);
-    expect(result.canonicalOutcome).toEqual({ baselineGoalCount: 0, savedGoalCount: 1, readbackGoalCount: 1 });
+    expect(result.canonicalOutcome).toEqual({ baselineGoalCount: 0, savedGoalCount: 1, proposalGoalCount: 0 });
     expect(result.turns.map((turn) => turn.latencyMs)).toEqual([1_000, 1_000, 1_000, 1_000, 1_000]);
     expect(clock.elapsedMs()).toBe(3 * (HOSTED_EXECUTION_DEFAULT_RUNNER_IDLE_TTL_MS + 5_000));
     expect(mocks.spaceSend).toHaveBeenCalledTimes(5);
@@ -391,28 +395,22 @@ describe("production conversation canary runner", () => {
     expect(mocks.stop).toHaveBeenCalledOnce();
   });
 
-  it("does not accept a save claim when the canonical goal never appears", async () => {
+  it("does not accept a confirmation when the canonical goal never appears", async () => {
     prepareCompleteConversation();
+    mockCanaryObservationClock();
     vi.mocked(fetch).mockResolvedValueOnce(resetResponse())
       .mockImplementation(async () => outcomeResponse({ ready: true, matchingGoalCount: 0, matchingGoalIdCount: 0 }));
-    await expect(runLinqProductionCanary(TEST_ENV)).rejects.toMatchObject({ name: "outcome-not-ready; stage=save-goal" });
-    expect(mocks.spaceSend).toHaveBeenCalledTimes(4);
+    await expect(runLinqProductionCanary(TEST_ENV)).rejects.toMatchObject({ name: "outcome-not-ready; stage=accept-goal" });
+    expect(mocks.spaceSend).toHaveBeenCalledTimes(5);
   });
 
-  it("requires the delivered readback to name the saved goal", async () => {
-    prepareCompleteConversation("I cannot find a saved walking goal.");
-    await expect(runLinqProductionCanary(TEST_ENV)).rejects.toMatchObject({ name: "goal-readback-reply-invalid" });
-    expect(mocks.stop).toHaveBeenCalledOnce();
-  });
-
-  it("rejects a readback that creates another canonical goal", async () => {
+  it("rejects a goal created before the person accepts the proposal", async () => {
     prepareCompleteConversation();
     vi.mocked(fetch).mockResolvedValueOnce(resetResponse())
       .mockResolvedValueOnce(outcomeResponse({ ready: true, matchingGoalCount: 0, matchingGoalIdCount: 0 }))
-      .mockResolvedValueOnce(outcomeResponse({ ready: true, matchingGoalCount: 1, matchingGoalIdCount: 1 }))
-      .mockResolvedValueOnce(outcomeResponse({ ready: true, matchingGoalCount: 2, matchingGoalIdCount: 2 }));
-    await expect(runLinqProductionCanary(TEST_ENV)).rejects.toMatchObject({ name: "outcome-cardinality-invalid; stage=read-goal" });
-    expect(mocks.spaceSend).toHaveBeenCalledTimes(5);
+      .mockResolvedValueOnce(outcomeResponse({ ready: true, matchingGoalCount: 1, matchingGoalIdCount: 1 }));
+    await expect(runLinqProductionCanary(TEST_ENV)).rejects.toMatchObject({ name: "outcome-cardinality-invalid; stage=goal-proposal" });
+    expect(mocks.spaceSend).toHaveBeenCalledTimes(4);
   });
 
   it("rejects malformed outcome metadata without logging its content", async () => {
@@ -462,7 +460,7 @@ describe("production conversation canary runner", () => {
         return response;
       });
 
-    await expect(runLinqProductionCanary(TEST_ENV)).resolves.toHaveProperty("canonicalOutcome.readbackGoalCount", 1);
+    await expect(runLinqProductionCanary(TEST_ENV)).resolves.toHaveProperty("canonicalOutcome.proposalGoalCount", 0);
     expect(clock.elapsedMs()).toBe(11_000);
     expect(mocks.spaceSend).toHaveBeenCalledTimes(5);
   });
@@ -528,15 +526,15 @@ function mockCanaryObservationClock(): { elapsedMs(): number; advance(durationMs
   return { elapsedMs: () => elapsedMs, advance };
 }
 
-function prepareCompleteConversation(readback = LINQ_PRODUCTION_CANARY_GOAL_TITLE): void {
+function prepareCompleteConversation(): void {
   mocks.now = [0, 0, 1_000, 1_000, 1_000, 2_000, 2_000, 2_000, 3_000, 3_000, 3_000, 4_000, 4_000, 4_000, 5_000];
   mocks.sendResults = [true, true, true, true, true];
   mocks.messages = [
     MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
     MURPH_ASSISTANT_ONBOARDING_IDENTITY_QUESTIONS.casual,
     "What would you most like to improve about your health?",
-    "Your goal is saved.",
-    readback,
+    "How about a twenty-minute walk before lunch on weekdays?",
+    "Your walking plan is set for tomorrow.",
   ].map((text) => inboundMessage({ text }));
 }
 

@@ -379,6 +379,51 @@ function describeRealCodex(name: string, factory: () => void): void {
   suite(name, { tags: [REAL_CODEX_E2E_TAG] }, factory)
 }
 
+describeRealCodex('real natural goal canary journey', () => {
+  it('natural canary proposes a walking plan and persists it only after acceptance', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const fixture = await createCanonicalLiveFixture(config, 'linq')
+    try {
+      // Read the same synthetic messages sent by the production canary.
+      const raw: unknown = JSON.parse(await readFile(new URL(
+        '../../../apps/web/scripts/fixtures/linq-production-conversation.json', import.meta.url,
+      ), 'utf8'))
+      if (!Array.isArray(raw)) throw new Error('Expected canary conversation fixture.')
+      const promptFor = (stage: string) => {
+        const row = raw.map(readRecord).find((item) => item?.stage === stage)
+        const prompt = readString(row?.prompt)
+        if (!prompt) throw new Error(`Missing canary stage: ${stage}`)
+        return prompt
+      }
+      const preview = await fixture.message(promptFor('goal-proposal'))
+      expect(preview.response).toMatch(/walk/iu)
+      expect(preview.response).toMatch(/lunch/iu)
+      expect(preview.response).toMatch(/twenty|20/iu)
+      expect(await listGoals(fixture.vault)).toHaveLength(0)
+      expect((await readVaultRawTolerant(fixture.vault)).regimens).toHaveLength(0)
+
+      const accepted = await fixture.message(promptFor('accept-goal'))
+      const vault = await readVaultRawTolerant(fixture.vault)
+      expect(vault.goals).toHaveLength(1)
+      expect(vault.goals[0]?.attributes.status).toBe('active')
+      expect(vault.regimens).toHaveLength(1)
+      const regimen = regimenFrontmatterSchema.parse(vault.regimens[0]?.attributes)
+      expect(regimen).toMatchObject({
+        kind: 'habit', status: 'active', relatedGoalIds: [vault.goals[0]?.entityId],
+      })
+      expect(`${regimen.title} ${regimen.schedule} ${regimen.note}`).toMatch(/walk/iu)
+      expect(`${regimen.schedule} ${regimen.note}`).toMatch(/lunch/iu)
+      expect(`${regimen.schedule} ${regimen.note}`).toMatch(/twenty|20/iu)
+      expect(await listFollowUpAutomations(fixture.vault)).toHaveLength(0)
+      expect(accepted.response).toMatch(/walk|plan/iu)
+      expect(accepted.response).not.toMatch(/goal_[A-Z0-9]+|reg_[A-Z0-9]+|subagent|vault-cli/iu)
+    } finally {
+      await fixture.close()
+      await removeRealCodexTemporaryPaths(config.temporaryPaths)
+    }
+  }, 600_000)
+})
+
 describeRealCodex('real clinical document extraction journeys', () => {
   it('clinical extraction live recovers unsupported dates without rewriting valid siblings', async () => {
     const config = await resolveRealCodexE2eConfig()

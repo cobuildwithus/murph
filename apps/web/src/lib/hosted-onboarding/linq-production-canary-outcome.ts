@@ -14,7 +14,7 @@ import { readHostedWorkspace } from "@/src/lib/hosted-workspace/store";
 
 import { HostedOnboardingError, hostedOnboardingError } from "./errors";
 import { readHostedLinqProductionCanaryMemberId } from "./linq-production-canary";
-import { LINQ_PRODUCTION_CANARY_GOAL_TITLE, type LinqProductionCanaryOutcome } from "./linq-production-canary-contract";
+import type { LinqProductionCanaryOutcome } from "./linq-production-canary-contract";
 import { assertActiveHostedMemberAccessAllowed, readHostedRuntimeAiAccessDecision } from "./member-access";
 import type { HostedOnboardingReadClient } from "./shared";
 
@@ -110,7 +110,7 @@ export async function readHostedLinqProductionCanaryOutcome(input: {
 
     stage = "goal_counting";
     const allGoals = decoded.shards.core.entities.filter((entity) => entity.family === "goal");
-    const goals = allGoals.filter((entity) => entity.title === LINQ_PRODUCTION_CANARY_GOAL_TITLE);
+    const goals = allGoals.filter((entity) => entity.status === "active");
     return {
       ready: true,
       totalGoalCount: allGoals.length,
