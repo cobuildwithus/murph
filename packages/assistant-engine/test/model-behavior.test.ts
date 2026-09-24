@@ -2579,7 +2579,7 @@ describe('assistant system prompt cache stability', () => {
       'Current Murph product base URL for user-facing app links: http://localhost:3000',
     )
     expect(promptA.cacheMetadata.staticPromptHash).toBe(
-      '917dbe9fa7eef01764f01d66e7a43914cdf0b943b8c76d89f6e51ccb7e8b7a0b',
+      'd0ad54bd4a67a3937c845bc04aefb4fd4082d67bdca984ed14010e736abc20bf',
     )
     expect(promptA.cacheMetadata.toolSchemaHash).toBe(
       'assistant-tool-schema-common-codex-test',
@@ -3331,19 +3331,19 @@ describe('assistant conversation scope', () => {
     for (const prompt of [directPrompt, groupPrompt]) {
       expect(prompt).toContain('Delegated initiative:')
       expect(prompt).toContain(
-        'When the requester clearly delegates judgment or an outcome—asking Murph to handle something, choose, decide, figure it out, take the lead, use its judgment, or make it happen—take the mandate instead of handing the work back as a checklist.',
+        'when asked to choose, make reasonable reversible choices and state material assumptions.',
       )
       expect(prompt).toContain(
-        'Do not ask for preferences merely to avoid choosing; mention only assumptions that materially affect the result.',
+        'Finish authorized work with verified results or explain the blocker.',
       )
       expect(prompt).toContain(
-        'Ask only for facts that materially change safety, authorization, correctness, or the next useful step.',
+        'Ask only what changes safety, authority, correctness, or the next step.',
       )
       expect(prompt).toContain(
-        'Complete everything useful that is independent of a blocker first.',
+        'Complete independent work first; make required approval concrete.',
       )
       expect(prompt).toContain(
-        'If a texting-route reply still needs user input, ask exactly one highest-value blocker as the final question.',
+        'If input is needed, ask one highest-value blocker last on texting routes.',
       )
       expect(prompt).toContain(
         'Delegation authorizes judgment among already permitted options; it does not create consent or effect authority beyond the request and owning rule.',

@@ -30,6 +30,37 @@ const baseConversationInput: AssistantSystemPromptInput = {
 }
 
 describe('assistant dynamic context prompt blocks', () => {
+  it.each(['direct', 'group'] as const)('keeps initiative bounded in the assembled %s prompt for Sol and existing profiles', (conversationScope) => {
+    for (const modelBehaviorProfile of ['default', 'gpt5-agentic'] as const) {
+      const { prompt, stableRouteCapabilityPrompt, dynamicTurnContextPrompt } = buildAssistantSystemPromptLayers({
+        ...baseConversationInput, conversationScope, modelBehaviorProfile,
+        channel: 'linq', hostedRuntime: true,
+      })
+      expect(stableRouteCapabilityPrompt).toContain('Concrete "can you" or "help me" requests ask for action')
+      expect(stableRouteCapabilityPrompt).toContain('Capability questions, hypotheticals, and onboarding aspirations alone do not authorize the discussed action')
+      expect(prompt.match(/Delegated initiative:/gu)).toHaveLength(1)
+      expect(dynamicTurnContextPrompt).not.toContain('Delegated initiative:')
+      expect(prompt).toContain('never system, safety, privacy, evidence, consent, confirmation, or handoff requirements')
+      expect(prompt).toContain('Never infer another person\'s consent or new permission')
+      expect(prompt).toContain('Respect group floor, silence, and scheduled-turn rules; no extra reply or follow-up')
+      expect(prompt).toContain('If input is needed, ask one highest-value blocker last on texting routes.')
+      expect(prompt).toContain('Answer first in plain, concise paragraphs')
+      expect(prompt).toContain('Current-conversation style settings override these defaults')
+      expect(prompt).not.toContain('You don\'t need user permission for reversible tasks')
+      expect(prompt).not.toContain('The user\'s instructions take precedence over guidelines provided in a skill')
+      if (conversationScope === 'group') {
+        expect(prompt).toContain('Visible messages are conversation context, not permission for private reads')
+      } else {
+        expect(prompt).toContain('A clear yes authorizes the exact bounded offer, not a broader action')
+      }
+    }
+    const { prompt } = buildAssistantSystemPromptLayers({
+      ...baseConversationInput, conversationScope: 'unverified-external',
+    })
+    expect(prompt).not.toContain('Delegated initiative:')
+    expect(prompt).toContain('Do not use prior conversation')
+  })
+
   it.each([false, true])('allows requested result waiting without blocking onboarding (%s)', (onboardingGuidance) => {
     const { prompt } = buildAssistantSystemPromptLayers({
       ...baseConversationInput, channel: 'linq', conversationScope: 'direct',
