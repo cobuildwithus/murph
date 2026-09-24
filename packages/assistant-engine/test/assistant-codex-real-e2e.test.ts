@@ -21663,8 +21663,8 @@ describeRealCodex('real Codex public goal setup e2e', () => {
           false,
         )
         const motivationQuestionPattern =
-          /what matters most|what(?:'s| is) most important|what (?:would|will).{0,80}(?:mean|matter|make|change|feel)|why.{0,60}(?:care|important|matter|want)|what.{0,40}hoping.{0,60}(?:feel|change|easier)|what.{0,35}(?:driving|motivat|prompting|reason)|is (?:your|the) (?:main )?reason\b/iu
-        expect(discoveryReply).toMatch(motivationQuestionPattern)
+          /\b(?:why|reason|aim|matters?|important|hoping|motivation|driving|prompting)\b|what (?:would|will).{0,80}(?:mean|make|change|feel)/iu
+        expect(discoveryReply.match(/[^.!?\n]+\?/u)?.[0]).toMatch(motivationQuestionPattern)
         expect(discoveryReply).not.toMatch(/what is the main issue/iu)
         expect(discoveryReply.match(/\?/gu) ?? []).toHaveLength(1)
         expect(discoveryReply).not.toMatch(
@@ -21684,7 +21684,7 @@ describeRealCodex('real Codex public goal setup e2e', () => {
           firstAgentQuestion,
           'first reply asks only for the person\'s reason',
         ).toBeDefined()
-        expect(firstAgentQuestion?.text).toMatch(motivationQuestionPattern)
+        expect(firstAgentQuestion?.text.match(/[^.!?\n]+\?/u)?.[0]).toMatch(motivationQuestionPattern)
         if (
           !firstAgentQuestion
           || !discoveryGoalInventory
@@ -21715,8 +21715,9 @@ describeRealCodex('real Codex public goal setup e2e', () => {
           )
         }
 
+        // Keep schedule parsing bounded; this fixture requests an exact display format.
         const groundingPrompt =
-          'It matters because I want enough energy to be present with my family in the morning. What do you recommend?'
+          'It matters because I want enough energy to be present with my family in the morning. What do you recommend? Show each proposed reminder and review separately as YYYY-MM-DD HH:mm in my local timezone.'
         expect(groundingPrompt).not.toMatch(
           /six hours|\b6:30\b|\b11:30\b|\b12:30\b|midnight|colder|supplement/iu,
         )
@@ -21877,6 +21878,11 @@ describeRealCodex('real Codex public goal setup e2e', () => {
           'saved Goal readback',
           ['goal show', savedGoal.entityId, '--format json'],
         )
+        process.stdout.write('[goal-regimen-inventory-e2e] ' + JSON.stringify({
+          setup: readGoalSetupRegimenActionDiagnostics(setupActions),
+          accepted: readGoalSetupRegimenActionDiagnostics(acceptedActions),
+          commands: acceptedVaultCommandAttempts.filter((command) => /\bregimen list\b/u.test(command)),
+        }) + '\n')
         const acceptedRegimenInventory = acceptedActions.find(
           isSuccessfulRegimenInventoryReadAction,
         )
@@ -42973,4 +42979,100 @@ describeRealCodex('real Codex poll freshness e2e', () => {
       await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
     }
   }, 360_000)
+})
+
+
+describeRealCodex('real Codex proactive plan follow-through e2e', () => {
+  it.each(['known-window', 'missing-window', 'declined-support'] as const)(
+    'closes a repeated-action proposal with appropriate support: %s',
+    async (scenario) => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-plan-followthrough-e2e-'))
+      const skillsRoot = path.join(workingDirectory, 'skills')
+      const binDirectory = path.join(workingDirectory, 'bin')
+      const commandLogPath = path.join(workingDirectory, 'commands.log')
+      const requests: AssistantHostedAutomationToolRequest[] = []
+      try {
+        await initializeVault({ title: 'Synthetic follow-through proof', timezone: 'UTC', vaultRoot: workingDirectory })
+        await writeFile(commandLogPath, '', 'utf8')
+        await Promise.all([
+          ...(['daily-activity', 'behavior-followthrough', 'self-management-experiments', 'experiment-onboarding', 'goal-setup'] as const)
+            .map((slug) => materializeAssistantSkill({ skillsRoot, slug })),
+          materializeRealWorkoutVaultCli({ binDirectory, commandLogPath, vaultRoot: workingDirectory }),
+        ])
+        const before = await readVaultRawTolerant(workingDirectory)
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions: buildAssistantSystemPrompt({
+            assistantCliContract: null, assistantContextSnapshotPrompt: null,
+            assistantHostedAutomationAvailable: true, assistantProgressUpdatesAvailable: false,
+            assistantHostedDeviceConnectAvailable: false, assistantHostedDeviceConnectProviders: [],
+            assistantKnowledgeToolsAvailable: false,
+            channel: 'linq', cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+            conversationScope: 'direct', currentLocalDate: '2030-04-01',
+            currentInstant: '2030-04-01T08:00:00.000Z', currentTimeZone: 'UTC',
+            hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic',
+            onboardingGuidance: false, ordinaryInboundTurn: true, turnTrigger: 'automation-auto-reply',
+          }),
+          dynamicTools: [MURPH_AUTOMATION_TOOL],
+          env: { ...config.env, [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+            PATH: `${binDirectory}${path.delimiter}${config.env.PATH ?? ''}` },
+          hostedToolContext: {
+            automationTool: { async request(request) {
+              requests.push(request)
+              throw new Error('This proposal has not been accepted; scheduling is unauthorized.')
+            } },
+            computerToolsAvailable: false, currentHostedDeliveryContext: () => null,
+            currentHostedMailboxItemIds: () => [], vaultFileSendAvailable: false,
+            sendVaultFile: async () => { throw new Error('No file send authorized.') },
+          },
+          model: config.model, modelProvider: config.modelProvider,
+          prompt: [
+            'I want to break up my desk day because sitting all afternoon leaves me restless.',
+            'I already walk comfortably for twenty minutes each morning and have no pain, illness, or activity restrictions.',
+            'I tried taking one short indoor walking break on workdays; it felt good, but I forgot after the first few days.',
+            'There are no other plans for this. I want a small practical plan I can try next.',
+            scenario === 'missing-window'
+              ? 'My work hours change every week and I have not picked a repeatable break time.'
+              : 'Lunch ends at 12:30 UTC every weekday, starting today, and I have five free minutes then.',
+            scenario === 'declined-support'
+              ? 'I do not want reminders, check-ins, saved plans, or follow-up messages. Just tell me the plan.'
+              : 'What would you suggest?',
+          ].join(' '),
+          reasoningEffort: 'medium', sandbox: 'workspace-write', workingDirectory,
+        })
+        const reply = result.finalMessage.trim()
+        const commands = (await readFile(commandLogPath, 'utf8')).split('\n').filter(Boolean)
+        const after = await readVaultRawTolerant(workingDirectory)
+        process.stdout.write('[plan-followthrough-e2e] ' + JSON.stringify({ scenario, reply, automationCalls: requests.length }) + '\n')
+        expect(requests).toHaveLength(0)
+        expect(commands.some(isGoalSetupMutationCommand)).toBe(false)
+        expect(after.goals).toEqual(before.goals)
+        expect(after.regimens).toEqual(before.regimens)
+        expect(after.experiments).toEqual(before.experiments)
+        expect((await listAutomations({ vaultRoot: workingDirectory })).items).toEqual([])
+        expect(reply).toMatch(/walk|walking/iu)
+        expect(reply).not.toMatch(/(?:I['’]ve|I have) (?:scheduled|set up|saved)|(?:reminders?|check-ins?) (?:are|is) (?:set|scheduled)/iu)
+        expect(reply).not.toMatch(/supportKind|supportSeriesId|vault-cli|automationId/iu)
+        if (scenario === 'declined-support') {
+          expect(reply).not.toMatch(/want me to|shall I|would you like|I['’]ll (?:remind|check|message|follow up)/iu)
+        } else {
+          expect(reply.match(/\?/gu)).toHaveLength(1)
+          if (scenario === 'known-window') {
+            expect(reply).toMatch(/12:30|after (?:your )?lunch/iu)
+            expect(reply).toMatch(/remind|nudge|cue/iu)
+            expect(reply).toMatch(/check[- ]?in|check (?:back|in)|review|reassess/iu)
+            expect(reply).toMatch(/week|days|sessions|Friday|Monday/iu)
+          } else {
+            expect(reply).toMatch(/(?:what|which|when|could|would).{0,120}(?:time|cue|break|lunch|day|fit|anchor|moment)/isu)
+          }
+        }
+        expect(result.runtimeIssueInputs).toEqual([])
+      } finally {
+        await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+      }
+    }, 720_000,
+  )
 })

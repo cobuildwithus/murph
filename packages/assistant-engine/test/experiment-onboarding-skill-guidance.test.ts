@@ -51,6 +51,21 @@ describe('experiment onboarding skill guidance', () => {
     )
   }
 
+  it('offers bounded follow-through outside onboarding without bypassing consent', async () => {
+    const support = await readBehaviorFollowthroughSkill()
+    const trial = await readSelfManagementExperimentsSkill()
+    expect(support).toContain('advice alone is not the finished proposal')
+    expect(support).toContain('a practical cue, a bounded review point, and an offer of reminders and a check-in')
+    expect(support).toContain('if timing is missing, ask one narrow schedule question after giving the useful plan')
+    expect(support).toContain('Respect declined support and urgent-care priorities')
+    expect(support).toContain('never claim future outreach before it is scheduled')
+    expect(support).toContain('For any private repeated-behavior launch')
+    expect(support).toContain('A current request for help already')
+    expect(support).not.toContain('For the first onboarding launch, this offer is the authorization boundary')
+    expect(trial).toContain('lack of consent means offer or resolve it')
+    expect(trial).toContain('two weeks can be useful but is not a universal duration')
+  })
+
   it('requires every resolved safety question before any active start', async () => {
     const raw = await readExperimentOnboardingSkill()
 
