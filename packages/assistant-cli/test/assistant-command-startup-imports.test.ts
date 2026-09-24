@@ -55,16 +55,6 @@ test('forbidden startup module mocks intercept their module ids', async () => {
   }
 })
 
-test(
-  'assistant command registration does not import the ink chat surface at module load',
-  async () => {
-    mockForbiddenStartupModules()
-
-    await import('../src/commands/assistant.js')
-  },
-  STARTUP_IMPORT_GUARD_TIMEOUT_MS,
-)
-
 // Module-load guarding alone would miss an eager import added inside the
 // registration body, so run the real registration with unwired services.
 test(

@@ -6,7 +6,7 @@ description: One-pass seam audit prompt for @murphai/assistantd
 
 ## Scope
 
-- `packages/assistantd/src/{config.ts,http.ts,http-protocol.ts,service.ts,client.ts,bin.ts,index.ts}`
+- `packages/assistantd/src/{config.ts,http.ts,http-protocol.ts,service.ts,client.ts,bin.ts}`
 - `packages/assistantd/README.md`
 - directly coupled `packages/assistantd/test/**`
 

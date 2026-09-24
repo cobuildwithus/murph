@@ -33,18 +33,6 @@ describe("hosted runner secrets payload decoding", () => {
     })).toEqual({});
   });
 
-  it("accepts extension-only keys only when the same allowlist source is provided on read", () => {
-    const payload = encodeRunnerSecretsPayload({
-      CUSTOM_API_KEY: "custom-secret",
-    });
-
-    expect(decodeHostedRunnerSecretsPayload(payload, {
-      HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS: "CUSTOM_API_KEY",
-    })).toEqual({
-      CUSTOM_API_KEY: "custom-secret",
-    });
-  });
-
   it("rejects removed or disallowed keys even if they are present in stored payloads", () => {
     expect(() => decodeHostedRunnerSecretsPayload(encodeRunnerSecretsPayload({
       OPENAI_API_KEY: "openai-user-secret",

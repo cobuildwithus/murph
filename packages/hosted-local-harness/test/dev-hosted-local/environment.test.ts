@@ -1163,12 +1163,6 @@ describe("buildHostedLocalDevOverrides", () => {
     );
   });
 
-  it("preserves an explicit wake fetch proof key override", () => {
-    const overrides = buildHostedLocalDevOverrides(localConfig, {
-    });
-
-  });
-
   it("derives web callback verifier keys from the current local signing key", () => {
     const overrides = buildHostedLocalDevOverrides(localConfig, {
       HOSTED_WEB_CALLBACK_SIGNING_KEY_ID: "callback:v1",
