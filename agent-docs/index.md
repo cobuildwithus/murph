@@ -624,8 +624,15 @@ its active/retained target and namespace-routing proof is owned by the testing C
 
 Provider-search delivery is recorded in
 [`2026-09-15-records-connect-polish.md`](exec-plans/completed/2026-09-15-records-connect-polish.md).
+
 The separate registration activation and composed import proof remain active in
 [`2026-09-16-epic-import-live-verification.md`](exec-plans/active/2026-09-16-epic-import-live-verification.md).
+
+Medical records presentation simplification and responsive interaction proof:
+[`records simplification`](exec-plans/completed/2026-09-25-records-simplify.md).
+
+Further medical records reduction to one contextual action and Manage:
+[`records distillation`](exec-plans/completed/2026-09-25-records-distill.md).
 
 The channel-scoped inactivity pause and local proof are recorded in
 [`2026-09-17-imessage-proactivity-pause.md`](exec-plans/completed/2026-09-17-imessage-proactivity-pause.md).
@@ -775,9 +782,3 @@ are tracked in `exec-plans/completed/2026-09-24-signup-contact-card.md`.
 
 Health-purpose connected-plan follow-ups and legacy suppression are tracked in
 [`health-purpose check-ins`](exec-plans/completed/2026-09-25-health-purpose-checkins.md).
-
-Medical records presentation simplification and responsive interaction proof:
-[`records simplification`](exec-plans/completed/2026-09-25-records-simplify.md).
-
-Further medical records reduction to one contextual action and Manage:
-[`records distillation`](exec-plans/completed/2026-09-25-records-distill.md).
