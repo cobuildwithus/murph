@@ -737,3 +737,8 @@ Junction origin parsing allocation reduction and synthetic equivalence evidence:
 
 Junction admission reuses the provider-only reader with unchanged source fences:
 [`admission parsing cost`](exec-plans/completed/2026-09-24-junction-admission-cost.md).
+Personal Patterns bounded capacity recovery: [`capacity recovery`](exec-plans/completed/2026-09-24-personal-patterns-capacity.md).
+
+Signup-wide native contact-card sharing and daily attempt suppression are owned by
+`operations/imessage-deliverability.md`; implementation and receipt-order proof
+are tracked in `exec-plans/completed/2026-09-24-signup-contact-card.md`.

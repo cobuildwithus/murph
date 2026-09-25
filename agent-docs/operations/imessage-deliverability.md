@@ -2,6 +2,27 @@
 
 Last verified: 2026-08-12
 
+## Automatic contact sharing
+
+After a confirmed delivered iMessage, Web shares the sending line's native
+contact card into the member's current, unsuspended home chat. This covers
+instant text signup, app and website phone welcomes, later channel connections,
+and ordinary direct replies. Invite signup retains its correlated direct/group
+share. A receipt can precede delivery acceptance and home-route materialization;
+the runtime callback checks the exact persisted message/chat delivery receipts
+again after commit. Acceptance alone never authorizes a share.
+
+The existing chat-keyed reservation bounds native attempts to one per rolling
+24 hours, including concurrent receipts and ambiguous provider failures. Recent
+attempts return before provider preflight. An unverified or imaged line card does
+not consume the reservation; subsequent delivered activity can retry after line
+configuration recovers. Explicitly requested vCards keep their 90-second throttle.
+All provider work is post-response and best effort; it never retries or fails the
+original reply. No new scheduler, queue, migration, or runtime protocol is added.
+Email-only accounts wait for a direct iMessage route; native sharing does not work
+over SMS/RCS. Linq cannot confirm handset presentation or contact saving. See the
+[provider contract](https://docs.linqapp.com/channel/imessage/guides/contact-cards/).
+
 ## Purpose
 
 Runtime-owned terminal Linq send failures have one bounded retry through the

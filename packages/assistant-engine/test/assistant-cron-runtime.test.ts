@@ -6488,7 +6488,8 @@ describe('assistant cron runtime orchestration', () => {
     },
     {
       automationId: MURPH_PERSONAL_PATTERNS_UPDATE_AUTOMATION_ID,
-      name: 'Personal Patterns',
+      name: 'Personal Patterns after a prolonged capacity shortage',
+      retryDelayMs: 150 * 60_000,
       occurrenceAt: '2026-04-08T13:00:00.000Z',
     },
     ...[
@@ -6500,6 +6501,7 @@ describe('assistant cron runtime orchestration', () => {
   ])('keeps Flex after a failed managed $name occurrence', async ({
     automationId,
     occurrenceAt,
+    retryDelayMs = 30_000,
   }) => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date(occurrenceAt))
@@ -6571,7 +6573,7 @@ describe('assistant cron runtime orchestration', () => {
     )
 
     cronMocks.canSkipManagedPersonalPatterns.mockClear().mockResolvedValue(true)
-    vi.setSystemTime(new Date(Date.parse(occurrenceAt) + 30_000))
+    vi.setSystemTime(new Date(Date.parse(occurrenceAt) + retryDelayMs))
     const retried = await processDueAssistantCronJobsLocal({
       executionContext,
       limit: 1,

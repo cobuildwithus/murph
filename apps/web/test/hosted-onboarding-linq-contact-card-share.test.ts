@@ -248,7 +248,7 @@ describe("shareMurphHostedLinqNativeContactCardToChat", () => {
       reason: "line_card_has_image",
     });
 
-    expect(prisma.model.findMany).not.toHaveBeenCalled();
+    expect(prisma.model.create).not.toHaveBeenCalled();
     expect(prisma.rows).toHaveLength(0);
     expect(shareSendMocks.shareHostedLinqContactCard).not.toHaveBeenCalled();
   });
@@ -287,7 +287,7 @@ describe("shareMurphHostedLinqNativeContactCardToChat", () => {
     });
 
     expect(shareSendMocks.getHostedLinqContactCard).not.toHaveBeenCalled();
-    expect(prisma.model.findMany).not.toHaveBeenCalled();
+    expect(prisma.model.create).not.toHaveBeenCalled();
     expect(prisma.rows).toHaveLength(0);
     expect(shareSendMocks.shareHostedLinqContactCard).not.toHaveBeenCalled();
   });
@@ -340,7 +340,7 @@ describe("shareMurphHostedLinqNativeContactCardToChat", () => {
       reason: "line_card_unverified",
     });
 
-    expect(prisma.model.findMany).not.toHaveBeenCalled();
+    expect(prisma.model.create).not.toHaveBeenCalled();
     expect(prisma.rows).toHaveLength(0);
     expect(shareSendMocks.shareHostedLinqContactCard).not.toHaveBeenCalled();
   });
@@ -360,7 +360,7 @@ describe("shareMurphHostedLinqNativeContactCardToChat", () => {
       reason: "line_card_unverified",
     });
 
-    expect(prisma.model.findMany).not.toHaveBeenCalled();
+    expect(prisma.model.create).not.toHaveBeenCalled();
     expect(prisma.rows).toHaveLength(0);
     expect(shareSendMocks.shareHostedLinqContactCard).not.toHaveBeenCalled();
   });
@@ -382,10 +382,37 @@ describe("shareMurphHostedLinqNativeContactCardToChat", () => {
       prisma: prisma.client,
     })).resolves.toEqual({ status: "already_shared" });
 
-    expect(shareSendMocks.getHostedLinqContactCard).toHaveBeenCalledWith({
-      phoneNumber: "+15557770000",
-    });
+    expect(shareSendMocks.getHostedLinqContactCard).not.toHaveBeenCalled();
     expect(shareSendMocks.shareHostedLinqContactCard).not.toHaveBeenCalled();
+  });
+
+  it("shares native identity at most once per 24 hours without repeat provider preflight", async () => {
+    const prisma = createContactCardSharePrismaStub();
+    const start = new Date("2026-07-24T12:00:00.000Z");
+    const share = (now: Date) => shareMurphHostedLinqNativeContactCardToChat({
+      chatId: "chat_123", memberId: "member_123", now, prisma: prisma.client,
+    });
+    expect(await share(start)).toEqual({ status: "sent" });
+    expect(await share(new Date(start.getTime() + 90_001))).toEqual({ status: "already_shared" });
+    expect(await share(new Date(start.getTime() + 86_399_999))).toEqual({ status: "already_shared" });
+    expect(shareSendMocks.getHostedLinqChatHandles).toHaveBeenCalledTimes(1);
+    expect(await share(new Date(start.getTime() + 86_400_000))).toEqual({ status: "sent" });
+    expect(shareSendMocks.shareHostedLinqContactCard).toHaveBeenCalledTimes(2);
+  });
+
+  it("reserves one daily native share for concurrent deliveries", async () => {
+    const prisma = createContactCardSharePrismaStub();
+    await reserveHostedLinqContactCardShareAttempt({
+      chatId: "chat_123", memberId: "member_123",
+      now: new Date("2026-07-23T12:00:00.000Z"), prisma: prisma.client,
+    });
+    const outcomes = await Promise.all(Array.from({ length: 3 }, () =>
+      shareMurphHostedLinqNativeContactCardToChat({
+        chatId: "chat_123", memberId: "member_123",
+        now: new Date("2026-07-24T12:00:00.000Z"), prisma: prisma.client,
+      })));
+    expect(outcomes.filter((outcome) => outcome.status === "sent")).toHaveLength(1);
+    expect(shareSendMocks.shareHostedLinqContactCard).toHaveBeenCalledTimes(1);
   });
 
   it("keeps the reservation when the native share fails ambiguously", async () => {
