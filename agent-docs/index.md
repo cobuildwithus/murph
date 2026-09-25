@@ -161,6 +161,12 @@ Empty-source startup batching and Postgres processing summaries are owned by
 owned by `agent-docs/references/hosted-runtime-protocol.md`. Implementation proof:
 [`2026-09-17-runtime-latency-followup.md`](exec-plans/completed/2026-09-17-runtime-latency-followup.md).
 
+Follow-through setup lives in `packages/assistant-engine/skills/behavior-followthrough/SKILL.md`;
+its conditional delivery, reconciliation, and repair rules live in
+`packages/assistant-engine/skills/behavior-followthrough/references/support-runtime.md`.
+Goal-setup latency investigation and focused verification are recorded in
+[`2026-09-24-goal-turn-latency.md`](exec-plans/active/2026-09-24-goal-turn-latency.md).
+
 Runtime authority lock/read consolidation is recorded in
 [`2026-09-20-runtime-latency-delete-work.md`](exec-plans/active/2026-09-20-runtime-latency-delete-work.md).
 

@@ -292,6 +292,89 @@ describe('Codex canonical tool input contract upgrade guard', () => {
     }
   })
 
+  it.skipIf(process.env.MURPH_MEASURE_GOAL_INPUT !== '1').each(['direct', 'group'] as const)(
+    'goal setup: complete first provider input (%s)', { timeout: 180_000 }, async (scope) => {
+      stub ??= await startScriptedResponsesStub()
+      const scenario = await prepareScriptedTurnScenario(stub, temporaryPaths)
+      const tools = resolveMurphDynamicTools({
+        allowFinishWithoutReply: true, automationAvailable: true, personalizationAvailable: true,
+        groupSharedReadAvailable: scope === 'group', responseCardsAvailable: scope === 'direct',
+        imageGenerationAvailable: false, progressUpdatesAvailable: false,
+      })
+      const layers = buildAssistantSystemPromptLayers({
+        assistantCliContract: null, assistantHostedAutomationAvailable: true,
+        assistantHostedGroupToolSurface: scope === 'group' ? 'shared_read' : 'none',
+        channel: 'linq', cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+        conversationScope: scope, currentLocalDate: '2026-09-28',
+        currentInstant: '2026-09-28T08:00:00.000Z', currentTimeZone: 'UTC',
+        hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic',
+        onboardingGuidance: false, ordinaryInboundTurn: true,
+      })
+      const catalog = await writeHostedOpenAiMixedModeModelCatalogJson({
+        codexCommand: scenario.turnInput.codexCommand, directory: scenario.turnInput.codexHome,
+      })
+      const head = [layers.staticCacheableCorePrompt, layers.stableRouteCapabilityPrompt, layers.threadContextPrompt].join('\n\n')
+      // Exact nine eager-text changes from base 55f5518a480f. Skill bodies are
+      // deferred file reads; tools, history, and every other field stay identical.
+      const replacements: readonly (readonly [string, string])[] = [
+        ["For deterministic exact food-label nutrition facts, use food-journal's label database directly.", "Skip this search only when the request is limited to deterministic exact food-label nutrition facts resolved by food-journal's label database; use that database directly."],
+        ['For a new proposal, run `cat "$MURPH_ASSISTANT_SKILLS_ROOT/goal-setup/SKILL.md"` alone first; do not write yet. On acceptance, execute its persist section using the loaded instructions and completed research; do not restart setup. ', ''],
+        ["Immediate acceptance of an unchanged plan is not new health advice: reuse its completed search. ", ""],
+        ["ordinary plans with a chosen or clearly indicated action", "cases where one clearly indicated direct action makes comparison unnecessary"],
+        [
+          "Accepting an invitation to begin setup starts only that conversation. Accepting a concrete final proposal authorizes its named writes under the owner's rules; perform them without asking again.",
+          "Setup acceptance starts the setup conversation only, not activation."
+        ],
+        [
+          "For strength-workout routine planning, saves, and retrieval, read strength-training.",
+          "For routine planning, saves, and retrieval, read strength-training."
+        ],
+        [
+          "daily-activity owns wearable facts, walking breaks, and everyday movement targets;",
+          "daily-activity owns wearable facts;"
+        ],
+        [
+          " Ordinary goal setup with a chosen action belongs to goal-setup.",
+          ""
+        ],
+        [
+          "Use for running, structured walking workouts, cycling, aerobic-base or Zone 2 work, cardio conditioning, low-impact conditioning, cardio around strength or sport, limited-time maintenance, and non-event speed development. Use daily-activity for ordinary walking breaks and everyday movement targets.",
+          "Use for running, walking, cycling, aerobic-base or Zone 2 work, cardio conditioning, low-impact conditioning, cardio around strength or sport, limited-time maintenance, and non-event speed development."
+        ]
+      ]
+      const base = replacements.reduce((text, [after, before]) => text.replaceAll(after, before), head)
+      assert.notEqual(base, head)
+      const measurements = []
+      for (const [phase, developerInstructions] of [['base', base], ['head', head]] as const) {
+        await stopWarmCodexAppServer()
+        stub.markRequestBaseline()
+        stub.captureProviderRequestDiagnostics({ completeInput: true })
+        stub.queue({ text: CONTRACT_CAPTURE_DONE })
+        const result = await executeCodexAppServerTurn({
+          ...scenario.turnInput, model: 'gpt-6-luna', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          dynamicTools: tools, developerInstructions,
+          prompt: [layers.dynamicTurnContextPrompt, 'Help me set a walking goal and plan before lunch.'].join('\n\n'),
+          groupConversation: scope === 'group',
+          env: { ...scenario.turnInput.env, [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: catalog },
+        })
+        assert.equal(result.finalMessage, CONTRACT_CAPTURE_DONE)
+        assert.equal(stub.requestCountSinceBaseline(), 1)
+        const captured = stub.requestSummariesSinceBaseline()[0]?.completeProviderInput
+        assert.ok(captured)
+        const body = readRecord(JSON.parse(captured.json))
+        assert.ok(body)
+        delete body.prompt_cache_key
+        measurements.push({ phase, decodedRequestUtf8Bytes: Buffer.byteLength(JSON.stringify(body)),
+          exclusions: [...new Set([...captured.excludedTransportFields, 'prompt_cache_key'])],
+        })
+      }
+      process.stdout.write('[goal-input-proof] ' + JSON.stringify({ scope, model: 'gpt-6-luna', measurements,
+        tokens: null, tokenLimitation: 'No exact Luna tokenizer configured; scripted usage is not tokenization.',
+        baseline: '55f5518a480f; exact nine eager-text replacements; identical tools and synthetic history',
+      }) + '\n')
+    },
+  )
+
   it.skipIf(process.env.MURPH_MEASURE_UPCOMING_INPUT !== '1').each(['direct', 'group'] as const)(
     'upcoming context: complete first provider input (%s)', { timeout: 180_000 }, async (scope) => {
       stub ??= await startScriptedResponsesStub()

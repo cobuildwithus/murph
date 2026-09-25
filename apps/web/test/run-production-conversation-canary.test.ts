@@ -165,7 +165,7 @@ describe("production conversation canary runner", () => {
       "My name is Robin. I am 32 and a woman.",
     ]);
     expect(mocks.spaceSend.mock.calls[3]?.[0]).toContain("Could you help me set a walking goal");
-    expect(mocks.spaceSend.mock.calls[4]?.[0]).toBe("Yes, that sounds good. Let’s start tomorrow.");
+    expect(mocks.spaceSend.mock.calls[4]?.[0]).toBe("Yes, that sounds good. Let’s start on the next weekday.");
     for (const [prompt] of mocks.spaceSend.mock.calls) {
       expect(prompt).not.toMatch(/exact title|save it now|tell me when|read my saved goals/iu);
     }
