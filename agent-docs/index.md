@@ -27,6 +27,12 @@ Plain contact-name presentation and PR preparation are tracked in
 The [email batch follow-up](exec-plans/completed/2026-09-22-group-report-email-batches.md)
 preserves one naming snapshot across sparse shared-data reads.
 
+Recurring report correction persistence and synthetic verification are tracked in
+[`report format correction`](exec-plans/completed/2026-09-24-report-format-correction.md).
+
+General correction scope and canonical-owner verification are tracked in
+[`durable correction scope`](exec-plans/completed/2026-09-24-durable-correction-scope.md).
+
 Automation database load, daily scheduling, and Flex retry work:
 [`2026-09-21-automation-query-load.md`](exec-plans/completed/2026-09-21-automation-query-load.md).
 
@@ -732,14 +738,13 @@ are tracked in [`2026-09-24-natural-onboarding-canary`](exec-plans/completed/202
 Native turn cancellation and voice continuity proof:
 [`2026-09-24-voice-turn-lifecycle.md`](exec-plans/completed/2026-09-24-voice-turn-lifecycle.md).
 
-Recurring report correction persistence and synthetic verification are tracked in
-[`report format correction`](exec-plans/completed/2026-09-24-report-format-correction.md).
+Junction origin parsing allocation reduction and synthetic equivalence evidence:
+[`origin parsing cost`](exec-plans/completed/2026-09-24-junction-origin-cost.md).
 
+Junction admission reuses the provider-only reader with unchanged source fences:
+[`admission parsing cost`](exec-plans/completed/2026-09-24-junction-admission-cost.md).
 Personal Patterns bounded capacity recovery: [`capacity recovery`](exec-plans/completed/2026-09-24-personal-patterns-capacity.md).
 
 Signup-wide native contact-card sharing and daily attempt suppression are owned by
 `operations/imessage-deliverability.md`; implementation and receipt-order proof
 are tracked in `exec-plans/completed/2026-09-24-signup-contact-card.md`.
-
-General correction scope and canonical-owner verification are tracked in
-[`durable correction scope`](exec-plans/completed/2026-09-24-durable-correction-scope.md).

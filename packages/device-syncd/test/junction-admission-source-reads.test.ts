@@ -148,6 +148,13 @@ test.each(["connected", "disconnected", "unavailable", "new_epoch", "without_rea
       return createJsonResponse({ data: [{
         id: "synthetic-admitted", connectionId: "synthetic-garmin", steps: 321,
       }, {
+        id: "synthetic-alias-admitted", source: { provider_slug: "garmin" }, steps: 123,
+      }, {
+        id: "synthetic-alias-disconnected", connectionId: "synthetic-garmin",
+        source: { provider_slug: "fitbit" }, steps: 456,
+      }, {
+        id: "synthetic-unknown-disconnected", connectionId: "synthetic-unknown", steps: 789,
+      }, {
         id: "synthetic-disconnected", connectionId: "synthetic-fitbit", steps: 654,
       }] });
     }, { summaryResources: ["activity"], timeseriesResources: [] });
@@ -176,6 +183,9 @@ test.each(["connected", "disconnected", "unavailable", "new_epoch", "without_rea
     await pass.executeJob(context, job);
     assert.equal(sourceReads, scenario === "without_reader" ? 0 : 1, "fresh projection and import use one current source read");
     assert.ok(imported[0]?.includes("synthetic-admitted"));
+    assert.ok(imported[0]?.includes("synthetic-alias-admitted"));
+    assert.ok(!imported[0]?.includes("synthetic-alias-disconnected"));
+    assert.equal(imported[0]?.includes("synthetic-unknown-disconnected"), scenario === "without_reader");
     assert.ok(!imported[0]?.includes("synthetic-disconnected"));
     if (scenario === "unavailable") {
       await assert.rejects(pass.executeJob(context, job), (error) => error === failure);
@@ -184,6 +194,9 @@ test.each(["connected", "disconnected", "unavailable", "new_epoch", "without_rea
       await pass.executeJob(context, job);
       assert.equal(imported[1]?.includes("synthetic-admitted"), scenario === "connected" || scenario === "without_reader");
       assert.ok(!imported[1]?.includes("synthetic-disconnected"));
+      assert.equal(imported[1]?.includes("synthetic-alias-admitted"), scenario === "connected" || scenario === "without_reader");
+      assert.ok(!imported[1]?.includes("synthetic-alias-disconnected"));
+      assert.equal(imported[1]?.includes("synthetic-unknown-disconnected"), scenario === "without_reader");
     }
     assert.equal(inventoryReads, 1, "provider inventory can be reused across the pass");
     assert.equal(sourceReads, scenario === "without_reader" ? 0 : 2, "source authority is read again after the next provider fetch");
