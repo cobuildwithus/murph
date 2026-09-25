@@ -1,0 +1,18 @@
+{
+  "publishedOn": "2026-09-25",
+  "order": 100,
+  "item": {
+    "id": "health-purpose-follow-ups",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "More useful follow-ups",
+    "summary": "Calendar plans stay useful context without automatically prompting an attendance check.",
+    "details": "Automatic follow-ups focus on a specific health question. Reminders you explicitly requested are preserved, and older generic check-ins are skipped.",
+    "relevanceTags": [
+      "assistant",
+      "reminders",
+      "journal"
+    ],
+    "sourcePullRequests": []
+  }
+}

@@ -764,3 +764,6 @@ Personal Patterns bounded capacity recovery: [`capacity recovery`](exec-plans/co
 Signup-wide native contact-card sharing and daily attempt suppression are owned by
 `operations/imessage-deliverability.md`; implementation and receipt-order proof
 are tracked in `exec-plans/completed/2026-09-24-signup-contact-card.md`.
+
+Health-purpose connected-plan follow-ups and legacy suppression are tracked in
+[`health-purpose check-ins`](exec-plans/completed/2026-09-25-health-purpose-checkins.md).
