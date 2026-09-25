@@ -3,6 +3,11 @@ in [the import-speed plan](exec-plans/completed/2026-09-24-garmin-import-speed.m
 
 # Murph Agent Docs Index
 
+Completed device polling-hint cleanup and the hourly-preflight investigation are
+recorded in [stale device wakes](exec-plans/completed/2026-09-24-stale-device-wakes.md).
+The runtime mailbox contract remains in
+[`hosted-runtime-protocol.md`](references/hosted-runtime-protocol.md).
+
 [CLI read validation telemetry](exec-plans/completed/2026-09-25-cli-read-validation-telemetry.md)
 records the locally verified implementation; [PR #3707](https://github.com/cobuildwithus/murph/pull/3707)
 owns delivery status. The contract remains in `docs/hosted-runtime-log-database.md`.

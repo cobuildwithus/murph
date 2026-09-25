@@ -3230,7 +3230,14 @@ recorder then publishes cadence, removes the mailbox item, and checkpoints that
 removal in the same runtime admission only for a fresh record whose full
 reconciliation was accepted in that admission, whose normalized retained-job
 set is empty, and whose non-null connection epoch still names the current
-active connection. Yielded wakes are not completion-eligible. Restored records
+active connection. That same conditional mailbox removal also retires pristine,
+already-imported scheduled hints covered by the completed cadence. It reuses
+retained-owner coverage (same connection, member, provider, and connection epoch;
+strictly older cadence and later mailbox sequence) without persisting another
+owner. Webhook and explicit-work barriers remain, and newer requests, manual
+refresh, dirty work, and future or equal cadences are preserved. A changed
+mailbox claim prevents both removals. This does not retire unimported Web rows.
+Yielded wakes are not completion-eligible. Restored records
 return to the full-reconciliation path; epoch-less legacy, replaced, missing,
 or terminal records drain without a cadence write. A cold replacement, whose snapshot
 intentionally excludes the device-sync SQLite store, reconstructs the same
