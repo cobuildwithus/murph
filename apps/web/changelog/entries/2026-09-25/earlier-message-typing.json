@@ -1,0 +1,17 @@
+{
+  "publishedOn": "2026-09-25",
+  "order": 200,
+  "item": {
+    "id": "earlier-message-typing",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Less silence before typing",
+    "summary": "Murph starts the typing indicator sooner after receiving a text message.",
+    "details": "Typing can begin while Murph prepares your reply in private and supported group conversations.",
+    "relevanceTags": [
+      "messaging",
+      "reliability"
+    ],
+    "sourcePullRequests": []
+  }
+}

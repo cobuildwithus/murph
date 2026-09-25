@@ -764,3 +764,7 @@ Personal Patterns bounded capacity recovery: [`capacity recovery`](exec-plans/co
 Signup-wide native contact-card sharing and daily attempt suppression are owned by
 `operations/imessage-deliverability.md`; implementation and receipt-order proof
 are tracked in `exec-plans/completed/2026-09-24-signup-contact-card.md`.
+
+Early Linq text typing reuses the existing staging-to-turn handoff owned by
+`packages/assistant-runtime/README.md`; implementation and synthetic proof are
+tracked in [`warm typing latency`](exec-plans/completed/2026-09-25-warm-typing-latency.md).
