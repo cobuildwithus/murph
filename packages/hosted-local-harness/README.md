@@ -100,8 +100,14 @@ MURPH_DEV_TEMPORAL_WORKER_PACKAGE_DIR=../murph-cloud/packages/hosted-orchestrato
 ```
 
 The setting changes only the package directory passed to `pnpm --dir` for
-`temporal:worker` and `temporal:ensure-device-sync-reconciler-schedule`. The
-Temporal address, namespace, task queue, and signed Web/Cloudflare HTTP
+`temporal:worker`, `temporal:ensure-device-sync-reconciler-schedule`, and
+`temporal:check-reconciliation-compatibility --fixtures <absolute-json-path>`.
+Before stack setup, the last command must parse every synthetic reconciliation
+fixture produced by this checkout using the same parser as the worker, without
+connecting to Temporal or requiring credentials. Missing commands, incompatible
+parsers, and checks exceeding 30 seconds stop startup with an update hint.
+Update the consumer package before adopting this harness contract; disabling
+Temporal skips this check. The Temporal address, namespace, task queue, and signed Web/Cloudflare HTTP
 contracts remain unchanged. The private package is not mirrored into public
 Murph: when the setting is unset or blank, hosted-local fails before starting
 Temporal and points to this variable or `MURPH_DEV_TEMPORAL=disabled`. This
