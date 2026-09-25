@@ -168,7 +168,7 @@ canary threshold, or production credential changes.
 - Outcome: reduce unrelated initial model context while preserving specialist
   actions and ordinary accepted-plan persistence.
 - Reaches: private and group initial tool exposure. Progress, reply targeting,
-  cancellation/recovery, device and personalization tools stay eager. No new
+  cancellation/recovery, device and personalization tools keep their loading policy. No new
   state owner, provider call, model setting, permission, or schema is introduced.
 - Proof: real pinned native complete-input capture, whole-inventory schema guards,
   a real Luna deferred song discovery/attachment journey, and the natural goal
@@ -196,3 +196,26 @@ canary threshold, or production credential changes.
   are unchanged. This prompt-primary change uses the existing completion-review
   exemption; no independent backend/protocol change is introduced. No new public
   speed claim is warranted from input-size evidence alone.
+
+## Deployment fixture follow-up
+
+- PR #3710 merged after 37 exact-head checks passed. The protected runtime run
+  selected its exact merge revision, but the Linq delivery gate failed before
+  deployment: its advertisement helper still expects six newly deferred tools
+  eagerly. Nine other delivery scenarios passed. The runtime was not deployed.
+- Reproduced the mismatch in the focused helper test with the new canonical
+  deferred surface. Replace its copied availability and loading filters with
+  the public canonical resolver, keeping exact advertised names and required
+  deferred discovery assertions. Add negative cases for missing eager tools,
+  accidentally eager deferred tools, and missing discovery metadata.
+- Reuse existing Frog issue #2921 (hosted E2E inventory duplicates deferred tool
+  policy); no duplicate friction entry. This follow-up changes test proof only.
+- A preceding unrelated runtime rollout failed with a Cloudflare API HTTP 500
+  while ensuring device queues, before its Worker deployment step. Do not roll
+  back or weaken deployment gates; observe the normal protected successor run.
+
+- The focused test failed before the helper correction and all 38 cases pass
+  after it. Cloudflare typecheck passes after ordinary Prisma client generation;
+  the first attempt lacked generated client types. Complexity and diff checks
+  pass. Parent review confirms test-only behavior and no weakened exact inventory
+  or discovery assertion. Full protected delivery replay remains pending.
