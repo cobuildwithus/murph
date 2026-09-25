@@ -1016,11 +1016,11 @@ Hosted onboarding extras:
   `HOSTED_LINQ_ALERT_EMAIL_FROM`, and `HOSTED_LINQ_ALERT_EMAILS`. The historical
   Linq-prefixed email names are shared operational configuration; neither path
   sends through or falls back to Linq/iMessage. The latency monitor uses the
-  fixed 30-second product
+  fixed 60-second alert
   boundary for the first accepted user-visible response: either a progress
   update or the final reply. Completed grouped traces count once by their
   shared Linq delivery, and traces for one in-flight provider request count
-  once while unresolved. Progress accepted before 30 seconds suppresses that
+  once while unresolved. Progress accepted before 60 seconds suppresses that
   turn; progress at or after the boundary remains alertable. Fresh conversation
   mailbox rows explicitly stamped by the existing AI usage gate are excluded
   before the bounded scan and grouping only while execution remains blocked;
