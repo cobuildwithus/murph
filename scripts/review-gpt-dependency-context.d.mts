@@ -1,6 +1,7 @@
 export function readReviewGptRegistryInput(lockfile: string): {
   version: string;
   patchPath: string;
+  patchHash: string;
   integrity: string;
 };
 
