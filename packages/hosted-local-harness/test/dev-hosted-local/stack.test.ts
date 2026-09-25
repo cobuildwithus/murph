@@ -300,6 +300,7 @@ const cleanupHostedLocalMinioContainerBestEffort = vi.fn(async () => {});
 const startHostedLocalTemporalRuntime = vi.fn<
   (input: unknown) => Promise<HostedLocalTemporalRuntime | null>
 >(async () => null);
+const preflightHostedLocalTemporalWorker = vi.fn(async () => {});
 const requireHostedLocalTemporalWorkerPackageDir = vi.fn(
   (source: Readonly<Record<string, string | undefined>>): string => {
     const packageDir =
@@ -496,6 +497,10 @@ vi.mock("../../src/dev-hosted-local/linq-webhook-tunnel.ts", () => ({
 vi.mock("../../src/dev-hosted-local/minio.ts", () => ({
   cleanupHostedLocalMinioContainerBestEffort,
   maybeStartHostedLocalMinio,
+}));
+
+vi.mock("../../src/dev-hosted-local/temporal-preflight.ts", () => ({
+  preflightHostedLocalTemporalWorker,
 }));
 
 vi.mock("../../src/dev-hosted-local/temporal.ts", async (importOriginal) => ({
@@ -1236,6 +1241,25 @@ describe("hosted local dev stack", () => {
     expect(spawnStripeListenerWithSecretCapture).not.toHaveBeenCalled();
     expect(resolveHostedLocalLinqWebhookSetup).not.toHaveBeenCalled();
     expect(registerHostedLocalLinqWebhookSubscription).not.toHaveBeenCalled();
+    expect(maybeStartHostedLocalMinio).not.toHaveBeenCalled();
+    expect(startHostedLocalTemporalRuntime).not.toHaveBeenCalled();
+  });
+
+  it("rejects an incompatible Temporal worker before stack side effects", async () => {
+    const configModule = await import("../../src/dev-hosted-local/config.ts");
+    vi.mocked(configModule.resolveHostedLocalDevConfig).mockReturnValueOnce({
+      ...defaultConfig,
+      temporal: { ...defaultConfig.temporal, mode: "managed" },
+    });
+    preflightHostedLocalTemporalWorker.mockRejectedValueOnce(new Error("incompatible parser"));
+    const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
+    await expect(startHostedLocalDevStack({
+      env: { MURPH_DEV_TEMPORAL_WORKER_PACKAGE_DIR: "/synthetic/worker" },
+    })).rejects.toThrow("incompatible parser");
+    expect(runCommand).not.toHaveBeenCalled();
+    expect(spawnChildProcess).not.toHaveBeenCalled();
+    expect(spawnStripeListenerWithSecretCapture).not.toHaveBeenCalled();
+    expect(resolveHostedLocalLinqWebhookSetup).not.toHaveBeenCalled();
     expect(maybeStartHostedLocalMinio).not.toHaveBeenCalled();
     expect(startHostedLocalTemporalRuntime).not.toHaveBeenCalled();
   });
