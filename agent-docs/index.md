@@ -799,4 +799,8 @@ Health-purpose connected-plan follow-ups and legacy suppression are tracked in
 [`health-purpose check-ins`](exec-plans/completed/2026-09-25-health-purpose-checkins.md).
 
 Further removal of duplicate provider routing reads and unchanged-snapshot cleanup
-bookkeeping is tracked in [`runtime latency work removal`](exec-plans/active/2026-09-25-runtime-latency-work-removal.md).
+bookkeeping is tracked in [`runtime latency work removal`](exec-plans/completed/2026-09-25-runtime-latency-work-removal.md).
+
+Web build fonts are bundled locally; source and license provenance is owned by
+`apps/web/README.md` under "Bundled Web fonts". Implementation proof is tracked
+in [`local Web fonts`](exec-plans/completed/2026-09-25-local-web-fonts.md).
