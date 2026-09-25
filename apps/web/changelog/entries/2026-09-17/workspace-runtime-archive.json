@@ -1,0 +1,20 @@
+{
+  "publishedOn": "2026-09-17",
+  "order": 100,
+  "item": {
+    "id": "workspace-runtime-archive",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Complete workspace exports",
+    "summary": "Ask Murph in a private conversation for your complete workspace, including hidden files, runtime records and conversation history.",
+    "details": "The archive preserves your files and folder layout without filtering or changing their contents. The existing approval step still comes before the attachment is sent.",
+    "relevanceTags": [
+      "vault",
+      "exports"
+    ],
+    "sourcePullRequests": [
+      2873,
+      3537
+    ]
+  }
+}

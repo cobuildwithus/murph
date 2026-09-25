@@ -8,7 +8,7 @@ import { stageHostedRunnerRelease } from "../scripts/stage-runner-release.ts";
 let directory: string;
 const primary = { bank: "primary", id: "primary-old", bundleFingerprint: "a".repeat(64), sourceFingerprint: "b".repeat(64) };
 const next = { bank: "next", id: "next-old", bundleFingerprint: "c".repeat(64), sourceFingerprint: "d".repeat(64) };
-const classes = ["RunnerContainer", "NextRunnerContainer", "DeploySmokeRunnerContainer", "StandbyRunnerContainer"];
+const classes = ["RunnerContainer", "NextRunnerContainer", "DeploySmokeRunnerContainer", "StandbyRunnerContainer", "SmallRunnerContainer"];
 const image = `registry.cloudflare.com/${"a".repeat(32)}/synthetic@sha256:${"e".repeat(64)}`;
 const config = {
   name: "synthetic-worker", main: "../src/index.ts",
@@ -51,13 +51,15 @@ describe("runner deployment staging", () => {
       currentVersion: version({ active, candidate: null, previous }),
       listApplications: async (name) => (await listApplications(name)).map((entry) => ({ ...entry,
         max_instances: name.endsWith("-deploysmokerunnercontainer") ? 1
-          : name.endsWith("-standbyrunnercontainer") ? 0 : 324,
+          : name.endsWith("-standbyrunnercontainer") ? 0
+          : name.endsWith("-smallrunnercontainer") ? 10 : 324,
       })),
     });
-    const released: { containers: Array<{ max_instances: number }> } = JSON.parse(
+    const released: { containers: Array<{ class_name: string; max_instances: number }> } = JSON.parse(
       await readFile(staged.promotionConfigPath, "utf8"),
     );
-    expect(released.containers.reduce((total, entry) => total + entry.max_instances, 0)).toBe(749);
+    expect(released.containers.filter(entry => entry.class_name !== "SmallRunnerContainer").reduce((total, entry) => total + entry.max_instances, 0)).toBe(749);
+    expect(released.containers.find(entry => entry.class_name === "SmallRunnerContainer")?.max_instances).toBe(10);
   });
 
   it.each([false, true])("keeps allocation identity while preparing an image in the serving namespace (reversed=%s)", async (reversed) => {
@@ -81,6 +83,59 @@ describe("runner deployment staging", () => {
     expect(promoted).toEqual({ active: prepared.candidate, candidate: null, previous });
     expect(promotion.containers).toEqual(stage.containers);
     expect(staged.applications[0]?.applicationId).toContain("id-");
+  });
+
+  it.each([false, true])("applies zero grace only to updated applications (workerOnly=%s)", async retainServingRunner => {
+    await writeFile(path.join(directory, "source.json"), JSON.stringify({ ...config,
+      containers: config.containers.map(entry => ({ ...entry, rollout_active_grace_period: 0 })),
+    }));
+    const staged = await stageHostedRunnerRelease({ releaseSha: "1".repeat(40),
+      configPath: path.join(directory, "source.json"), currentVersionId: "worker-live",
+      currentVersion: version({ active: primary, candidate: null, previous: next }),
+      retainServingRunner, listApplications,
+    });
+    for (const application of staged.applications) {
+      expect(application.specification.rollout_active_grace_period).toBe(0);
+    }
+    const effective: { containers: Array<{ class_name: string; rollout_active_grace_period: number; image: string }> }
+      = JSON.parse(await readFile(staged.configPath, "utf8"));
+    for (const container of effective.containers) {
+      const updated = staged.applications.some(application => application.className === container.class_name);
+      expect(container.rollout_active_grace_period).toBe(updated ? 0 : 300);
+      expect(container.image).toBe(updated ? image : "registry.example.test/previous@sha256:old");
+    }
+  });
+
+  it.each([false, true])("retains dormant native resources without image admission (workerOnly=%s)", async workerOnly => {
+    const retainedImage = `registry.example.test/retained@sha256:${"2".repeat(64)}`;
+    const staged = await stageHostedRunnerRelease({ releaseSha: "1".repeat(40),
+      configPath: path.join(directory, "source.json"), currentVersionId: "worker-live",
+      currentVersion: version(), retainServingRunner: workerOnly,
+      listApplications: async name => (await listApplications(name)).map(app =>
+        name.endsWith("-smallrunnercontainer") ? { ...app, max_instances: 7,
+          configuration: { image: retainedImage, vcpu: 1, memory_mib: 3072, disk: { size_mb: 6000 } },
+        } : app),
+    });
+    expect(staged.applications.map(app => app.className)).not.toContain("SmallRunnerContainer");
+    expect(staged.retirements.map(app => app.name)).not.toContain("synthetic-worker-smallrunnercontainer");
+    for (const configPath of [staged.configPath, staged.promotionConfigPath]) {
+      const rendered: { containers: Array<{ class_name: string }> } = JSON.parse(await readFile(configPath, "utf8"));
+      expect(rendered.containers.find(app => app.class_name === "SmallRunnerContainer")).toMatchObject({
+        image: retainedImage, instance_type: { vcpu: 1, memory_mib: 3072, disk_mb: 6000 },
+        max_instances: 7, constraints: { regions: ["ENAM"] }, rollout_active_grace_period: 300,
+      });
+    }
+  });
+
+  it("does not provision a missing dormant application", async () => {
+    const staged = await stageHostedRunnerRelease({ releaseSha: "1".repeat(40),
+      configPath: path.join(directory, "source.json"), currentVersionId: "worker-live",
+      currentVersion: version(), listApplications: async name =>
+        name.endsWith("-smallrunnercontainer") ? [] : listApplications(name),
+    });
+    const rendered: { containers: Array<{ class_name: string }> } = JSON.parse(await readFile(staged.configPath, "utf8"));
+    expect(rendered.containers.map(app => app.class_name)).not.toContain("SmallRunnerContainer");
+    expect(staged.applications.map(app => app.className)).not.toContain("SmallRunnerContainer");
   });
 
   it("bootstraps from the existing Worker fingerprint without changing its release identity", async () => {
@@ -111,6 +166,18 @@ describe("runner deployment staging", () => {
     expect(second.deployment).toEqual(first.deployment);
     await writeFile(path.join(directory, "source.json"), JSON.stringify({ ...config, vars: { ...config.vars, HOSTED_EXECUTION_RUNNER_SOURCE_FINGERPRINT: "a".repeat(64) } }));
     await expect(stageHostedRunnerRelease({ releaseSha: "1".repeat(40), configPath: path.join(directory, "source.json"), currentVersionId: "staged-worker", currentVersion: version(first.deployment), listApplications })).rejects.toThrow("different candidate");
+  });
+
+  it("rejects a grace-only change to a pending candidate while allowing an exact retry", async () => {
+    const input = { releaseSha: "1".repeat(40), configPath: path.join(directory, "source.json"),
+      currentVersionId: "worker-live", currentVersion: version(), listApplications };
+    const first = await stageHostedRunnerRelease(input);
+    const retry = { ...input, currentVersionId: "staged-worker", currentVersion: version(first.deployment) };
+    expect((await stageHostedRunnerRelease(retry)).deployment).toEqual(first.deployment);
+    await writeFile(input.configPath, JSON.stringify({ ...config,
+      containers: config.containers.map(entry => ({ ...entry, rollout_active_grace_period: 0 })),
+    }));
+    await expect(stageHostedRunnerRelease(retry)).rejects.toThrow("different candidate");
   });
 
   it("reuses already admitted pending inventory after an interrupted staging smoke", async () => {

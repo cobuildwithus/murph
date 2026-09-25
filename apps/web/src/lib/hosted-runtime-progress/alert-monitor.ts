@@ -15,6 +15,9 @@ import {
 } from "../hosted-operational-alert/incident-email-monitor";
 import {
   readHostedRuntimeLatencyAlertConfig,
+  readHostedRuntimeCheckpointPublicationExpectedBy,
+  readHostedRuntimeTerminalNonReplyCommittedAt,
+  readHostedRuntimeTerminalReplyCommittedAt,
 } from "../hosted-runtime-latency/alert-monitor";
 import { getPrisma } from "../prisma";
 
@@ -45,6 +48,8 @@ type HostedRuntimeProgressPrismaClient =
   & HostedOperationalAlertPrismaClient;
 
 export interface HostedRuntimeProgressHealthRow {
+  checkpointEvidence: unknown;
+  deliveryAcceptedAt: Date | null;
   chronologyInvalid: boolean;
   durableHighWaterSeq: bigint;
   effectiveConsumedSeq: bigint;
@@ -480,6 +485,16 @@ async function readHostedRuntimeProgressCandidatePage(input: {
     progress_evidence AS (
       SELECT
         workspace_evidence.*,
+        CASE WHEN delivery.status IN ('accepted', 'delivered', 'sent_no_receipt_expected')
+          THEN delivery.accepted_at ELSE NULL END AS delivery_accepted_at,
+        jsonb_build_object('assistant', jsonb_build_object(
+          'checkpointPublicationExpectedByEpochMs',
+            trace.phase_breakdown_json -> 'assistant' -> 'checkpointPublicationExpectedByEpochMs',
+          'terminalReplyCommittedAtEpochMs',
+            trace.phase_breakdown_json -> 'assistant' -> 'terminalReplyCommittedAtEpochMs',
+          'terminalNonReplyCommittedAtEpochMs',
+            trace.phase_breakdown_json -> 'assistant' -> 'terminalNonReplyCommittedAtEpochMs'
+        )) AS checkpoint_evidence,
         evidence.first_post_denial_at,
         COALESCE(evidence.has_future_evidence, FALSE) AS has_future_evidence,
         COALESCE(
@@ -522,6 +537,8 @@ async function readHostedRuntimeProgressCandidatePage(input: {
     progress_lane AS (
       SELECT
         progress_evidence.user_id,
+        progress_evidence.delivery_accepted_at,
+        progress_evidence.checkpoint_evidence,
         progress_evidence.durable_high_water_seq,
         progress_evidence.effective_consumed_seq,
         progress_evidence.head_kind,
@@ -569,6 +586,8 @@ async function readHostedRuntimeProgressCandidatePage(input: {
       FROM progress_evidence
     )
     SELECT
+      progress_lane.checkpoint_evidence AS "checkpointEvidence",
+      progress_lane.delivery_accepted_at AS "deliveryAcceptedAt",
       progress_lane.chronology_invalid AS "chronologyInvalid",
       progress_lane.durable_high_water_seq AS "durableHighWaterSeq",
       progress_lane.effective_consumed_seq AS "effectiveConsumedSeq",
@@ -755,10 +774,28 @@ function classifyHostedRuntimeProgressRow(
   ) {
     return "invalid";
   }
+  if (row.lane === "conversation" && isConversationAwaitingCheckpoint(row, now)) {
+    return "fresh";
+  }
   return now.getTime() - progressOriginAtMs
       >= HOSTED_RUNTIME_PROGRESS_STALL_THRESHOLD_MS
     ? "stalled"
     : "fresh";
+}
+
+function isConversationAwaitingCheckpoint(
+  row: HostedRuntimeProgressHealthRow,
+  now: Date,
+): boolean {
+  const expectedBy = readHostedRuntimeCheckpointPublicationExpectedBy(row.checkpointEvidence);
+  const completedAt = row.deliveryAcceptedAt
+    ?? readHostedRuntimeTerminalReplyCommittedAt(row.checkpointEvidence)
+    ?? readHostedRuntimeTerminalNonReplyCommittedAt(row.checkpointEvidence);
+  return expectedBy !== null && completedAt !== null
+    && completedAt.getTime() >= row.progressOriginAt.getTime()
+    && completedAt.getTime() <= now.getTime()
+    && expectedBy.getTime() >= completedAt.getTime()
+    && now.getTime() <= expectedBy.getTime();
 }
 
 function buildHostedRuntimeProgressAlertDetails(input: {

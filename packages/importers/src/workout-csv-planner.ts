@@ -496,6 +496,49 @@ function normalizeSetType(value: string | undefined, detectedSource: WorkoutCsvS
   return "normal";
 }
 
+function buildWorkoutSet(input: {
+  detectedSource: WorkoutCsvSource | null;
+  rawSetOrder?: string;
+  rawSetType?: string;
+  warmup?: string;
+  dropset?: string;
+  failure?: string;
+  appendOrder: number;
+  values: Readonly<Omit<WorkoutSet, "order" | "type">>;
+}): WorkoutSet | undefined {
+  let type = normalizeSetType(input.rawSetType, input.detectedSource);
+  if (input.detectedSource === "strong") {
+    type = normalizeSetType(input.rawSetOrder, input.detectedSource);
+  } else if (type === "normal") {
+    if (parseBooleanLike(input.warmup)) {
+      type = "warmup";
+    } else if (parseBooleanLike(input.dropset)) {
+      type = "dropset";
+    } else if (parseBooleanLike(input.failure)) {
+      type = "failure";
+    }
+  }
+  const requestedOrder = input.detectedSource === "strong"
+    ? undefined
+    : parseNonnegativeInteger(input.rawSetOrder);
+  const setValues: Omit<WorkoutSet, "order" | "type"> = {
+    ...input.values,
+    weight: input.values.weight === 0 ? undefined : input.values.weight,
+    weightUnit: input.values.weight ? input.values.weightUnit : undefined,
+  };
+  for (const key of Object.keys(setValues) as (keyof typeof setValues)[]) {
+    if (setValues[key] === undefined) delete setValues[key];
+  }
+  if (Object.keys(setValues).length === 0) {
+    return undefined;
+  }
+  return {
+    order: requestedOrder && requestedOrder > 0 ? requestedOrder : input.appendOrder,
+    type,
+    ...setValues,
+  };
+}
+
 function sourceTimestampDomain(rawTimestamp: string): "instant" | "wall" {
   const trimmed = rawTimestamp.trim();
   return /^(?:[+-]?\d{10}|[+-]?\d{13})$/u.test(trimmed)
@@ -565,6 +608,45 @@ function resolveExerciseMode(exercise: WorkoutCsvSessionExercise): WorkoutSessio
   if (hasDistance && hasDuration) return "cardio";
   if (hasDuration && !hasLoadOrReps) return "duration";
   return "weight_reps";
+}
+
+function projectWorkoutSession(
+  session: Readonly<MutableWorkoutCsvSession>,
+  source: WorkoutCsvSource,
+): PlannedWorkoutCsvSession {
+  const endedAt = session.endedAt
+    ?? (session.durationMinutes
+      ? new Date(new Date(session.occurredAt).getTime() + session.durationMinutes * 60_000).toISOString()
+      : undefined);
+  const exercises = session.exercises
+    .filter((exercise) => exercise.sets.length > 0)
+    .map((exercise) => {
+      const unitOverride = exercise.sets.find((set) => set.weightUnit)?.weightUnit;
+      return {
+        ...exercise,
+        mode: resolveExerciseMode(exercise),
+        ...(unitOverride ? { unitOverride } : {}),
+      };
+    });
+  return {
+    sourceSessionKey: session.sourceSessionKey,
+    ...(session.sourceEndTimeKey ? { sourceEndTimeKey: session.sourceEndTimeKey } : {}),
+    sourceWorkoutId: session.sourceWorkoutId,
+    occurredAt: session.occurredAt,
+    title: session.title,
+    ...(session.durationMinutes ? { durationMinutes: session.durationMinutes } : {}),
+    ...(session.distanceKm ? { distanceKm: session.distanceKm } : {}),
+    ...(session.note ? { note: session.note } : {}),
+    workout: {
+      sourceApp: source,
+      sourceWorkoutId: session.sourceWorkoutId,
+      startedAt: session.occurredAt,
+      ...(endedAt ? { endedAt } : {}),
+      routineName: session.title,
+      ...(session.note ? { sessionNote: session.note } : {}),
+      exercises,
+    },
+  };
 }
 
 function toWarnings(input: {
@@ -860,79 +942,32 @@ function buildSessions(input: {
     exercise.groupId = exercise.groupId ?? valueAt(row, groupIndex);
     exercise.note = exercise.note ?? valueAt(row, exerciseNoteIndex);
 
-    const normalizedGenericType = normalizeSetType(valueAt(row, setTypeIndex), input.detectedSource);
-    const type = input.detectedSource === "strong"
-      ? normalizeSetType(rawSetOrder, input.detectedSource)
-      : normalizedGenericType !== "normal"
-        ? normalizedGenericType
-        : parseBooleanLike(valueAt(row, warmupIndex))
-          ? "warmup"
-          : parseBooleanLike(valueAt(row, dropsetIndex))
-            ? "dropset"
-            : parseBooleanLike(valueAt(row, failureIndex))
-              ? "failure"
-              : "normal";
-    const requestedOrder = input.detectedSource === "strong"
-      ? undefined
-      : parseNonnegativeInteger(rawSetOrder);
-    const setValues: Omit<WorkoutSet, "order" | "type"> = {
-      reps,
-      weight: weight === 0 ? undefined : weight,
-      weightUnit: weight ? weightMetadata.unit : undefined,
-      durationSeconds,
-      distanceMeters,
-      rpe,
-      bodyweightKg,
-      assistanceKg,
-      addedWeightKg,
-    };
-    for (const key of Object.keys(setValues) as (keyof typeof setValues)[]) {
-      if (setValues[key] === undefined) delete setValues[key];
-    }
-    if (Object.keys(setValues).length > 0) {
-      exercise.sets.push({
-        order: requestedOrder && requestedOrder > 0 ? requestedOrder : exercise.sets.length + 1,
-        type,
-        ...setValues,
-      });
+    const set = buildWorkoutSet({
+      detectedSource: input.detectedSource,
+      rawSetOrder,
+      rawSetType: valueAt(row, setTypeIndex),
+      warmup: valueAt(row, warmupIndex),
+      dropset: valueAt(row, dropsetIndex),
+      failure: valueAt(row, failureIndex),
+      appendOrder: exercise.sets.length + 1,
+      values: {
+        reps,
+        weight,
+        weightUnit: weightMetadata.unit,
+        durationSeconds,
+        distanceMeters,
+        rpe,
+        bodyweightKg,
+        assistanceKg,
+        addedWeightKg,
+      },
+    });
+    if (set) {
+      exercise.sets.push(set);
     }
   }
 
-  const planned = [...sessions.values()].map((session): PlannedWorkoutCsvSession => {
-    const endedAt = session.endedAt
-      ?? (session.durationMinutes
-        ? new Date(new Date(session.occurredAt).getTime() + session.durationMinutes * 60_000).toISOString()
-        : undefined);
-    const exercises = session.exercises
-      .filter((exercise) => exercise.sets.length > 0)
-      .map((exercise) => {
-        const unitOverride = exercise.sets.find((set) => set.weightUnit)?.weightUnit;
-        return {
-          ...exercise,
-          mode: resolveExerciseMode(exercise),
-          ...(unitOverride ? { unitOverride } : {}),
-        };
-      });
-    return {
-      sourceSessionKey: session.sourceSessionKey,
-      ...(session.sourceEndTimeKey ? { sourceEndTimeKey: session.sourceEndTimeKey } : {}),
-      sourceWorkoutId: session.sourceWorkoutId,
-      occurredAt: session.occurredAt,
-      title: session.title,
-      ...(session.durationMinutes ? { durationMinutes: session.durationMinutes } : {}),
-      ...(session.distanceKm ? { distanceKm: session.distanceKm } : {}),
-      ...(session.note ? { note: session.note } : {}),
-      workout: {
-        sourceApp: input.source,
-        sourceWorkoutId: session.sourceWorkoutId,
-        startedAt: session.occurredAt,
-        ...(endedAt ? { endedAt } : {}),
-        routineName: session.title,
-        ...(session.note ? { sessionNote: session.note } : {}),
-        exercises,
-      },
-    };
-  });
+  const planned = [...sessions.values()].map((session) => projectWorkoutSession(session, input.source));
 
   return {
     sessions: planned,

@@ -1,4 +1,7 @@
+import { parseHostedRuntimeUsageRecordResponse } from "@murphai/hosted-execution/parsers";
+import { authorizePostgresRuntimeProvider } from "./runtime-provider-authorization.ts";
 import { Buffer } from "node:buffer";
+import { waitUntil } from "cloudflare:workers";
 
 import {
   buildExaResearchScoutBatchLaneRequest,
@@ -19,7 +22,6 @@ import {
   type HostedExecutionStructuredLogDetails,
 } from "@murphai/hosted-execution";
 import {
-  buildHostedCodexMemoryUsageRecord,
   buildHostedElevenLabsMusicUsageRecord,
   buildHostedElevenLabsTtsUsageRecord,
   buildHostedGeminiVideoAnalysisUsageRecord,
@@ -28,15 +30,11 @@ import {
   type AssistantUsageRecord,
 } from "@murphai/hosted-execution/assistant-usage";
 import {
-  resolveHostedAiUsageTokenPricingBasis,
   type HostedRuntimeUsageRecordResponse,
 } from "@murphai/hosted-execution/runtime-control";
 
 import { readHostedExecutionEnvironment } from "./env.ts";
 import { asWorkerStringEnvironment } from "./worker-contracts.ts";
-import {
-  recordHostedRuntimeUsageRecord,
-} from "./runtime-platform/usage-record-port.ts";
 
 import {
   CLOUDFLARE_HOSTED_CONTAINER_FATAL_PATH,
@@ -60,9 +58,7 @@ import {
   HOSTED_RUNNER_WEB_CONTROL_ROUTES,
 } from "./runner-outbound/shared-web-control-policy.ts";
 import {
-  applyRunnerRuntimeUsageSettlement,
-  requireRunnerRuntimeWriteFence,
-  RunnerRuntimeWriteFenceError,
+  writeRunnerRuntimeWriteFenceHeaders,
 } from "./runner-outbound/write-fence.ts";
 import type {
   RunnerOutboundEnvironmentSource,
@@ -75,9 +71,6 @@ import {
   HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER,
   HOSTED_RUNNER_BOUND_USER_ID_HEADER,
 } from "./runner-outbound/headers.ts";
-export {
-  HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
-} from "./runner-injected-credential.ts";
 import {
   HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
 } from "./runner-injected-credential.ts";
@@ -102,23 +95,12 @@ import {
   buildHostedCustomInferenceUpstreamRequestBody,
   injectHostedCustomInferenceAuth,
 } from "./runner-egress-custom-inference.ts";
-import {
-  HOSTED_CODEX_MEMORY_MAX_MESSAGE_BYTES,
-  hasHostedCodexMemoryBillableUsage,
-  parseHostedCodexMemoryTerminalResponse,
-  parseHostedCodexMemoryRequestMetadata,
-  readHostedCodexNativeMemoryKind,
-  type HostedCodexMemoryProviderRequestOutcome,
-  type HostedCodexMemoryRequestMetadata,
-  type HostedCodexMemoryUsage,
-  type HostedCodexNativeMemoryKind,
-} from "./runner-egress-codex-memory.ts";
-import {
-  relayHostedOpenAiResponsesWebSocketUpgrade,
-  type HostedCodexMemoryWebSocketCompletion,
-  type HostedOpenAiWebSocketFailurePhase,
-} from "./runner-egress-openai-responses-websocket.ts";
 import { readHostedOpenAiImageRequest } from "./runner-egress-openai-image-request.ts";
+import {
+  HOSTED_OPENAI_LIVE_PATH, HOSTED_OPENAI_LIVE_BODY_LIMIT,
+  readHostedLiveAttachReference, isHostedLiveCreationBody,
+  createHostedLiveSessionReference, authorizeHostedLiveAttachment,
+} from "./runner-egress-openai-live.ts";
 import {
   DEFAULT_ELEVENLABS_API_BASE_URL,
   HOSTED_ELEVENLABS_MAX_BODY_BYTES,
@@ -149,15 +131,15 @@ import {
 } from "./runner-egress-venice.ts";
 import {
   buildHostedOpenAiCacheDiagnostic,
-  readHostedResponsesRequestModelKind,
-  readVeniceDiagnosticModelKind,
   type HostedOpenAiCacheDiagnosticEndpointKind,
-  type HostedResponsesDiagnosticProviderKind,
   type HostedRunnerDiagnosticJson,
 } from "./runner-egress-responses-diagnostics.ts";
 import {
   readDeployLiveModelTurnSmokeOpenAiModel,
 } from "./deploy-smoke-live-model.ts";
+export {
+  HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
+} from "./runner-injected-credential.ts";
 
 type HostedRunnerOutboundHandler = (
   request: Request,
@@ -173,6 +155,7 @@ const HOSTED_RUNTIME_AUTHORITY_HEADER_NAMES = [
 
 const DEFAULT_LINQ_API_BASE_URL = "https://api.linqapp.com/api/partner/v3";
 const DEFAULT_OPENAI_API_BASE_URL = "https://api.openai.com";
+const HOSTED_OPENAI_RESPONSES_MAX_BODY_BYTES = 32 * 1024 * 1024;
 const OPENAI_AUTHORIZATION_ALERT_SINGLETON_NAME = "production";
 const OPENAI_AUTHORIZATION_ALERT_REPORT_FAILURE_CODE =
   "openai_authorization_alert_report_failed";
@@ -321,38 +304,16 @@ type HostedProviderEgressValidationMode =
   | "missing_identity"
   | "provider_egress_credential"
   | "provider_egress_token";
-const HOSTED_PROVIDER_EGRESS_TOKEN_REJECT_REASONS = [
-  "missing_provider_egress_token",
-  "missing_runner_state",
-  "missing_write_fence",
-  "provider_egress_token_mismatch",
-  "write_fence_mismatch",
-] as const;
-const HOSTED_PROVIDER_EGRESS_CREDENTIAL_REJECT_REASONS = [
-  "missing_runner_state",
-  "missing_write_fence",
-  "provider_egress_not_allowed",
-  "runner_container_mismatch",
-  "write_fence_mismatch",
-] as const;
-type HostedProviderEgressTokenRejectReason =
-  typeof HOSTED_PROVIDER_EGRESS_TOKEN_REJECT_REASONS[number];
-type HostedProviderEgressCredentialRejectReason =
-  typeof HOSTED_PROVIDER_EGRESS_CREDENTIAL_REJECT_REASONS[number];
 type HostedProviderEgressRejectReason =
-  | HostedProviderEgressCredentialRejectReason
-  | HostedProviderEgressTokenRejectReason
+  | "write_fence_mismatch"
   | "bound_user_missing"
   | "exact_write_fence_rejected"
   | "provider_egress_credential_invalid"
   | "provider_egress_credential_provider_mismatch"
-  | "provider_egress_credential_rejected"
   | "provider_egress_credential_signature_mismatch"
   | "provider_egress_credential_validation_error"
   | "provider_egress_token_missing"
-  | "provider_egress_token_rejected"
-  | "provider_egress_token_validation_error"
-  | "validation_rpc_missing";
+  | "usage_settlement_pending";
 
 interface HostedProviderEgressAuthorization {
   authorized: boolean;
@@ -1126,34 +1087,14 @@ async function recordHostedDirectRuntimeUsage(input: {
   record: AssistantUsageRecord;
   writeFence: HostedProviderEgressWriteFenceMetadata;
 }): Promise<HostedRuntimeUsageRecordResponse> {
-  let settlement: HostedRuntimeUsageRecordResponse | null = null;
-  try {
-    const environment = readHostedExecutionEnvironment(asWorkerStringEnvironment(input.env));
-    settlement = await recordHostedRuntimeUsageRecord({
-      boundUserId: input.writeFence.userId,
-      fetchImpl: fetch,
-      record: input.record,
-      timeoutMs: environment.webControlTimeoutMs,
-      transport: {
-        callbackSigning: environment.webCallbackSigning,
-        mode: "direct",
-        webControlBaseUrl: environment.hostedWebBaseUrl,
-        workspaceCheckpointBridge: null,
-      },
-    });
-    return settlement;
-  } finally {
-    await applyRunnerRuntimeUsageSettlement({
-      env: input.env,
-      settlement,
-      userId: input.writeFence.userId,
-      writeAuthority: {
-        attemptId: input.writeFence.attemptId,
-        generation: input.writeFence.leaseGeneration,
-        workspaceVersion: input.writeFence.workspaceVersion,
-      },
-    });
-  }
+  const headers = new Headers({ "content-type": "application/json" });
+  if (!input.writeFence.workspaceVersion) throw new Error("Runtime usage workspace identity is missing.");
+  writeRunnerRuntimeWriteFenceHeaders(headers, { attemptId: input.writeFence.attemptId, leaseGeneration: input.writeFence.leaseGeneration, workspaceVersion: input.writeFence.workspaceVersion });
+  const response = await handleRunnerOutboundRequest(new Request(`${CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.webControlPlane}${HOSTED_RUNNER_WEB_CONTROL_ROUTES.usageRecording.path}`, {
+    method: "POST", headers, body: JSON.stringify({ usage: input.record }),
+  }), input.env, input.writeFence.userId);
+  if (!response.ok) throw new Error(`Runtime usage recording returned HTTP ${response.status}.`);
+  return parseHostedRuntimeUsageRecordResponse(await response.json());
 }
 
 function requireHostedDirectUsageWriteFence(
@@ -1450,24 +1391,21 @@ function reportOpenAiAuthorizationFailureSafely(input: {
 }
 
 async function readHostedOpenAiRequestBody(input: {
-  nativeMemory: boolean;
   pathnameSuffix: string;
   request: Request;
 }): Promise<Response | {
   boundedBody: ArrayBuffer | undefined;
   imageGenerationRequested: boolean;
-  memoryRequestMetadata: HostedCodexMemoryRequestMetadata | null;
 }> {
   let boundedBody: ArrayBuffer | undefined;
   let imageGenerationRequested = false;
-  let memoryRequestMetadata: HostedCodexMemoryRequestMetadata | null = null;
   if (
     input.request.method === "POST"
     && input.pathnameSuffix === "/v1/responses"
   ) {
     const body = await readBoundedRequestBody(
       input.request,
-      HOSTED_CODEX_MEMORY_MAX_MESSAGE_BYTES,
+      HOSTED_OPENAI_RESPONSES_MAX_BODY_BYTES,
     );
     if (body === null) {
       return new Response("Payload Too Large", { status: 413 });
@@ -1477,12 +1415,6 @@ async function readHostedOpenAiRequestBody(input: {
       return new Response("Invalid Responses request.", { status: 400 });
     }
     imageGenerationRequested = imageRequest === "image";
-    if (input.nativeMemory) {
-      memoryRequestMetadata = parseHostedCodexMemoryRequestMetadata(body);
-      if (!memoryRequestMetadata) {
-        return new Response("Invalid Codex memory request.", { status: 400 });
-      }
-    }
     boundedBody = body;
   } else if (
     input.request.method === "POST"
@@ -1498,7 +1430,7 @@ async function readHostedOpenAiRequestBody(input: {
     boundedBody = body;
   }
 
-  return { boundedBody, imageGenerationRequested, memoryRequestMetadata };
+  return { boundedBody, imageGenerationRequested };
 }
 
 async function maybeHandleOpenAiRequest(input: {
@@ -1518,6 +1450,9 @@ async function maybeHandleOpenAiRequest(input: {
     return null;
   }
   const { pathnameSuffix } = pathMatch;
+  const liveReference = readHostedLiveAttachReference(pathnameSuffix);
+  if (liveReference) return handleHostedLiveAttachment({ ...input, pathMatch, reference: liveReference });
+  if (pathnameSuffix === HOSTED_OPENAI_LIVE_PATH) return handleHostedLiveCreation({ ...input, pathMatch });
   if (!isAllowedOpenAiRequest(input.request, pathnameSuffix)) {
     return disallowedProviderEgress();
   }
@@ -1545,24 +1480,20 @@ async function maybeHandleOpenAiRequest(input: {
     });
   }
 
-  const nativeMemoryKind = authorization.platformAiUsageAllowed !== false
-    ? readHostedCodexNativeMemoryKind(input.request.headers)
-    : null;
   const token = readRequiredInterceptSecret(input.env.OPENAI_API_KEY, "OPENAI_API_KEY");
   const headers = stripHostedProviderUpstreamHeaders(input.request.headers);
   headers.set("authorization", "Bearer " + token);
   const bodyRead = await readHostedOpenAiRequestBody({
-    nativeMemory: nativeMemoryKind !== null,
     pathnameSuffix,
     request: input.request,
   });
   if (bodyRead instanceof Response) return bodyRead;
-  const { boundedBody, imageGenerationRequested, memoryRequestMetadata } = bodyRead;
+  const { boundedBody, imageGenerationRequested } = bodyRead;
 
-  if (imageGenerationRequested || pathnameSuffix === "/v1/images/generations" || pathnameSuffix === "/v1/images/edits") {
-    const denied = await checkHostedImageGenerationAccess({ authorization, env: input.env });
-    if (denied) return denied;
-  }
+  const imageDenied = await checkHostedOpenAiImageRequestAccess({
+    request: input.request, env: input.env, authorization, pathnameSuffix, imageGenerationRequested,
+  });
+  if (imageDenied) return imageDenied;
 
   const upstreamRequest = await createHostedRunnerUpstreamRequest(
     input.request,
@@ -1613,69 +1544,103 @@ async function maybeHandleOpenAiRequest(input: {
     await diagnosticPromise;
   }
 
-  if (
-    input.request.method === "GET"
-    && pathnameSuffix === "/v1/responses"
-  ) {
-    return relayHostedOpenAiResponsesWebSocketUpgrade({
-      authorizeClientFrame: async (data) => {
-        const imageRequest = readHostedOpenAiImageRequest(data);
-        if (imageRequest === "invalid") {
-          return Response.json({ error: {
-            code: "MURPH_RESPONSES_REQUEST_INVALID",
-            message: "Invalid Responses request.",
-          } }, { status: 400 });
-        }
-        return imageRequest === "image"
-          ? await checkHostedImageGenerationAccess({ authorization, env: input.env })
-          : null;
-      },
-      ...(typeof input.ctx?.waitUntil === "function"
-        ? {
-            defer: (promise) => {
-              input.ctx?.waitUntil?.(promise);
-            },
-          }
-        : {}),
-      ...(nativeMemoryKind
-        ? {
-            persistUsage: async (completion: HostedCodexMemoryWebSocketCompletion) => {
-              await recordHostedCodexMemoryUsage({
-                apiKeyEnv: "OPENAI_API_KEY",
-                authorization,
-                baseUrl: DEFAULT_OPENAI_API_BASE_URL + "/v1",
-                env: input.env,
-                providerName: "hosted-openai",
-                providerRequestOutcome: completion.providerRequestOutcome,
-                requestMetadata: completion.requestMetadata,
-                usage: completion.usage,
-              });
-            },
-            reportFailure: ({ phase }: { phase: HostedOpenAiWebSocketFailurePhase }) => {
-              reportHostedCodexMemoryUsageFailure({
-                memoryKind: nativeMemoryKind,
-                providerName: "hosted-openai",
-                reason: "websocket_" + phase,
-              });
-            },
-          }
-        : {}),
-      upstreamResponse: response,
-    });
-  }
+  // Return upgrades unaccepted: Cloudflare owns the byte forwarding and
+  // native Codex owns connection reuse/recovery. Accepting here would couple
+  // every subsequent frame to this Worker invocation's JavaScript lifetime.
+  return response;
+}
 
-  return memoryRequestMetadata && nativeMemoryKind
-    ? await handleHostedCodexMemoryUsageResponse({
-        apiKeyEnv: "OPENAI_API_KEY",
-        authorization,
-        baseUrl: DEFAULT_OPENAI_API_BASE_URL + "/v1",
-        env: input.env,
-        memoryKind: nativeMemoryKind,
-        providerName: "hosted-openai",
-        requestMetadata: memoryRequestMetadata,
-        response,
-      })
-    : response;
+async function checkHostedOpenAiImageRequestAccess(input: {
+  request: Request; env: RunnerOutboundEnvironmentSource; authorization: HostedProviderEgressAuthorization;
+  pathnameSuffix: string; imageGenerationRequested: boolean;
+}): Promise<Response | null> {
+  // An opaque Responses socket cannot inspect later image-tool requests.
+  if (input.request.method === "GET" && input.pathnameSuffix === "/v1/responses") {
+    const denied = await checkHostedImageGenerationAccess(input);
+    return denied ? new Response("Use HTTPS Responses for this account.", { status: 426 }) : null;
+  }
+  if (input.imageGenerationRequested || input.pathnameSuffix === "/v1/images/generations" || input.pathnameSuffix === "/v1/images/edits") {
+    return checkHostedImageGenerationAccess(input);
+  }
+  return null;
+}
+
+async function handleHostedLiveCreation(input: {
+  request: Request; url: URL; pathMatch: ProviderPathMatch; env: RunnerOutboundEnvironmentSource;
+  upstreamFetchImpl?: typeof fetch; userId: string | null; ctx?: HostedRunnerOutboundContext;
+}): Promise<Response> {
+  if (input.request.method !== "POST" || input.url.search) return disallowedProviderEgress();
+  const bearerCredential = readBearerCredential(input.request.headers);
+  if (!bearerCredential || !isHostedProviderEgressCredential(bearerCredential)) return disallowedProviderEgress();
+  const startedAt = Date.now();
+  const authorization = await authorizeHostedOpenAiProviderEgress({ ...input, bearerCredential });
+  if (!authorization?.authorized || !authorization.writeFence) return disallowedProviderEgress();
+  const body = await readBoundedRequestBody(input.request, HOSTED_OPENAI_LIVE_BODY_LIMIT);
+  if (body === null) return new Response("Payload Too Large", { status: 413 });
+  if (!isHostedLiveCreationBody(body)) return new Response("Invalid Live request.", { status: 400 });
+  const headers = stripHostedProviderUpstreamHeaders(input.request.headers);
+  headers.set("authorization", `Bearer ${readRequiredInterceptSecret(input.env.OPENAI_API_KEY, "OPENAI_API_KEY")}`);
+  const response = await fetchAuthorizedProviderUpstream({
+    authorization, providerKind: "openai", request: input.request, startedAt, url: input.url,
+    upstreamRequest: await createHostedRunnerUpstreamRequest(input.request, createProviderUpstreamUrl(input.url, input.pathMatch), headers, { body, redirect: "manual" }),
+    upstreamFetchImpl: input.upstreamFetchImpl,
+  });
+  if (response.status === 401 || response.status === 403) {
+    await reportOpenAiAuthorizationFailureSafely({ ctx: input.ctx, env: input.env, status: response.status });
+  }
+  return response.ok ? wrapHostedLiveCreationResponse(response, authorization.writeFence, input.env) : response;
+}
+
+async function handleHostedLiveAttachment(input: {
+  request: Request; url: URL; pathMatch: ProviderPathMatch; reference: string;
+  env: RunnerOutboundEnvironmentSource; upstreamFetchImpl?: typeof fetch; ctx?: HostedRunnerOutboundContext;
+}): Promise<Response> {
+  if (input.request.method !== "GET" || input.url.search || !isWebSocketUpgradeRequest(input.request.headers)) return disallowedProviderEgress();
+  const credential = readBearerCredential(input.request.headers);
+  if (!credential) return disallowedProviderEgress();
+  const startedAt = Date.now();
+  const resource = await authorizeHostedLiveAttachment({ credential, reference: input.reference, source: input.env });
+  if (!resource) return disallowedProviderEgress();
+  const url = new URL(createProviderUpstreamUrl(input.url, input.pathMatch));
+  url.pathname = url.pathname.replace(`/${input.reference}/attach`, `/${encodeURIComponent(resource.sessionId)}/attach`);
+  const headers = stripHostedProviderUpstreamHeaders(input.request.headers);
+  headers.set("authorization", `Bearer ${readRequiredInterceptSecret(input.env.OPENAI_API_KEY, "OPENAI_API_KEY")}`);
+  // This grants attachment only to an existing exact-owner resource, including
+  // closure after revocation. It cannot create another Live session.
+  const response = await fetchAuthorizedProviderUpstream({
+    authorization: { authorized: true, mode: "provider_egress_credential", durationMs: Date.now() - startedAt,
+      providerEgressTokenPresent: false, runtimeAuthorityHeadersPresent: false,
+      userId: resource.owner.userId, writeFence: { ...resource.owner, workspaceVersion: null } },
+    providerKind: "openai", request: input.request, startedAt, url: input.url,
+    upstreamRequest: await createHostedRunnerUpstreamRequest(input.request, url, headers, { redirect: "manual" }),
+    upstreamFetchImpl: input.upstreamFetchImpl,
+  });
+  if (response.status === 401 || response.status === 403) {
+    await reportOpenAiAuthorizationFailureSafely({ ctx: input.ctx, env: input.env, status: response.status });
+  }
+  // Leave the upgrade unaccepted; Cloudflare forwards bytes and native Codex owns frames.
+  return response;
+}
+
+async function wrapHostedLiveCreationResponse(
+  response: Response, owner: HostedProviderEgressWriteFenceMetadata, source: RunnerOutboundEnvironmentSource,
+): Promise<Response> {
+  const body = await readBoundedRequestBody(response, HOSTED_OPENAI_LIVE_BODY_LIMIT);
+  let value: unknown;
+  try { value = body === null ? null : JSON.parse(new TextDecoder().decode(body)); }
+  catch { return new Response("Live creation outcome unconfirmed.", { status: 502 }); }
+  if (!value || typeof value !== "object" || !("session" in value) || !("transport" in value)) return new Response("Live creation outcome unconfirmed.", { status: 502 });
+  const session = value.session;
+  const transport = value.transport;
+  if (!session || typeof session !== "object" || !("id" in session) || typeof session.id !== "string"
+    || session.id.length === 0 || session.id === "." || session.id === ".." || new TextEncoder().encode(session.id).byteLength > 1024
+    || !transport || typeof transport !== "object" || !("sdp" in transport) || typeof transport.sdp !== "string") {
+    return new Response("Live creation outcome unconfirmed.", { status: 502 });
+  }
+  return Response.json({
+    session: { id: await createHostedLiveSessionReference(session.id, owner, source) },
+    transport: { type: "webrtc", sdp: transport.sdp },
+  }, { status: response.status });
 }
 
 async function maybeHandleVeniceRequest(input: {
@@ -1724,21 +1689,12 @@ async function maybeHandleVeniceRequest(input: {
     });
   }
 
-  const nativeMemoryKind = authorization.platformAiUsageAllowed !== false
-    ? readHostedCodexNativeMemoryKind(input.request.headers)
-    : null;
   const body = await readBoundedRequestBody(
     input.request,
     HOSTED_VENICE_RESPONSES_MAX_BODY_BYTES,
   );
   if (body === null) {
     return new Response("Payload Too Large", { status: 413 });
-  }
-  const memoryRequestMetadata = nativeMemoryKind
-    ? parseHostedCodexMemoryRequestMetadata(body)
-    : null;
-  if (nativeMemoryKind && !memoryRequestMetadata) {
-    return new Response("Invalid Codex memory request.", { status: 400 });
   }
   const upstreamBody = buildHostedVeniceResponsesRequestBody({
     body,
@@ -1761,246 +1717,16 @@ async function maybeHandleVeniceRequest(input: {
     headers,
     { body: upstreamBody },
   );
-  const captureMemoryDiagnostic = nativeMemoryKind !== null;
-  const diagnosticBody = captureMemoryDiagnostic
-    ? upstreamRequest.clone()
-    : null;
-  const canonicalModelKind = captureMemoryDiagnostic
-    ? readHostedResponsesRequestModelKind(body)
-    : null;
-  const providerStartedAt = Date.now();
-  let response: Response;
-  try {
-    response = await fetchAuthorizedProviderUpstream({
-      authorization,
-      providerKind: "venice",
-      request: input.request,
-      startedAt,
-      upstreamRequest,
-      url: input.url,
-    });
-  } catch (error) {
-    if (diagnosticBody) {
-      const diagnosticPromise = emitHostedRunnerOpenAiCacheDiagnostic({
-        canonicalModelKind,
-        ctx: input.ctx ?? null,
-        endpointKind: readVeniceCacheDiagnosticEndpointKind(pathMatch.pathnameSuffix),
-        env: input.env,
-        providerKind: "venice",
-        providerTransportFailed: true,
-        request: input.request,
-        upstreamRequestBody: diagnosticBody,
-        userId: authorization.userId,
-        writeFence: authorization.writeFence,
-      });
-      scheduleHostedProviderDiagnostic({
-        ctx: input.ctx ?? null,
-        promise: diagnosticPromise,
-      });
-    }
-    throw error;
-  }
-
-  if (diagnosticBody) {
-    const diagnosticPromise = emitHostedRunnerOpenAiCacheDiagnostic({
-      canonicalModelKind,
-      ctx: input.ctx ?? null,
-      endpointKind: readVeniceCacheDiagnosticEndpointKind(pathMatch.pathnameSuffix),
-      env: input.env,
-      providerKind: "venice",
-      providerResponseTtfbMs: Date.now() - providerStartedAt,
-      request: input.request,
-      response,
-      upstreamRequestBody: diagnosticBody,
-      userId: authorization.userId,
-      writeFence: authorization.writeFence,
-    });
-    scheduleHostedProviderDiagnostic({
-      ctx: input.ctx ?? null,
-      promise: diagnosticPromise,
-    });
-  }
-  return memoryRequestMetadata && nativeMemoryKind
-    ? await handleHostedCodexMemoryUsageResponse({
-        apiKeyEnv: "VENICE_API_KEY",
-        authorization,
-        baseUrl: DEFAULT_VENICE_API_BASE_URL,
-        env: input.env,
-        memoryKind: nativeMemoryKind,
-        providerName: "venice",
-        requestMetadata: memoryRequestMetadata,
-        response,
-      })
-    : response;
-}
-
-async function handleHostedCodexMemoryUsageResponse(input: {
-  apiKeyEnv: string;
-  authorization: HostedProviderEgressAuthorization;
-  baseUrl: string;
-  env: RunnerOutboundEnvironmentSource;
-  memoryKind: HostedCodexNativeMemoryKind;
-  providerName: "hosted-openai" | "venice";
-  requestMetadata: HostedCodexMemoryRequestMetadata;
-  response: Response;
-}): Promise<Response> {
-  if (!input.response.ok) {
-    return input.response;
-  }
-
-  const responseBody = await readBoundedRequestBody(
-    input.response,
-    HOSTED_CODEX_MEMORY_MAX_MESSAGE_BYTES,
-  );
-  if (responseBody === null) {
-    reportHostedCodexMemoryUsageFailure({
-      memoryKind: input.memoryKind,
-      providerName: input.providerName,
-      reason: "response_too_large",
-    });
-    return new Response("Hosted Codex memory response too large.", {
-      status: 502,
-    });
-  }
-
-  const terminal = parseHostedCodexMemoryTerminalResponse(responseBody);
-  if (
-    input.requestMetadata.usageRequired
-    && (
-      terminal === null
-      || (
-        terminal.usage === null
-        && terminal.providerRequestOutcome === "succeeded"
-      )
-    )
-  ) {
-    reportHostedCodexMemoryUsageFailure({
-      memoryKind: input.memoryKind,
-      providerName: input.providerName,
-      reason: "terminal_usage_missing",
-    });
-    return new Response("Hosted Codex memory usage was unavailable.", {
-      status: 502,
-    });
-  }
-
-  if (
-    terminal?.usage
-    && hasHostedCodexMemoryBillableUsage(terminal.usage)
-  ) {
-    try {
-      await recordHostedCodexMemoryUsage({
-        apiKeyEnv: input.apiKeyEnv,
-        authorization: input.authorization,
-        baseUrl: input.baseUrl,
-        env: input.env,
-        providerName: input.providerName,
-        providerRequestOutcome: terminal.providerRequestOutcome,
-        requestMetadata: input.requestMetadata,
-        usage: terminal.usage,
-      });
-    } catch (error) {
-      reportHostedCodexMemoryUsageFailure({
-        error,
-        memoryKind: input.memoryKind,
-        providerName: input.providerName,
-        reason: "persistence_failed",
-      });
-      // The provider work has already completed. Preserve its terminal
-      // response so Codex does not retry an irreversible, billable request.
-    }
-  }
-
-  return rebuildBufferedProviderResponse(input.response, responseBody);
-}
-
-async function recordHostedCodexMemoryUsage(input: {
-  apiKeyEnv: string;
-  authorization: HostedProviderEgressAuthorization;
-  baseUrl: string;
-  env: RunnerOutboundEnvironmentSource;
-  providerName: "hosted-openai" | "venice";
-  providerRequestOutcome: HostedCodexMemoryProviderRequestOutcome;
-  requestMetadata: HostedCodexMemoryRequestMetadata;
-  usage: HostedCodexMemoryUsage;
-}): Promise<void> {
-  const writeFence = requireHostedDirectUsageWriteFence(input.authorization);
-  const record = buildHostedCodexMemoryUsageRecord({
-    apiKeyEnv: input.apiKeyEnv,
-    baseUrl: input.baseUrl,
-    cacheWriteTokens: input.usage.cacheWriteTokens,
-    cachedInputTokens: input.usage.cachedInputTokens,
-    inputTokens: input.usage.inputTokens,
-    memberId: writeFence.userId,
-    occurredAt: input.usage.occurredAt,
-    outputTokens: input.usage.outputTokens,
-    providerName: input.providerName,
-    providerRequestId: input.usage.providerRequestId,
-    providerRequestOutcome: input.providerRequestOutcome,
-    rawUsageJson: input.usage.rawUsageJson,
-    reasoningTokens: input.usage.reasoningTokens,
-    requestedModel: input.requestMetadata.requestedModel,
-    // Venice exposes its translated provider id. The canonical request model
-    // remains the priceable identity for that provider.
-    servedModel: input.providerName === "venice"
-      ? null
-      : input.usage.servedModel,
-    tokenPricingBasis: resolveHostedAiUsageTokenPricingBasis({
-      model: input.requestMetadata.requestedModel,
-      providerName: input.providerName,
-      serviceTier: input.usage.serviceTier
-        ?? input.requestMetadata.serviceTier,
-    }),
-    totalTokens: input.usage.totalTokens,
-  });
-  await recordHostedDirectRuntimeUsage({
-    env: input.env,
-    record,
-    writeFence,
+  return await fetchAuthorizedProviderUpstream({
+    authorization,
+    providerKind: "venice",
+    request: input.request,
+    startedAt,
+    upstreamRequest,
+    url: input.url,
   });
 }
 
-function rebuildBufferedProviderResponse(
-  response: Response,
-  body: ArrayBuffer,
-): Response {
-  const headers = new Headers(response.headers);
-  headers.delete("content-encoding");
-  headers.delete("content-length");
-  return new Response(body, {
-    headers,
-    status: response.status,
-    statusText: response.statusText,
-  });
-}
-
-function reportHostedCodexMemoryUsageFailure(input: {
-  error?: unknown;
-  memoryKind: HostedCodexNativeMemoryKind;
-  providerName: "hosted-openai" | "venice";
-  reason: string;
-}): void {
-  const errorName = input.error === undefined
-    ? null
-    : readHostedExecutionSafeErrorName(input.error);
-  emitHostedExecutionStructuredLog({
-    component: "runner",
-    details: {
-      ...(input.error === undefined
-        ? {}
-        : {
-            errorCode: deriveHostedExecutionErrorCode(input.error),
-            ...(errorName ? { errorName } : {}),
-          }),
-      memoryKind: input.memoryKind,
-      providerKind: input.providerName + "_codex_memory",
-      reason: input.reason,
-    },
-    level: "warn",
-    message: "Hosted Codex memory usage accounting failed.",
-    phase: "wake.running",
-  });
-}
 
 async function maybeHandleElevenLabsRequest(input: {
   ctx?: HostedRunnerOutboundContext;
@@ -2533,14 +2259,6 @@ function readOpenAiCacheDiagnosticEndpointKind(
   return null;
 }
 
-function readVeniceCacheDiagnosticEndpointKind(
-  pathnameSuffix: string,
-): HostedOpenAiCacheDiagnosticEndpointKind {
-  return pathnameSuffix === "/responses/compact"
-    ? "responses_compact"
-    : "responses";
-}
-
 async function readDeploySmokeLiveModelTurnOpenAiModel(input: {
   pathnameSuffix: string;
   request: Request;
@@ -2561,44 +2279,11 @@ async function readDeploySmokeLiveModelTurnOpenAiModel(input: {
   );
 }
 
-function scheduleHostedProviderDiagnostic(input: {
-  ctx: HostedRunnerOutboundContext | null;
-  promise: Promise<void>;
-}): void {
-  if (typeof input.ctx?.waitUntil === "function") {
-    try {
-      input.ctx.waitUntil(input.promise);
-      return;
-    } catch {
-      // Production container interception has no lifecycle owner. If an
-      // optional scheduler rejects synchronously, use the same best-effort
-      // detached fallback without extending the provider-response budget.
-    }
-  }
-  void input.promise.catch((error: unknown) => {
-    emitHostedExecutionStructuredLog({
-      component: "runner",
-      details: {
-        ...buildHostedExecutionSafeErrorDetails(error),
-        providerKind: "venice",
-      },
-      level: "warn",
-      message: "Hosted runner provider request diagnostic detached task failed.",
-      phase: "wake.running",
-    });
-  });
-}
-
 async function emitHostedRunnerOpenAiCacheDiagnostic(input: {
-  canonicalModelKind?: string | null;
   ctx: HostedRunnerOutboundContext | null;
   endpointKind: HostedOpenAiCacheDiagnosticEndpointKind;
   env: RunnerOutboundEnvironmentSource;
-  providerKind?: HostedResponsesDiagnosticProviderKind;
-  providerResponseTtfbMs?: number;
-  providerTransportFailed?: boolean;
   request: Request;
-  response?: Response;
   upstreamRequestBody: HostedRunnerDiagnosticBodySource;
   userId: string | null;
   writeFence: HostedProviderEgressWriteFenceMetadata | null;
@@ -2607,22 +2292,14 @@ async function emitHostedRunnerOpenAiCacheDiagnostic(input: {
   try {
     const requestBytes = new Uint8Array(await input.upstreamRequestBody.arrayBuffer());
     diagnostic = await buildHostedOpenAiCacheDiagnostic({
-      canonicalModelKind: input.canonicalModelKind ?? null,
       endpointKind: input.endpointKind,
       fingerprintSecret: readOpenAiCacheDiagnosticFingerprintSecret(input.env),
       method: input.request.method,
-      providerKind: input.providerKind ?? "openai",
+      providerKind: "openai",
       requestBytes,
       turnMetadataHeader: input.request.headers.get(
         OPENAI_CACHE_DIAGNOSTIC_CODEX_TURN_METADATA_HEADER,
       ),
-    });
-    appendProviderResponseDiagnostics({
-      diagnostic,
-      providerKind: input.providerKind ?? "openai",
-      providerResponseTtfbMs: input.providerResponseTtfbMs,
-      providerTransportFailed: input.providerTransportFailed ?? false,
-      response: input.response,
     });
   } catch (error) {
     emitHostedExecutionStructuredLog({
@@ -2630,7 +2307,7 @@ async function emitHostedRunnerOpenAiCacheDiagnostic(input: {
       details: {
         diagnosticCaptured: false,
         endpointKind: input.endpointKind,
-        providerKind: input.providerKind ?? "openai",
+        providerKind: "openai",
       },
       error,
       level: "warn",
@@ -2668,7 +2345,7 @@ async function emitHostedRunnerOpenAiCacheDiagnostic(input: {
       component: "runner",
       details: {
         endpointKind: input.endpointKind,
-        providerKind: input.providerKind ?? "openai",
+        providerKind: "openai",
         runtimeLogScheduled,
       },
       error,
@@ -2677,71 +2354,6 @@ async function emitHostedRunnerOpenAiCacheDiagnostic(input: {
       phase: "wake.running",
     });
   });
-}
-
-function readBoundedProviderRetryCount(value: string | null): number | null {
-  const normalized = value?.trim() ?? "";
-  if (!/^\d{1,3}$/u.test(normalized)) {
-    return null;
-  }
-  const parsed = Number(normalized);
-  return parsed <= 100 ? parsed : null;
-}
-
-function appendProviderResponseDiagnostics(input: {
-  diagnostic: HostedRunnerDiagnosticJson;
-  providerKind: HostedResponsesDiagnosticProviderKind;
-  providerResponseTtfbMs?: number;
-  providerTransportFailed: boolean;
-  response?: Response;
-}): void {
-  if (input.providerResponseTtfbMs !== undefined) {
-    input.diagnostic.providerResponseTtfbMs = Math.max(
-      0,
-      Math.trunc(input.providerResponseTtfbMs),
-    );
-  }
-  if (input.providerTransportFailed) {
-    input.diagnostic.providerResponseOutcomeKind = "transport_error";
-    return;
-  }
-  if (!input.response) {
-    return;
-  }
-
-  input.diagnostic.providerResponseOk = input.response.ok;
-  input.diagnostic.providerResponseOutcomeKind = input.response.ok
-    ? "accepted"
-    : "rejected";
-  input.diagnostic.providerResponseStatus = input.response.status;
-  input.diagnostic.providerResponseContentKind = readResponseContentKind(
-    input.response.headers.get("content-type"),
-  );
-
-  if (input.providerKind !== "venice") {
-    return;
-  }
-  const cloudflareRay = readSafeCloudflareRay(input.response.headers.get("cf-ray"));
-  if (cloudflareRay) {
-    input.diagnostic.providerResponseCloudflareRay = cloudflareRay;
-  }
-  const responseModelKind = readVeniceDiagnosticModelKind(
-    input.response.headers.get("x-venice-model-id"),
-  );
-  input.diagnostic.providerResponseModelKind = responseModelKind;
-  const requestModelKind = input.diagnostic.upstreamModelKind;
-  input.diagnostic.providerResponseModelMatchesRequest =
-    typeof requestModelKind === "string"
-    && requestModelKind !== "missing"
-    && requestModelKind !== "other"
-    && responseModelKind === requestModelKind;
-
-  const retryCount = readBoundedProviderRetryCount(
-    input.response.headers.get("x-retry-count"),
-  );
-  if (retryCount !== null) {
-    input.diagnostic.providerResponseRetryCount = retryCount;
-  }
 }
 
 async function writeHostedRunnerOpenAiCacheDiagnosticRuntimeLog(input: {
@@ -2765,11 +2377,7 @@ async function writeHostedRunnerOpenAiCacheDiagnosticRuntimeLog(input: {
           component: "runner",
           eventCode: HOSTED_OPENAI_CACHE_DIAGNOSTIC_EVENT_CODE,
           ...(writeFence ? { leaseGeneration: writeFence.leaseGeneration } : {}),
-          level:
-            input.diagnostic.providerResponseOutcomeKind === "rejected"
-              || input.diagnostic.providerResponseOutcomeKind === "transport_error"
-              ? "warn"
-              : "debug",
+          level: "debug",
           phase: "fetch",
           redactedJson: input.diagnostic,
           ...(writeFence?.workspaceVersion ? { workspaceVersion: writeFence.workspaceVersion } : {}),
@@ -3348,42 +2956,30 @@ async function authorizeHostedProviderEgress(input: {
       headers: input.request.headers,
       userId: input.userId,
     });
-    try {
-      await requireRunnerRuntimeWriteFence({
-        env: input.env,
-        request: input.request,
-        userId: input.userId,
+    if (writeFence) {
+      const validation = await authorizePostgresRuntimeProvider({ env: input.env, userId: input.userId,
+        command: { operation: "authorize_effect", attemptId: writeFence.attemptId, generation: writeFence.leaseGeneration, runnerContainerName: null, managedAi: false },
+        managed: HOSTED_PLATFORM_METERED_PROVIDER_KINDS.has(input.providerKind) || input.providerKind === "workers_ai_transcribe",
       });
-      return {
-        authorized: true,
-        durationMs: Date.now() - startedAt,
-        mode: "exact_headers",
-        providerEgressTokenPresent: false,
-        runtimeAuthorityHeadersPresent,
-        userId: input.userId,
-        writeFence,
-      };
-    } catch (error) {
-      if (error instanceof RunnerRuntimeWriteFenceError) {
-        return {
-          authorized: false,
-          durationMs: Date.now() - startedAt,
-          mode: "exact_headers",
-          providerEgressTokenPresent: false,
-          rejectReason: "exact_write_fence_rejected",
-          runtimeAuthorityHeadersPresent,
-          userId: input.userId,
-          writeFence,
-        };
-      }
-      throw error;
+      return postgresProviderAuthorization(validation, { startedAt, userId: input.userId, mode: "exact_headers", runtimeAuthorityHeadersPresent, providerEgressTokenPresent: false });
     }
+    return {
+      authorized: false,
+      durationMs: Date.now() - startedAt,
+      mode: "exact_headers",
+      providerEgressTokenPresent: false,
+      rejectReason: "exact_write_fence_rejected",
+      runtimeAuthorityHeadersPresent,
+      userId: input.userId,
+      writeFence: null,
+    };
   }
 
   const providerEgressToken = readHostedProviderEgressToken(input.request);
   if (input.userId && providerEgressToken) {
     return await authorizeHostedProviderEgressToken({
       activeUserId: input.userId,
+      providerKind: input.providerKind,
       env: input.env,
       providerEgressToken,
       providerEgressTokenPresent: true,
@@ -3623,61 +3219,15 @@ async function authorizeHostedProviderEgressCredential(input: {
     };
   }
 
-  const runner = input.env.USER_RUNNER.getByName(verification.claims.userId);
-  if (typeof runner.validateRuntimeProviderEgressCredential !== "function") {
-    return {
-      authorized: false,
-      durationMs: Date.now() - startedAt,
-      mode: "provider_egress_credential",
-      providerEgressTokenPresent,
-      rejectReason: "validation_rpc_missing",
-      runtimeAuthorityHeadersPresent,
-      userId: verification.claims.userId,
-      writeFence: null,
-    };
-  }
-
-  let rawValidation: unknown;
-  try {
-    rawValidation = await runner.validateRuntimeProviderEgressCredential({
-      providerKind: verification.claims.providerKind,
-      runnerContainerName: verification.claims.runnerContainerName,
-      userId: verification.claims.userId,
-    });
-  } catch (error) {
-    const validationErrorName = readHostedExecutionSafeErrorName(error);
-    return {
-      authorized: false,
-      durationMs: Date.now() - startedAt,
-      mode: "provider_egress_credential",
-      providerEgressTokenPresent,
-      rejectReason: "provider_egress_credential_validation_error",
-      runtimeAuthorityHeadersPresent,
-      userId: verification.claims.userId,
-      validationError: error,
-      validationErrorCode: deriveHostedExecutionErrorCode(error),
-      ...(validationErrorName ? { validationErrorName } : {}),
-      writeFence: null,
-    };
-  }
-
-  const validation = normalizeProviderEgressCredentialValidationResult(rawValidation);
-  return {
-    authorized: validation.owns,
-    durationMs: Date.now() - startedAt,
-    mode: "provider_egress_credential",
-    providerEgressTokenPresent,
-    ...(validation.platformAiUsageAllowed === undefined
-      ? {}
-      : { platformAiUsageAllowed: validation.platformAiUsageAllowed }),
-    ...(validation.rejectReason ? { rejectReason: validation.rejectReason } : {}),
-    runtimeAuthorityHeadersPresent,
-    userId: verification.claims.userId,
-    writeFence: validation.writeFence,
-  };
+  const validation = await authorizePostgresRuntimeProvider({ env: input.env, userId: verification.claims.userId,
+    command: { operation: "authorize_provider", runnerContainerName: verification.claims.runnerContainerName, providerEgressTokenHash: null, providerKind: input.providerKind },
+    managed: HOSTED_PLATFORM_METERED_PROVIDER_KINDS.has(input.providerKind) || input.providerKind === "workers_ai_transcribe",
+  });
+  return postgresProviderAuthorization(validation, { startedAt, userId: verification.claims.userId, mode: "provider_egress_credential", runtimeAuthorityHeadersPresent, providerEgressTokenPresent });
 }
 
 async function authorizeHostedProviderEgressToken(input: {
+  providerKind: string;
   activeUserId: string;
   env: RunnerOutboundEnvironmentSource;
   providerEgressToken: string;
@@ -3685,213 +3235,13 @@ async function authorizeHostedProviderEgressToken(input: {
   runtimeAuthorityHeadersPresent: boolean;
   startedAt: number;
 }): Promise<HostedProviderEgressAuthorization> {
-  const runner = input.env.USER_RUNNER.getByName(input.activeUserId);
-  if (typeof runner.validateRuntimeProviderEgressToken !== "function") {
-    return {
-      authorized: false,
-      durationMs: Date.now() - input.startedAt,
-      mode: "provider_egress_token",
-      providerEgressTokenPresent: input.providerEgressTokenPresent,
-      rejectReason: "validation_rpc_missing",
-      runtimeAuthorityHeadersPresent: input.runtimeAuthorityHeadersPresent,
-      userId: input.activeUserId,
-      writeFence: null,
-    };
-  }
-
-  let rawValidation: unknown;
-  try {
-    rawValidation = await runner.validateRuntimeProviderEgressToken({
-      providerEgressToken: input.providerEgressToken,
-      userId: input.activeUserId,
-    });
-  } catch (error) {
-    const validationErrorName = readHostedExecutionSafeErrorName(error);
-    return {
-      authorized: false,
-      durationMs: Date.now() - input.startedAt,
-      mode: "provider_egress_token",
-      providerEgressTokenPresent: input.providerEgressTokenPresent,
-      rejectReason: "provider_egress_token_validation_error",
-      runtimeAuthorityHeadersPresent: input.runtimeAuthorityHeadersPresent,
-      userId: input.activeUserId,
-      validationErrorCode: deriveHostedExecutionErrorCode(error),
-      ...(validationErrorName ? { validationErrorName } : {}),
-      writeFence: null,
-    };
-  }
-
-  const validation = normalizeProviderEgressTokenValidationResult(rawValidation);
-  return {
-    authorized: validation.owns,
-    ...(validation.customInferenceEnvelope
-      ? { customInferenceEnvelope: validation.customInferenceEnvelope }
-      : {}),
-    durationMs: Date.now() - input.startedAt,
-    mode: "provider_egress_token",
-    providerEgressTokenPresent: input.providerEgressTokenPresent,
-    ...(validation.platformAiUsageAllowed === undefined
-      ? {}
-      : { platformAiUsageAllowed: validation.platformAiUsageAllowed }),
-    ...(validation.rejectReason ? { rejectReason: validation.rejectReason } : {}),
-    runtimeAuthorityHeadersPresent: input.runtimeAuthorityHeadersPresent,
-    userId: input.activeUserId,
-    writeFence: validation.writeFence,
-  };
-}
-
-function normalizeProviderEgressCredentialValidationResult(value: unknown): {
-  owns: boolean;
-  platformAiUsageAllowed?: boolean;
-  rejectReason: HostedProviderEgressRejectReason | null;
-  writeFence: HostedProviderEgressWriteFenceMetadata | null;
-} {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return {
-      owns: false,
-      rejectReason: "provider_egress_credential_rejected",
-      writeFence: null,
-    };
-  }
-
-  const record = value as Record<string, unknown>;
-  if (record.owns !== true) {
-    return {
-      owns: false,
-      rejectReason: readProviderEgressCredentialRejectReason(record.reason)
-        ?? "provider_egress_credential_rejected",
-      writeFence: null,
-    };
-  }
-  if (
-    typeof record.attemptId !== "string"
-    || typeof record.leaseGeneration !== "string"
-    || typeof record.userId !== "string"
-    || (
-      record.workspaceVersion !== null
-      && record.workspaceVersion !== undefined
-      && typeof record.workspaceVersion !== "string"
-    )
-  ) {
-    return {
-      owns: false,
-      rejectReason: "provider_egress_credential_rejected",
-      writeFence: null,
-    };
-  }
-
-  return {
-    owns: true,
-    ...(typeof record.platformAiUsageAllowed === "boolean"
-      ? { platformAiUsageAllowed: record.platformAiUsageAllowed }
-      : {}),
-    rejectReason: null,
-    writeFence: {
-      attemptId: record.attemptId,
-      leaseGeneration: record.leaseGeneration,
-      userId: record.userId,
-      workspaceVersion: typeof record.workspaceVersion === "string"
-        ? record.workspaceVersion
-        : null,
-    },
-  };
-}
-
-function normalizeProviderEgressTokenValidationResult(value: unknown): {
-  customInferenceEnvelope?: string;
-  owns: boolean;
-  platformAiUsageAllowed?: boolean;
-  rejectReason: HostedProviderEgressRejectReason | null;
-  writeFence: HostedProviderEgressWriteFenceMetadata | null;
-} {
-  if (typeof value === "boolean") {
-    return {
-      owns: false,
-      rejectReason: "provider_egress_token_rejected",
-      writeFence: null,
-    };
-  }
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return {
-      owns: false,
-      rejectReason: "provider_egress_token_rejected",
-      writeFence: null,
-    };
-  }
-
-  const record = value as Record<string, unknown>;
-  if (record.owns !== true) {
-    return {
-      owns: false,
-      rejectReason: readProviderEgressTokenRejectReason(record.reason)
-        ?? "provider_egress_token_rejected",
-      writeFence: null,
-    };
-  }
-  if (
-    typeof record.attemptId !== "string"
-    || typeof record.leaseGeneration !== "string"
-    || typeof record.userId !== "string"
-    || (
-      record.workspaceVersion !== null
-      && record.workspaceVersion !== undefined
-      && typeof record.workspaceVersion !== "string"
-    )
-  ) {
-    return {
-      owns: false,
-      rejectReason: "provider_egress_token_rejected",
-      writeFence: null,
-    };
-  }
-
-  return {
-    ...(typeof record.customInferenceEnvelope === "string"
-        && record.customInferenceEnvelope.length > 0
-      ? { customInferenceEnvelope: record.customInferenceEnvelope }
-      : {}),
-    owns: true,
-    ...(typeof record.platformAiUsageAllowed === "boolean"
-      ? { platformAiUsageAllowed: record.platformAiUsageAllowed }
-      : {}),
-    rejectReason: null,
-    writeFence: {
-      attemptId: record.attemptId,
-      leaseGeneration: record.leaseGeneration,
-      userId: record.userId,
-      workspaceVersion: typeof record.workspaceVersion === "string"
-        ? record.workspaceVersion
-        : null,
-    },
-  };
-}
-
-function readProviderEgressCredentialRejectReason(
-  value: unknown,
-): HostedProviderEgressCredentialRejectReason | null {
-  if (typeof value !== "string") {
-    return null;
-  }
-  for (const reason of HOSTED_PROVIDER_EGRESS_CREDENTIAL_REJECT_REASONS) {
-    if (value === reason) {
-      return reason;
-    }
-  }
-  return null;
-}
-
-function readProviderEgressTokenRejectReason(
-  value: unknown,
-): HostedProviderEgressTokenRejectReason | null {
-  if (typeof value !== "string") {
-    return null;
-  }
-  for (const reason of HOSTED_PROVIDER_EGRESS_TOKEN_REJECT_REASONS) {
-    if (value === reason) {
-      return reason;
-    }
-  }
-  return null;
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(input.providerEgressToken)));
+  const providerEgressTokenHash = Array.from(digest, value => value.toString(16).padStart(2, "0")).join("");
+  const validation = await authorizePostgresRuntimeProvider({ env: input.env, userId: input.activeUserId,
+    command: { operation: "authorize_provider", runnerContainerName: null, providerEgressTokenHash, providerKind: input.providerKind },
+    managed: HOSTED_PLATFORM_METERED_PROVIDER_KINDS.has(input.providerKind) || input.providerKind === "workers_ai_transcribe",
+  });
+  return postgresProviderAuthorization(validation, { ...input, userId: input.activeUserId, mode: "provider_egress_token" });
 }
 
 function unauthorizedProviderEgress(input: {
@@ -3901,7 +3251,9 @@ function unauthorizedProviderEgress(input: {
   startedAt: number;
   url: URL;
 }): Response {
-  const response = new Response("Unauthorized", { status: 401 });
+  const response = input.authorization.rejectReason === "usage_settlement_pending"
+    ? new Response("Usage settlement pending.", { status: 503, headers: { "retry-after": "1" } })
+    : new Response("Unauthorized", { status: 401 });
   emitHostedProviderEgressDiagnostic({
     authorization: input.authorization,
     providerKind: input.providerKind,
@@ -4577,4 +3929,20 @@ async function checkHostedImageGenerationAccess(input: {
     code: "MURPH_IMAGE_ACCESS_UNAVAILABLE",
     message: "Image generation access could not be confirmed. Try again later.",
   } }, { status: 503 });
+}
+
+function postgresProviderAuthorization(
+  validation: Awaited<ReturnType<typeof authorizePostgresRuntimeProvider>>,
+  input: { startedAt: number; userId: string; mode: HostedProviderEgressValidationMode; providerEgressTokenPresent: boolean; runtimeAuthorityHeadersPresent: boolean },
+): HostedProviderEgressAuthorization {
+  const owner = validation?.owner;
+  return {
+    authorized: Boolean(owner) && !validation?.settlementPending,
+    durationMs: Date.now() - input.startedAt, mode: input.mode,
+    providerEgressTokenPresent: input.providerEgressTokenPresent, runtimeAuthorityHeadersPresent: input.runtimeAuthorityHeadersPresent,
+    userId: input.userId,
+    ...(owner ? { platformAiUsageAllowed: owner.platformAiUsageAllowed, customInferenceEnvelope: owner.customInferenceEnvelope } : {}),
+    ...(validation?.settlementPending ? { rejectReason: "usage_settlement_pending" as const } : !owner ? { rejectReason: "write_fence_mismatch" as const } : {}),
+    writeFence: owner?.attemptId ? { attemptId: owner.attemptId, leaseGeneration: owner.generation, workspaceVersion: owner.workspaceVersion, userId: input.userId } : null,
+  };
 }

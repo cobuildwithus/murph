@@ -28,10 +28,10 @@ const browserRunner = readFileSync(
 describe("live Junction wearable canary workflow", () => {
   it("admits the private controller only for protected-main provider proof", () => {
     expect(workflow).toContain("permissions:\n  contents: read");
-    expect(workflow).toContain("      - main");
+    expect(workflow).toContain('cron: "43 5 * * *"');
     expect(workflow).toContain("  schedule:");
     expect(workflow).toContain("  workflow_dispatch:");
-    expect(workflow).not.toMatch(/^\s*(pull_request|pull_request_target|repository_dispatch):/mu);
+    expect(workflow).not.toMatch(/^\s*(push|pull_request|pull_request_target|repository_dispatch):/mu);
     expect(workflow).toContain("if: ${{ github.ref == 'refs/heads/main' && github.ref_protected }}");
     expect(workflow).toContain("environment: temporal-compatibility");
     expect(workflow).toContain("group: live-junction-wearable-canary");
@@ -61,9 +61,9 @@ describe("live Junction wearable canary workflow", () => {
 
   it("confirms the required Vital disclosure before waiting for provider authorization", () => {
     const disclosureOffset = browserRunner.indexOf(
-      'stage = "murph_vital_disclosure";',
+      'setStage("murph_vital_disclosure");',
     );
-    const connectOffset = browserRunner.indexOf('stage = "murph_connect_start";');
+    const connectOffset = browserRunner.indexOf('setStage("murph_connect_start");');
 
     expect(disclosureOffset).toBeGreaterThan(0);
     expect(connectOffset).toBeGreaterThan(disclosureOffset);

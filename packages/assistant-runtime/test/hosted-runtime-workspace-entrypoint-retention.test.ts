@@ -40,6 +40,7 @@ import {
   runCanonicalWrite,
   showAutomation,
   upsertAutomation,
+  upsertEvent,
   validateVault,
 } from "@murphai/core";
 import { createIntegratedInboxServices } from "@murphai/inbox-services";
@@ -167,7 +168,7 @@ describe("hosted workspace runtime entrypoint", () => {test("carries inbox media
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_retention_wake",
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "7",
             userId: TEST_USER_ID,
             workspaceVersion: "0",
@@ -277,7 +278,7 @@ describe("hosted workspace runtime entrypoint", () => {test("carries inbox media
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_retention_follow_up_wake",
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "7",
             userId: TEST_USER_ID,
             workspaceVersion: "0",
@@ -423,7 +424,7 @@ describe("hosted workspace runtime entrypoint", () => {test("carries inbox media
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_due_retention_wake",
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "7",
             userId: TEST_USER_ID,
             workspaceVersion: "0",
@@ -557,7 +558,7 @@ describe("hosted workspace runtime entrypoint", () => {test("carries inbox media
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_promoted_document_retention",
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "7",
             processingMode: "inbox_media_retention",
             userId: TEST_USER_ID,
@@ -738,7 +739,7 @@ describe("hosted workspace runtime entrypoint", () => {test("carries inbox media
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_generated_image_retention",
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "7",
             processingMode: "inbox_media_retention",
             userId: TEST_USER_ID,
@@ -819,7 +820,7 @@ describe("hosted workspace runtime entrypoint", () => {test("carries inbox media
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_generated_image_retention_recovery",
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "8",
             processingMode: "inbox_media_retention",
             userId: TEST_USER_ID,
@@ -1108,7 +1109,7 @@ describe("hosted workspace runtime entrypoint", () => {test("carries inbox media
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_message_retention_proof",
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "7",
             processingMode: "inbox_media_retention",
             userId: TEST_USER_ID,
@@ -1261,6 +1262,15 @@ describe("hosted workspace runtime entrypoint", () => {test("carries inbox media
         rawRefs: [envelopePath], attachments: [], text: "Synthetic confidential fixture text", envelopePath,
       } });
       const original = await readFile(path.join(sourceVaultRoot, ledgerPath), "utf8");
+      const historicalEvent = await upsertEvent({
+        vaultRoot: sourceVaultRoot,
+        payload: {
+          kind: "note", occurredAt: "2020-02-12T09:00:00.000Z",
+          note: "Synthetic canonical history is outside content retention.",
+          title: "Historical event",
+        },
+      });
+      const historicalBytes = await readFile(path.join(sourceVaultRoot, historicalEvent.ledgerFile));
       const bundle = await snapshotHostedBundleRoots({
         kind: "vault", roots: [{ root: sourceVaultRoot, rootKey: "vault" }],
       });
@@ -1293,6 +1303,9 @@ describe("hosted workspace runtime entrypoint", () => {test("carries inbox media
       expect(result.nextWakeAt).toBe(assistantWake);
       expect(checkpointRequests.at(-1)?.inboxMediaRetentionWakeAt).toBe("2026-07-06T00:00:00.000Z");
       expect(await readFile(path.join(liveVaultRoot, ledgerPath), "utf8")).toBe(original);
+      expect(await readFile(path.join(liveVaultRoot, historicalEvent.ledgerFile))).toEqual(historicalBytes);
+      await expect(access(path.join(liveVaultRoot, `${historicalEvent.ledgerFile}.br`)))
+        .rejects.toMatchObject({ code: "ENOENT" });
       await drainHostedRuntimeLogWritesBestEffort();
       const issues = logRequests.flatMap((request) => request.entries)
         .filter((entry) => entry.eventCode === "runtime.retention_issue");
@@ -1444,7 +1457,7 @@ describe("hosted workspace runtime entrypoint", () => {test("carries inbox media
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_retention_only",
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "7",
             processingMode: "inbox_media_retention",
             userId: TEST_USER_ID,
@@ -1536,7 +1549,7 @@ describe("hosted workspace runtime entrypoint", () => {test("carries inbox media
           createWorkspaceRuntimeJobInput({
             request: {
               attemptId: "attempt_synthetic_retention_only_interrupted",
-              idleCheckpointDelayMs: 1,
+              runnerIdleTtlMs: 1,
               leaseGeneration: "7",
               processingMode: "inbox_media_retention",
               userId: TEST_USER_ID,
@@ -1598,7 +1611,7 @@ describe("hosted workspace runtime entrypoint", () => {test("carries inbox media
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_retention_only_shutdown_pending_wake",
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "7",
             processingMode: "inbox_media_retention",
             userId: TEST_USER_ID,
@@ -1658,9 +1671,9 @@ describe("hosted workspace runtime entrypoint", () => {test("carries inbox media
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
-    const idleCheckpointDelayMs = 180_000;
+    const runnerIdleTtlMs = 180_000;
     const durableWakeAt = new Date(
-      Date.parse(TEST_NOW) + idleCheckpointDelayMs + 120_000,
+      Date.parse(TEST_NOW) + runnerIdleTtlMs + 120_000,
     ).toISOString();
     const assistantObserved = createDeferred<void>();
     let firstCheckpointStartedAtMs: number | null = null;
@@ -1684,7 +1697,7 @@ describe("hosted workspace runtime entrypoint", () => {test("carries inbox media
           createWorkspaceRuntimeJobInput({
             request: {
               attemptId: "attempt_synthetic_durable_effect_follow_up_checkpoint",
-              idleCheckpointDelayMs,
+              runnerIdleTtlMs,
               leaseGeneration: "7",
               userId: TEST_USER_ID,
               workspaceVersion: "0",
@@ -1740,7 +1753,7 @@ describe("hosted workspace runtime entrypoint", () => {test("carries inbox media
       await withRealTimeout(assistantObserved.promise, 15_000, () => events.join(","));
       await waitForFakeTimerScheduled(() => events.join(","));
       assert.equal(checkpointRequests.length, 0);
-      await vi.advanceTimersByTimeAsync(idleCheckpointDelayMs - 1_000);
+      await vi.advanceTimersByTimeAsync(runnerIdleTtlMs - 1_000);
       assert.equal(checkpointRequests.length, 0);
       await vi.advanceTimersByTimeAsync(1_000);
       const result = await resultPromise;
@@ -1757,8 +1770,8 @@ describe("hosted workspace runtime entrypoint", () => {test("carries inbox media
         checkpointRequests.map((request) => request.expectedWorkspaceVersion),
         ["0", "1"],
       );
-      assert.equal(firstCheckpointStartedAtMs, Date.parse(TEST_NOW) + idleCheckpointDelayMs);
-      assert.equal(secondCheckpointStartedAtMs, Date.parse(TEST_NOW) + idleCheckpointDelayMs);
+      assert.equal(firstCheckpointStartedAtMs, Date.parse(TEST_NOW) + runnerIdleTtlMs);
+      assert.equal(secondCheckpointStartedAtMs, Date.parse(TEST_NOW) + runnerIdleTtlMs);
       assert.equal(checkpointRequests[1]?.nextWakeAt, durableWakeAt);
       assert.equal(checkpointRequests[1]?.nextWakeReason, "assistant");
       assert.ok(checkpointEventIndexes[0] < events.indexOf("durable-effect"));
@@ -1786,7 +1799,7 @@ describe("hosted workspace runtime entrypoint", () => {test("carries inbox media
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_import_enrichment_checkpoint_barrier",
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "7",
             userId: TEST_USER_ID,
             workspaceVersion: "0",
@@ -1892,7 +1905,7 @@ describe("hosted workspace runtime entrypoint", () => {test("carries inbox media
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_durable_effect_checkpoint_wake_drain",
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "7",
             userId: TEST_USER_ID,
             workspaceVersion: "0",
@@ -1992,7 +2005,7 @@ describe("hosted workspace runtime entrypoint", () => {test("carries inbox media
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_durable_effect_failure_isolated",
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "7",
             userId: TEST_USER_ID,
             workspaceVersion: "0",
@@ -2080,7 +2093,7 @@ describe("hosted workspace runtime entrypoint", () => {test("carries inbox media
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_durable_effect_failure",
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "7",
             userId: TEST_USER_ID,
             workspaceVersion: "0",
@@ -2253,7 +2266,7 @@ describe("hosted workspace runtime entrypoint", () => {test("carries inbox media
       await runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput({
         request: {
           attemptId: "attempt_synthetic_phase_checkpoint",
-          idleCheckpointDelayMs: 1,
+          runnerIdleTtlMs: 1,
           leaseGeneration: "7",
           userId: TEST_USER_ID,
           workspaceVersion: "0",

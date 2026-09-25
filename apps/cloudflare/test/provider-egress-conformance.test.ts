@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+import { createPostgresTestOwner, mockPostgresOwnerCommand, forbiddenLegacyRuntime } from "./postgres-owner-fixtures.ts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -150,6 +152,7 @@ describe("hosted provider egress conformance", () => {
         threadIsDirect: true,
       }, {
         env: runnerEnv,
+        persistAppCardTextFallback: async () => {},
         fetchImplementation: createProductionProviderFetch(env),
       });
 
@@ -452,7 +455,7 @@ async function readForwardedBody(request: Request): Promise<unknown> {
 
 function createProviderInterceptEnv(input: {
   validateRuntimeProviderEgressToken?: (input: {
-    providerEgressToken: string;
+    providerEgressTokenHash: string;
     userId: string;
   }) => Promise<WorkerProviderEgressTokenValidationResult>;
   validateRuntimeWriteFence: (input: {
@@ -461,30 +464,27 @@ function createProviderInterceptEnv(input: {
     userId: string;
   }) => Promise<boolean>;
 }): RunnerOutboundEnvironmentSource {
+  mockPostgresOwnerCommand(async ({ userId, command }) => {
+    if (command.operation !== "authorize_provider" || !command.providerEgressTokenHash) throw new Error("Unexpected owner operation.");
+    const result = await input.validateRuntimeProviderEgressToken?.({ userId, providerEgressTokenHash: command.providerEgressTokenHash });
+    return { cutover: "postgres", status: result?.owns ? "authorized" : "stale", owner: result?.owns ? createPostgresTestOwner({ userId, attemptId: result.attemptId, generation: result.leaseGeneration, workspaceVersion: result.workspaceVersion }) : null };
+  });
   const env: RunnerOutboundEnvironmentSource = {
     ...createHostedExecutionTestEnv(),
     BUNDLES: {} as RunnerOutboundEnvironmentSource["BUNDLES"],
     LINQ_API_TOKEN: "linq-worker-secret",
     TELEGRAM_BOT_TOKEN: "telegram-worker-secret",
-    USER_RUNNER: {
-      getByName: () => ({
-        validateRuntimeProviderEgressCredential: async () => ({ owns: false }),
-        validateRuntimeProviderEgressToken:
-          input.validateRuntimeProviderEgressToken
-          ?? (async () => ({ owns: false })),
-        validateRuntimeWriteFence: input.validateRuntimeWriteFence,
-      }),
-    },
+    USER_RUNNER: forbiddenLegacyRuntime,
   };
   return env;
 }
 
 async function createProviderEgressTokenValidationResult(input: {
-  providerEgressToken: string;
+  providerEgressTokenHash: string;
   userId: string;
 }): Promise<WorkerProviderEgressTokenValidationResult> {
   expect(input).toEqual({
-    providerEgressToken: PROVIDER_EGRESS_TOKEN,
+    providerEgressTokenHash: createHash("sha256").update(PROVIDER_EGRESS_TOKEN).digest("hex"),
     userId: "member_123",
   });
   return {

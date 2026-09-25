@@ -325,12 +325,12 @@ test('buildAssistantCliSurfaceContract normalizes commands into a compact index 
         },
       },
       {
-        description: 'Murph Age readiness',
-        name: 'age inputs',
+        description: 'Assistant configuration diagnostics',
+        name: 'assistant doctor',
       },
       {
-        description: 'Murph Age report',
-        name: 'age report',
+        description: 'Stop the assistant runtime',
+        name: 'assistant stop',
       },
       {
         description: 'Mark onboarding complete',
@@ -390,7 +390,6 @@ test('buildAssistantCliSurfaceContract normalizes commands into a compact index 
     /- `assistant`: `onboarding complete`, `onboarding resume-context`\./u,
   )
   assert.match(contract, /- `document`: `import`\./u)
-  assert.doesNotMatch(contract, /- `age`:/u)
   assert.match(
     contract,
     /- `assistant onboarding resume-context`: Read compact setup context for onboarding resume; options --limit=number\./u,
@@ -414,8 +413,8 @@ test('buildAssistantCliSurfaceContract normalizes commands into a compact index 
   assert.doesNotMatch(contract, /`assistant session list`/u)
   assert.doesNotMatch(contract, /`assistant self-target set`/u)
   assert.doesNotMatch(contract, /`assistant onboarding status`/u)
-  assert.doesNotMatch(contract, /`age inputs`/u)
-  assert.doesNotMatch(contract, /`age report`/u)
+  assert.doesNotMatch(contract, /`assistant doctor`/u)
+  assert.doesNotMatch(contract, /`assistant stop`/u)
   assert.doesNotMatch(contract, /`status`/u)
   assert.doesNotMatch(contract, /`doctor`/u)
   assert.doesNotMatch(contract, /`model`/u)
@@ -1115,7 +1114,7 @@ test('buildAssistantCliSurfaceContract keeps every normalized command reconstruc
         name: 'search docs',
       },
       {
-        name: 'age report',
+        name: 'assistant stop',
       },
       {
         name: 'assistant status',
@@ -1227,4 +1226,17 @@ test('buildAssistantCliSurfaceContract keeps hot-path option signatures beside a
   assert.match(goalSaveLine, /--status=active\|paused\|completed\|abandoned/u)
   assert.match(goalSaveLine, /--horizon=short_term\|medium_term\|long_term\|ongoing/u)
   assert.match(goalSaveLine, /--priority=integer/u)
+})
+
+
+test('CLI discovery uses concise help for syntax and reserves schemas for structured contracts', async () => {
+  const { buildAssistantCliSurfaceContract } = await import('../src/assistant/cli-surface-bootstrap.ts')
+  const contract = buildAssistantCliSurfaceContract({
+    commands: [{ name: 'food search-labels', description: 'Look up food labels.' }],
+  })
+  assert.ok(contract)
+  assert.match(contract, /read `vault-cli <command> --help` for positional arguments, flags, and examples/u)
+  assert.match(contract, /Reuse the loaded skill or a precise error hint/u)
+  assert.match(contract, /--schema --format json` only when help omits a needed structured input or output contract/u)
+  assert.doesNotMatch(contract, /Before running.*--schema/u)
 })

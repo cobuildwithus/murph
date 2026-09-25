@@ -1,6 +1,7 @@
 import {
   TEST_NOW,
   createBrowserVaultReplicaRef,
+  createDeferred,
   createMailboxItem,
   createMailboxPort,
   createPlatform,
@@ -58,6 +59,7 @@ test.each([
   let refreshWakeSent = false;
   let refreshReadFault: "error" | "incomplete" | null = null;
   let completeRefreshWakeRead: (() => void) | null = null;
+  let writesAtFirstPublication: number | null = null;
   let effectStartedAt = 0;
   const latencyTraceRequests: HostedRuntimeLatencyTraceRequest[] = [];
   const checkpointExpectationCount = () => latencyTraceRequests.filter((request) =>
@@ -85,6 +87,7 @@ test.each([
     },
   }));
   const events: string[] = [];
+  const projectionRelease = createDeferred<void>();
   const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
   let assistantPasses = 0;
   let idleCheckpoints = 0;
@@ -128,6 +131,7 @@ test.each([
       assert.equal(retained[0]?.lastErrorCode, null);
       assert.equal(retained[0]?.nextAttemptAt, null);
       events.push("foreground.provider");
+      if (repliedInputIds.size === 2) projectionRelease.resolve();
       const intent = await createAssistantOutboxIntent({
         channel: "linq", createdAt: TEST_NOW, dedupeToken: "synthetic-environment-reply-" + repliedInputIds.size,
         explicitTarget: "thread_1", identityId: "synthetic-member", message: "Your message is received.",
@@ -230,6 +234,7 @@ test.each([
           return createBrowserVaultReplicaRef(replica);
         },
         async publishRef({ replicaRef }) {
+          writesAtFirstPublication ??= events.filter((event) => event === "replica.write").length;
           events.push("replica.publish");
           currentWorkspace = { ...currentWorkspace, browserVaultReplicaRef: replicaRef };
           return { published: true, workspace: currentWorkspace };
@@ -246,11 +251,8 @@ test.each([
             runtimeWakeSignal.notify({ requestedProcessingMode: "default" });
             const signal = request?.signal;
             assert.ok(signal);
-            await new Promise<void>((resolve) => {
-              if (signal.aborted) resolve();
-              else signal.addEventListener("abort", () => resolve(), { once: true });
-            });
-            signal.throwIfAborted();
+            await projectionRelease.promise;
+            assert.equal(signal.aborted, false, "Foreground work must not cancel projection scopes.");
           }
           return { projectionKinds: [], projectionScopes: [] };
         },
@@ -258,7 +260,7 @@ test.each([
       },
     });
     const runInvocation = (processingMode: "system_mailbox" | "default") => runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput({
-      request: { attemptId: attemptId + "-" + processingMode, idleCheckpointDelayMs: 1_500, processingMode, workspaceVersion: currentWorkspace.version },
+      request: { attemptId: attemptId + "-" + processingMode, runnerIdleTtlMs: 1_500, processingMode, workspaceVersion: currentWorkspace.version },
       forwardedEnv: { LINQ_API_TOKEN: "synthetic-linq-token" },
       resolvedConfig: {
         channelCapabilities: { emailSendReady: false, telegramBotConfigured: false },
@@ -384,9 +386,9 @@ test.each([
     }
     if (scenario === "scheduler-refresh" || scenario.startsWith("refresh-")) {
       assert.ok(refreshWakeSent, facts());
-      assert.equal(events.filter((event) => event === "replica.write").length, 1, facts());
     }
     if (scenario.startsWith("refresh-")) {
+      assert.equal(events.filter((event) => event === "replica.write").length, 1, facts());
       assert.equal(events.includes("replica.publish"), false, facts());
       assert.equal(result.status, "scheduled", facts());
       assert.ok(Date.parse(result.nextWakeAt ?? "") <= Date.now(), facts());
@@ -395,9 +397,11 @@ test.each([
       return;
     }
     if (scenario === "scheduler-refresh") {
+      // An unfinished wake classification can be replayed after publication.
+      // Prove the original write completes without restart across the hints.
+      assert.equal(writesAtFirstPublication, 1, facts());
       assert.equal(events.filter((event) => event === "refresh.wake_hint").length, 3, facts());
       assert.equal(events.filter((event) => event === "refresh.mailbox_read").length, 3, facts());
-      assert.equal(events.filter((event) => event === "replica.publish").length, 1, facts());
     }
     const pending = (await readHostedSystemMailboxState(vaultRoot)).pending;
     assert.equal(pending.length, 0, JSON.stringify({ retry: pending.map(({ status, lastErrorCode, nextAttemptAt }) => ({ status, lastErrorCode, nextAttemptAt })), ...JSON.parse(facts()) }));
@@ -420,6 +424,7 @@ test.each([
   } finally {
     systemWorkObserver.mockRestore();
     controller.abort();
+    projectionRelease.resolve();
     await runtimeCompletion?.catch(() => undefined);
     if (originalAutomation) mocks.runAssistantAutomationPass.mockImplementation(originalAutomation);
     vi.unstubAllGlobals();

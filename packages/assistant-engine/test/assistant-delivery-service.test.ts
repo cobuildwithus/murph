@@ -928,7 +928,7 @@ function createSharedPlan(input?: {
   }
 }
 
-test.each(['active', 'pending', 'failed', 'stopped', 'aborted', 'expired', 'isolated', 'observer-pending', 'observer-failed'])(
+test.each(['active', 'pending', 'failed', 'stopped', 'aborted', 'expired', 'isolated', 'observer-pending', 'observer-failed', 'prepared'])(
   'typing evidence follows turn admission and handle lifetime: %s', async (scenario) => {
     const signal = new AbortController()
     let release!: () => void
@@ -941,7 +941,10 @@ test.each(['active', 'pending', 'failed', 'stopped', 'aborted', 'expired', 'isol
     const startTelegramTyping = vi.fn(async () => {
       await ready
       if (scenario === 'failed') throw new Error('Synthetic provider failure')
-      return { isActive: () => active, stop: async () => { active = false } }
+      return {
+        ...(scenario === 'prepared' ? { acceptedAt: '2026-09-01T00:00:00.000Z' } : {}),
+        isActive: () => active, stop: async () => { active = false },
+      }
     })
     const indicator = startAssistantChannelTypingIndicator({
       channelDependencies: { startTelegramTyping, onTypingAccepted },
@@ -971,6 +974,7 @@ test.each(['active', 'pending', 'failed', 'stopped', 'aborted', 'expired', 'isol
       }
       await vi.waitFor(() => expect(onTypingAccepted).toHaveBeenCalled())
       const at = onTypingAccepted.mock.calls[0]![0].at
+      if (scenario === 'prepared') expect(at).toBe('2026-09-01T00:00:00.000Z')
       if (scenario === 'stopped') await indicator?.stop()
       if (scenario === 'aborted') signal.abort()
       if (scenario === 'expired') active = false
@@ -979,7 +983,7 @@ test.each(['active', 'pending', 'failed', 'stopped', 'aborted', 'expired', 'isol
       await indicator?.refreshNow?.()
       expect(onTypingAccepted.mock.calls.map(([event]) => event)).toEqual([
         { acceptedInputIds: ['initial'], at, channel: 'telegram' },
-        ...(['active', 'pending', 'observer-pending', 'observer-failed'].includes(scenario)
+        ...(['active', 'pending', 'observer-pending', 'observer-failed', 'prepared'].includes(scenario)
           ? [{ acceptedInputIds: ['followup'], at, channel: 'telegram' }]
           : []),
       ])

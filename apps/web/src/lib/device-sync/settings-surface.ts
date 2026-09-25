@@ -257,39 +257,48 @@ function buildConnectedSource(input: {
     ? buildReconnectAction(sourceReconnectTarget)
     : null;
 
+  const commonSource = {
+    connectionId: connection.id,
+    connectedAt: connection.connectedAt,
+    connectSourceId: input.connectTarget?.connectSourceId ?? null,
+    connectTarget: input.connectTarget?.connectTarget ?? null,
+    displayName,
+    lastActivityAt,
+    lastSuccessfulSyncAt,
+    lastWebhookAt: connection.lastWebhookAt,
+    nextReconcileAt: connection.nextReconcileAt,
+    provider: connection.provider,
+    providerConfigured: true,
+    providerLabel,
+    secondaryAction: {
+      kind: "disconnect",
+      label: "Disconnect",
+    },
+    state: connection.status,
+    updatedAt: connection.updatedAt,
+    upstreamSources: input.upstreamSources,
+  } satisfies Partial<HostedDeviceSyncSettingsSource>;
+
   if (connection.status === "disconnected") {
     const resetIncomplete = isHistoricalResetIncompleteDeviceSyncAccount(connection);
 
     return {
-      connectionId: connection.id,
-      connectedAt: connection.connectedAt,
-      connectSourceId: input.connectTarget?.connectSourceId ?? null,
-      connectTarget: input.connectTarget?.connectTarget ?? null,
+      ...commonSource,
       detail: resetIncomplete
         ? "This source is disconnected, but the last reset did not finish in your wearable provider account."
         : lastSuccessfulSyncAt
           ? "This source is disconnected. Your past history stays in place."
           : "This source is disconnected.",
-      displayName,
       guidance: resetIncomplete
         ? "Remove the old connection in your wearable provider account, then connect it again here."
         : "Past history stays in place.",
       headline: "Disconnected",
       ...(resetIncomplete ? { historicalResetIncomplete: true } : {}),
-      lastActivityAt,
-      lastSuccessfulSyncAt,
-      lastWebhookAt: connection.lastWebhookAt,
       nextReconcileAt: null,
       primaryAction: null,
-      provider: connection.provider,
-      providerConfigured: true,
-      providerLabel,
       secondaryAction: null,
-      state: connection.status,
       statusLabel: resetIncomplete ? "Needs attention" : "Disconnected",
       tone: resetIncomplete ? "attention" : "muted",
-      updatedAt: connection.updatedAt,
-      upstreamSources: input.upstreamSources,
     } satisfies HostedDeviceSyncSettingsSource;
   }
 
@@ -299,36 +308,18 @@ function buildConnectedSource(input: {
     const setupNeedsAttention = setupPhase === "failed" || setupExpired;
 
     return {
-      connectionId: connection.id,
-      connectedAt: connection.connectedAt,
-      connectSourceId: input.connectTarget?.connectSourceId ?? null,
-      connectTarget: input.connectTarget?.connectTarget ?? null,
+      ...commonSource,
       detail: setupNeedsAttention
         ? "The provider connection setup did not finish cleanly."
         : "Waiting for the provider to confirm the source.",
-      displayName,
       guidance: setupNeedsAttention
         ? "Disconnect this source if you no longer need it."
         : "Murph can keep listening for provider confirmation in the background.",
       headline: setupNeedsAttention ? "Setup needs attention" : "Finishing setup",
-      lastActivityAt,
-      lastSuccessfulSyncAt,
-      lastWebhookAt: connection.lastWebhookAt,
-      nextReconcileAt: connection.nextReconcileAt,
       primaryAction: null,
-      provider: connection.provider,
-      providerConfigured: true,
-      providerLabel,
-      secondaryAction: {
-        kind: "disconnect",
-        label: "Disconnect",
-      },
       setupIncomplete: setupNeedsAttention,
-      state: connection.status,
       statusLabel: setupNeedsAttention ? "Setup incomplete" : "Setting up",
       tone: setupNeedsAttention ? "attention" : "muted",
-      updatedAt: connection.updatedAt,
-      upstreamSources: input.upstreamSources,
     } satisfies HostedDeviceSyncSettingsSource;
   }
 
@@ -336,14 +327,10 @@ function buildConnectedSource(input: {
     const disconnectNotFinished =
       isDeviceSyncDisconnectRecoveryRequired(connection);
     return {
-      connectionId: connection.id,
-      connectedAt: connection.connectedAt,
-      connectSourceId: input.connectTarget?.connectSourceId ?? null,
-      connectTarget: input.connectTarget?.connectTarget ?? null,
+      ...commonSource,
       detail: disconnectNotFinished
         ? "The provider did not confirm that Murph access was removed."
         : "The provider asked Murph to renew access before it can keep syncing.",
-      displayName,
       guidance: disconnectNotFinished
         ? "Remove Murph access in the provider account, then retry Disconnect here. Your earlier history is still here."
         : lastSuccessfulSyncAt
@@ -352,64 +339,39 @@ function buildConnectedSource(input: {
       headline: disconnectNotFinished
         ? "Disconnect not finished"
         : "Access needs attention",
-      lastActivityAt,
-      lastSuccessfulSyncAt,
-      lastWebhookAt: connection.lastWebhookAt,
-      nextReconcileAt: connection.nextReconcileAt,
       primaryAction: !disconnectNotFinished && input.connectTarget
         ? {
             kind: "reconnect",
             label: "Reconnect",
           }
         : null,
-      provider: connection.provider,
-      providerConfigured: true,
-      providerLabel,
       secondaryAction: {
         kind: "disconnect",
         label: disconnectNotFinished ? "Retry disconnect" : "Disconnect",
       },
-      state: connection.status,
       statusLabel: disconnectNotFinished ? "Needs removal" : "Needs access",
       tone: "attention",
-      updatedAt: connection.updatedAt,
-      upstreamSources: input.upstreamSources,
     } satisfies HostedDeviceSyncSettingsSource;
   }
 
   if (reconnectSource) {
     return {
-      connectionId: connection.id,
-      connectedAt: connection.connectedAt,
+      ...commonSource,
       connectSourceId: sourceReconnectTarget?.connectSourceId ?? null,
       connectTarget: sourceReconnectTarget?.connectTarget ?? null,
       detail: needsConnectionReset
         ? `${reconnectSource.providerLabel} needs a fresh connection before Murph can bring in its history.`
         : `${reconnectSource.providerLabel} needs to be reconnected before Murph can keep syncing it.`,
-      displayName,
       guidance: needsConnectionReset
         ? "Disconnect this source first, then connect it again to start a fresh sync."
         : sourceReconnectAction
           ? "Reconnect this source to refresh access, or disconnect it if you no longer need it."
           : "Disconnect this source if you no longer need it.",
       headline: "Access needs attention",
-      lastActivityAt,
-      lastSuccessfulSyncAt,
-      lastWebhookAt: connection.lastWebhookAt,
-      nextReconcileAt: connection.nextReconcileAt,
       primaryAction: sourceReconnectAction,
-      provider: connection.provider,
-      providerConfigured: true,
       providerLabel: reconnectSource.providerLabel,
-      secondaryAction: {
-        kind: "disconnect",
-        label: "Disconnect",
-      },
-      state: connection.status,
       statusLabel: needsConnectionReset ? "Needs attention" : "Needs access",
       tone: "attention",
-      updatedAt: connection.updatedAt,
-      upstreamSources: input.upstreamSources,
     } satisfies HostedDeviceSyncSettingsSource;
   }
 
@@ -427,124 +389,53 @@ function buildConnectedSource(input: {
         : "Give it a little time unless you expect data here already.";
 
     return {
-      connectionId: connection.id,
-      connectedAt: connection.connectedAt,
-      connectSourceId: input.connectTarget?.connectSourceId ?? null,
-      connectTarget: input.connectTarget?.connectTarget ?? null,
+      ...commonSource,
       detail,
-      displayName,
       guidance,
       headline: "Connected",
-      lastActivityAt,
       lastSuccessfulSyncAt: null,
-      lastWebhookAt: connection.lastWebhookAt,
-      nextReconcileAt: connection.nextReconcileAt,
       primaryAction: recentErrorReconnectAction,
-      provider: connection.provider,
-      providerConfigured: true,
-      providerLabel,
-      secondaryAction: {
-        kind: "disconnect",
-        label: "Disconnect",
-      },
-      state: connection.status,
       statusLabel: hasRecentError ? "Needs attention" : "Connected",
       tone: hasRecentError ? "attention" : "calm",
-      updatedAt: connection.updatedAt,
-      upstreamSources: input.upstreamSources,
     } satisfies HostedDeviceSyncSettingsSource;
   }
 
   if (lastSuccessfulSyncAgeMs !== null && lastSuccessfulSyncAgeMs <= RECENT_SYNC_WINDOW_MS) {
     return {
-      connectionId: connection.id,
-      connectedAt: connection.connectedAt,
-      connectSourceId: input.connectTarget?.connectSourceId ?? null,
-      connectTarget: input.connectTarget?.connectTarget ?? null,
+      ...commonSource,
       detail: "Murph has a fresh sync from this source.",
-      displayName,
       guidance: "Nothing to do here.",
       headline: "Connected and syncing normally",
-      lastActivityAt,
-      lastSuccessfulSyncAt,
-      lastWebhookAt: connection.lastWebhookAt,
-      nextReconcileAt: connection.nextReconcileAt,
       primaryAction: null,
-      provider: connection.provider,
-      providerConfigured: true,
-      providerLabel,
-      secondaryAction: {
-        kind: "disconnect",
-        label: "Disconnect",
-      },
-      state: connection.status,
       statusLabel: "Connected",
       tone: "calm",
-      updatedAt: connection.updatedAt,
-      upstreamSources: input.upstreamSources,
     } satisfies HostedDeviceSyncSettingsSource;
   }
 
   if (lastSuccessfulSyncAgeMs !== null && lastSuccessfulSyncAgeMs <= STALE_SYNC_WINDOW_MS && !hasRecentError) {
     return {
-      connectionId: connection.id,
-      connectedAt: connection.connectedAt,
-      connectSourceId: input.connectTarget?.connectSourceId ?? null,
-      connectTarget: input.connectTarget?.connectTarget ?? null,
+      ...commonSource,
       detail: "Murph has a recent sync from this source.",
-      displayName,
       guidance: "Nothing urgent here. It may update again on the next quiet background check.",
       headline: "Connected",
-      lastActivityAt,
-      lastSuccessfulSyncAt,
-      lastWebhookAt: connection.lastWebhookAt,
-      nextReconcileAt: connection.nextReconcileAt,
       primaryAction: null,
-      provider: connection.provider,
-      providerConfigured: true,
-      providerLabel,
-      secondaryAction: {
-        kind: "disconnect",
-        label: "Disconnect",
-      },
-      state: connection.status,
       statusLabel: "Connected",
       tone: "calm",
-      updatedAt: connection.updatedAt,
-      upstreamSources: input.upstreamSources,
     } satisfies HostedDeviceSyncSettingsSource;
   }
 
   return {
-    connectionId: connection.id,
-    connectedAt: connection.connectedAt,
-    connectSourceId: input.connectTarget?.connectSourceId ?? null,
-    connectTarget: input.connectTarget?.connectTarget ?? null,
+    ...commonSource,
     detail: "Murph has not seen a fresh sync from this source recently.",
-    displayName,
     guidance: hasRecentError
       ? recentErrorReconnectAction
         ? "Reconnect this source to refresh access, or disconnect it if you no longer need it."
         : "Disconnect this source if you no longer need it."
       : "This may resolve on its own if the provider sends new data.",
     headline: "Connected, but updates have been quiet lately",
-    lastActivityAt,
-    lastSuccessfulSyncAt,
-    lastWebhookAt: connection.lastWebhookAt,
-    nextReconcileAt: connection.nextReconcileAt,
     primaryAction: recentErrorReconnectAction,
-    provider: connection.provider,
-    providerConfigured: true,
-    providerLabel,
-    secondaryAction: {
-      kind: "disconnect",
-      label: "Disconnect",
-    },
-    state: connection.status,
     statusLabel: hasRecentError ? "Needs attention" : "Quiet lately",
     tone: hasRecentError ? "attention" : "muted",
-    updatedAt: connection.updatedAt,
-    upstreamSources: input.upstreamSources,
   } satisfies HostedDeviceSyncSettingsSource;
 }
 

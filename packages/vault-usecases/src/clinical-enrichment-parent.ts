@@ -13,11 +13,12 @@ import {
   listClinicalFhirAttachments,
   normalizeClinicalFhirPatientReference,
   rawRefForClinicalManifestFile,
+  resolveClinicalFhirSourceRevision,
   type ClinicalDocumentAttachment,
   type ClinicalRawManifest,
 } from "@murphai/clinical-records";
-import { isWritableIsoDateTime } from "@murphai/contracts";
 import { resolveVaultPathOnDisk } from "@murphai/core";
+import { isWritableIsoDateTime } from "@murphai/contracts";
 
 const MAX_PARENT_PAGE_BYTES = 5 * 1024 * 1024;
 type DownloadedAttachment = Extract<ClinicalDocumentAttachment, { status: "downloaded" }>;
@@ -39,15 +40,29 @@ export async function readClinicalEnrichmentParentEligibility(input: {
   const parent = await readAttestedParent({ ...input, manifest, attachment });
   validateParentPatient(parent, manifest);
   validateParentAttachment(parent, attachment);
-  const revision = isRecord(parent.meta) ? parent.meta.lastUpdated : undefined;
-  if (typeof revision !== "string" || revision.length > 200 || !isWritableIsoDateTime(revision)) throw invalidParent();
+  // Same revision rule as the importer: an absent `meta.lastUpdated` binds the
+  // parent to the retrieval batch, so derived facets match the imported parent.
+  const revision = resolveClinicalFhirSourceRevision({
+    lastUpdated: isRecord(parent.meta) ? parent.meta.lastUpdated : undefined, fetchedAt: manifest.fetchedAt });
+  if (revision === undefined) throw invalidParent();
   const parentExternalRef = externalRefForFhir({ fhirBaseUrlHash: manifest.fhirBaseUrlHash,
     patientIdHash: manifest.patientIdHash, sourceSystem: manifest.sourceSystem,
     resourceType: attachment.resourceType, resourceId: attachment.resourceId, version: revision });
   const eligibility = clinicalDocumentParentEligibility({ resourceType: attachment.resourceType,
     status: parent.status, docStatus: parent.docStatus });
   return { eligible: eligibility.action === "eligible", ...("reason" in eligibility ? { reason: eligibility.reason } : {}),
-    parentExternalRef, parentRevision: revision };
+    parentExternalRef, parentRevision: revision,
+    clinicalOccurredAt: readParentClinicalDate(parent), retrievedAt: manifest.fetchedAt };
+}
+
+function readParentClinicalDate(parent: Record<string, unknown>): string | undefined {
+  // Match the canonical importer's readClinicalOccurredAt contract. In
+  // particular, an effective date must not silently fall back to issue time.
+  const effective = "effectiveDateTime" in parent || "effectivePeriod" in parent;
+  const value = effective
+    ? (typeof parent.effectiveDateTime === "string" && parent.effectiveDateTime.trim() ? parent.effectiveDateTime : undefined) ?? (isRecord(parent.effectivePeriod) ? parent.effectivePeriod.start : undefined)
+    : parent.resourceType === "DocumentReference" ? parent.date : parent.issued;
+  return typeof value === "string" && isWritableIsoDateTime(value) ? new Date(value).toISOString() : undefined;
 }
 
 async function readAttestedParent(input: {

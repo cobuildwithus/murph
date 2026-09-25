@@ -3545,8 +3545,9 @@ function isPrismaUniqueConstraintError(error: unknown): boolean {
   );
 }
 
-function buildHostedLinqDeliveryId(idempotencyKey: string): string {
-  return `hld_${sha256Hex(idempotencyKey).slice(0, 32)}`;
+// Accept the privacy-normalized lookup key used by the delivery claim owner.
+export function buildHostedLinqDeliveryId(idempotencyLookupKey: string): string {
+  return `hld_${sha256Hex(idempotencyLookupKey).slice(0, 32)}`;
 }
 
 function buildHostedLinqDeliveryMessageId(

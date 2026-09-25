@@ -27,6 +27,13 @@ async function main(): Promise<void> {
   if (inventory.upstreamTag !== `rust-v${inventory.version}`) {
     throw new Error("Codex upstream tag does not match the pinned package version.");
   }
+  const dockerfile = await readFile(
+    path.join(repoRoot, "Dockerfile.cloudflare-hosted-runner-base"),
+    "utf8",
+  );
+  if (!dockerfile.includes(`ARG CODEX_UPSTREAM_REVISION=${inventory.upstreamCommit}\n`)) {
+    throw new Error("Codex image source does not match the reviewed upstream commit.");
+  }
 
   const temporaryRoot = await mkdtemp(
     path.join(tmpdir(), "murph-codex-upstream-source-"),
@@ -67,6 +74,12 @@ async function main(): Promise<void> {
       );
     }
 
+    // Verify the same patch the deployment build applies to this exact release.
+    runGit(["checkout", "--quiet", "--detach", "FETCH_HEAD"], upstreamRepository);
+    runGit([
+      "apply", "--check", path.join(repoRoot, "patches/codex-public-live.patch"),
+    ], upstreamRepository);
+
     const sourceFiles = new Set(runGit([
       "ls-tree",
       "-r",
@@ -90,7 +103,7 @@ async function main(): Promise<void> {
     }
 
     process.stdout.write(
-      `Verified Codex ${inventory.version} tag, commit, ${inventory.upstreamSourceRoot} tree, and ${declaredSources.size} reviewed source paths.\n`,
+      `Verified Codex ${inventory.version} tag, commit, native patch applicability, ${inventory.upstreamSourceRoot} tree, and ${declaredSources.size} reviewed source paths.\n`,
     );
   } finally {
     await rm(temporaryRoot, { force: true, recursive: true });

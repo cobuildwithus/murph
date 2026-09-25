@@ -1,130 +1,84 @@
 import { createElement } from "react";
-import { act } from "react";
-import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { beforeEach, expect, test, vi } from "vitest";
 
 import { renderClientComponent } from "./render-client-component";
 
 const mocks = vi.hoisted(() => ({
-  ensureConfigured: vi.fn(),
-  hookState: {
-    clientAuthenticated: false,
-    configured: false,
-    error: null as string | null,
-    pendingLabel: null as string | null,
-    ready: true,
-    walletAddress: null as string | null,
-  },
+  legacyWallet: vi.fn(() => ({ setup: {
+    clientAuthenticated: false, configured: false, error: null, pendingLabel: null, ready: true, walletAddress: null,
+    ensureConfigured: vi.fn(), ensureExistingFactor: vi.fn(), loginForSetup: vi.fn(),
+  }, signChallenge: vi.fn() })),
   openAuthDialog: vi.fn(),
+  request: vi.fn(),
 }));
 
+vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
 vi.mock("@/src/components/hosted-onboarding/auth-dialog-provider", () => ({
-  useAuth: () => ({
-    authenticated: true,
-    openAuthDialog: mocks.openAuthDialog,
-  }),
+  useAuth: () => ({ authenticated: true, openAuthDialog: mocks.openAuthDialog }),
 }));
-
-vi.mock("@/src/components/sensitive-actions/use-passkey-wallet-mfa", () => ({
-  usePasskeyWalletMfa: () => ({
-    ...mocks.hookState,
-    ensureConfigured: mocks.ensureConfigured,
-  }),
+vi.mock("@/src/components/hosted-onboarding/client-api", async (original) => ({
+  ...await original<typeof import("@/src/components/hosted-onboarding/client-api")>(), requestHostedOnboardingJson: mocks.request,
+}));
+vi.mock("@/src/components/sensitive-actions/legacy-wallet-approval-context", () => ({
+  useLegacyWalletApproval: mocks.legacyWallet,
 }));
 
 import { HostedPasskeySettings } from "@/src/components/settings/hosted-passkey-settings";
 
-beforeEach(() => {
-  vi.clearAllMocks();
-  mocks.hookState.clientAuthenticated = false;
-  mocks.hookState.configured = false;
-  mocks.hookState.error = null;
-  mocks.hookState.pendingLabel = null;
-  mocks.hookState.ready = true;
-  mocks.hookState.walletAddress = null;
-});
+beforeEach(() => { vi.clearAllMocks(); });
 
-afterEach(() => {
-  vi.unstubAllGlobals();
-});
+function buttons(container: { querySelectorAll(selector: string): Iterable<{ textContent: string | null; disabled: boolean }> }) {
+  return [...container.querySelectorAll("button")].map((button) => `${button.textContent}${button.disabled ? " (disabled)" : ""}`);
+}
 
-test("shows server-confirmed passkey enabled when the mobile Privy client user is absent", async () => {
-  const rendered = await renderClientComponent(
-    createElement(HostedPasskeySettings, {
-      authenticated: true,
-      secureApprovalStatus: { status: "configured" },
-    }),
-    { requireButton: false },
-  );
-
+// The Settings control renders exactly the four outputs of readHostedSecureApprovalStatus.
+test("established Murph passkey shows recovery only", async () => {
+  const rendered = await renderClientComponent(createElement(HostedPasskeySettings, {
+    authenticated: true, enrollmentEnabled: true, secureApprovalStatus: { status: "configured", method: "passkey" },
+  }), { requireButton: false });
   expect(rendered.container.textContent).toContain("Enabled");
-  expect(rendered.container.textContent).not.toContain("Not set up");
-  expect(rendered.container.textContent).not.toContain("Set up");
-  expect(rendered.container.textContent).not.toContain("Sign in");
-
+  expect(buttons(rendered.container)).toEqual(["Recovery key"]);
   await rendered.cleanup();
 });
 
-test("asks the user to sign in on this device before starting passkey setup", async () => {
-  const rendered = await renderClientComponent(
-    createElement(HostedPasskeySettings, {
-      authenticated: true,
-      secureApprovalStatus: { status: "not_configured" },
-    }),
-  );
-
+test("new unprotected account offers initial setup", async () => {
+  const rendered = await renderClientComponent(createElement(HostedPasskeySettings, {
+    authenticated: true, enrollmentEnabled: true, secureApprovalStatus: { status: "not_configured", method: "initial" },
+  }));
   expect(rendered.container.textContent).toContain("Not set up");
-  expect(rendered.container.textContent).toContain("Sign in on this device");
-  expect(rendered.button.textContent).toBe("Sign in");
-
-  await act(async () => {
-    rendered.button.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
-  });
-
-  expect(mocks.openAuthDialog).toHaveBeenCalledTimes(1);
-  expect(mocks.ensureConfigured).not.toHaveBeenCalled();
-
+  expect(buttons(rendered.container)).toEqual(["Set up"]);
+  expect(rendered.container.textContent).not.toContain("already linked");
   await rendered.cleanup();
 });
 
-test("starts passkey setup only when Privy has an authenticated client user", async () => {
-  mocks.hookState.clientAuthenticated = true;
-  mocks.ensureConfigured.mockResolvedValue({
-    address: "0x1111111111111111111111111111111111111111",
-    walletIndex: 0,
-  });
-
-  const rendered = await renderClientComponent(
-    createElement(HostedPasskeySettings, {
-      authenticated: true,
-      secureApprovalStatus: { status: "not_configured" },
-    }),
-  );
-
-  expect(rendered.button.textContent).toBe("Set up");
-
-  await act(async () => {
-    rendered.button.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
-  });
-
-  expect(mocks.ensureConfigured).toHaveBeenCalledTimes(1);
-  expect(mocks.openAuthDialog).not.toHaveBeenCalled();
-
+test("never-migrated legacy account offers the inline Murph passkey update", async () => {
+  const rendered = await renderClientComponent(createElement(HostedPasskeySettings, {
+    authenticated: true, enrollmentEnabled: true, secureApprovalStatus: { status: "not_configured", method: "legacy-repair" },
+  }));
+  expect(rendered.container.textContent).toContain("Update needed");
+  expect(buttons(rendered.container)).toEqual(["Add Murph passkey"]);
+  expect(rendered.container.textContent).toContain("sign-in method already linked to your account");
+  expect(rendered.container.textContent).toContain("cannot be replaced here");
   await rendered.cleanup();
 });
 
-test("renders the migrated approval passkey without asking for client reauthentication", async () => {
-  mocks.hookState.ready = false;
-  const rendered = await renderClientComponent(
-    createElement(HostedPasskeySettings, {
-      authenticated: true,
-      enrollmentEnabled: true,
-      secureApprovalStatus: { status: "configured", method: "passkey" },
-    }),
-    { requireButton: false },
-  );
-  expect(rendered.container.textContent).toContain("Enabled");
-  expect(rendered.container.querySelector("button")).toBeNull();
-  expect(mocks.ensureConfigured).not.toHaveBeenCalled();
+test("unavailable status stays closed without setup, restoration or migration actions", async () => {
+  const rendered = await renderClientComponent(createElement(HostedPasskeySettings, {
+    authenticated: true, enrollmentEnabled: true, secureApprovalStatus: { status: "unavailable" },
+  }), { requireButton: false });
+  expect(rendered.container.textContent).toContain("Unavailable");
+  expect(rendered.container.textContent).toContain("temporarily unavailable");
+  expect(buttons(rendered.container)).toEqual([]);
+  expect(mocks.legacyWallet).not.toHaveBeenCalled();
   expect(mocks.openAuthDialog).not.toHaveBeenCalled();
+  expect(mocks.request).not.toHaveBeenCalled();
+  await rendered.cleanup();
+});
+
+test("renders nothing before authentication", async () => {
+  const rendered = await renderClientComponent(createElement(HostedPasskeySettings, {
+    authenticated: false, secureApprovalStatus: { status: "unavailable" },
+  }), { requireButton: false });
+  expect(rendered.container.textContent).toBe("");
   await rendered.cleanup();
 });

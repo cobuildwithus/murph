@@ -320,9 +320,10 @@ export function ShareResultsCardPanel({
       <div className="flex flex-col gap-2 sm:flex-row">
         {canNativeShare && (
           <Button
+            size="lg"
             onClick={onShare}
             disabled={busy !== null || previewStatus !== "ready"}
-            className="flex-1"
+            className="min-h-11 flex-1"
           >
             <Share2 />
             {busy === "share" ? "Opening…" : "Share"}
@@ -330,9 +331,10 @@ export function ShareResultsCardPanel({
         )}
         <Button
           variant={canNativeShare ? "outline" : "default"}
+          size="lg"
           onClick={onDownload}
           disabled={busy !== null || previewStatus === "loading"}
-          className="flex-1"
+          className="min-h-11 flex-1"
         >
           <Download />
           {busy === "download" ? "Preparing…" : "Download image"}

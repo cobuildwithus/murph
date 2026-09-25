@@ -17,6 +17,7 @@ import {
   readWrittenRpcMessages,
   requireMockChildProcess,
   sentProgressResult,
+  waitForMockCall,
   waitForRpcMessages,
   waitForRpcMethod,
   waitForRpcMethodCount,
@@ -27,6 +28,7 @@ import {
 } from "./assistant-codex-runtime.harness.ts";
 
 import path from 'node:path'
+import { EventEmitter } from 'node:events'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   buildCodexAppServerSteerRequest,
@@ -1297,6 +1299,99 @@ describe('assistant codex runtime', () => {it('fails closed on unexpected app-se
       sessionId: 'thread-progress-unsupported',
     })
     expect(progressDelivery.send).not.toHaveBeenCalled()
+  })
+
+  it('establishes fresh and warm turn identity before batched tools and drains their work', async () => {
+    const workingDirectory = await createTempDir('assistant-codex-batched-owner-work-')
+    const codexHome = await createTempDir('assistant-codex-batched-owner-home-')
+    const child = new MockChildProcess()
+    codexMocks.spawn.mockReturnValue(child)
+
+    for (const ordinal of [1, 2]) {
+      const threadId = `thread-batched-owner-${ordinal}`
+      const turnId = `turn-batched-owner-${ordinal}`
+      const toolRequestId = 900 + ordinal
+      const releaseTool = createDeferred<void>()
+      const settled = vi.fn()
+      const deviceRequest = vi.fn(async () => {
+        await releaseTool.promise
+        return {
+          accounts: [],
+          action: 'list_accounts' as const,
+          provider: null,
+          sourceProvider: null,
+        }
+      })
+      const execution = executeCodexAppServerTurn({
+        codexHome,
+        hostedToolContext: {
+          ...createHostedToolContext(),
+          deviceTool: { request: deviceRequest },
+        },
+        prompt: 'Read the connected devices.',
+        workingDirectory,
+      }).then((result) => {
+        settled()
+        return result
+      })
+      if (ordinal === 1) {
+        const initialize = await waitForRpcMethod(child, 'initialize')
+        child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+      }
+      const thread = await waitForRpcMethodCount(child, 'thread/start', ordinal)
+      child.stdout.write(jsonLine({ id: thread.id, result: { thread: { id: threadId } } }))
+      const turn = await waitForRpcMethodCount(child, 'turn/start', ordinal)
+      const response = { id: turn.id, result: { turn: { id: turnId } } }
+      // One physical stdout batch and no turn/started notification: the RPC
+      // response must establish identity synchronously, not in a .then(). A
+      // duplicate response must not replace that identity or enter the journal.
+      child.stdout.write([
+        response,
+        { id: turn.id, result: { turn: { id: 'turn-stale-response' } } },
+        { id: 'unknown-response', error: { code: -32603, message: 'stale response' } },
+        {
+          id: toolRequestId,
+          method: 'item/tool/call',
+          params: {
+            arguments: { action: 'list_accounts' },
+            namespace: 'murph',
+            threadId,
+            tool: 'device',
+            turnId,
+          },
+        },
+        {
+          method: 'item/completed',
+          params: {
+            item: { id: `answer-${ordinal}`, type: 'agentMessage', text: 'Devices checked.' },
+            threadId,
+            turnId,
+          },
+        },
+        { method: 'turn/completed', params: { threadId, turn: { id: turnId, status: 'completed' } } },
+      ].map(jsonLine).join(''))
+
+      try {
+        await waitForMockCall(deviceRequest, 1)
+        expect(settled).not.toHaveBeenCalled()
+        await expect(stopWarmCodexAppServer('batched-tool-still-draining')).rejects.toMatchObject({
+          code: 'ASSISTANT_CODEX_APP_SERVER_BUSY',
+          context: { state: 'running' },
+        })
+      } finally {
+        releaseTool.resolve(undefined)
+      }
+      await expect(waitForRpcResponse(child, toolRequestId)).resolves.toMatchObject({
+        id: toolRequestId,
+        result: { success: true },
+      })
+      const result = await execution
+      expect(result).toMatchObject({ finalMessage: 'Devices checked.', sessionId: threadId, turnId })
+      expect(result.jsonEvents.filter((event) => asRecord(event).id === turn.id)).toEqual([response])
+      expect(result.jsonEvents.some((event) => asRecord(event).id === 'unknown-response')).toBe(false)
+      expect(deviceRequest).toHaveBeenCalledTimes(1)
+    }
+    expect(codexMocks.spawn).toHaveBeenCalledTimes(1)
   })
 
   it('requires exact active-turn identity for invocation-scoped root tools', async () => {
@@ -2750,7 +2845,7 @@ describe('assistant codex runtime', () => {it('fails closed on unexpected app-se
     { settlement: 'truncated stdout' },
     { settlement: 'child error' },
     { settlement: 'failed terminal frame' },
-  ])('treats abort-race $settlement as interrupted, sends turn/interrupt, and signals the child group', async ({ settlement }) => {
+  ])('retires an unhealthy process when native interruption encounters $settlement', async ({ settlement }) => {
     const workingDirectory = await createTempDir('assistant-codex-abort-')
     const controller = new AbortController()
     const spawnedChildren: MockChildProcess[] = []
@@ -2761,26 +2856,7 @@ describe('assistant codex runtime', () => {it('fails closed on unexpected app-se
       spawnedChildren.push(spawnedChild)
       const processNumber = spawnedChildren.length
       vi.mocked(process.kill).mockImplementation((pid, signal) => {
-        if (
-          processNumber === 1 &&
-          pid === -spawnedChild.pid &&
-          signal === 'SIGINT'
-        ) {
-          if (settlement === 'truncated stdout') {
-            spawnedChild.stdout.write('{')
-          } else if (settlement === 'child error') {
-            spawnedChild.emit('error', new Error('child error after abort'))
-          } else if (settlement === 'failed terminal frame') {
-            spawnedChild.stdout.write(jsonLine({
-              method: 'turn/completed',
-              params: {
-                turn: {
-                  id: 'turn-abort-1',
-                  status: 'failed',
-                },
-              },
-            }))
-          }
+        if (pid === -spawnedChild.pid && signal === 'SIGTERM') {
           queueMicrotask(() => {
             spawnedChild.emit('exit', null, signal)
             spawnedChild.emit('close', null, signal)
@@ -2788,16 +2864,25 @@ describe('assistant codex runtime', () => {it('fails closed on unexpected app-se
         }
         return true
       })
-      if (processNumber === 1 && settlement === 'stdin EPIPE') {
+      if (processNumber === 1) {
         spawnedChild.stdin.onWrite = (write) => {
-          const message = asRecord(JSON.parse(write))
-          if (message.method !== 'turn/interrupt') {
-            return
-          }
-
+          if (asRecord(JSON.parse(write)).method !== 'turn/interrupt') return
           spawnedChild.stdin.onWrite = null
           queueMicrotask(() => {
-            spawnedChild.stdin.emit('error', createErrnoException('EPIPE', 'write EPIPE'))
+            if (settlement === 'stdin EPIPE') {
+              spawnedChild.stdin.emit('error', createErrnoException('EPIPE', 'write EPIPE'))
+            } else if (settlement === 'child error') {
+              spawnedChild.emit('error', new Error('child error after abort'))
+            } else if (settlement === 'truncated stdout') {
+              spawnedChild.stdout.write('{')
+              spawnedChild.emit('exit', 1, null)
+              spawnedChild.emit('close', 1, null)
+            } else {
+              spawnedChild.stdout.write(jsonLine({
+                method: 'turn/completed',
+                params: { turn: { id: 'turn-abort-1', status: 'failed' } },
+              }))
+            }
           })
         }
       }
@@ -2864,18 +2949,9 @@ describe('assistant codex runtime', () => {it('fails closed on unexpected app-se
         prompt: 'abort me',
         workingDirectory,
       }),
-    ).rejects.toMatchObject({
-      code: 'ASSISTANT_CODEX_INTERRUPTED',
-      context: {
-        codexAbortRequested: true,
-        codexFailureStage: 'interrupted',
-        codexShutdownRequested: false,
-        codexTerminationSignalSent: 'SIGINT',
-        interrupted: true,
-        codexThreadIdPresent: true,
-        retryable: false,
-      },
-    })
+    ).rejects.toMatchObject(settlement === 'child error'
+      ? { message: 'child error after abort' }
+      : { code: 'ASSISTANT_CODEX_FAILED' })
 
     const spawnedChild = requireMockChildProcess(spawnedChildren[0] ?? null)
     const messages = await waitForRpcMessages(spawnedChild, 5)
@@ -2887,7 +2963,7 @@ describe('assistant codex runtime', () => {it('fails closed on unexpected app-se
         turnId: 'turn-abort-1',
       },
     })
-    expect(process.kill).toHaveBeenCalledWith(-spawnedChild.pid, 'SIGINT')
+    expect(process.kill).not.toHaveBeenCalledWith(-spawnedChild.pid, 'SIGINT')
     expect(spawnedChild.kill).not.toHaveBeenCalledWith('SIGINT')
 
     const replacementTrace = vi.fn()
@@ -2905,7 +2981,9 @@ describe('assistant codex runtime', () => {it('fails closed on unexpected app-se
     expect(replacementTrace).toHaveBeenCalledWith(
       expect.objectContaining({
         rawEvent: expect.objectContaining({
-          codexTimingColdStartReason: 'previous-turn-abort',
+          codexTimingColdStartReason: settlement === 'truncated stdout'
+            ? 'previous-process-exit'
+            : 'previous-turn-abort',
           codexTimingStage: 'initialized',
         }),
       }),
@@ -2987,11 +3065,12 @@ describe('assistant codex runtime', () => {it('fails closed on unexpected app-se
     const killSpy = vi.mocked(process.kill)
     const onceSpy = vi.spyOn(process, 'once')
     const offSpy = vi.spyOn(process, 'off')
+    const prependSpy = vi.spyOn(process, 'prependListener')
     const cleanup = attachCodexAppServerProcessExitCleanup({
       processGroupPid: 515_151,
     })
     const exitListener = onceSpy.mock.calls.find(([eventName]) => eventName === 'exit')?.[1]
-    const sigtermListener = onceSpy.mock.calls.find(([eventName]) => eventName === 'SIGTERM')?.[1]
+    const sigtermListener = prependSpy.mock.calls.find(([eventName]) => eventName === 'SIGTERM')?.[1]
     expect(exitListener).toBeTypeOf('function')
     expect(sigtermListener).toBeTypeOf('function')
 
@@ -3003,4 +3082,80 @@ describe('assistant codex runtime', () => {it('fails closed on unexpected app-se
     expect(offSpy).toHaveBeenCalledWith('exit', exitListener)
     expect(offSpy).toHaveBeenCalledWith('SIGTERM', sigtermListener)
   })
+
+  it.each(['SIGTERM', 'SIGINT'] as const)('lets the existing %s owner drain before exit cleanup', (signal) => {
+    if (process.platform === 'win32') return
+    const owner = vi.fn()
+    process.on(signal, owner)
+    const onceSpy = vi.spyOn(process, 'once')
+    const prependSpy = vi.spyOn(process, 'prependListener')
+    const cleanup = attachCodexAppServerProcessExitCleanup({ processGroupPid: 515_152 })
+    const exitListener = onceSpy.mock.calls.find(([name]) => name === 'exit')?.[1]
+    const signalListener = [...onceSpy.mock.calls, ...prependSpy.mock.calls]
+      .find(([name]) => name === signal)?.[1]
+    try {
+      expect(signalListener).toBeTypeOf('function')
+      ;(signalListener as () => void)()
+      ;(signalListener as () => void)()
+      expect(process.kill).not.toHaveBeenCalled()
+      ;(exitListener as () => void)()
+      expect(process.kill).toHaveBeenCalledExactlyOnceWith(-515_152, 'SIGKILL')
+    } finally {
+      cleanup()
+      process.off(signal, owner)
+    }
+  })
+
+
+  it('does not mistake another Codex cleanup listener for a graceful shutdown owner', () => {
+    if (process.platform === 'win32') return
+    const prependSpy = vi.spyOn(process, 'prependListener')
+    const firstCleanup = attachCodexAppServerProcessExitCleanup({ processGroupPid: 515_153 })
+    const secondCleanup = attachCodexAppServerProcessExitCleanup({ processGroupPid: 515_154 })
+    const handlers = prependSpy.mock.calls.filter(([name]) => name === 'SIGTERM').map(([, handler]) => handler)
+    try {
+      for (const handler of handlers) (handler as () => void)()
+      expect(process.kill).toHaveBeenCalledWith(-515_153, 'SIGKILL')
+      expect(process.kill).toHaveBeenCalledWith(-515_154, 'SIGKILL')
+      expect(vi.mocked(process.kill).mock.calls.filter(([pid]) => pid === process.pid)).toHaveLength(2)
+    } finally {
+      firstCleanup()
+      secondCleanup()
+    }
+  })
+
+
+  it('defers before a one-shot host signal listener is consumed by Node event delivery', () => {
+    if (process.platform === 'win32') return
+    const events = new EventEmitter()
+    const spies = [
+      vi.spyOn(process, 'listeners').mockImplementation((name) => events.listeners(name)),
+      vi.spyOn(process, 'once').mockImplementation((name, listener) => {
+        events.once(name, listener)
+        return process
+      }),
+      vi.spyOn(process, 'prependListener').mockImplementation((name, listener) => {
+        events.prependListener(name, listener)
+        return process
+      }),
+      vi.spyOn(process, 'off').mockImplementation((name, listener) => {
+        events.off(name, listener)
+        return process
+      }),
+    ]
+    const owner = vi.fn()
+    events.once('SIGTERM', owner)
+    const cleanup = attachCodexAppServerProcessExitCleanup({ processGroupPid: 515_155 })
+    try {
+      events.emit('SIGTERM')
+      expect(owner).toHaveBeenCalledOnce()
+      expect(process.kill).not.toHaveBeenCalled()
+      events.emit('exit')
+      expect(process.kill).toHaveBeenCalledExactlyOnceWith(-515_155, 'SIGKILL')
+    } finally {
+      cleanup()
+      for (const spy of spies) spy.mockRestore()
+    }
+  })
+
 })

@@ -69,7 +69,7 @@ describe('durable optional follow-ups', () => {
     const [child] = await listAutomations(input.vault)
     expect(child).toMatchObject({
       followUpSourceIntentId: sent.intent.intentId, status: 'active',
-      continuityPolicy: 'preserve', assistantTargetOverride: { model: 'gpt-5.6-terra' },
+      continuityPolicy: 'preserve', assistantTargetOverride: { model: 'gpt-6-sol' },
     })
     expect(child.schedule).toEqual({
       kind: 'at', at: new Date(Date.parse(sent.intent.delivery!.sentAt) + 20 * 60_000).toISOString(),

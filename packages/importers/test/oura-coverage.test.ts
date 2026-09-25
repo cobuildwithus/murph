@@ -381,3 +381,93 @@ test("normalizeOuraSnapshot covers deletion resource and event fallbacks", () =>
     payload.evidenceParts?.some((artifact) => artifact.role.startsWith("deletion:workout:workout.deleted:")),
   );
 });
+
+test("Oura record emitters preserve deletion, rest, and skipped-session fallback ids", () => {
+  const start = "2026-04-22T01:00:00.000Z";
+  const end = "2026-04-22T02:00:00.000Z";
+  const payload = normalizeOuraSnapshot({
+    importedAt: "2026-04-24T12:00:00.000Z",
+    dailySleep: [{ score: 0 }],
+    sleeps: [
+      { type: "deleted" },
+      { type: "rest", bedtime_start: start, bedtime_end: end, average_hrv: 0 },
+      { type: "nap", bedtime_start: start, bedtime_end: end, average_hrv: 0 },
+    ],
+    sessions: [
+      {
+        start, end: start,
+        get heart_rate(): never { throw new Error("skipped session metrics must not be read"); },
+      },
+      { start, end, type: "meditation", heart_rate: 0 },
+    ],
+    workouts: [
+      {
+        start, end: start,
+        get active_calories(): never { throw new Error("skipped workout metrics must not be read"); },
+      },
+      { start, end, activity: false, activity_type: "running", distance: 0, active_calories: 0 },
+    ],
+  });
+
+  assert.deepEqual(payload.events?.map((event) => [
+    event.externalRef?.resourceType, event.externalRef?.resourceId, event.externalRef?.facet,
+  ]), [
+    ["daily-sleep", "daily-sleep-1", "sleep-score"],
+    ["sleep", "sleep-2", "deleted"],
+    ["sleep", "sleep-3", "average-hrv"],
+    ["sleep", "sleep-4", undefined],
+    ["sleep", "sleep-4", "average-hrv"],
+    ["session", "session-6", undefined],
+    ["workout", "workout-7", undefined],
+  ]);
+  assert.deepEqual(payload.evidenceParts?.slice(-4).map((part) => part.role), [
+    "session:session-6", "session:session-6", "workout:workout-7", "workout:workout-7",
+  ]);
+  assert.equal(payload.events?.[3]?.fields?.sleepType, "nap");
+  assert.equal(payload.events?.at(-1)?.fields?.activityType, "false");
+  assert.equal(payload.events?.at(-1)?.fields?.distanceKm, 0);
+  assert.deepEqual(payload.provenance?.importedSections, {
+    personalInfo: false, dailyActivity: 0, dailySleep: 1, dailyReadiness: 0,
+    dailySpO2: 0, sleeps: 3, sessions: 2, workouts: 2, deletions: 0,
+  });
+});
+
+test("Oura identity resolution preserves nullish priority and explicit account short-circuiting", () => {
+  for (const primary of [undefined, null, false, 0]) {
+    const reads: string[] = [];
+    const personalInfo = {
+      get id() { reads.push("id"); return primary; },
+      get user_id() { reads.push("user_id"); return "synthetic-profile"; },
+      get userId(): never { throw new Error("lower-priority identity must not be read"); },
+    };
+    const payload = normalizeOuraSnapshot({
+      importedAt: "2026-04-24T12:00:00.000Z", personalInfo,
+    });
+    const expected = primary === false ? undefined : primary === 0 ? "0" : "synthetic-profile";
+    assert.equal(payload.accountId, expected);
+    assert.equal(payload.provenance?.ouraUserId, expected);
+    assert.deepEqual(reads, primary === undefined || primary === null
+      ? ["id", "user_id", "id", "user_id"] : ["id", "id"]);
+
+    reads.length = 0;
+    const explicit = normalizeOuraSnapshot({
+      importedAt: "2026-04-24T12:00:00.000Z", accountId: 0, personalInfo,
+    });
+    assert.equal(explicit.accountId, "0");
+    assert.equal(explicit.provenance?.ouraUserId, expected);
+    assert.deepEqual(reads, primary === undefined || primary === null
+      ? ["id", "user_id"] : ["id"]);
+  }
+});
+
+test("Oura record emitters preserve the first getter exception and stop before later sections", () => {
+  const reads: string[] = [];
+  const failure = new Error("synthetic sleep failure");
+  assert.throws(() => normalizeOuraSnapshot({
+    importedAt: "2026-04-24T12:00:00.000Z",
+    personalInfo: { get id() { reads.push("identity"); return "synthetic-profile"; } },
+    sleeps: [{ get type(): never { reads.push("sleep"); throw failure; } }],
+    sessions: [{ get start_datetime(): never { throw new Error("later section was read"); } }],
+  }), (error: unknown) => error === failure);
+  assert.deepEqual(reads, ["identity", "sleep"]);
+});

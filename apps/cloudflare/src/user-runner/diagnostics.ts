@@ -1,7 +1,10 @@
+import type { HostedExecutionEnvironment } from "../env.js";
+import { fetchHostedExecutionWebControlPlaneResponse } from "../web-control-plane.js";
+import { HOSTED_RUNTIME_LOG_PATH } from "@murphai/hosted-execution/routes";
 import type { HostedRuntimeEnsureProcessingResponse } from "@murphai/hosted-execution/orchestration-control";
 import {
+  emitHostedExecutionStructuredLog,
   buildHostedExecutionSafeErrorDiagnostics,
-  deriveHostedExecutionErrorCode,
   type HostedExecutionStructuredLogDetails,
 } from "@murphai/hosted-execution";
 import {
@@ -11,11 +14,6 @@ import {
   type HostedRuntimeLogRequest,
   type HostedRuntimeRedactedJson,
 } from "@murphai/hosted-execution/runtime-control";
-
-import type {
-  RunnerContainerEnsureProcessingResult,
-} from "../runner-container.js";
-import type { RunnerStateRecord } from "./types.js";
 
 // Owned by one ensure call. Never persist this on the runner or send it as
 // authority; concurrent/queued calls must not share observations.
@@ -73,96 +71,6 @@ export type RuntimeProcessingRetryAttribution =
       reason: Exclude<RuntimeProcessingRetryReason, "container_busy">;
       stage?: never;
     };
-
-export type RuntimeProcessingStartFailureRetryReason = Extract<
-  RuntimeProcessingRetryReason,
-  | "command_budget_exhausted"
-  | "container_rpc_error"
-  | "container_rpc_timeout"
-  | "missing_container_binding"
->;
-
-export function buildRunnerRecordTimingLogDetails(
-  record: RunnerStateRecord,
-  nowMs = Date.now(),
-): HostedExecutionStructuredLogDetails {
-  const writeFence = record.writeFence;
-  const writeFenceStartedAtMs = writeFence ? Date.parse(writeFence.startedAt) : NaN;
-
-  return {
-    activeWriteFenceAgeMs: Number.isFinite(writeFenceStartedAtMs)
-      ? Math.max(0, nowMs - writeFenceStartedAtMs)
-      : null,
-    activeWriteFenceGeneration: writeFence?.generation ?? null,
-    activeWriteFencePresent: writeFence !== null,
-    activeWriteFenceWorkspaceVersion: writeFence?.workspaceVersion ?? null,
-    failureCount: record.failureCount,
-    lastErrorCode: record.lastErrorCode,
-  };
-}
-
-export function buildRunnerWriteFenceValidationRejectedDetails(input: {
-  attemptId: string;
-  generation: string;
-  record: RunnerStateRecord | null;
-  userId: string;
-}): HostedExecutionStructuredLogDetails {
-  if (!input.record) {
-    return {
-      activeWriteFencePresent: false,
-      activeWriteFenceWorkspaceVersionPresent: false,
-      runnerStatePresent: false,
-      writeFenceAttemptMatches: false,
-      writeFenceGenerationMatches: false,
-      writeFenceUserMatches: false,
-      writeFenceValidationRejectReason: "missing_runner_state",
-    };
-  }
-
-  const writeFence = input.record.writeFence;
-  const writeFenceAttemptMatches = writeFence !== null
-    && writeFence.attemptId === input.attemptId;
-  const writeFenceGenerationMatches = writeFence !== null
-    && String(writeFence.generation) === input.generation;
-  const writeFenceUserMatches = input.record.userId === input.userId;
-
-  return {
-    activeWriteFencePresent: writeFence !== null,
-    activeWriteFenceWorkspaceVersionPresent: writeFence?.workspaceVersion !== null
-      && writeFence?.workspaceVersion !== undefined,
-    runnerStatePresent: true,
-    writeFenceAttemptMatches,
-    writeFenceGenerationMatches,
-    writeFenceUserMatches,
-    writeFenceValidationRejectReason: readRunnerWriteFenceValidationRejectReason({
-      writeFenceAttemptMatches,
-      writeFenceGenerationMatches,
-      writeFencePresent: writeFence !== null,
-      writeFenceUserMatches,
-    }),
-  };
-}
-
-export function readRunnerWriteFenceValidationRejectReason(input: {
-  writeFenceAttemptMatches: boolean;
-  writeFenceGenerationMatches: boolean;
-  writeFencePresent: boolean;
-  writeFenceUserMatches: boolean;
-}): string {
-  if (!input.writeFencePresent) {
-    return "no_active_write_fence";
-  }
-  if (!input.writeFenceAttemptMatches) {
-    return "attempt_mismatch";
-  }
-  if (!input.writeFenceGenerationMatches) {
-    return "generation_mismatch";
-  }
-  if (!input.writeFenceUserMatches) {
-    return "user_mismatch";
-  }
-  return "unknown";
-}
 
 /**
  * Same metadata-only picks as `buildHostedRunnerMetadataOnlyErrorDetails`, plus
@@ -283,49 +191,6 @@ export function safeCleanupErrorCode(error: unknown): string {
     : "UnknownError";
 }
 
-export function mapRunnerProcessingRetryReason(
-  reason: Extract<
-    RunnerContainerEnsureProcessingResult,
-    { kind: "wake-unconfirmed" }
-  >["reason"],
-): Exclude<RuntimeProcessingRetryReason, "container_busy"> {
-  switch (reason) {
-    case "active-child-rejected":
-      return "active_child_rejected";
-    case "container-rpc-error":
-      return "container_rpc_error";
-    case "container-rpc-timeout":
-      return "container_rpc_timeout";
-    case "missing-container-binding":
-      return "missing_container_binding";
-    case "missing-wake-method":
-      return "container_rpc_error";
-  }
-}
-
-export function classifyRuntimeStartFailureRetryReason(
-  error: unknown,
-): RuntimeProcessingStartFailureRetryReason {
-  if (isMissingContainerBindingFailure(error)) {
-    return "missing_container_binding";
-  }
-
-  return deriveHostedExecutionErrorCode(error) === "timeout"
-    ? "container_rpc_timeout"
-    : "container_rpc_error";
-}
-
-export function isMissingContainerBindingFailure(error: unknown): boolean {
-  const message = error instanceof Error
-    ? error.message
-    : typeof error === "string"
-      ? error
-      : "";
-  const normalized = message.toLowerCase();
-  return normalized.includes("runnercontainer binding")
-    || normalized.includes("container binding");
-}
-
 // Snapshot scalars before detaching telemetry so late work cannot change a row.
 export function buildRuntimeProcessingSummaryEntry(
   diagnostics: RuntimeProcessingDiagnostics,
@@ -353,4 +218,57 @@ export function buildRuntimeProcessingSummaryEntry(
       } : {}),
     },
   };
+}
+
+export async function recordRuntimeProcessingSummary(input: {
+  env: HostedExecutionEnvironment;
+  entry: HostedRuntimeLogRequest["entries"][number];
+  orchestrationAttemptId: string;
+  userId: string;
+}): Promise<void> {
+  // The producer is not necessarily Web: even an opaque-looking caller id
+  // can be a member id. Fingerprint the whole value, only on this detached
+  // telemetry path. Never fall back to the original on hashing failure.
+  let orchestrationAttemptFingerprint: string | undefined;
+  try {
+    const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(
+      `murph.runtime-processing-attempt.v1\0${input.orchestrationAttemptId}`,
+    ));
+    orchestrationAttemptFingerprint = Array.from(new Uint8Array(digest), (byte) =>
+      byte.toString(16).padStart(2, "0")).join("");
+  } catch {
+    // Attempt/generation and command timing still identify this observation.
+  }
+  const entry = {
+    ...input.entry,
+    redactedJson: {
+      ...input.entry.redactedJson,
+      ...(orchestrationAttemptFingerprint ? { orchestrationAttemptFingerprint } : {}),
+    },
+  };
+  const response = await fetchHostedExecutionWebControlPlaneResponse({
+    ...(input.env.hostedWebAllowHttpHosts
+      ? { allowHttpHosts: input.env.hostedWebAllowHttpHosts }
+      : {}),
+    baseUrl: input.env.hostedWebBaseUrl,
+    body: JSON.stringify({ entries: [entry] } satisfies HostedRuntimeLogRequest),
+    boundUserId: input.userId,
+    callbackSigning: input.env.webCallbackSigning,
+    method: "POST",
+    path: HOSTED_RUNTIME_LOG_PATH,
+    timeoutMs: input.env.webControlTimeoutMs,
+  });
+  // Initiate release, but do not wait for the stream's underlying cancel to
+  // settle. Own both synchronous throws and rejected cancellation promises.
+  void Promise.resolve().then(() => response.body?.cancel()).catch(() => undefined);
+  if (!response.ok) {
+    emitHostedExecutionStructuredLog({
+      component: "hosted.runner",
+      details: { runtimeLogWriteStatus: response.status },
+      level: "warn",
+      message: "Hosted runner processing summary log write rejected.",
+      phase: "failed",
+      userId: input.userId,
+    });
+  }
 }

@@ -5484,8 +5484,13 @@ test("device sync service worker handles missing providers, disconnected jobs, a
   close();
 });
 
-test("device sync service imports accepted companion RMSSD jobs after terminal account state", async () => {
-  for (const status of ["disconnected", "reauthorization_required"] as const) {
+test("device sync service imports accepted companion RMSSD jobs without ordinary account authority", async () => {
+  for (const { status, setupPhase } of [
+    { status: "active", setupPhase: "pending_link" },
+    { status: "active", setupPhase: "link_returned" },
+    { status: "disconnected", setupPhase: null },
+    { status: "reauthorization_required", setupPhase: null },
+  ] as const) {
     const vaultRoot = await makeTempDirectory(`murph-device-syncd-companion-terminal-${status}`);
     const imports: unknown[] = [];
     const providerRequests = vi.fn(async (input: RequestInfo | URL) => {
@@ -5526,6 +5531,7 @@ test("device sync service imports accepted companion RMSSD jobs after terminal a
         displayName: "Junction",
         scopes: [],
         status,
+        setupPhase,
         credential: {
           kind: "provider_config",
           providerConfigKey: "junction",
@@ -5557,7 +5563,10 @@ test("device sync service imports accepted companion RMSSD jobs after terminal a
       await service.runWorkerOnce();
 
       assert.equal(store.getJobById(job.id)?.status, "succeeded");
+      assert.equal(store.getJobById(job.id)?.attempts, 1);
       assert.equal(store.getAccountById(account.id)?.status, status);
+      assert.equal(store.getAccountById(account.id)?.setupPhase, setupPhase);
+      assert.equal(service.listJobTimingDiagnostics()[0]?.outcome, "completed");
       assert.equal(imports.length, 1);
       assert.equal(providerRequests.mock.calls.length, 0);
     } finally {
@@ -5662,6 +5671,93 @@ test("device sync service retains one accepted companion RMSSD job until canonic
     close();
   }
 });
+
+test.each(["blood_oxygen", "electrocardiogram_voltage"])(
+  "Junction %s validation remains pending across exhaustion and restart until corrected",
+  async (resource) => {
+    const vaultRoot = await makeTempDirectory("murph-junction-validation-retry");
+    let now = new Date("2026-04-03T12:00:00.000Z");
+    let corrected = false;
+    let otherJobs = 0;
+    const createFixture = () => createServiceFixture({
+      secret: "secret-for-tests",
+      clock: { now: () => now },
+      config: { vaultRoot, publicBaseUrl: "https://sync.example.test", stateDatabasePath: path.join(vaultRoot, "state.sqlite") },
+      providers: [createFakeProvider({
+        provider: "junction",
+        descriptor: JUNCTION_DEVICE_PROVIDER_DESCRIPTOR,
+        async executeJob(_context, job) {
+          if (job.payload.resource !== resource) { otherJobs += 1; return {}; }
+          if (corrected) return {};
+          if (resource === "blood_oxygen") {
+            throw new JunctionSparseCalendarRepairNormalizationError({
+              reason: "daily.value_out_of_range", valueKind: "number",
+              valueRange: "negative", unitKind: "percent",
+            });
+          }
+          throw deviceSyncError({
+            code: "JUNCTION_ECG_RECORDING_BINDING_INCOMPLETE",
+            message: "Synthetic incomplete ECG collection.", retryable: true,
+            details: { reason: "voltage_collection_empty", pageCount: 1, groupCount: 0,
+              providerMatchGroupCount: 0, instanceMatchGroupCount: 0, matchedGroupCount: 0 },
+          });
+        },
+      })],
+    });
+    let fixture = createFixture();
+    try {
+      const account = fixture.store.upsertAccount({
+        provider: "junction", externalAccountId: "junction-validation-retry",
+        displayName: "Junction", scopes: [], status: "active",
+        credential: { kind: "provider_config", providerConfigKey: "junction", credentialMetadata: {} },
+        connectedAt: now.toISOString(),
+      });
+      const input = {
+        accountId: account.id, provider: "junction", kind: "resource", maxAttempts: 1,
+        availableAt: now.toISOString(), dedupeKey: "validation-resource-day",
+        payload: { resource, resourceCategory: "timeseries", sourceProviderSlug: "withings",
+          windowStart: "2026-04-02T00:00:00.000Z", windowEnd: "2026-04-03T00:00:00.000Z" },
+      };
+      const original = fixture.store.enqueueJob(input);
+      for (let attempt = 1; attempt <= 6; attempt += 1) {
+        assert.equal((await fixture.service.runWorkerOnce())?.id, original.id);
+        const retained = fixture.store.getJobById(original.id);
+        assert.ok(retained);
+        assert.equal(retained.status, "queued");
+        assert.equal(retained.attempts, attempt);
+        assert.ok(retained.maxAttempts > retained.attempts);
+        assert.deepEqual(retained.payload, original.payload);
+        assert.equal(Date.parse(retained.availableAt) - now.getTime(), 30 * 60_000);
+        assert.equal(fixture.store.enqueueJob(input).id, original.id);
+        assert.equal(await fixture.service.runWorkerOnce(), null);
+        const diagnostic = fixture.service.listJobFailureDiagnostics().at(-1);
+        assert.equal(diagnostic?.details.validationRetryDelayMs, 30 * 60_000);
+        if (resource === "electrocardiogram_voltage") {
+          assert.equal(diagnostic?.details.junctionEcgGroupCount, 0);
+          assert.equal(diagnostic.details.providerHttpStatusSource, "local_validation");
+        }
+        if (attempt === 1) {
+          const other = fixture.store.enqueueJob({ ...input, dedupeKey: "other-resource",
+            payload: { ...input.payload, resource: "heartrate" } });
+          assert.equal((await fixture.service.runWorkerOnce())?.id, other.id);
+          assert.equal(fixture.store.getJobById(other.id)?.status, "succeeded");
+          fixture.close();
+          fixture = createFixture();
+          assert.equal(await fixture.service.runWorkerOnce(), null);
+        }
+        now = new Date(retained.availableAt);
+      }
+      corrected = true;
+      assert.equal((await fixture.service.runWorkerOnce())?.id, original.id);
+      assert.equal(fixture.store.getJobById(original.id)?.status, "succeeded");
+      assert.equal(otherJobs, 1);
+      assert.equal(fixture.store.getAccountById(account.id)?.lastErrorCode, null);
+    } finally {
+      fixture.close();
+      await rm(vaultRoot, { recursive: true, force: true });
+    }
+  },
+);
 
 test("device sync service retains one accepted sparse calendar job until canonical import succeeds", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-syncd-calendar-retained-import");
@@ -5926,10 +6022,12 @@ test("device sync service retries structurally incomplete calendar rows before a
 });
 
 test("device sync service keeps calendar work dormant without account authority", async () => {
+  const now = new Date("2026-07-10T13:46:00.000Z");
   for (const accountState of [
-    { status: "active", setupPhase: "pending_link" },
-    { status: "disconnected", setupPhase: null },
-    { status: "reauthorization_required", setupPhase: null },
+    { status: "active", setupPhase: "pending_link", code: "CONNECTION_SETUP_PENDING" },
+    { status: "active", setupPhase: "link_returned", code: "CONNECTION_SETUP_PENDING" },
+    { status: "disconnected", setupPhase: null, code: "ACCOUNT_DISCONNECTED" },
+    { status: "reauthorization_required", setupPhase: null, code: "ACCOUNT_REAUTHORIZATION_REQUIRED" },
   ] as const) {
     const vaultRoot = await makeTempDirectory(`murph-device-syncd-calendar-dormant-${accountState.status}`);
     const providerRequests = vi.fn(async (input: RequestInfo | URL) => {
@@ -5937,6 +6035,7 @@ test("device sync service keeps calendar work dormant without account authority"
     });
     const { service, store, close } = createServiceFixture({
       secret: "secret-for-tests",
+      clock: { now: () => now },
       config: {
         vaultRoot,
         publicBaseUrl: "https://sync.example.test/device-sync",
@@ -5974,16 +6073,125 @@ test("device sync service keeps calendar work dormant without account authority"
           resource: "water",
           sourceProviderSlug: "garmin",
         },
-        availableAt: "2026-07-10T13:00:00.000Z",
+        availableAt: now.toISOString(),
+        maxAttempts: 1,
       });
+      const accountBeforeRun = store.getAccountById(account.id);
+      assert.ok(accountBeforeRun);
       await service.runWorkerOnce();
       const retained = store.getJobById(job.id);
       assert.equal(retained?.status, "queued");
       assert.equal(retained?.attempts, 1);
+      assert.equal(retained?.maxAttempts, 2);
+      assert.equal(retained?.lastErrorCode, accountState.code);
+      assert.equal(
+        retained?.availableAt,
+        new Date(now.getTime() + computeRetryDelayMs(1)).toISOString(),
+      );
+      assert.deepEqual(store.getAccountById(account.id), accountBeforeRun);
+      assert.deepEqual(service.listJobFailureDiagnostics(), []);
+      assert.equal(service.listJobTimingDiagnostics()[0]?.outcome, "deferred");
+      assert.equal(service.listJobTimingDiagnostics()[0]?.providerExecutionElapsedMs, null);
       assert.equal(providerRequests.mock.calls.length, 0);
     } finally {
       close();
     }
+  }
+});
+
+test.each([
+  { status: "active", setupPhase: "pending_link" },
+  { status: "active", setupPhase: "link_returned" },
+  { status: "disconnected", setupPhase: null },
+  { status: "reauthorization_required", setupPhase: null },
+] as const)("device sync service rejects overlapping companion/calendar payloads before $status/$setupPhase admission", async (accountState) => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-companion-calendar-overlap");
+  const now = new Date("2026-07-10T13:46:00.000Z");
+  const importSnapshot = vi.fn(async () => ({ events: [{ kind: "observation" }] }));
+  const providerRequest = vi.fn(async (input: RequestInfo | URL) => {
+    throw new Error(`Unexpected Junction request for overlapping job: ${readUrl(input)}`);
+  });
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    clock: { now: () => now },
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    importer: { importDeviceProviderSnapshot: importSnapshot },
+    providers: [createJunctionDeviceSyncProvider({
+      apiKey: "sk_us_test_123",
+      clientUserIdSecret: "junction-client-user-id-secret",
+      environment: "sandbox",
+      region: "us",
+      summaryBackfillDays: 2,
+      summaryResources: [],
+      timeseriesResources: [],
+      webhookSecret: "whsec_d2ViaG9vay10ZXN0LXNlY3JldA==",
+      fetchImpl: providerRequest,
+    })],
+  });
+
+  try {
+    const account = store.upsertAccount({
+      provider: "junction",
+      externalAccountId: "junction-companion-calendar-overlap",
+      displayName: "Junction",
+      ...accountState,
+      scopes: [],
+      credential: { kind: "provider_config", providerConfigKey: "junction" },
+      connectedAt: "2026-07-10T13:00:00.000Z",
+    });
+    const job = store.enqueueJob({
+      accountId: account.id,
+      provider: "junction",
+      kind: "resource",
+      payload: {
+        ...buildCompanionHrvRmssdJobPayload({
+          schema: COMPANION_HRV_RMSSD_SCHEMA,
+          methodVersion: COMPANION_HRV_RMSSD_METHOD_VERSION,
+          nightDate: "2026-07-10",
+          rmssdMs: 48.25,
+          completedWindowCount: 84,
+          acceptedWindowCount: 56,
+        }),
+        calendarRefreshDay: "2026-07-08",
+        resource: COMPANION_HRV_RMSSD_RESOURCE,
+        resourceCategory: "derived",
+        sourceProviderSlug: "whoop",
+      },
+      availableAt: now.toISOString(),
+      maxAttempts: 3,
+    });
+
+    const accountBeforeRun = store.getAccountById(account.id);
+    assert.ok(accountBeforeRun);
+    assert.equal((await service.runWorkerOnce(account.id))?.id, job.id);
+    const terminal = store.getJobById(job.id);
+    assert.equal(terminal?.status, "dead");
+    assert.equal(terminal?.attempts, 1);
+    assert.equal(terminal?.maxAttempts, 3);
+    assert.equal(terminal?.lastErrorCode, "JUNCTION_CALENDAR_REFRESH_JOB_INVALID");
+    assert.equal(terminal?.lastErrorMessage, "Junction calendar refresh job payload was invalid.");
+    assert.equal(terminal?.finishedAt, now.toISOString());
+    assert.deepEqual(store.getAccountById(account.id), accountBeforeRun);
+    assert.equal(readJobsForAccountForTesting(store, account.id).length, 1);
+    assert.equal(await service.runWorkerOnce(account.id), null);
+    const [failure] = service.listJobFailureDiagnostics();
+    assert.equal(failure?.code, "JUNCTION_CALENDAR_REFRESH_JOB_INVALID");
+    assert.equal(failure?.jobDisposition, "dead");
+    assert.equal(failure?.remainingAttempts, 0);
+    assert.equal(failure?.retryable, false);
+    const [timing] = service.listJobTimingDiagnostics();
+    assert.equal(timing?.outcome, "failed");
+    assert.equal(timing?.durableProgressCommitted, false);
+    assert.equal(timing?.providerExecutionElapsedMs, null);
+    assert.equal(timing?.snapshotImportCount, 0);
+    assert.equal(importSnapshot.mock.calls.length, 0);
+    assert.equal(providerRequest.mock.calls.length, 0);
+  } finally {
+    close();
   }
 });
 
@@ -9926,11 +10134,9 @@ test("Junction reconcile atomically queues a daily temporal sweep that survives 
       const processedFollowUp = await restarted.service.runWorkerOnce();
       assert.equal(processedFollowUp?.id, reconcileFollowUp.id);
       assert.equal(restarted.store.getAccountById(account.id)?.lastSyncCompletedAt, null);
-      for (let continuationRun = 0; continuationRun < 4; continuationRun += 1) {
-        const continued = await restarted.service.runWorkerOnce();
-        assert.equal(continued?.kind, "reconcile");
-        assert.equal(restarted.store.getAccountById(account.id)?.lastSyncCompletedAt, null);
-      }
+      const continued = await restarted.service.runWorkerOnce();
+      assert.equal(continued?.kind, "reconcile");
+      assert.equal(restarted.store.getAccountById(account.id)?.lastSyncCompletedAt, null);
       const terminalFollowUp = await restarted.service.runWorkerOnce();
       assert.equal(terminalFollowUp?.kind, "reconcile");
       assert.equal(restarted.store.getAccountById(account.id)?.lastSyncCompletedAt, now.toISOString());
@@ -10313,6 +10519,104 @@ function latestLiveRecords(
     (record.lifecycle as { state?: string } | undefined)?.state !== "deleted"
   );
 }
+
+test("Junction zero oxygen completes retained work through the real importer without replacing history", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-junction-zero-oxygen");
+  const externalAccountId = "junction-zero-oxygen";
+  let now = new Date("2026-08-15T12:00:00.000Z");
+  let values: readonly (number | string)[] = [97, 98, 98, 99];
+  await initializeVault({ vaultRoot, timezone: "UTC" });
+  const fixture = createServiceFixture({
+    secret: "secret-for-tests",
+    clock: { now: () => now },
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    importer: createImporters(),
+    providers: [createJunctionDeviceSyncProvider({
+      apiKey: "sk_us_fake_test_placeholder",
+      clientUserIdSecret: "test-only-hmac-secret",
+      environment: "sandbox",
+      region: "us",
+      summaryResources: [],
+      timeseriesResources: ["blood_oxygen"],
+      fetchImpl: async (input) => {
+        const url = new URL(readUrl(input));
+        if (url.pathname === `/v2/user/providers/${externalAccountId}`) {
+          return createJsonResponse({ providers: [{
+            id: "provider-garmin-zero-oxygen", slug: "garmin", name: "Garmin",
+            status: "connected", resource_availability: { blood_oxygen: true },
+          }] });
+        }
+        if (url.pathname === `/v2/timeseries/${externalAccountId}/blood_oxygen/grouped`) {
+          return createJsonResponse({ groups: { garmin: [{
+            source: { provider: "garmin", type: "watch" },
+            data: values.map((value, index) => ({
+              timestamp: new Date(Date.UTC(2026, 7, 12, 7, index)).toISOString(), value,
+            })),
+          }] } });
+        }
+        throw new Error(`Unexpected Junction zero-oxygen request: ${url.pathname}`);
+      },
+    })],
+  });
+  try {
+    const account = fixture.store.upsertAccount({
+      provider: "junction", externalAccountId, displayName: "Junction", scopes: [], status: "active",
+      credential: { kind: "provider_config", providerConfigKey: "junction", credentialMetadata: {} },
+      connectedAt: "2026-08-01T00:00:00.000Z",
+    });
+    const enqueueDay = (dedupeKey: string) => fixture.store.enqueueJob({
+      accountId: account.id, provider: "junction", kind: "resource", maxAttempts: 1,
+      availableAt: now.toISOString(), dedupeKey,
+      payload: {
+        resource: "blood_oxygen", resourceCategory: "timeseries", temporalAuthorityTimeZone: "UTC",
+        windowStart: "2026-08-12T00:00:00.000Z", windowEnd: "2026-08-13T00:00:00.000Z",
+      },
+    });
+    const seed = enqueueDay("zero-oxygen-seed");
+    assert.equal((await fixture.service.runWorkerOnce(account.id))?.id, seed.id);
+    assert.equal(fixture.store.getJobById(seed.id)?.status, "succeeded");
+    const relativePath = "ledger/events/2026/2026-08.jsonl";
+    const before = await readFile(path.join(vaultRoot, relativePath));
+    const liveFacets = async () => latestLiveRecords(await readJsonlRecords({ vaultRoot, relativePath }))
+      .filter((record) => typeof record.metric === "string" && record.metric.startsWith("spo2-"));
+    assert.ok((await liveFacets()).length > 0);
+
+    values = [-1];
+    const retry = enqueueDay("zero-oxygen-retained");
+    await fixture.service.runWorkerOnce(account.id);
+    const retained = fixture.store.getJobById(retry.id);
+    assert.ok(retained);
+    assert.equal(retained.status, "queued");
+    assert.equal(retained.lastErrorCode, "JUNCTION_CALENDAR_REFRESH_INCOMPLETE_NORMALIZATION");
+    assert.equal(Date.parse(retained.availableAt) - now.getTime(), 30 * 60_000);
+    now = new Date(retained.availableAt);
+    values = [0];
+    assert.equal((await fixture.service.runWorkerOnce(account.id))?.id, retry.id);
+    assert.equal(fixture.store.getJobById(retry.id)?.status, "succeeded");
+    assert.deepEqual(await readFile(path.join(vaultRoot, relativePath)), before);
+
+    for (const [index, response] of [[0], ["0"], [97, 0, 98], [0.97, "0", 0.98]].entries()) {
+      values = response;
+      const job = enqueueDay(`zero-oxygen-replay-${index}`);
+      assert.equal((await fixture.service.runWorkerOnce(account.id))?.id, job.id);
+      assert.equal(fixture.store.getJobById(job.id)?.status, "succeeded");
+      assert.deepEqual(await readFile(path.join(vaultRoot, relativePath)), before);
+    }
+    values = [88, 88, 98, 98];
+    const corrected = enqueueDay("zero-oxygen-corrected");
+    await fixture.service.runWorkerOnce(account.id);
+    assert.equal(fixture.store.getJobById(corrected.id)?.status, "succeeded");
+    assert.notDeepEqual(await readFile(path.join(vaultRoot, relativePath)), before);
+    assert.ok((await liveFacets()).length > 0);
+  } finally {
+    fixture.close();
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
 
 test("Junction ambiguous-timestamp rows fail a complete day closed through the real importer", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-syncd-junction-ambiguous-rows");
@@ -11176,12 +11480,12 @@ test("Junction maximum temporal catch-up yields to ordinary continuation before 
     const ordinaryContinuation = await fixture.service.runWorkerOnce(account.id);
     assert.equal(ordinaryContinuation?.id, ordinaryContinuations[0]?.id);
     assert.equal(ordinaryContinuation?.payload.timeseriesResourceCursor, "blood_oxygen");
+    assert.ok(requests.length >= 1 && requests.length <= 14);
+    assert.ok(requests.every((request) => request.resource === "blood_oxygen"));
     assert.deepEqual(
-      requests.at(-1) && {
-        dayKey: requests.at(-1)?.start?.slice(0, 10),
-        resource: requests.at(-1)?.resource,
-      },
-      { dayKey: "2026-08-01", resource: "blood_oxygen" },
+      requests.map((request) => request.start?.slice(0, 10)),
+      Array.from({ length: requests.length }, (_, index) =>
+        `2026-08-${String(index + 1).padStart(2, "0")}`),
     );
     const canonicalAfterOrdinary = latestLiveRecords(
       await (await import("@murphai/core")).readJsonlRecords({
@@ -11400,9 +11704,6 @@ test.each([
       assert.equal(processedReconcile?.kind, "reconcile");
       assert.equal(processedReconcile?.priority, 40);
       assert.equal(requestedProviderDays.length, 0);
-      assert.equal(restarted.store.getAccountById(account.id)?.lastSyncCompletedAt, null);
-      const firstContinuation = await restarted.service.runWorkerOnce();
-      assert.equal(firstContinuation?.kind, "reconcile");
       assert.equal(restarted.store.getAccountById(account.id)?.lastSyncCompletedAt, null);
       const terminalContinuation = await restarted.service.runWorkerOnce();
       assert.equal(terminalContinuation?.kind, "reconcile");
@@ -13007,6 +13308,9 @@ test.each([
             sourceProvider,
             timestampKind: "invalid",
             timestampSemantics: "unknown",
+            valueKind: "numeric_string",
+            valueRange: "above_percentage",
+            unitKind: "percent",
           });
         },
       }),
@@ -13032,6 +13336,9 @@ test.each([
         : {}),
       normalizationTimestampKind: "invalid",
       normalizationTimestampSemantics: "unknown",
+      normalizationValueKind: "numeric_string",
+      normalizationValueRange: "above_percentage",
+      normalizationUnitKind: "percent",
     });
   } finally {
     close();
@@ -13718,6 +14025,7 @@ test("device sync service preserves only safe Junction ECG binding diagnostics",
     assert.deepEqual(service.listJobFailureDiagnostics()[0]?.details, {
       ...expected,
       providerHttpStatus: 500,
+      providerHttpStatusSource: "local_validation",
     });
     assert.deepEqual(
       {
@@ -15246,4 +15554,75 @@ test("canonical lock contention does not override foreground abort or ordinary s
     fixture.close();
     await rm(vaultRoot, { recursive: true, force: true });
   }
+});
+
+
+test("an active account can pull a nearby full reconcile forward without widening the global scheduler", async () => {
+  const now = new Date("2026-06-12T12:00:00.000Z");
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-coalescing");
+  const { service, store, close } = createServiceFixture({
+    secret: "synthetic-coalescing-secret", clock: { now: () => now },
+    config: { vaultRoot, publicBaseUrl: "https://sync.example.test", stateDatabasePath: ":memory:" },
+    providers: [createFakeProvider({
+      createScheduledJobs(account, at) {
+        return { jobs: [{ kind: "reconcile", dedupeKey: `cadence:${account.id}` }],
+          nextReconcileAt: new Date(Date.parse(at) + 60 * 60_000).toISOString() };
+      },
+    })],
+  });
+  try {
+    const account = store.upsertAccount({ provider: "demo", externalAccountId: "synthetic-cadence",
+      scopes: [], credential: { kind: "provider_config", providerConfigKey: "demo", credentialMetadata: {} },
+      connectedAt: now.toISOString(), nextReconcileAt: "2026-06-12T12:25:00.000Z" });
+    assert.equal((await service.runSchedulerOnce(account.id)).length, 0);
+    const options = { reconcileBefore: "2026-06-12T12:30:00.000Z" };
+    assert.equal((await service.runSchedulerOnce(undefined, options)).length, 0);
+    const queued = await service.runSchedulerOnce(account.id, options);
+    assert.equal(queued.length, 1);
+    assert.equal(queued[0]?.kind, "reconcile");
+    assert.equal(store.getAccountById(account.id)?.nextReconcileAt, "2026-06-12T13:00:00.000Z");
+    assert.equal((await service.runSchedulerOnce(account.id, options)).length, 0);
+    assert.equal(store.listPendingJobsForAccount(account.id, 10).length, 1,
+      "the full pull retains its durable queue owner until completed");
+  } finally { close(); }
+});
+
+
+test.each([false, true])("device sync credits continuation progress only after owned commit: %s", async (commitSucceeds) => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-continuation-progress");
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    providers: [createFakeProvider({
+      async executeJob() {
+        return {
+          continuationProgress: true,
+          scheduledJobs: [{ kind: "resource", payload: { windowStart: "2026-03-17T00:00:00.000Z" } }],
+        };
+      },
+    })],
+  });
+  try {
+    const begin = await service.startConnection({ provider: "demo" });
+    const connected = await service.handleOAuthCallback({ provider: "demo", state: begin.state, code: "progress" });
+    if (!commitSucceeds) {
+      const commit = store.completeJobsMarkSyncSucceededAndEnqueueJobs.bind(store);
+      store.completeJobsMarkSyncSucceededAndEnqueueJobs = (input) => {
+        store.patchAccount(connected.account.id, { metadata: { revisionChanged: true } });
+        return commit(input);
+      };
+    }
+    await service.runWorkerOnce();
+    const diagnostic = service.listJobTimingDiagnostics()[0];
+    assert.ok(diagnostic);
+    expect(diagnostic).toMatchObject({ durableProgressCommitted: commitSucceeds });
+    assert.equal(Object.hasOwn(diagnostic, "continuationProgressCommitted"), commitSucceeds);
+    assert.equal(Object.hasOwn(diagnostic, "canonicalProgressCommitted"), false);
+    const jobs = readJobsForAccountForTesting(store, connected.account.id);
+    assert.equal(jobs.some(job => job.kind === "resource"), commitSucceeds);
+  } finally { close(); }
 });

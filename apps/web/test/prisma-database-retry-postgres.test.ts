@@ -33,6 +33,56 @@ if (
 describe.skipIf(!runPostgresRetryProof)(
   "hosted web database retry (real PostgreSQL)",
   () => {
+    it.each(["interactive", "batch"])("does not report pressure for a healthy %s transaction holding the only connection", async (kind) => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+      const prisma = createPrismaClient({ databaseUrl, poolMax: 1 });
+      try {
+        const rows = kind === "interactive"
+          ? await prisma.$transaction(async (tx) => {
+            await tx.$queryRaw`select 1`;
+            return tx.$queryRaw`select 2 as value`;
+          })
+          : (await prisma.$transaction([
+            prisma.$queryRaw`select 1`,
+            prisma.$queryRaw`select 2 as value`,
+          ]))[1];
+        expect(rows).toEqual([{ value: 2 }]);
+        expect(warn.mock.calls.filter((call) =>
+          call[0] === "Hosted web database pool pressure."
+        )).toEqual([]);
+      } finally {
+        await prisma.$disconnect();
+        warn.mockRestore();
+      }
+    });
+
+    it("still reports a standalone checkout started inside a transaction callback", async () => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+      const prisma = createPrismaClient({ databaseUrl, poolMax: 1 });
+      let pending: Promise<unknown> | undefined;
+      try {
+        await prisma.$transaction(async (tx) => {
+          await tx.$queryRaw`select 1`;
+          expect(warn.mock.calls.filter((call) =>
+            call[0] === "Hosted web database pool pressure."
+          )).toEqual([]);
+          pending = Promise.resolve(prisma.$queryRaw`select 2 as value`);
+          await vi.waitFor(() => expect(warn).toHaveBeenCalledWith(
+            "Hosted web database pool pressure.",
+            {
+              idleConnections: 0, poolMax: 1, totalConnections: 1,
+              trigger: "at_capacity", waitingRequests: 0,
+            },
+          ));
+        });
+        await expect(pending).resolves.toEqual([{ value: 2 }]);
+      } finally {
+        await pending?.catch(() => undefined);
+        await prisma.$disconnect();
+        warn.mockRestore();
+      }
+    });
+
     it("does not retry a real transaction-start timeout under local saturation", async () => {
       const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
       const prisma = createPrismaClient({ databaseUrl, poolMax: 1 });

@@ -4,6 +4,7 @@ import * as z from '@murphai/contracts/zod-runtime'
 import {
   firstString,
   loadQueryRuntime,
+  matchesDateRange,
   toOwnedEventCommandShowEntity,
   type QueryRecord,
 } from '../commands/query-record-command-helpers.js'
@@ -153,13 +154,18 @@ async function listOwnedRecords(input: {
 }) {
   const limit = input.limit ?? DEFAULT_LIST_LIMIT
   const query = await loadQueryRuntime('document/meal query reads')
-  const records = await query.listCanonicalEntities(input.vault, {
-    family: 'event',
-    kinds: [input.expectedKind],
-    from: input.from,
-    to: input.to,
-    limit: null,
-  })
+  const records = input.expectedKind === 'meal'
+    ? (await query.readCanonicalEntityFamilySource(input.vault, 'event')).filter(
+        (record) => record.kind === 'meal'
+          && matchesDateRange(record.date ?? record.occurredAt, input.from, input.to),
+      )
+    : await query.listCanonicalEntities(input.vault, {
+        family: 'event',
+        kinds: [input.expectedKind],
+        from: input.from,
+        to: input.to,
+        limit: null,
+      })
   const items = records
     .slice(0, limit)
     .map((record: QueryRecord) => {
@@ -189,28 +195,15 @@ export async function listAutomaticMealPhotoCloseoutWorkRecords(input: {
       '--occurrence-at must be a valid ISO timestamp.',
     )
   }
-  const occurrenceTime = occurrenceAt.getTime()
   const query = await loadQueryRuntime('automatic meal photo closeout reads')
   const records = await query.listCanonicalEntities(input.vault, {
+    automaticMealPhotoCloseoutAt: occurrenceAt.toISOString(),
     family: 'event',
     kinds: ['meal'],
     to: input.to,
-    limit: null,
+    limit,
   })
-  const automaticCaptures = records
-    .filter(isAutomaticMealCapture)
-  const retryEvidence = automaticCaptures.filter(
-    (record) => readTimestamp(record.attributes.recordedAt) >= occurrenceTime,
-  )
-  const retryEvidenceIds = new Set(
-    retryEvidence.map((record) => record.entityId),
-  )
-  const pending = automaticCaptures.filter(
-    (record) =>
-      !retryEvidenceIds.has(record.entityId)
-      && hasRetainedMealPhoto(record),
-  )
-  const items = [...retryEvidence, ...pending]
+  const items = records
     .slice(0, limit)
     .map((record: QueryRecord) => {
       const entity = toOwnedEventCommandShowEntity(record, OWNED_EVENT_LINK_KEYS)
@@ -222,31 +215,6 @@ export async function listAutomaticMealPhotoCloseoutWorkRecords(input: {
     limit,
     to: input.to,
   }, items)
-}
-
-function isAutomaticMealCapture(record: QueryRecord): boolean {
-  const externalRef = readObject(record.attributes.externalRef)
-  return externalRef?.system === 'meal-photo-capture'
-    && externalRef.resourceType === 'photo'
-}
-
-function hasRetainedMealPhoto(record: QueryRecord): boolean {
-  const attachments = record.attributes.attachments
-  return Array.isArray(attachments) && attachments.some((attachment) => {
-    const value = readObject(attachment)
-    return value?.kind === 'photo' && value.role === 'photo'
-  })
-}
-
-function readObject(value: unknown): Record<string, unknown> | null {
-  return value !== null && typeof value === 'object' && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : null
-}
-
-function readTimestamp(value: unknown): number {
-  const timestamp = typeof value === 'string' ? Date.parse(value) : Number.NaN
-  return Number.isNaN(timestamp) ? Number.NEGATIVE_INFINITY : timestamp
 }
 
 async function showOwnedManifest(

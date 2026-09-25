@@ -1,7 +1,7 @@
 import { readTestMurphDynamicToolRequest } from './support/codex-app-server.ts'
 import assert from 'node:assert/strict'
 import path from 'node:path'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 
 import { afterEach, describe, expect, test, vi } from 'vitest'
@@ -21,6 +21,7 @@ import {
 } from '@murphai/operator-config/assistant-response-cards'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
+  upsertMemory,
   AVAILABILITY_CONFLICT_BLOCK_END,
   AVAILABILITY_CONFLICT_BLOCK_START,
 } from '@murphai/core'
@@ -235,6 +236,8 @@ afterEach(() => {
 
 test.each([
   { profile: 'member-memory', status: 'empty', page: 'missing', skip: true },
+  { profile: 'member-memory', status: 'empty', page: 'present', skip: false },
+  { profile: 'member-memory', status: 'empty', page: 'unavailable', skip: false },
   { profile: 'group-room-model', status: 'empty', page: 'missing', skip: true },
   { profile: 'member-memory', status: 'unavailable', page: 'missing', skip: false },
   { profile: 'member-memory', status: 'available', page: 'missing', skip: false },
@@ -261,7 +264,15 @@ test.each([
     }),
     turnId: 'turn-empty-maintenance',
   })
+  const vault = await mkdtemp(path.join(tmpdir(), 'murph-memory-admission-'))
+  if (profile === 'member-memory' && page === 'present') {
+    await upsertMemory(vault, { section: 'Preferences', text: 'Prefers concise comparisons.' })
+  } else if (profile === 'member-memory' && page === 'unavailable') {
+    await mkdir(path.join(vault, 'bank'), { recursive: true })
+    await writeFile(path.join(vault, 'bank/memory.md'), 'malformed memory')
+  }
   const onProviderRequestStarted = vi.fn()
+  try {
   const result = await sendAssistantNotificationLocal({
     executionContext: { hosted: null },
     instructions: 'Perform the authorized silent maintenance.',
@@ -271,7 +282,7 @@ test.each([
       maintenanceProfile: profile,
       privateSummary: 'Silent maintenance complete.',
     },
-    vault: '/vaults/empty-maintenance',
+    vault,
   })
   expect(result.decision).toEqual({ kind: 'skip', privateSummary: 'Silent maintenance complete.' })
   expect(result.response).toBeNull()
@@ -282,6 +293,40 @@ test.each([
     expect(mocks.recordAssistantUsageEvent).not.toHaveBeenCalled()
     expect(onProviderRequestStarted).not.toHaveBeenCalled()
     expect(result.session.turnCount).toBe(0)
+  }
+  } finally {
+    await rm(vault, { recursive: true, force: true })
+  }
+})
+
+test('connected-channel greeting selects isolated output-only continuation and removes exact onboarding instructions', async () => {
+  const vault = await mkdtemp(path.join(tmpdir(), 'murph-greeting-policy-'))
+  try {
+    const providerResult = createProviderResult({ response: JSON.stringify({
+      kind: 'send_message', privateSummary: 'Greet the connected phone.', text: 'Hey, you can text me here now.',
+    }) })
+    const { sendAssistantNotificationLocal, deliverMessage, mocks } = await loadNotificationTurnHarness({
+      providerResult, turnId: 'turn-connected-channel-greeting',
+    })
+    await sendAssistantNotificationLocal({
+      channel: 'linq', threadIsDirect: true, connectedChannelGreeting: true,
+      executionContext: { hosted: null }, instructions: 'PREMADE_WELCOME_SENTINEL',
+      responsePolicy: { kind: 'require_send_exact_text', text: 'PREMADE_WELCOME_SENTINEL' },
+      vault,
+    })
+    expect(mocks.executeCodexTurnWithRecovery).toHaveBeenCalledOnce()
+    const request = mocks.executeCodexTurnWithRecovery.mock.calls[0]![0]
+    expect(request.profile).toEqual({
+      nativeResumePolicy: 'disabled', promptProfile: 'operator-message',
+      threadScope: 'isolated-thread', toolProfile: 'output-only-turn',
+    })
+    expect(request.input.prompt).toContain('Do not restart onboarding')
+    expect(request.input.prompt).not.toContain('PREMADE_WELCOME_SENTINEL')
+    expect(request.hostedToolContext).toBeNull()
+    expect(deliverMessage).toHaveBeenCalledOnce()
+    expect(mocks.applyAssistantSessionCodexResumeStateAction).not.toHaveBeenCalled()
+  } finally {
+    await rm(vault, { recursive: true, force: true })
   }
 })
 
@@ -4000,6 +4045,57 @@ test.each(['linq', 'telegram', 'email'] as const)(
     )
   },
 )
+
+test('manual meal estimation has isolated vault tools and one private reply', async () => {
+  const response = JSON.stringify({
+    kind: 'send_message', text: 'About how large was the serving?',
+    privateSummary: 'Asked for the missing portion.',
+  })
+  const { deliverMessage, mocks, sendAssistantNotificationLocal } =
+    await loadNotificationTurnHarness({
+      providerResult: createProviderResult({ response }),
+      turnId: 'turn-manual-meal-estimation',
+    })
+  await sendAssistantNotificationLocal({
+    executionContext: { hosted: null },
+    instructions: 'Complete the already saved meal from its photo.',
+    manualMealEstimation: true,
+    responsePolicy: { kind: 'require_send' },
+    threadIsDirect: true,
+    vault: '/vaults/manual-meal',
+  })
+  expect(mocks.executeCodexTurnWithRecovery).toHaveBeenCalledTimes(1)
+  expect(mocks.executeCodexTurnWithRecovery).toHaveBeenCalledWith(
+    expect.objectContaining({
+      profile: {
+        nativeResumePolicy: 'disabled', promptProfile: 'conversation',
+        threadScope: 'isolated-thread', toolProfile: 'provider-turn',
+      },
+    }),
+  )
+  expect(deliverMessage).toHaveBeenCalledTimes(1)
+  expect(deliverMessage).toHaveBeenCalledWith(expect.objectContaining({
+    message: 'About how large was the serving?',
+  }))
+})
+
+test('manual meal estimation cannot enable tools in a group', async () => {
+  const { deliverMessage, mocks, sendAssistantNotificationLocal } =
+    await loadNotificationTurnHarness({
+      providerResult: createProviderResult({ response: '{}' }),
+      turnId: 'turn-manual-meal-group-denied',
+    })
+  await expect(sendAssistantNotificationLocal({
+    executionContext: { hosted: null },
+    instructions: 'Complete the already saved meal.',
+    manualMealEstimation: true,
+    responsePolicy: { kind: 'require_send' },
+    threadIsDirect: false,
+    vault: '/vaults/manual-meal',
+  })).rejects.toThrow('Manual meal estimation requires a private direct route')
+  expect(mocks.executeCodexTurnWithRecovery).not.toHaveBeenCalled()
+  expect(deliverMessage).not.toHaveBeenCalled()
+})
 
 test('sendAssistantNotificationLocal delivers ordinary context handoff text through the existing output-only path', async () => {
   const response = 'The final round stayed controlled. Nice work.'

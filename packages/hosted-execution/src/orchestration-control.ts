@@ -1,9 +1,10 @@
 import {
   HOSTED_WORKSPACE_INVOCATION_PROCESSING_MODES,
-  type HostedMailboxKind,
   type HostedMailboxLane,
   type HostedWorkspaceInvocationProcessingMode,
-} from "./runtime-control.ts";
+} from "./runtime-control-values.ts";
+import type { HostedMailboxKind } from "./runtime-control.ts";
+export { isHostedMailboxLane } from "./runtime-control-values.ts";
 
 import type {
   HostedRuntimeReconciliationBlockedReason,
@@ -130,8 +131,12 @@ export function classifyHostedSystemMailboxExecutionClass(input: {
 }
 
 export interface HostedRuntimeEnsureProcessingRequest {
+  /** Ephemeral reservation only; SDP never enters an invocation job. */
+  voiceCallId?: string;
+  admission?: import("./runtime-owner.ts").HostedRuntimeOwnerResponse;
   assistantExecutionBlocked?: true;
   conversationWorkPending?: true;
+  mailboxWakeHighWater?: import("./runtime-control.ts").HostedMailboxWakeHighWater;
   orchestrationAttemptId: string;
   processingMode?: HostedRuntimeProcessingMode | null;
 }

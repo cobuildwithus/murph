@@ -14,6 +14,7 @@ import type {
   AssistantUsageRecord,
 } from "@murphai/hosted-execution/assistant-usage";
 import {
+  acquireCanonicalWriteLock,
   withHostedCanonicalWritePort,
   type HostedCanonicalWritePort,
   type HostedCanonicalWriteReceipt,
@@ -68,6 +69,7 @@ import type {
   HostedMailboxAssistantInputRecord,
   HostedMailboxConversationDeferral,
   HostedMailboxItemImportOutcome,
+  HostedMailboxImporter,
   HostedMailboxPrefixPrefetch,
   HostedMailboxPostCheckpointEffect,
   HostedMailboxPostCheckpointEffectResult,
@@ -402,7 +404,7 @@ export interface HostedWorkspaceRunnerMailboxImportContext {
   assistantBootstrap?: HostedAssistantBootstrapResult | null;
   assistantAskRequestTargetKind?: "joined_group";
   latencyMilestones?: HostedRuntimeLatencyTraceStagedMilestones | null;
-  onConversationActivityObserved?: (() => void) | null;
+  onConversationActivityObserved?: ((receivedAtEpochMs: number) => void) | null;
   onConversationInputStaged?: ((
     channel: HostedExecutionConversationMessageChannel,
   ) => void) | null;
@@ -435,10 +437,8 @@ export interface HostedWorkspaceRunnerRuntimeStatusCheckpointInput {
   workspace: HostedWorkspaceState | null;
 }
 
-export type HostedWorkspaceRunnerMailboxImportItem = (
-  item: HostedMailboxResolvedImportItem,
-  context?: HostedWorkspaceRunnerMailboxImportContext,
-) => Promise<HostedMailboxItemImportOutcome>;
+export type HostedWorkspaceRunnerMailboxImportItem =
+  HostedMailboxImporter<HostedWorkspaceRunnerMailboxImportContext>;
 
 export interface HostedWorkspaceRunnerInput {
   awaitBackgroundMaintenanceBarrier?: ((input: {
@@ -803,6 +803,7 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
   const hostedCanonicalWritePort = createAssistantCanonicalWritePort();
   const hostedCanonicalMailboxWritePort = createHostedWorkspaceCanonicalWritePort({
     checkpointRequestBuilder: checkpointRequestSession,
+    deferInboxAttachmentPersistence: true,
     deferRuntimeStatusCheckpoint: true,
     input,
     onAssistantContextSnapshotDirty: () => {
@@ -2462,6 +2463,7 @@ async function importHostedMailboxForWorkspaceRunnerUntracked(
   input: HostedMailboxForWorkspaceRunnerImportInput,
 ): Promise<HostedMailboxImportCheckpointResult> {
   const importItem = input.importItem ?? input.input.importItem;
+  const importAudioPair = importItem.importAudioPair;
   const signal = input.signal ?? input.importItemContext?.signal ?? input.input.signal ?? null;
   const initialAssistantAskRequestTargetKind =
     input.input.initialMailboxImportContext?.assistantAskRequestTargetKind;
@@ -2491,7 +2493,15 @@ async function importHostedMailboxForWorkspaceRunnerUntracked(
     deferCheckpoint: input.deferCheckpoint === true,
     expectedUserId: input.input.expectedUserId,
     fetchSignal: input.mailboxFetchSignal ?? null,
-    importItem: (item) => importItem(item, importItemContext ?? undefined),
+    importItem: Object.assign(
+      (item: HostedMailboxResolvedImportItem) => importItem(item, importItemContext ?? undefined),
+      {
+        importAudioPair: importAudioPair
+          ? (items: Parameters<NonNullable<HostedMailboxImporter["importAudioPair"]>>[0]) =>
+              importAudioPair(items, importItemContext ?? undefined)
+          : undefined,
+      },
+    ),
     lanes: input.lanes,
     limitPerLane: input.limitPerLane ?? input.input.limitPerLane,
     mailboxPort: input.input.platform.mailboxPort,
@@ -2954,6 +2964,7 @@ function createHostedWorkspaceCanonicalWritePort(input: {
   canonicalWriteCheckpointCoalescer?:
     HostedWorkspaceCanonicalWriteCheckpointCoalescer;
   checkpointRequestBuilder: HostedWorkspaceCheckpointRequestSession;
+  deferInboxAttachmentPersistence?: boolean;
   deferRuntimeStatusCheckpoint?: boolean;
   generatedImageRetentionWakeAt?: string | null;
   input: HostedWorkspaceRunnerInput;
@@ -3060,6 +3071,15 @@ function createHostedWorkspaceCanonicalWritePort(input: {
       });
     },
     async persistCanonicalWrite(writeInput) {
+      const deferAttachmentPersistence = input.deferInboxAttachmentPersistence === true
+        && writeInput.receipt.operationType === "inbox_capture_persist"
+        && writeInput.receipt.actions.some((action) =>
+          action.kind === "raw_upsert"
+          && action.targetRelativePath.startsWith(`${VAULT_LAYOUT.rawInboxDirectory}/`)
+          && action.targetRelativePath.includes("/attachments/")
+        );
+      const deferStatusCheckpoint = input.deferRuntimeStatusCheckpoint === true
+        && !deferAttachmentPersistence;
       const persist = async () => {
         const assistantAutomationScheduleChanged =
           hostedCanonicalWriteChangesAssistantAutomationSchedule(
@@ -3098,7 +3118,7 @@ function createHostedWorkspaceCanonicalWritePort(input: {
           receipt: canonicalWritePersistence.receipt,
         });
         const receiptLogStatus = hostedCanonicalWriteReceiptLogStatusFields(receiptLogUpdate);
-        if (input.deferRuntimeStatusCheckpoint === true) {
+        if (deferStatusCheckpoint) {
           const coalescer = input.canonicalWriteCheckpointCoalescer;
           const deferredWrite = {
             assistantAutomationScheduleChanged,
@@ -3173,6 +3193,26 @@ function createHostedWorkspaceCanonicalWritePort(input: {
           input.onAssistantAutomationScheduleChanged?.();
         }
       };
+      if (deferAttachmentPersistence) {
+        // Keep receipt publication ordered with later canonical writes while
+        // releasing the importer to admit the locally available attachment.
+        // A failed backup must not roll back the file already given to Codex.
+        const lock = await acquireCanonicalWriteLock(input.input.vaultRoot);
+        const completion = (async () => {
+          try {
+            await runWithCanonicalWritePersistence(persist);
+          } finally {
+            await lock.release();
+          }
+        })().catch((error: unknown) => {
+          warnAssistantBestEffortFailure({
+            error,
+            operation: "persist inbox attachment backup",
+          });
+        });
+        input.input.trackLocalWorkspaceMutationCompletion?.(completion);
+        return;
+      }
       await runWithCanonicalWritePersistence(persist);
     },
     async persistRuntimeState() {

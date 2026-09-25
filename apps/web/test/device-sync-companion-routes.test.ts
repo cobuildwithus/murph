@@ -38,6 +38,7 @@ const mocks = vi.hoisted(() => ({
       findUnique: vi.fn(),
     },
     hostedMember: {
+      findFirst: vi.fn(),
       findUnique: vi.fn(),
     },
     label: "test-prisma",
@@ -136,6 +137,7 @@ function mockVerifiedPrivyUser(): void {
   mocks.lookupHostedMemberForPrivyPrincipal.mockResolvedValue(ACTIVE_MEMBER);
   mocks.prismaClient.hostedAuthRecord.findUnique.mockResolvedValue(null);
   mocks.prismaClient.hostedMemberIdentity.findUnique.mockResolvedValue({ memberId: ACTIVE_MEMBER.id });
+  mocks.prismaClient.hostedMember.findFirst.mockResolvedValue(null);
   mocks.projectHostedMemberIdentityState.mockResolvedValue({ privyUserId: "did:privy:user_123" });
   mocks.prismaClient.hostedMember.findUnique.mockResolvedValue({
     accountGroupMemberships: [],
@@ -443,6 +445,20 @@ describe("device sync companion routes", () => {
       }));
 
       expect(response.status).toBe(400);
+    });
+
+    it.each([
+      "hosted_response_rejected", "hosted_credentials_unavailable", "hosted_invalid_response",
+    ])("accepts the closed first-party diagnostic code %s", async (diagnosticCode) => {
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const response = await authDiagnosticsRoute.POST(authDiagnosticsRequest({
+        diagnosticCode, errorKind: "unavailable", method: "session",
+        retryable: true, stage: "session_refresh",
+      }));
+      expect(response.status).toBe(200);
+      expect(warnSpy).toHaveBeenCalledWith("Companion auth diagnostic.", expect.objectContaining({
+        diagnosticCode, errorKind: "unavailable", method: "session", stage: "session_refresh",
+      }));
     });
 
     it("accepts the checked-in iOS OTP failure contract", async () => {

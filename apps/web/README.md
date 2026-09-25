@@ -139,6 +139,14 @@ are not a reason to restore pre-consent readers.
 
 ## Browser-vault dashboard loading
 
+Signed-out visits to the shared `(dashboard)` route group automatically open
+the existing auth dialog once per pathname. Dismissing it keeps the page usable;
+visiting another dashboard page prompts again. Successful sign-in resumes the
+current path, query, and anchor when the member's stage allows dashboard access.
+Signed-in and authentication-unavailable states do not trigger the prompt.
+The root auth provider derives this scope from Next's selected layout segment,
+so dashboard pages do not maintain separate route lists or dialog owners.
+
 Browser-vault dashboard sessions and public-homepage preparation read only the
 published replica ref and workspace version. Refresh orchestration is imported
 only when the existing after-response refresh path needs it. The browser loader
@@ -531,9 +539,11 @@ The hosted Prisma schema keeps ownership sharp and nested:
   a zero default so existing receipts and old-Web inserts remain compatible;
   after the cursor-aware Web is live and prior functions drain, the contract
   lane rejects any unexpected null before setting `NOT NULL`. Immediate
-  cleanup uses one five-second shared target deadline plus a small
+  cleanup uses one eight-second shared target deadline plus a small
   receipt-settlement margin; hourly retries use a fifteen-second shared target
-  deadline and four-receipt concurrency. Cloudflare is
+  deadline and four-receipt concurrency. Cloudflare deadline expiry logs
+  informational cleanup-pending metadata and retains its error code and retry
+  receipt; other runner deletion failures remain error logs. Cloudflare is
   terminal only when the capability-bearing Worker explicitly confirms
   `deleteAllCompleted`, so a legacy response cannot erase retry ownership.
 
@@ -820,7 +830,7 @@ set, then prefers records with a reported package size, then keeps the existing
 relevance order. It does not claim sales or usage popularity. Supplement
 searches retain their existing ranking path. Food retrieval admits at
 most 250 literal exact-name rows and 10,000 GIN full-text matches before
-similarity scoring, canonical-key deduplication, and window sorting. When the
+similarity scoring and canonical-key deduplication. When the
 GIN set reaches that cap and may be truncated, one GiST branch admits up to
 10,000 strict-word-nearest names to recover stronger full-text candidates. An
 unsaturated GIN set is already exhaustive and skips that whole-catalog scan.
@@ -830,8 +840,12 @@ matches ahead of ineligible names before the cap. The bounded admissions
 preserve representative choice and canonical diversity across the established
 5,000-row boundary and ineligible-neighbor fixtures. Ranking is deterministic
 within the admitted set; it is intentionally not an exhaustive whole-catalog
-ranking. Exact IDs and UPCs continue to use direct lookup
-paths. On `foods_api_failed` failures from private food lookup, including exact
+ranking. After deduplication and any evidence, popularity, or comparison filters,
+food-name searches apply the complete deterministic order and LIMIT/OFFSET before
+computing the internal delivery ordinal. Numbering only the selected page permits
+top-N selection; the same order is retained after label and exact-record evidence
+joins, including on nonzero-offset pages. Exact IDs and UPCs continue to use direct
+lookup paths. On `foods_api_failed` failures from private food lookup, including exact
 ID/UPC dispatch and ranked search, the existing safe structured log adds only
 the closed `failureStage` value `search_rows` or `contaminant_summary`;
 PostgreSQL error codes remain in the existing safe error fields, and SQL/query
@@ -1002,11 +1016,11 @@ Hosted onboarding extras:
   `HOSTED_LINQ_ALERT_EMAIL_FROM`, and `HOSTED_LINQ_ALERT_EMAILS`. The historical
   Linq-prefixed email names are shared operational configuration; neither path
   sends through or falls back to Linq/iMessage. The latency monitor uses the
-  fixed 30-second product
+  fixed 60-second alert
   boundary for the first accepted user-visible response: either a progress
   update or the final reply. Completed grouped traces count once by their
   shared Linq delivery, and traces for one in-flight provider request count
-  once while unresolved. Progress accepted before 30 seconds suppresses that
+  once while unresolved. Progress accepted before 60 seconds suppresses that
   turn; progress at or after the boundary remains alertable. Fresh conversation
   mailbox rows explicitly stamped by the existing AI usage gate are excluded
   before the bounded scan and grouping only while execution remains blocked;
@@ -1398,6 +1412,99 @@ or an ephemeral preview deployment URL as a long-lived provider callback or
 webhook base. Web build validation and the browser start boundary reject a
 hostname mismatch before provider authorization begins.
 
+### Workspace read timing
+
+`GET /api/internal/hosted-workspace` records content-free
+`hosted-workspace.read.timing` diagnostics for the first request in a module,
+failed requests, and requests with at least 250 ms of handler work or verified
+signed-request age at handler entry. It measures authentication, workspace,
+assistant configuration, usage and response preparation through the existing
+Prisma operation and pool-acquisition collectors. The three reads overlap:
+their durations and the database/pool totals must not be added to request time.
+An early read failure records unfinished sibling phases without waiting for them
+or replacing the original failure.
+
+Optional `murph_workspace_*` Server-Timing fields describe completed phases and
+handler total. Signed-request age includes transport, startup and clock skew;
+first-module status is not proof of a platform cold start. Query/pool samples
+are capped at 24, with aggregate counts and durations. No request, member,
+credential, SQL parameter, row content or error prose enters this event.
+Diagnostics add no database or network work and cannot change response behavior.
+
+A processing action of `started` means a new invocation, not necessarily a new
+container. The existing container-ready event's `startMode` and
+`readinessLatencyMs` establish native warmth; a retained member target is
+considered before pristine standby allocation. A warm target still needs the
+fresh workspace, configuration and usage callback before invocation.
+
+### Mailbox fetch timing
+
+Mailbox reads use the allowance owner's narrow Family sponsorship projection,
+with sponsorship and billing-period fields joined in one SQL statement. The
+allowance reader imports plan constants from `billing-plans`, not the Family
+mutation workflow, so checking messages does not initialize its Stripe, email,
+or Temporal signaling dependencies. Active membership, group access, tier
+validation and billing-period fallback remain owned by the allowance reader.
+
+`/api/internal/hosted-mailbox/fetch` emits one content-free
+`hosted-mailbox.fetch.timing` record for the first request in a module instance,
+a failed request, or a request with at least 250 ms of handler work or verified
+signed-request age at handler entry. Fast later requests remain quiet.
+
+`phaseMs` separates authentication (including replay-nonce persistence), parsing,
+transaction acquisition, runtime authority locks/reads, member projection, access,
+mailbox projection, usage, response projection, transaction finish, optional group
+presentation, ingress-envelope verification, and serialization. `failedPhase`
+retains the failing phase even when the transaction rolls back afterward.
+`totalMs` stops when the handler constructs its response; it excludes framework
+response flushing and network transport.
+
+`poolAcquireMs` records actual pg checkouts, including new connection setup or
+pool queuing. Matching `poolBeforeAcquire` counts show idle/total connections and
+queued requests at checkout start. These help distinguish an empty pool from
+contention but do not independently measure TCP, TLS, or server-side waits.
+`dbNN.<model>.<operation>` gives query wall time without SQL, parameters or row
+contents. The record includes at most 24 operations and 24 pool samples plus
+aggregate counts/totals. Pool durations overlap query and transaction phase
+durations: do not add them together. The authority phase includes lock waits and
+SQL/network work, rather than claiming a pure server lock-wait measurement.
+
+`handlerStartedAt` and verified `signedAt` support platform-log correlation.
+`signedRequestToHandlerMs` also includes transport and inter-host clock skew;
+`firstRequestInModule` is not a Vercel cold-start verdict. Request bodies, member
+and attempt identifiers, nonce values, signatures and error prose are excluded.
+Diagnostics add no database writes or network requests and logging failure cannot
+replace the response or original error.
+
+Google auth and Vercel OIDC load only for real KMS operations. Ingress-envelope
+reads verify signatures locally without evaluating those SDKs. The four KMS
+operations use bounded HTTPS REST requests; the KMS RPC SDK, generated protobuf
+and gRPC initialization are absent from this path. Google auth still owns
+Workload Identity token refresh and sharing between concurrent operations.
+
+Concurrent first operations share auth client construction inside the existing
+`sdk_initialize` deadline/cancellation boundary. The `kms_rpc` duration includes
+auth header acquisition, HTTP transport and bounded response consumption. REST
+uses base64 bytes and decimal CRC32C strings; resource binding, verification
+flags and response integrity checks remain mandatory. Redirects are rejected,
+response bodies are capped at 128 KiB, and caller/attempt cancellation aborts
+fetch and response consumption. Known connection failures and HTTP 503/504
+without a valid Google status map to the existing transient/deadline reasons;
+only decrypt may retry once within its existing aggregate deadline. Certificate,
+auth, quota, malformed-response and integrity failures remain terminal.
+
+The existing Web control connection owner records `hosted-control.connect.timing`
+for a failed connection or setup taking at least 250 ms. It records only elapsed
+milliseconds, TLS presence and completion, never destinations or error prose.
+This measures new connection setup, not request handling, reused sockets or
+cross-host clock skew. It adds no requests or waits, and logger failure cannot
+prevent connection completion.
+
+This is Web-only, requires no migration or Worker rollout order, and preserves
+the existing response contract. After deployment, compare first-operation crypto
+and control-connection records with webhook-to-typing milestones. Local import
+benchmarks alone do not establish production latency savings.
+
 ### Vercel setup
 
 Set these under `Settings -> Environment Variables` in the Vercel project that
@@ -1763,9 +1870,12 @@ and fixed category labels without recording error messages or connection fields.
 
 Pool pressure is reported before it becomes a failure. `Hosted web database pool
 pressure.` logs the same total, idle, and waiting counts when the pool is full
-before the prospective first waiter queues, or whenever later callers are
-already waiting with no idle connection. It is rate limited to once per ten
-seconds per pool; a pool with idle capacity logs nothing. `Hosted web database slow transaction
+at an actual pool checkout before the prospective first waiter queues, or
+whenever later callers are already waiting with no idle connection. Statements
+using an acquired transaction connection do not request another checkout and
+therefore do not emit pressure warnings merely because the pool is full. Sampling
+is rate limited to once per ten seconds per pool; a pool with idle capacity logs
+nothing. `Hosted web database slow transaction
 acquisition.` measures only the wait before an interactive callback begins,
 while `Hosted web database slow transaction callback.` measures callback wall
 time and reports the effective transaction timeout without claiming the
@@ -2019,6 +2129,19 @@ machine: 4 vCPUs, 8 GB RAM, and 32 GB disk. The CI guard currently observes the
 production `next build` in a root-level cgroup-v2 child for accounting only. It
 does not write `memory.max`, `memory.swap.max`, or `memory.oom.group`.
 
+The Vercel entrypoint runs the initial Web typecheck with one checker through
+`MURPH_TSC_WEB_CHECKERS=1`. Automatic checker parallelism exhausted the Standard
+build machine before the Next build began; the limit retains the full check.
+
+The final Next compilation also sets `GOMEMLIMIT=1GiB` for Workflow's Go-based
+esbuild services, which can remain resident in both the Next parent and its
+Webpack worker. Node's V8 heap limits do not cover these services. This is a
+[Go GC soft target](https://go.dev/doc/gc-guide#Memory_limit), not a process RSS
+or container limit. Keep it on the Next compilation command: applying the same
+target to the whole package build would also constrain the much larger native
+TypeScript source check. Route type generation and the separate TypeScript
+compatibility check retain their existing environment and heap budgets.
+
 The production runner first performs route type generation and an explicit
 app-local generated-contract TypeScript check with a 6 GiB limit. It marks
 only that prepared check complete before starting Webpack. The Next CLI parent
@@ -2219,6 +2342,23 @@ continues to own production ordering and promotion; admission never promotes an
 artifact itself. Deploy the private ancestry-aware consumer before this public
 controller. Verify one candidate reaches production while a later merge is still
 being checked, then verify a delayed older check cannot replace a newer release.
+
+Admission explicitly publishes the `Temporal Web production admission` commit
+status for the exact candidate SHA: pending before proof, then success only after
+the entire admission job succeeds. A dependent finalizer publishes failure for
+failed, canceled, or skipped admission. This delivers the final result through
+Vercel's supported commit-status channel when its imported GitHub check remains
+running after job completion. Status publication failures fail their job; they
+never authorize promotion or disable the configured Deployment Check. The
+finalizer requires proof from the same workflow attempt: rerun the whole
+admission workflow after notification failure, not only its publishing job.
+
+A separate `Temporal Web Admission Cancellation` workflow consumes completed
+cancellation events outside the admission concurrency group. Superseded waiting
+runs never start their own finalizer, so this notifier publishes failure for the
+exact canceled candidate after checking current run identity and attempt. It
+skips newer attempts and existing successful admission, never publishes success,
+and does not check out candidate code or use private deployment credentials.
 
 Do not deploy production from the local CLI, promote an existing deployment,
 use Instant Rollback, or force-promote past a Deployment Check. Those paths do
@@ -2472,6 +2612,10 @@ Current hosted billing assumptions:
   correlation.
 - `Reset everyone` requires the exact typed phrase, ignores any active search,
   and walks ascending hosted IDs in authenticated same-origin batches of 10.
+  Partly used as well as exhausted Starter accounts receive only the deficit
+  between their remaining Starter grants and the standard $4.50 allowance;
+  separate purchased and referral credit stays intact. Current period spend
+  is cleared, while already-full zero-spend Starter accounts are unchanged.
   Members are reset sequentially through the same canonical transaction; one
   stale re-read is allowed, the batch stops before acknowledging a remaining
   failure, and each runtime wake begins only after that member commits. The page

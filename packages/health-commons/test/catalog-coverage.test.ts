@@ -1,3 +1,5 @@
+import assert from "node:assert/strict";
+
 import { describe, expect, it } from "vitest";
 
 import {
@@ -1246,4 +1248,122 @@ describe("@murphai/health-commons catalog coverage", () => {
       "source_artifact:example/wrong-artifact-owner sourceFindings finding:example/wrong-artifact-owner extractedFromArtifactId art_example_pdf belongs to source_artifact:example/owned-artifact, not source_artifact:example/wrong-artifact-owner.",
     );
   });
+});
+
+describe("health commons validation ordering", () => {
+  const validatePages = (...pages: HealthCommonsSourcePage[]): void => {
+    validateHealthCommonsContent({
+      artifactManifests: [], changes: [], evidenceAppraisals: [], redirects: [], pages,
+    });
+  };
+
+  it("indexes every alias before reading page references", () => {
+    const first = protocolPage("protocol_variant:first", "first");
+    const second = protocolPage("protocol_variant:second", "second");
+    first.frontmatter.aliases = ["  Example Alias  "];
+    second.frontmatter.aliases = ["example   alias"];
+    Object.defineProperty(first.frontmatter, "relations", {
+      get() { throw new Error("references were read before the index was complete"); },
+    });
+    assert.throws(() => validatePages(first, second), {
+      message: 'Duplicate health commons alias "example   alias" on protocol_variant:first and protocol_variant:second. Use a disambiguation page instead.',
+    });
+  });
+
+  it("finishes one page's references before reading the next page's references", () => {
+    const first = protocolPage("protocol_variant:first", "first");
+    const second = protocolPage("protocol_variant:second", "second");
+    Object.defineProperty(second.frontmatter, "relations", {
+      get() { throw new Error("the second page was validated too early"); },
+    });
+    assert.throws(() => validatePages(first, second), {
+      message: "protocol_variant:first test plan first-plan points to missing health commons target biomarker:example.",
+    });
+  });
+
+  it("checks claims before reading research groups or test plans", () => {
+    const page = protocolPage("protocol_variant:example", "example");
+    page.frontmatter.claims = [{
+      claimId: "example-claim",
+      type: "evidence_scope",
+      text: "Synthetic claim for reference validation.",
+      strength: "unknown",
+      sourceKeys: ["source_artifact:missing"],
+    }];
+    Object.defineProperty(page.frontmatter, "researchLandscape", {
+      get() { throw new Error("research groups were read before claims were validated"); },
+    });
+    assert.throws(() => validatePages(page), {
+      message: "protocol_variant:example claim example-claim points to missing health commons target source_artifact:missing.",
+    });
+  });
+
+  it("reads all measurement path target lists before validating the first list", () => {
+    const reads: string[] = [];
+    const page = protocolPage("protocol_variant:example", "example");
+    page.frontmatter.measurementPlan = {
+      schemaVersion: "murph.commons.measurement-plan.v1",
+      defaultPathId: "example-path",
+      paths: [{
+        pathId: "example-path",
+        label: "Example measurement path",
+        tier: "default_home",
+        required: true,
+        get methodKeys() {
+          reads.push("methodKeys");
+          return ["measurement_method:missing"];
+        },
+        get outcomeKeys() {
+          reads.push("outcomeKeys");
+          return undefined;
+        },
+        get safetyOutcomeKeys() {
+          reads.push("safetyOutcomeKeys");
+          return ["biomarker:missing"];
+        },
+      }],
+    };
+    assert.throws(() => validatePages(page, biomarkerPage), {
+      message: "protocol_variant:example measurementPlan path example-path methodKeys points to missing health commons target measurement_method:missing.",
+    });
+    assert.deepEqual(reads, ["methodKeys", "outcomeKeys", "safetyOutcomeKeys"]);
+  });
+
+  it("re-reads a truthy measurement output target instead of caching the guard read", () => {
+    const page: HealthCommonsSourcePage = structuredClone(measurementMethodPage);
+    const method = page.frontmatter.measurementMethod;
+    assert.ok(method);
+    const output = method.outputs[0];
+    assert.ok(output);
+    let reads = 0;
+    Object.defineProperty(output, "mapsToBiomarkerKey", {
+      get() {
+        reads += 1;
+        return reads === 1 ? "biomarker:example" : "biomarker:missing";
+      },
+    });
+    assert.throws(() => validatePages(page, biomarkerPage), {
+      message: "measurement_method:example measurementMethod output example_output points to missing health commons target biomarker:missing.",
+    });
+    assert.equal(reads, 2);
+  });
+
+  for (const target of [undefined, ""]) {
+    it(`skips an output target of ${JSON.stringify(target)} after one guard read`, () => {
+      const page: HealthCommonsSourcePage = structuredClone(measurementMethodPage);
+      const method = page.frontmatter.measurementMethod;
+      assert.ok(method);
+      const output = method.outputs[0];
+      assert.ok(output);
+      let reads = 0;
+      Object.defineProperty(output, "mapsToBiomarkerKey", {
+        get() {
+          reads += 1;
+          return target;
+        },
+      });
+      assert.equal(validatePages(page, biomarkerPage), undefined);
+      assert.equal(reads, 1);
+    });
+  }
 });

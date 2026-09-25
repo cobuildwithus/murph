@@ -117,11 +117,12 @@ vi.mock("@/src/components/settings/hosted-phone-settings", () => ({
 }));
 
 vi.mock("@/src/components/settings/hosted-email-settings", () => ({
-  HostedEmailSettings(props: { onSynced?: (payload: { mode: string }) => void }) {
+  HostedEmailSettings(props: { onSynced?: (payload: { mode: string }) => void; recoverEmailSync?: boolean }) {
     return createElement(
       "button",
       {
         type: "button",
+        "data-recover-email-sync": String(props.recoverEmailSync),
         onClick: () => props.onSynced?.({ mode: "email" }),
       },
       "Link email child",
@@ -532,7 +533,7 @@ describe("HostedSettingsIdentityLinkDialog", () => {
     }
   });
 
-  it("keeps the inline email dialog when the Privy user already has an email", async () => {
+  it.each(["matched", "mismatched"] as const)("opens the inline email dialog with %s recovery state", async (status) => {
     const { HostedSettingsIdentityLinkDialog } = await import(
       "@/src/components/settings/hosted-settings-identity-link-dialog"
     );
@@ -545,6 +546,7 @@ describe("HostedSettingsIdentityLinkDialog", () => {
             address: "member@example.com",
             verifiedAt: "2026-05-02T00:00:00.000Z",
           },
+          privySignInStates: { ...removablePrivySignInStates(), email: { removable: false, status } },
         },
         expectedPrivyUserId: "privy-user-a",
         initialMode: "email",
@@ -557,6 +559,7 @@ describe("HostedSettingsIdentityLinkDialog", () => {
       expect(container.querySelector('[data-dialog-open="true"]')).toBeTruthy();
       expect(container.textContent).toContain("Link email child");
       expect(container.textContent).not.toContain("Privy hand-off child");
+      expect(container.querySelector("[data-recover-email-sync]")?.getAttribute("data-recover-email-sync")).toBe(String(status === "mismatched"));
     } finally {
       await cleanup();
     }

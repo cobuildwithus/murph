@@ -191,8 +191,9 @@ const MURPH_RUNNER_BUNDLE_TEST_PARSER_TOOLCHAIN_ENV =
 const HOSTED_LOCAL_CODEX_MODEL_CATALOG_FILE =
   "codex-model-catalog.openai-flex.json";
 const HOSTED_LOCAL_OPENAI_PRODUCT_MODEL_SLUGS = [
+  "gpt-6-sol",
+  "gpt-6-luna",
   "gpt-5.6-sol",
-  "gpt-5.6-terra",
   "gpt-5.6-luna",
 ] as const;
 const HOSTED_LOCAL_OPENAI_FLEX_SERVICE_TIER = {
@@ -200,8 +201,6 @@ const HOSTED_LOCAL_OPENAI_FLEX_SERVICE_TIER = {
   name: "Flex",
   description: "Lower-cost flexible processing",
 } as const;
-const HOSTED_LOCAL_DEPLOY_SMOKE_MODEL_SLUG = "gpt-5.4-nano";
-const HOSTED_LOCAL_DEPLOY_SMOKE_TEMPLATE_MODEL_SLUG = "gpt-5.4-mini";
 const HOSTED_LOCAL_RUNNER_BUNDLE_MANIFEST_FILE =
   ".murph-runner-bundle-manifest.json";
 function registerHostedLocalStackLifecycle(input: {
@@ -667,61 +666,12 @@ export async function startHostedLocalDevStack(input: {
       stderrTarget: input.stderrTarget,
     });
 
-    if (!config.skipPrismaMigrate) {
-      if (shouldSyncLocalDatabaseSchema(runtimeEnv.DATABASE_URL)) {
-        await runCommand("pnpm", [
-          "--dir",
-          "apps/web",
-          "exec",
-          "prisma",
-          "db",
-          "push",
-          config.forceResetLocalDatabase ? "--force-reset" : "--accept-data-loss",
-        ], {
-          cwd: repoRoot,
-          env: runtimeEnv,
-          name: "setup",
-          signal: abortController.signal,
-        });
-      } else {
-        await runCommand("pnpm", ["--dir", "apps/web", "prisma:migrate:deploy"], {
-          cwd: repoRoot,
-          env: runtimeEnv,
-          name: "setup",
-          signal: abortController.signal,
-        });
-      }
-
-      // The DB is now the hosted Linq home-line authority, so seed the
-      // configured lines the same way the Vercel deploy does. Without this a
-      // fresh local database has no assignable line and onboarding activation
-      // fails closed with LINQ_CONVERSATION_PHONE_REQUIRED. Provider inventory
-      // sync is skipped locally so startup needs no Linq API call. With no
-      // configured conversation phones there is nothing to seed and the
-      // script's pool-ready assertion would fail startup, so skip it: e2e
-      // scenarios seed their own line inventory, and a dev stack without Linq
-      // env keeps failing closed at activation exactly as before.
-      const configuredLinqConversationPhones =
-        runtimeEnv.HOSTED_ONBOARDING_LINQ_CONVERSATION_PHONE_NUMBERS?.trim() ?? "";
-      if (configuredLinqConversationPhones.length > 0) {
-        await runCommand("pnpm", [
-          "--dir",
-          "apps/web",
-          "linq:sync-lines",
-          "--",
-          "--skip-provider-inventory",
-        ], {
-          cwd: repoRoot,
-          env: runtimeEnv,
-          name: "setup",
-          signal: abortController.signal,
-        });
-      } else {
-        (input.stderrTarget ?? process.stderr).write(
-          "[setup] No HOSTED_ONBOARDING_LINQ_CONVERSATION_PHONE_NUMBERS configured; skipping hosted Linq line seeding.\n",
-        );
-      }
-    }
+    await prepareHostedLocalDatabase({
+      abortSignal: abortController.signal,
+      config,
+      runtimeEnv,
+      stderrTarget: input.stderrTarget,
+    });
 
     if (!config.skipWeb) {
       await maybeGenerateHostedWebHealthCommons({
@@ -733,74 +683,14 @@ export async function startHostedLocalDevStack(input: {
     }
 
     if (workerRuntimeEnv !== null) {
-      if (initialEnv.MURPH_DEV_SKIP_RUNNER_BUNDLE !== "1") {
-        const runnerBundleEnv: NodeJS.ProcessEnv = {
-          ...(workerProcessEnv ?? workerRuntimeEnv),
-          MURPH_RUNNER_BUNDLE_BUILD_CONCURRENCY:
-            (workerProcessEnv ?? workerRuntimeEnv).MURPH_RUNNER_BUNDLE_BUILD_CONCURRENCY ?? "1",
-          MURPH_RUNNER_BUNDLE_SKIP_PACK_PREFLIGHTS: "1",
-        };
-        if (runnerBundleEnv[HOSTED_LOCAL_E2E_PARSER_TOOLCHAIN_ENV] === "1") {
-          runnerBundleEnv[MURPH_RUNNER_BUNDLE_TEST_PARSER_TOOLCHAIN_ENV] = "1";
-        }
-        await runCommand("pnpm", ["--dir", "apps/cloudflare", "runner:bundle:hosted-local"], {
-          cwd: repoRoot,
-          env: runnerBundleEnv,
-          name: "setup",
-          signal: abortController.signal,
-        });
-        if (workerProcessEnv !== null) {
-          workerProcessEnv.MURPH_DEV_SKIP_RUNNER_BUNDLE = "1";
-        }
-      }
-      const runnerBundleFingerprintEnv =
-        await readHostedLocalRunnerBundleFingerprintEnv();
-      applyHostedLocalRunnerBundleFingerprintEnv({
-        fingerprintEnv: runnerBundleFingerprintEnv,
+      await prepareHostedLocalRunner({
+        abortSignal: abortController.signal,
+        initialEnv,
+        tempDir,
+        workerConfigPath,
+        workerPersistDir,
         workerProcessEnv,
         workerRuntimeEnv,
-      });
-      const cloudflareSourceSnapshot = await prepareHostedLocalCloudflareSourceSnapshot({
-        abortSignal: abortController.signal,
-        tempDir,
-      });
-      await writeFile(
-        workerConfigPath,
-        `${JSON.stringify(
-          buildWranglerLocalDevConfig(workerRuntimeEnv, {
-            cloudflareAppDir: cloudflareSourceSnapshot.cloudflareAppDir,
-            configDir: path.dirname(workerConfigPath),
-            workspaceRoot: cloudflareSourceSnapshot.workspaceRoot,
-          }),
-          null,
-          2,
-        )}\n`,
-        {
-          encoding: "utf8",
-          mode: 0o600,
-        },
-      );
-      await chmod(workerConfigPath, 0o600);
-
-      const runnerCleanupScope = resolvePreStartHostedRunnerContainerCleanupScope(initialEnv);
-      await cleanupHostedRunnerContainers({
-        cwd: repoRoot,
-        env: workerProcessEnv ?? workerRuntimeEnv,
-        ignoreErrors: true,
-        scope: runnerCleanupScope,
-        stoppedOnly: true,
-      });
-      await cleanupHostedRunnerImages({
-        cwd: repoRoot,
-        env: workerProcessEnv ?? workerRuntimeEnv,
-        force: false,
-        ignoreErrors: true,
-        preserveCurrentBuild: true,
-        scope: runnerCleanupScope,
-      });
-      await cleanupHostedRunnerContainerLocalState({
-        env: workerProcessEnv ?? workerRuntimeEnv,
-        persistDir: workerPersistDir,
       });
     }
     throwIfAbortSignalAborted(abortController.signal);
@@ -1308,6 +1198,171 @@ export async function startHostedLocalDevStack(input: {
   function killHostedLocalMinioMonitor(): void {
     if (minioMonitor !== null) {
       minioMonitor.kill();
+    }
+  }
+}
+
+async function prepareHostedLocalRunner({
+  abortSignal,
+  initialEnv,
+  tempDir,
+  workerConfigPath,
+  workerPersistDir,
+  workerProcessEnv,
+  workerRuntimeEnv,
+}: {
+  abortSignal: AbortSignal;
+  initialEnv: NodeJS.ProcessEnv;
+  tempDir: string;
+  workerConfigPath: string;
+  workerPersistDir: string;
+  workerProcessEnv: NodeJS.ProcessEnv | null;
+  workerRuntimeEnv: NodeJS.ProcessEnv;
+}): Promise<void> {
+  if (initialEnv.MURPH_DEV_SKIP_RUNNER_BUNDLE !== "1") {
+    const runnerBundleEnv: NodeJS.ProcessEnv = {
+      ...(workerProcessEnv ?? workerRuntimeEnv),
+      MURPH_RUNNER_BUNDLE_BUILD_CONCURRENCY:
+        (workerProcessEnv ?? workerRuntimeEnv).MURPH_RUNNER_BUNDLE_BUILD_CONCURRENCY ?? "1",
+      MURPH_RUNNER_BUNDLE_SKIP_PACK_PREFLIGHTS: "1",
+    };
+    if (runnerBundleEnv[HOSTED_LOCAL_E2E_PARSER_TOOLCHAIN_ENV] === "1") {
+      runnerBundleEnv[MURPH_RUNNER_BUNDLE_TEST_PARSER_TOOLCHAIN_ENV] = "1";
+    }
+    await runCommand("pnpm", ["--dir", "apps/cloudflare", "runner:bundle:hosted-local"], {
+      cwd: repoRoot,
+      env: runnerBundleEnv,
+      name: "setup",
+      signal: abortSignal,
+    });
+    if (workerProcessEnv !== null) {
+      workerProcessEnv.MURPH_DEV_SKIP_RUNNER_BUNDLE = "1";
+    }
+  }
+  const runnerBundleFingerprintEnv =
+    await readHostedLocalRunnerBundleFingerprintEnv();
+  applyHostedLocalRunnerBundleFingerprintEnv({
+    fingerprintEnv: runnerBundleFingerprintEnv,
+    workerProcessEnv,
+    workerRuntimeEnv,
+  });
+  const cloudflareSourceSnapshot = await prepareHostedLocalCloudflareSourceSnapshot({
+    abortSignal: abortSignal,
+    tempDir,
+  });
+  await writeFile(
+    workerConfigPath,
+    `${JSON.stringify(
+      buildWranglerLocalDevConfig(workerRuntimeEnv, {
+        cloudflareAppDir: cloudflareSourceSnapshot.cloudflareAppDir,
+        configDir: path.dirname(workerConfigPath),
+        workspaceRoot: cloudflareSourceSnapshot.workspaceRoot,
+      }),
+      null,
+      2,
+    )}\n`,
+    {
+      encoding: "utf8",
+      mode: 0o600,
+    },
+  );
+  await chmod(workerConfigPath, 0o600);
+
+  const runnerCleanupScope = resolvePreStartHostedRunnerContainerCleanupScope(initialEnv);
+  await cleanupHostedRunnerContainers({
+    cwd: repoRoot,
+    env: workerProcessEnv ?? workerRuntimeEnv,
+    ignoreErrors: true,
+    scope: runnerCleanupScope,
+    stoppedOnly: true,
+  });
+  await cleanupHostedRunnerImages({
+    cwd: repoRoot,
+    env: workerProcessEnv ?? workerRuntimeEnv,
+    force: false,
+    ignoreErrors: true,
+    preserveCurrentBuild: true,
+    scope: runnerCleanupScope,
+  });
+  await cleanupHostedRunnerContainerLocalState({
+    env: workerProcessEnv ?? workerRuntimeEnv,
+    persistDir: workerPersistDir,
+  });
+}
+
+async function prepareHostedLocalDatabase({
+  abortSignal,
+  config,
+  runtimeEnv,
+  stderrTarget,
+}: {
+  abortSignal: AbortSignal;
+  config: HostedLocalDevConfig;
+  runtimeEnv: NodeJS.ProcessEnv;
+  stderrTarget: NodeJS.WritableStream | undefined;
+}): Promise<void> {
+  if (!config.skipPrismaMigrate) {
+    if (shouldSyncLocalDatabaseSchema(runtimeEnv.DATABASE_URL)) {
+      await runCommand("pnpm", [
+        "--dir",
+        "apps/web",
+        "exec",
+        "prisma",
+        "db",
+        "push",
+        config.forceResetLocalDatabase ? "--force-reset" : "--accept-data-loss",
+      ], {
+        cwd: repoRoot,
+        env: runtimeEnv,
+        name: "setup",
+        signal: abortSignal,
+      });
+      await runCommand("pnpm", [
+        "--dir", "apps/web", "exec", "prisma", "db", "execute",
+        "--file", "scripts/initialize-local-runtime-cutover.sql",
+      ], {
+        cwd: repoRoot,
+        env: runtimeEnv,
+        name: "setup",
+        signal: abortSignal,
+      });
+    } else {
+      await runCommand("pnpm", ["--dir", "apps/web", "prisma:migrate:deploy"], {
+        cwd: repoRoot,
+        env: runtimeEnv,
+        name: "setup",
+        signal: abortSignal,
+      });
+    }
+
+    // The DB is now the hosted Linq home-line authority, so seed the
+    // configured lines the same way the Vercel deploy does. Without this a
+    // fresh local database has no assignable line and onboarding activation
+    // fails closed with LINQ_CONVERSATION_PHONE_REQUIRED. Provider inventory
+    // sync is skipped locally so startup needs no Linq API call. With no
+    // configured conversation phones there is nothing to seed and the
+    // script's pool-ready assertion would fail startup, so skip it: e2e
+    // scenarios seed their own line inventory, and a dev stack without Linq
+    // env keeps failing closed at activation exactly as before.
+    const configuredLinqConversationPhones =
+      runtimeEnv.HOSTED_ONBOARDING_LINQ_CONVERSATION_PHONE_NUMBERS?.trim() ?? "";
+    if (configuredLinqConversationPhones.length > 0) {
+      await runCommand("pnpm", [
+        "--dir",
+        "apps/web",
+        "linq:sync-lines",
+        "--",
+        "--skip-provider-inventory",
+      ], {
+        cwd: repoRoot,
+        env: runtimeEnv,
+        name: "setup",
+        signal: abortSignal,
+      });
+    } else {
+      (stderrTarget ?? process.stderr).write(
+        "[setup] No HOSTED_ONBOARDING_LINQ_CONVERSATION_PHONE_NUMBERS configured; skipping hosted Linq line seeding.\n",
+      );
     }
   }
 }
@@ -2335,7 +2390,10 @@ function buildHostedLocalOpenAiCodexModelCatalogText(rawCatalog: string): string
     throw new Error("Hosted local dev received a Codex model catalog without a models array.");
   }
 
-  const catalogModels = parsed.models.filter(isRecord);
+  const catalogModels = parsed.models.filter(isRecord)
+    .filter((model) => model.slug !== "gpt-5.6-terra");
+  parsed.models = catalogModels;
+
   for (const slug of HOSTED_LOCAL_OPENAI_PRODUCT_MODEL_SLUGS) {
     const targetModel = catalogModels.find((candidate) => candidate.slug === slug);
     if (!targetModel) {
@@ -2357,42 +2415,6 @@ function buildHostedLocalOpenAiCodexModelCatalogText(rawCatalog: string): string
         HOSTED_LOCAL_OPENAI_FLEX_SERVICE_TIER,
       ];
     targetModel.tool_mode = "code_mode";
-  }
-
-  const deploySmokeModel = catalogModels
-    .find((candidate) => candidate.slug === HOSTED_LOCAL_DEPLOY_SMOKE_MODEL_SLUG);
-  if (deploySmokeModel) {
-    Object.assign(deploySmokeModel, {
-      description: "Fast, low-cost model for deploy smoke checks.",
-      display_name: "GPT-5.4-Nano",
-      priority: 5,
-      service_tiers: [],
-      supports_parallel_tool_calls: false,
-      supports_search_tool: false,
-      // The OpenAI API rejects gpt-5.4-nano when Codex >= 0.143 sends the
-      // x-openai-internal-codex-responses-lite header.
-      use_responses_lite: false,
-    });
-  } else {
-    const templateModel = catalogModels
-      .find((candidate) => candidate.slug === HOSTED_LOCAL_DEPLOY_SMOKE_TEMPLATE_MODEL_SLUG);
-    if (!templateModel) {
-      throw new Error(
-        `Hosted local dev Codex model catalog is missing ${HOSTED_LOCAL_DEPLOY_SMOKE_TEMPLATE_MODEL_SLUG}.`,
-      );
-    }
-
-    parsed.models.push({
-      ...templateModel,
-      description: "Fast, low-cost model for deploy smoke checks.",
-      display_name: "GPT-5.4-Nano",
-      priority: 5,
-      service_tiers: [],
-      slug: HOSTED_LOCAL_DEPLOY_SMOKE_MODEL_SLUG,
-      supports_parallel_tool_calls: false,
-      supports_search_tool: false,
-      use_responses_lite: false,
-    });
   }
 
   return `${JSON.stringify(parsed, null, 2)}\n`;

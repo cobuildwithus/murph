@@ -12,7 +12,7 @@ import {
   requireSingleAssistantRealCodexTest,
 } from './run-assistant-real-codex-e2e.ts'
 
-export const ASSISTANT_REAL_MODEL_GATE_MODEL = 'gpt-5.6-terra'
+export const ASSISTANT_REAL_MODEL_GATE_MODEL = 'gpt-6-sol'
 export const ASSISTANT_REAL_MODEL_GATE_SCENARIOS = [
   'real model canonical meal persists across assistant restart',
   'real model canonical reminder create fire and cancel',
@@ -63,9 +63,9 @@ export function requireRealModelGateEnvironment(env: NodeJS.ProcessEnv): void {
   if (
     env.CI !== 'true' || env.GITHUB_ACTIONS !== 'true'
     || env.GITHUB_REF !== 'refs/heads/main' || env.GITHUB_REF_PROTECTED !== 'true'
-    || !['push', 'workflow_dispatch'].includes(env.GITHUB_EVENT_NAME ?? '')
+    || !['schedule', 'workflow_dispatch'].includes(env.GITHUB_EVENT_NAME ?? '')
   ) {
-    throw new Error('Real-model gate requires a protected main push or main workflow dispatch.')
+    throw new Error('Real-model gate requires a protected main schedule or main workflow dispatch.')
   }
   if (
     !/^[a-f0-9]{40}$/u.test(env.GITHUB_SHA ?? '')

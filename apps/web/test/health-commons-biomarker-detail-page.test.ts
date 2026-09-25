@@ -14,6 +14,11 @@ import type {
   BiomarkerShellProjection,
 } from "@/src/lib/health-commons/biomarker-projections";
 
+vi.mock("node:fs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs")>();
+  return { ...actual, readFileSync: vi.fn(actual.readFileSync) };
+});
+
 const mocks = vi.hoisted(() => ({
   biomarkerLayoutClient: vi.fn(),
   getHostedDashboardPageAuthSnapshot: vi.fn(),
@@ -465,4 +470,33 @@ describe("BiomarkerPage", () => {
     ]));
   });
 
+});
+
+
+it("builds the same device biomarker list with one index read and no overview reads", async () => {
+  const { getGeneratedBiomarkerIndex } = await import("@/src/lib/health-commons/generated-biomarker-artifacts");
+  const expected = getGeneratedBiomarkerIndex().biomarkers
+    .filter((entry) => entry.published && !entry.hidden)
+    .flatMap((entry) => {
+      const overview = resolveHealthCommonsBiomarkerOverview(entry.routeId);
+      return overview && overview.privateMetricBindings.length > 0 ? [{
+        category: entry.categories[0] ?? null,
+        privateMetricBindings: overview.privateMetricBindings,
+        routeId: entry.routeId,
+        shortName: overview.shortName,
+        summary: entry.summary,
+        unit: overview.unit,
+        valuePrecision: overview.valuePrecision,
+      }] : [];
+    })
+    .sort((left, right) => left.shortName.localeCompare(right.shortName));
+  const { default: BiomarkersPage } = await import("../app/(dashboard)/biomarkers/page");
+  vi.mocked(readFileSync).mockClear();
+  const result = await BiomarkersPage();
+  expect(result.props.deviceBiomarkers).toEqual(expected);
+  expect(expected.length).toBeGreaterThan(0);
+  const jsonReads = vi.mocked(readFileSync).mock.calls
+    .filter(([file]) => String(file).endsWith(".json"));
+  expect(jsonReads.map(([file]) => String(file).split("/generated/web/").at(-1)))
+    .toEqual(["browse/biomarkers.json"]);
 });

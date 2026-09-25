@@ -1,3 +1,6 @@
+import { parseHostedVoiceCallId } from "../voice-input.ts";
+import { parseHostedGroupSharedReadOptions, parseHostedGroupSharedDateCoverage } from "../group-shared-history.ts";
+import { parseHostedGroupSharedFreshnessRequirements } from "../group-shared-freshness.ts";
 import {
   parseHostedExecutionDeviceSyncRuntimeApplyRequest,
   parseHostedExecutionDeviceSyncRuntimeSnapshotRequest,
@@ -40,6 +43,7 @@ import {
   HOSTED_STANDBY_ALLOCATION_OUTCOMES,
   HOSTED_STANDBY_ALLOCATION_REASONS,
   HOSTED_RUNTIME_LATENCY_TRACE_ASSISTANT_INPUT_MAX_IDS,
+  HOSTED_RUNTIME_LATENCY_TRACE_BATCH_MAX_EVENTS,
   HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_KEYS,
   HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS,
   inspectHostedRuntimeAutomationLaneTimingSubdivision,
@@ -94,6 +98,8 @@ import {
   type HostedRuntimeLatencyTraceMilestone,
   type HostedRuntimeLatencyTraceMilestoneEvent,
   type HostedRuntimeLatencyTraceProviderStartedEvent,
+  type HostedRuntimeLatencyTraceBatchRequest,
+  type HostedRuntimeLatencyTraceBatchResponse,
   type HostedRuntimeLatencyTraceRequest,
   type HostedRuntimeLatencyTraceResponse,
   type HostedStandbyAllocationOutcome,
@@ -201,6 +207,7 @@ import {
   hostedVaultShareProjectionKindToScope,
   parseHostedVaultShareDeliveryRecord,
   parseHostedVaultShareProjectionScope,
+  isHostedVaultShareRecentDateProjectionKind,
   type HostedVaultShareProjectionScope,
   type HostedVaultShareProjectionKind,
   type HostedVaultShareSelectableProjectionScope,
@@ -1427,6 +1434,9 @@ function parseHostedRuntimeGroupSharedDataRequest(
       record,
       new Set([
         "action",
+        "freshness",
+        "participantId",
+        "history",
         "linqSenderHandles",
         "projectionScopes",
         "telegramSenderHandles",
@@ -1434,13 +1444,18 @@ function parseHostedRuntimeGroupSharedDataRequest(
       "Hosted runtime group tool read_shared request",
     );
     const senderHandles = parseHostedRuntimeGroupSenderHandlesRequest(record);
+    const projectionScopes = parseHostedRuntimeGroupSharedRequestedProjectionScopes(
+      record.projectionScopes,
+      "Hosted runtime group tool read_shared request projectionScopes",
+    );
     return {
       action,
       ...senderHandles,
-      projectionScopes: parseHostedRuntimeGroupSharedRequestedProjectionScopes(
-        record.projectionScopes,
-        "Hosted runtime group tool read_shared request projectionScopes",
-      ),
+      ...parseHostedGroupSharedReadOptions(record, projectionScopes),
+      projectionScopes,
+      ...(record.freshness === undefined ? {} : {
+        freshness: parseHostedGroupSharedFreshnessRequirements(record.freshness, projectionScopes),
+      }),
     };
   }
   if (action === "prepare_email") {
@@ -2507,7 +2522,7 @@ function parseHostedRuntimeGroupSharedReadResult(
 
   assertAllowedObjectKeys(
     result,
-    new Set(["members", "requestedProjectionScopeKeys", "status"]),
+    new Set(["members", "requestedProjectionScopeKeys", "status", "freshness", "dateCoverage"]),
     `Hosted runtime group tool read_shared ${status} response result`,
   );
   const requestedScopes =
@@ -2519,6 +2534,9 @@ function parseHostedRuntimeGroupSharedReadResult(
     "Hosted runtime group tool read_shared response members",
   );
   if (status === "none") {
+    if (result.freshness !== undefined || result.dateCoverage !== undefined) {
+      throw new TypeError("Shared freshness requires an authorized ok response.");
+    }
     if (rawMembers.length !== 0) {
       throw new TypeError(
         "Hosted runtime group tool read_shared none response members must be empty.",
@@ -2577,7 +2595,26 @@ function parseHostedRuntimeGroupSharedReadResult(
     return member;
   });
 
+  const dateCoverage = result.dateCoverage === undefined
+    ? undefined : parseHostedGroupSharedDateCoverage(result.dateCoverage);
+  if (dateCoverage && (requestedScopes.length !== 1 || members.length > 1
+    || result.freshness !== undefined
+    || !isHostedVaultShareRecentDateProjectionKind(requestedScopes[0]!.projectionScope.projectionKind))) {
+    throw new TypeError("Shared history coverage requires one health scope and at most one participant.");
+  }
+  if (dateCoverage) {
+    const dates = [...new Set(members.flatMap((member) => member.projections.flatMap((projection) =>
+      projection.records.map((record) => record.occurredAt.slice(0, 10))
+    )))].sort();
+    if (JSON.stringify(dates) !== JSON.stringify(dateCoverage.availableDates)) {
+      throw new TypeError("Shared history coverage must describe exactly the returned observations.");
+    }
+  }
   return {
+    ...(dateCoverage ? { dateCoverage } : {}),
+    ...(result.freshness === undefined ? {} : {
+      freshness: parseHostedGroupSharedFreshnessResult(result.freshness),
+    }),
     members,
     requestedProjectionScopeKeys: requestedScopes.map(
       ({ projectionScopeKey }) => projectionScopeKey,
@@ -6576,6 +6613,22 @@ export function parseHostedRuntimeLatencyTraceEvent(
   );
 
   switch (type) {
+    case "delivery_committed": {
+      assertAllowedObjectKeys(record, new Set([
+        "type", "source", "at", "runtimeAttemptId", "mailboxItemIds", "checkpointPublicationExpectedBy",
+      ]), "Hosted runtime delivery committed event");
+      const mailboxItemIds = requireArray(record.mailboxItemIds, "Hosted runtime delivery mailboxItemIds")
+        .map((id) => requireString(id, "Hosted runtime delivery mailbox item id"));
+      if (mailboxItemIds.length === 0 || mailboxItemIds.length > HOSTED_RUNTIME_LATENCY_TRACE_ASSISTANT_INPUT_MAX_IDS) {
+        throw new TypeError("Hosted runtime delivery mailbox item count is invalid.");
+      }
+      return {
+        type, mailboxItemIds, source: parseHostedIngressLatencySource(record.source),
+        at: requireString(record.at, "Hosted runtime delivery at"),
+        runtimeAttemptId: requireString(record.runtimeAttemptId, "Hosted runtime delivery attempt"),
+        checkpointPublicationExpectedBy: requireString(record.checkpointPublicationExpectedBy, "Hosted runtime delivery checkpoint deadline"),
+      };
+    }
     case "assistant_input_staged":
       return parseHostedRuntimeLatencyTraceAssistantInputStagedEvent(record);
     case "assistant_milestone":
@@ -6604,6 +6657,36 @@ export function parseHostedRuntimeLatencyTraceRequest(
   return {
     event: parseHostedRuntimeLatencyTraceEvent(record.event),
   };
+}
+
+export function parseHostedRuntimeLatencyTraceBatchRequest(
+  value: unknown,
+): HostedRuntimeLatencyTraceBatchRequest {
+  const record = requireObject(value, "Hosted runtime latency batch request");
+  assertAllowedObjectKeys(record, new Set(["events"]), "Hosted runtime latency batch request");
+  const events = requireArray(record.events, "Hosted runtime latency batch events");
+  if (events.length === 0 || events.length > HOSTED_RUNTIME_LATENCY_TRACE_BATCH_MAX_EVENTS) {
+    throw new TypeError("Hosted runtime latency batch event count is invalid.");
+  }
+  return { events: events.map((value) => {
+    const event = parseHostedRuntimeLatencyTraceEvent(value);
+    if (event.type !== "assistant_milestone" && event.type !== "runtime_milestone") {
+      throw new TypeError("Hosted runtime latency batches require milestone events.");
+    }
+    return event;
+  }) };
+}
+
+export function parseHostedRuntimeLatencyTraceBatchResponse(
+  value: unknown,
+): HostedRuntimeLatencyTraceBatchResponse {
+  const record = requireObject(value, "Hosted runtime latency batch response");
+  const results = requireArray(record.results, "Hosted runtime latency batch results");
+  if (results.length === 0 || results.length > HOSTED_RUNTIME_LATENCY_TRACE_BATCH_MAX_EVENTS) {
+    throw new TypeError("Hosted runtime latency batch result count is invalid.");
+  }
+  return { results: results.map((result) => result === null
+    ? null : parseHostedRuntimeLatencyTraceResponse(result)) };
 }
 
 export function parseHostedRuntimeLatencyTraceResponse(
@@ -6854,6 +6937,21 @@ function parseHostedRuntimeLatencyPhaseBreakdown(
       ...requireOptionalNonNegativeInteger(
         orchestration,
         "directEnsureHandlerDurationMs",
+        orchestrationLabel,
+      ),
+      ...requireOptionalNonNegativeInteger(
+        orchestration,
+        "directWakeStartedAtEpochMs",
+        orchestrationLabel,
+      ),
+      ...requireOptionalNonNegativeInteger(
+        orchestration,
+        "directWakeAttemptCount",
+        orchestrationLabel,
+      ),
+      ...requireOptionalNonNegativeInteger(
+        orchestration,
+        "directWakeRetryWaitMs",
         orchestrationLabel,
       ),
       ...requireOptionalDirectEnsureOrchestrationAttemptId(
@@ -7186,6 +7284,26 @@ function parseHostedRuntimeLatencyPhaseBreakdown(
         "runtimeInvocationPreparationElapsedMs",
         orchestrationLabel,
       ),
+      ...requireOptionalNonNegativeInteger(
+        orchestration,
+        "runtimeInvocationInputsWaitElapsedMs",
+        orchestrationLabel,
+      ),
+      ...requireOptionalNonNegativeInteger(
+        orchestration,
+        "runtimeInvocationAdmissionElapsedMs",
+        orchestrationLabel,
+      ),
+      ...requireOptionalNonNegativeInteger(
+        orchestration,
+        "runtimeInvocationFenceBindElapsedMs",
+        orchestrationLabel,
+      ),
+      ...requireOptionalNonNegativeInteger(
+        orchestration,
+        "runtimeInvocationJobPrepareElapsedMs",
+        orchestrationLabel,
+      ),
     };
   }
 
@@ -7318,6 +7436,16 @@ function parseHostedRuntimeLatencyPhaseBreakdown(
       ...requireOptionalNonNegativeInteger(
         wake,
         "foregroundImportStartedAtEpochMs",
+        wakeLabel,
+      ),
+      ...requireOptionalNonNegativeInteger(
+        wake,
+        "foregroundPrefetchPrepareElapsedMs",
+        wakeLabel,
+      ),
+      ...requireOptionalNonNegativeInteger(
+        wake,
+        "foregroundPrefetchWaitElapsedMs",
         wakeLabel,
       ),
       ...requireOptionalNonNegativeInteger(
@@ -7602,6 +7730,11 @@ function parseHostedRuntimeLatencyPhaseBreakdown(
       ...requireOptionalNonNegativeInteger(
         assistant,
         "firstCodexTextObservedAtEpochMs",
+        assistantLabel,
+      ),
+      ...requireOptionalNonNegativeInteger(
+        assistant,
+        "terminalReplyCommittedAtEpochMs",
         assistantLabel,
       ),
       ...requireOptionalNonNegativeInteger(
@@ -7942,10 +8075,10 @@ function parseHostedRuntimeLatencyTraceAssistantMilestoneEvent(
   if (
     checkpointPublicationExpectedBy !== undefined &&
     checkpointPublicationExpectedBy !== null &&
-    milestone !== "terminal_non_reply_committed"
+    milestone !== "terminal_non_reply_committed" && milestone !== "terminal_reply_committed"
   ) {
     throw new TypeError(
-      "Hosted runtime latency trace checkpointPublicationExpectedBy requires terminal_non_reply_committed.",
+      "Hosted runtime latency trace checkpointPublicationExpectedBy requires a terminal completion milestone.",
     );
   }
 
@@ -8217,6 +8350,14 @@ export function parseHostedWorkspaceReadResponse(
     ...(hostedAssistantSubagentModelOverridesAllowed === null
       ? {}
       : { hostedAssistantSubagentModelOverridesAllowed }),
+    ...(record.hostedAssistantPriorityUntil === undefined
+      ? {}
+      : {
+          hostedAssistantPriorityUntil: requireString(
+            record.hostedAssistantPriorityUntil,
+            "Hosted workspace read response hostedAssistantPriorityUntil",
+          ),
+        }),
     ...(hostedAssistantAstraAllowed === null ? {} : { hostedAssistantAstraAllowed }),
     ...(platformAiUsageAllowed === null ? {} : { platformAiUsageAllowed }),
     workspace:
@@ -8732,6 +8873,12 @@ export function parseHostedWorkspaceInvocationRequest(
 ): HostedWorkspaceInvocationRequest {
   const record = requireObject(value, "Hosted workspace invocation request");
 
+  if (record.voiceCallId !== undefined
+    && ((record.processingMode != null && record.processingMode !== "default")
+      || record.assistantExecutionBlocked === true)) {
+    throw new TypeError("Voice reservation requires default processing mode.");
+  }
+
   for (const field of HOSTED_WORKSPACE_INVOCATION_REMOVED_FIELDS) {
     rejectHostedWorkspaceInvocationRemovedField(
       record,
@@ -8741,6 +8888,15 @@ export function parseHostedWorkspaceInvocationRequest(
   }
 
   return {
+    ...(record.voiceCallId === undefined ? {} : { voiceCallId: parseHostedVoiceCallId(record.voiceCallId) }),
+    ...(record.hostedAssistantPriorityUntil === undefined
+      ? {}
+      : {
+          hostedAssistantPriorityUntil: requireString(
+            record.hostedAssistantPriorityUntil,
+            "Hosted workspace invocation request hostedAssistantPriorityUntil",
+          ),
+        }),
     ...(record.assistantExecutionBlocked === undefined
       ? {}
       : {
@@ -8761,15 +8917,15 @@ export function parseHostedWorkspaceInvocationRequest(
             "Hosted workspace invocation request budget",
           ),
         }),
-    ...(record.idleCheckpointDelayMs === undefined
+    ...(record.runnerIdleTtlMs === undefined
       ? {}
       : {
-          idleCheckpointDelayMs:
-            record.idleCheckpointDelayMs === null
+          runnerIdleTtlMs:
+            record.runnerIdleTtlMs === null
               ? null
               : requirePositiveInteger(
-                  record.idleCheckpointDelayMs,
-                  "Hosted workspace invocation request idleCheckpointDelayMs",
+                  record.runnerIdleTtlMs,
+                  "Hosted workspace invocation request runnerIdleTtlMs",
                 ),
         }),
     leaseGeneration: requireNonNegativeBigIntString(
@@ -9185,4 +9341,17 @@ function readNullableNonNegativeBigIntString(
   }
 
   return requireNonNegativeBigIntString(value, label);
+}
+
+function parseHostedGroupSharedFreshnessResult(value: unknown): { checkedAt: string; refreshStatus: "requested" | "not_needed" | "unavailable" } {
+  const record = requireObject(value, "Shared freshness response");
+  assertAllowedObjectKeys(record, new Set(["checkedAt", "refreshStatus"]), "Shared freshness response");
+  const refreshStatus = record.refreshStatus;
+  if (refreshStatus !== "requested" && refreshStatus !== "not_needed" && refreshStatus !== "unavailable") {
+    throw new TypeError("Shared freshness refreshStatus is invalid.");
+  }
+  return {
+    checkedAt: parseHostedRuntimeGroupCanonicalTimestamp(record.checkedAt, "Shared freshness checkedAt"),
+    refreshStatus,
+  };
 }

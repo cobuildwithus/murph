@@ -189,6 +189,21 @@ describe("hosted runtime assistant configuration tool", () => {
     });
   });
 
+  it("returns an unavailable result when GPT-6 requires OpenAI", async () => {
+    mocks.updateConfiguration.mockRejectedValue(hostedOnboardingError({
+      code: "ASSISTANT_MODEL_REQUIRES_OPENAI",
+      httpStatus: 400,
+      message: "Choose OpenAI to use GPT-6 Sol or Luna.",
+    }));
+    await expect(handleHostedRuntimeAssistantConfigurationTool({
+      memberId: "member_123",
+      request: { action: "update", assistantInputId: `ain_${"c".repeat(32)}`, model: "gpt-6-luna", provider: "venice" },
+    })).resolves.toMatchObject({
+      action: "update",
+      result: { status: "unavailable", requiredPlan: null },
+    });
+  });
+
   it("returns a gate-aware unavailable provider result", async () => {
     mocks.updateConfiguration.mockRejectedValue(hostedOnboardingError({
       code: "ASSISTANT_PROVIDER_VENICE_UNAVAILABLE",

@@ -88,6 +88,7 @@ export type HostedLocalE2eScenarioName =
   | "group-sleep-source-sharing"
   | "foreground-reply-priority"
   | "hosted-web-browser-smoke"
+  | "native-voice"
   | "idle-checkpoint-deferred-progress"
   | "idle-checkpoint-runtime-handoff"
   | "imessage-member-action-timestamp"
@@ -116,6 +117,7 @@ export type HostedLocalE2eScenarioName =
   | "linq-webhook"
   | "linq-webhook-audio"
   | "runner-warm-reuse"
+  | "postgres-runtime-warm-reuse"
   | "snapshot-publication-fallback"
   | "snapshot-stress"
   | "stripe-billing-browser-matrix"
@@ -207,6 +209,12 @@ export const hostedLocalE2eScenarios: readonly HostedLocalE2eScenario[] = [
     file: "apps/cloudflare/test/hosted-local-web-browser-smoke-e2e.test.ts",
     manualOnly: true,
     name: "hosted-web-browser-smoke",
+  },
+  {
+    dedicatedVitestProcess: true,
+    file: "apps/cloudflare/test/hosted-local-native-voice-e2e.test.ts",
+    manualOnly: true,
+    name: "native-voice",
   },
   {
     file: "apps/cloudflare/test/hosted-local-device-sync-wake-e2e.test.ts",
@@ -387,6 +395,12 @@ export const hostedLocalE2eScenarios: readonly HostedLocalE2eScenario[] = [
   {
     file: "apps/cloudflare/test/hosted-local-linq-same-wake-batching-e2e.test.ts",
     name: "linq-same-wake-batching",
+  },
+  {
+    file: "apps/cloudflare/test/hosted-local-postgres-runtime-e2e.test.ts",
+    manualOnly: true,
+    name: "postgres-runtime-warm-reuse",
+    vitestProcessTestNamePatterns: ["empty Postgres: cold reply and warm typing", "rolling migration: cold reply and warm typing"],
   },
   {
     file: "apps/cloudflare/test/hosted-local-runner-warm-auth-recovery-e2e.test.ts",
@@ -683,6 +697,18 @@ export async function runHostedLocalE2eSuite(
           scenarios,
         });
       });
+      if (liveWearableEnvironment.vitestEnvOverlay[JUNCTION_WEARABLE_LIVE_ENV] === "1") {
+        suiteEnv.NEXT_DIST_DIR_MODE = "smoke";
+        await runAdmittedStep(async () => {
+          await runForegroundCommand({
+            args: ["--dir", "apps/web", "build:hosted-local"],
+            command: "pnpm",
+            cwd: hostedLocalHarnessRepoRoot,
+            env: suiteEnv,
+            label: "Hosted local wearable production Web preparation",
+          });
+        });
+      }
       await runAdmittedStep(async () => {
         await runHostedLocalVitest({
           assertWorkAdmission,

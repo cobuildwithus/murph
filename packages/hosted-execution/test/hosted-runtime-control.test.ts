@@ -20,7 +20,7 @@ import {
   HOSTED_ASSISTANT_REASONING_EFFORT_OVERRIDES,
   HOSTED_ASSISTANT_REASONING_EFFORTS,
   HOSTED_ASSISTANT_SOL_MODEL,
-  HOSTED_ASSISTANT_TERRA_MODEL,
+  HOSTED_ASSISTANT_DEFAULT_MODEL,
   isHostedAssistantProductModel,
   isHostedAssistantReasoningEffort,
   parseHostedAssistantModelOverride,
@@ -86,6 +86,8 @@ import {
   parseHostedRuntimeIssueExportRequest,
   parseHostedRuntimeIssueExportResponse,
   parseHostedRuntimeHealthDataAdmissionResponse,
+  parseHostedRuntimeLatencyTraceBatchRequest,
+  parseHostedRuntimeLatencyTraceBatchResponse,
   parseHostedRuntimeLatencyTraceRequest,
   parseHostedRuntimeLatencyTraceResponse,
   parseHostedRuntimeUsageRecordRequest,
@@ -396,26 +398,29 @@ describe("hosted runtime control contracts", () => {
 
   it("parses the hosted assistant product models and nullable default override", () => {
     expect(HOSTED_ASSISTANT_PRODUCT_MODELS).toEqual([
+      "gpt-6-sol",
+      "gpt-6-luna",
       HOSTED_ASSISTANT_LUNA_MODEL,
-      HOSTED_ASSISTANT_TERRA_MODEL,
       HOSTED_ASSISTANT_SOL_MODEL,
       "gpt-6-astra",
     ]);
     expect(HOSTED_ASSISTANT_MODEL_OVERRIDES).toEqual([
+      "gpt-6-sol",
+      "gpt-6-luna",
       HOSTED_ASSISTANT_LUNA_MODEL,
       HOSTED_ASSISTANT_SOL_MODEL,
       "gpt-6-astra",
     ]);
     expect(isHostedAssistantProductModel(HOSTED_ASSISTANT_LUNA_MODEL)).toBe(true);
-    expect(isHostedAssistantProductModel(HOSTED_ASSISTANT_TERRA_MODEL)).toBe(true);
+    expect(isHostedAssistantProductModel(HOSTED_ASSISTANT_DEFAULT_MODEL)).toBe(true);
     expect(isHostedAssistantProductModel(HOSTED_ASSISTANT_SOL_MODEL)).toBe(true);
     expect(isHostedAssistantProductModel("gpt-5.5")).toBe(false);
     expect(parseHostedAssistantModelOverride(HOSTED_ASSISTANT_LUNA_MODEL))
       .toBe(HOSTED_ASSISTANT_LUNA_MODEL);
     expect(parseHostedAssistantModelOverride(HOSTED_ASSISTANT_SOL_MODEL))
       .toBe(HOSTED_ASSISTANT_SOL_MODEL);
-    expect(parseHostedAssistantModelOverride(HOSTED_ASSISTANT_TERRA_MODEL))
-      .toBeNull();
+    expect(parseHostedAssistantModelOverride(HOSTED_ASSISTANT_DEFAULT_MODEL))
+      .toBe(HOSTED_ASSISTANT_DEFAULT_MODEL);
     expect(parseHostedAssistantModelOverride(" gpt-5.6-sol ")).toBeNull();
   });
 
@@ -568,7 +573,7 @@ describe("hosted runtime control contracts", () => {
       approval: {},
       reasoningEffort: "high",
       target: {
-        model: HOSTED_ASSISTANT_TERRA_MODEL,
+        model: HOSTED_ASSISTANT_DEFAULT_MODEL,
         reasoningEffort: "high",
       },
     })).toThrow(/not allowed/u);
@@ -579,7 +584,7 @@ describe("hosted runtime control contracts", () => {
       availableReasoningEfforts: [...HOSTED_ASSISTANT_REASONING_EFFORTS],
       configurationAvailable: true,
       dormantSolPreference: false,
-      model: HOSTED_ASSISTANT_TERRA_MODEL,
+      model: HOSTED_ASSISTANT_DEFAULT_MODEL,
       provider: "openai" as const,
       reasoningEffort: "low" as const,
       solAvailable: false,
@@ -651,6 +656,12 @@ describe("hosted runtime control contracts", () => {
       .toBeNull();
   });
 
+  it.each(["priority", "fast"])("keeps member pricing standard for the platform-funded %s boost", (serviceTier) => {
+    expect(resolveHostedAiUsageTokenPricingBasis({
+      model: "gpt-6-sol", providerName: "hosted-openai", serviceTier,
+    })).toBe("standard");
+  });
+
   it("uses OpenAI flex token pricing only for supported OpenAI flex models", () => {
     expect(resolveHostedAiUsageTokenPricingBasis({
       model: "gpt-5.6-terra",
@@ -699,6 +710,32 @@ describe("hosted runtime control contracts", () => {
     })).toBe("standard");
   });
 
+  it("ignores the retired checkpoint field across Worker/runtime deployment skew", () => {
+    const request = {
+      attemptId: "attempt_skew",
+      leaseGeneration: "1",
+      userId: "member_synthetic",
+      workspaceVersion: "0",
+    };
+    // Old Worker -> new runtime uses the new runtime's safe default. Unknown
+    // optional fields are ignored rather than forwarded into runtime policy.
+    expect(parseHostedWorkspaceInvocationRequest({
+      ...request,
+      idleCheckpointDelayMs: 180_000,
+    })).toEqual(request);
+    expect(parseHostedWorkspaceInvocationRequest({
+      ...request,
+      runnerIdleTtlMs: 600_000,
+      idleCheckpointDelayMs: 180_000,
+    })).toEqual({ ...request, runnerIdleTtlMs: 600_000 });
+    for (const runnerIdleTtlMs of [0, -1, 1.5, "600000"]) {
+      expect(() => parseHostedWorkspaceInvocationRequest({
+        ...request,
+        runnerIdleTtlMs,
+      })).toThrow();
+    }
+  });
+
   it("parses workspace invocation request and status-only result without invocation-drain fields", () => {
     const workspaceInvocationRequest = {
       attemptId: "attempt_1",
@@ -706,7 +743,7 @@ describe("hosted runtime control contracts", () => {
         maxMailboxItems: 25,
         maxRuntimeMs: 30_000,
       },
-      idleCheckpointDelayMs: 180_000,
+      runnerIdleTtlMs: 180_000,
       leaseGeneration: "7",
       providerEgressToken: "provider-egress-token-contract",
       userId: "member_123",
@@ -728,6 +765,26 @@ describe("hosted runtime control contracts", () => {
     expect(parseHostedWorkspaceInvocationRequest(workspaceInvocationRequest)).toEqual(
       workspaceInvocationRequest,
     );
+    expect(parseHostedWorkspaceInvocationRequest({
+      ...workspaceInvocationRequest, voiceCallId: "call-synthetic",
+    }).voiceCallId).toBe("call-synthetic");
+    for (const processingMode of ["system_mailbox", "inbox_media_retention"]) {
+      expect(() => parseHostedWorkspaceInvocationRequest({
+        ...workspaceInvocationRequest, voiceCallId: "call-synthetic", processingMode,
+      })).toThrow("Voice reservation requires default processing mode.");
+    }
+    expect(() => parseHostedWorkspaceInvocationRequest({
+      ...workspaceInvocationRequest, voiceCallId: "call:invalid",
+    })).toThrow("Hosted voice input identity is invalid.");
+    expect(parseHostedWorkspaceInvocationRequest({
+      ...workspaceInvocationRequest,
+      hostedAssistantPriorityUntil: "2026-09-24T00:00:00Z",
+      workspace: null,
+    }).hostedAssistantPriorityUntil).toBe("2026-09-24T00:00:00Z");
+    expect(() => parseHostedWorkspaceInvocationRequest({
+      ...workspaceInvocationRequest,
+      hostedAssistantPriorityUntil: 123,
+    })).toThrow("hostedAssistantPriorityUntil");
     expect(() => parseHostedWorkspaceInvocationRequest({
       ...workspaceInvocationRequest,
       budget: {
@@ -1428,10 +1485,26 @@ describe("hosted runtime control contracts", () => {
       "linq",
       "telegram",
       null,
-      null,
+      "email",
       null,
     ]);
 
+    const deliveryCompletion = {
+      event: {
+        type: "delivery_committed", source: "email", runtimeAttemptId: "attempt_email",
+        mailboxItemIds: ["mailbox_email"], at: "2026-04-26T00:01:00.000Z",
+        checkpointPublicationExpectedBy: "2026-04-26T00:30:00.000Z",
+      },
+    };
+    expect(parseHostedRuntimeLatencyTraceRequest(deliveryCompletion)).toEqual(deliveryCompletion);
+    for (const mailboxItemIds of [[], Array(65).fill("mailbox_email")]) {
+      expect(() => parseHostedRuntimeLatencyTraceRequest({
+        event: { ...deliveryCompletion.event, mailboxItemIds },
+      })).toThrow();
+    }
+    expect(() => parseHostedRuntimeLatencyTraceRequest({
+      event: { ...deliveryCompletion.event, message: "private content" },
+    })).toThrow();
     expect(parseHostedRuntimeLatencyTraceRequest({
       event: {
         assistantInputId: "input_1",
@@ -1685,6 +1758,9 @@ describe("hosted runtime control contracts", () => {
         temporalActivityRequestStartedAtEpochMs: 1_777_000_000_010,
         tokenAcquireStartedAtEpochMs: 1_777_000_000_011,
         tokenAcquiredAtEpochMs: 1_777_000_000_012,
+        directWakeStartedAtEpochMs: 1_777_000_000_001,
+        directWakeAttemptCount: 2,
+        directWakeRetryWaitMs: 250,
         directEnsureRequestStartedAtEpochMs: 1_777_000_000_013,
         directEnsureResponseReceivedAtEpochMs: 1_777_000_000_014,
         directEnsureAuthDurationMs: 0,
@@ -1762,6 +1838,10 @@ describe("hosted runtime control contracts", () => {
         shellPrewarmOutcome: "cold_start_observed",
         shellPrewarmSource: "linq-message-routing",
         workspaceReadElapsedMs: 30,
+        runtimeInvocationInputsWaitElapsedMs: 1,
+        runtimeInvocationAdmissionElapsedMs: 2,
+        runtimeInvocationFenceBindElapsedMs: 3,
+        runtimeInvocationJobPrepareElapsedMs: 4,
         runtimeStoreEnsureElapsedMs: 40,
         runtimeInvocationPreparationElapsedMs: 60,
       },
@@ -1791,6 +1871,8 @@ describe("hosted runtime control contracts", () => {
         runtimeWakeNotifiedAtEpochMs: 1_777_000_000_100,
         foregroundWaitResolvedAtEpochMs: 1_777_000_000_110,
         foregroundImportStartedAtEpochMs: 1_777_000_000_111,
+        foregroundPrefetchPrepareElapsedMs: 2,
+        foregroundPrefetchWaitElapsedMs: 250,
         foregroundWakeOrdinal: 1,
         activeRuntimePassOrdinal: 2,
         activeRuntimePassStartedAtEpochMs: 1_777_000_000_090,
@@ -2029,6 +2111,9 @@ describe("hosted runtime control contracts", () => {
       { temporalActivityStartedAtEpochMs: 1, requestUrl: 1 }, // unknown sub key
       { tokenAcquireStartedAtEpochMs: -1 }, // web-side negative leaf
       { directEnsureResponseReceivedAtEpochMs: 1.5 }, // web-side non-integer leaf
+      { directWakeStartedAtEpochMs: -1 },
+      { directWakeAttemptCount: 1.5 },
+      { directWakeRetryWaitMs: "250" },
       { directEnsureAuthDurationMs: -1 },
       { directEnsureAuthDurationMs: "42" },
       { directEnsureHandlerDurationMs: Number.POSITIVE_INFINITY },
@@ -2069,6 +2154,10 @@ describe("hosted runtime control contracts", () => {
       { activeWakeAccepted: 1 }, // boolean leaf must stay boolean
       { activeWakeFoundNoActiveChild: "true" }, // boolean leaf must stay boolean
       { activeWakeElapsedMs: 1.5 }, // duration must be an integer
+      { runtimeInvocationInputsWaitElapsedMs: -1 },
+      { runtimeInvocationAdmissionElapsedMs: "1" },
+      { runtimeInvocationFenceBindElapsedMs: 1.5 },
+      { runtimeInvocationJobPrepareElapsedMs: Number.POSITIVE_INFINITY },
       { freshStartRequestedAtEpochMs: "1777000000070" }, // string leaf
       { freshStartContainerPortsReadyAtEpochMs: -1 }, // container timestamps stay non-negative
       { shellPrewarmHintCount: -1 }, // counts must be non-negative
@@ -2120,6 +2209,8 @@ describe("hosted runtime control contracts", () => {
       { runtimeWakeNotifiedAtEpochMs: 1, threadId: 1 }, // unknown sub key
       { foregroundWaitResolvedAtEpochMs: 1.5 }, // non-integer leaf
       { foregroundImportStartedAtEpochMs: -1 }, // negative leaf
+      { foregroundPrefetchPrepareElapsedMs: -1 },
+      { foregroundPrefetchWaitElapsedMs: "250" },
       { runtimeWakeNotifiedAtEpochMs: "1777000000100" }, // string leaf
       { activeRuntimePassForeground: 0 }, // boolean leaf must stay boolean
     ]) {
@@ -2513,6 +2604,12 @@ describe("hosted runtime control contracts", () => {
       hostedAssistantReasoningEffortOverride: "high",
       workspace: null,
     });
+    expect(parseHostedWorkspaceReadResponse({
+      fetchedAt: "2026-09-23T00:00:00Z", hostedAssistantPriorityUntil: "2026-09-24T00:00:00Z", workspace: null,
+    }).hostedAssistantPriorityUntil).toBe("2026-09-24T00:00:00Z");
+    expect(parseHostedWorkspaceReadResponse({
+      fetchedAt: "2026-09-23T00:00:00Z", workspace: null,
+    }).hostedAssistantPriorityUntil).toBeUndefined();
     expect(() => parseHostedWorkspaceReadResponse({
       fetchedAt: "2026-04-26T00:00:02.000Z",
       hostedAssistantAstraAllowed: "true",
@@ -2541,7 +2638,6 @@ describe("hosted runtime control contracts", () => {
     });
     for (const invalidOverride of [
       null,
-      HOSTED_ASSISTANT_TERRA_MODEL,
       "gpt-5.5",
       " gpt-5.6-sol ",
       56,
@@ -3131,3 +3227,27 @@ function createAssistantRuntimeIssueRecord(): AssistantRuntimeIssueRecord {
     surface: "hosted-runtime",
   };
 }
+
+
+it("keeps bounded milestone batches additive to the deployed singleton wire contract", () => {
+  const event = { type: "assistant_milestone", source: "linq", runtimeAttemptId: "synthetic-attempt",
+    assistantInputIds: ["synthetic-input"], at: "2026-09-01T00:00:00.000Z", milestone: "first_codex_output_observed" };
+  const events = Array.from({ length: 8 }, () => event);
+  expect(parseHostedRuntimeLatencyTraceBatchRequest({ events })).toEqual({ events });
+  expect(parseHostedRuntimeLatencyTraceRequest({ event })).toEqual({ event });
+  const runtimeEvents = ["email", "linq", "telegram"].map(source => ({
+    type: "runtime_milestone", source, runtimeAttemptId: "synthetic-attempt",
+    at: event.at, milestone: "checkpoint_publication_expected_by",
+  }));
+  expect(parseHostedRuntimeLatencyTraceBatchRequest({ events: runtimeEvents })).toEqual({ events: runtimeEvents });
+  expect(() => parseHostedRuntimeLatencyTraceRequest({ events })).toThrow();
+  for (const payload of [{ events: [] }, { events: [...events, event] }, { events, event },
+    { events: [{ ...event, type: "runtime_milestone" }] }, { events: [{ ...event, privateText: "synthetic" }] }]) {
+    expect(() => parseHostedRuntimeLatencyTraceBatchRequest(payload)).toThrow();
+  }
+  const ok = { matchedCount: 1, recorded: true, unmatchedCount: 0 };
+  expect(parseHostedRuntimeLatencyTraceBatchResponse({ results: [ok, null] })).toEqual({ results: [ok, null] });
+  for (const results of [[], Array.from({ length: 9 }, () => ok), [{ ...ok, unmatchedCount: -1 }]]) {
+    expect(() => parseHostedRuntimeLatencyTraceBatchResponse({ results })).toThrow();
+  }
+});

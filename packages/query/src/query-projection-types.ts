@@ -23,6 +23,8 @@ export interface QueryMetricPointFilters {
 }
 
 export interface QueryCanonicalEntityFilters {
+  /** Select retained automatic meal photos and revisions from this closeout occurrence. */
+  automaticMealPhotoCloseoutAt?: string;
   family?: string;
   from?: string;
   kinds?: readonly string[];

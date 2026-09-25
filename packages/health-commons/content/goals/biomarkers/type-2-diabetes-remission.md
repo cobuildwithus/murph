@@ -3,8 +3,8 @@ schemaVersion: murph.commons.page.v1
 entityType: goal_template
 key: goal_template:type-2-diabetes-remission
 slug: type-2-diabetes-remission
-title: Put Type 2 Diabetes Into Remission
-summary: Pursue type 2 diabetes remission with a clinically supervised, sustainable weight and glucose plan while continuing long-term follow-up.
+title: Understand Type 2 Diabetes Remission
+summary: Learn what type 2 diabetes remission means, how clinicians assess it, and why ongoing follow-up matters.
 status: field-testing
 quality: usable
 aliases:
@@ -18,7 +18,7 @@ goal:
   category: biomarkers
   parentGoalKey: goal_template:improve-blood-sugar-control
   outcomeKind: biomarker
-  goalPhrase: put type 2 diabetes into remission
+  goalPhrase: understand type 2 diabetes remission
   successSignals:
     - id: diabetes_remission_criterion
       kind: biomarker
@@ -33,7 +33,7 @@ goal:
     kind: care_support
     ownerSkillIds:
       - cardiometabolic-health
-  startPrompt: Hey Murph, help me put type 2 diabetes into remission.
+  startPrompt: Hey Murph, help me understand type 2 diabetes remission.
   indexable: true
 safety:
   cautionLevel: high
@@ -89,4 +89,4 @@ Frequent low glucose, vomiting, dehydration, ketones, or rapidly falling medicat
 
 ## Related goals
 
-[Lower My A1C](/goals/lower-a1c) · [Improve My Blood Sugar Control](/goals/improve-blood-sugar-control) · [Improve My Insulin Sensitivity](/goals/improve-insulin-sensitivity)
+[Understand My A1C](/goals/lower-a1c) · [Track My Blood Sugar](/goals/improve-blood-sugar-control) · [Understand Insulin Sensitivity](/goals/improve-insulin-sensitivity)

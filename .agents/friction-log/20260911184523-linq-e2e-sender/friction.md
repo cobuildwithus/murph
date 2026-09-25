@@ -9,7 +9,7 @@ The synthetic signed Linq sender should honor the handler's explicit retryable r
 
 ## Current Behavior
 
-The first-contact fixture sends only once and immediately requires HTTP 202, so a concurrent route change can fail the delivery scenario on the deliberate HTTP 503 HOSTED_THREAD_ROUTE_PREPARATION_REQUIRED response.
+The first-contact fixture and the shared provider-egress scenario send only once and immediately requires HTTP 202, so a concurrent route change can fail the delivery scenario on the deliberate HTTP 503 HOSTED_THREAD_ROUTE_PREPARATION_REQUIRED response.
 
 ## Possible Solution
 
@@ -22,3 +22,5 @@ Return the typed retryable 503 from the first synthetic webhook request, followe
 ## Context
 
 Hosted-local Linq delivery verification must distinguish a bounded, declared retry boundary from a failed delivery assertion. No production routing or provider policy change is needed.
+
+The provider-egress scenario now reuses `postHostedLocalLinqWebhook`, including its existing identical-event one-redelivery ceiling. The warm-reuse provider-handoff race and its completion assertions remain unchanged.

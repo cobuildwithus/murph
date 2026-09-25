@@ -14,14 +14,19 @@ import {
   buildCloudflareHostedControlMealPhotoStagePath,
   buildCloudflareHostedControlRuntimeEnsureProcessingPath,
   buildCloudflareHostedControlRuntimeHealthDataConsentPath,
+  buildCloudflareHostedControlRuntimeResourcePurgePath,
   buildCloudflareHostedControlTelegramUsageLimitNoticePath,
   buildCloudflareHostedControlUserDataDeletionPath,
   buildCloudflareHostedControlUserStatusPath,
+  buildCloudflareHostedControlVoiceControlPath,
   matchCloudflareHostedControlUserRoutePath,
 } from "../src/routes.ts";
 
 describe("cloudflare hosted control routes", () => {
   it("builds the narrowed internal routes with encoded identifiers", () => {
+    expect(buildCloudflareHostedControlVoiceControlPath("user/a b")).toBe("/internal/users/user%2Fa%20b/runtime/voice");
+    expect(matchCloudflareHostedControlUserRoutePath("voiceControl",
+      buildCloudflareHostedControlVoiceControlPath("user/a b"))).toEqual({ userId: "user%2Fa%20b" });
     expect(buildCloudflareHostedControlBrowserVaultSessionPath("user/a b")).toBe(
       "/internal/users/user%2Fa%20b/browser-vault/session",
     );
@@ -129,6 +134,12 @@ describe("cloudflare hosted control routes", () => {
     ).toEqual({ userId: encodedUserId });
     expect(
       matchCloudflareHostedControlUserRoutePath(
+        "runtimeResourcePurge",
+        buildCloudflareHostedControlRuntimeResourcePurgePath(userId),
+      ),
+    ).toEqual({ userId: encodedUserId });
+    expect(
+      matchCloudflareHostedControlUserRoutePath(
         "telegramUsageLimitNotice",
         buildCloudflareHostedControlTelegramUsageLimitNoticePath(userId),
       ),
@@ -160,6 +171,8 @@ describe("cloudflare hosted control routes", () => {
       mealPhotoDelete: { method: "DELETE", suffix: "meal-photos/delete" },
       mealPhotoStage: { method: "POST", suffix: "meal-photos/stage" },
       runtimeEnsureProcessing: { method: "POST", suffix: "runtime/ensure-processing" },
+      voiceControl: { method: "POST", suffix: "runtime/voice" },
+      runtimeResourcePurge: { method: "POST", suffix: "runtime/resource-purge" },
       runtimeHealthDataConsentReconcile: {
         method: "POST",
         suffix: "runtime/health-data-consent",
@@ -227,9 +240,11 @@ describe("cloudflare hosted control routes", () => {
       "buildCloudflareHostedControlMealPhotoStagePath",
       "buildCloudflareHostedControlRuntimeEnsureProcessingPath",
       "buildCloudflareHostedControlRuntimeHealthDataConsentPath",
+      "buildCloudflareHostedControlRuntimeResourcePurgePath",
       "buildCloudflareHostedControlTelegramUsageLimitNoticePath",
       "buildCloudflareHostedControlUserDataDeletionPath",
       "buildCloudflareHostedControlUserStatusPath",
+      "buildCloudflareHostedControlVoiceControlPath",
       "matchCloudflareHostedControlUserRoutePath",
     ]);
     expect(routesModule).toMatchObject({
@@ -241,6 +256,7 @@ describe("cloudflare hosted control routes", () => {
       buildCloudflareHostedControlMealPhotoDeletePath: expect.any(Function),
       buildCloudflareHostedControlMealPhotoStagePath: expect.any(Function),
       buildCloudflareHostedControlRuntimeHealthDataConsentPath: expect.any(Function),
+      buildCloudflareHostedControlRuntimeResourcePurgePath: expect.any(Function),
       buildCloudflareHostedControlTelegramUsageLimitNoticePath: expect.any(Function),
       buildCloudflareHostedControlUserDataDeletionPath: expect.any(Function),
       buildCloudflareHostedControlUserStatusPath: expect.any(Function),

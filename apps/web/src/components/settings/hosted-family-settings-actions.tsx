@@ -116,6 +116,48 @@ type PendingAction =
       to: HostedFamilyPlanCode;
     };
 
+function resolveFamilyActionDialogCopy(
+  action: PendingAction | null,
+  sourceTier: FamilyManagerTier | null,
+  targetTier: FamilyManagerTier | null,
+  direction: "upgrade" | "downgrade" | null,
+) {
+  const sourceName = sourceTier?.name;
+  const targetName = targetTier?.name;
+  const targetPrice = targetTier?.priceLabel;
+  switch (action?.kind) {
+    case "remove-member":
+      return {
+        title: "Remove family member",
+        description: `Remove ${action.label}? They keep their own Murph account and data, but their access through your Family plan ends.`,
+        confirmLabel: "Remove member",
+        destructive: true,
+      };
+    case "change-plan": {
+      const subject = action.isOwner ? "your plan" : action.label;
+      return {
+        title: action.recovery
+          ? "Upgrade your Family access"
+          : action.isOwner ? "Manage your plan" : `Manage ${action.label}`,
+        description: action.recovery
+          ? `Move your Family access from ${sourceName} to ${targetName} at ${targetPrice}. ${targetName} includes more usage each month.`
+          : direction === "upgrade"
+            ? `Upgrade ${subject} from ${sourceName} to ${targetName} at ${targetPrice}. The prorated difference will appear on your next invoice.`
+            : `Downgrade ${subject} from ${sourceName} to ${targetName} at ${targetPrice}. Any prorated credit will apply to your next invoice.`,
+        confirmLabel: `${direction === "upgrade" ? "Upgrade" : "Downgrade"} to ${targetName}`,
+        destructive: false,
+      };
+    }
+    default:
+      return {
+        title: "Cancel invite",
+        description: `Cancel the invite for ${action?.label ?? "this person"}? The invite link stops working.`,
+        confirmLabel: "Cancel invite",
+        destructive: action?.kind === "cancel-invite",
+      };
+  }
+}
+
 type InviteChannel = "imessage" | "email" | "telegram";
 
 const INVITE_CHANNEL_OPTIONS: ReadonlyArray<{
@@ -330,6 +372,13 @@ export function HostedFamilyManager(props: {
       ? "upgrade"
       : "downgrade"
     : null;
+
+  const pendingActionCopy = resolveFamilyActionDialogCopy(
+    pendingAction,
+    pendingSourceTier,
+    pendingTargetTier,
+    pendingPlanChangeDirection,
+  );
 
   function resetInviteForm() {
     setInviteChannel("imessage");
@@ -985,24 +1034,10 @@ export function HostedFamilyManager(props: {
         <DialogContent className={DIALOG_CLASS} showCloseButton={!isActing}>
           <DialogHeader className="pr-10">
             <DialogTitle className="font-serif text-2xl/7 font-semibold tracking-normal text-[#2d3436]">
-              {pendingAction?.kind === "remove-member"
-                ? "Remove family member"
-                : pendingAction?.kind === "change-plan"
-                  ? pendingAction.recovery
-                    ? "Upgrade your Family access"
-                    : pendingAction.isOwner ? "Manage your plan" : `Manage ${pendingAction.label}`
-                  : "Cancel invite"}
+              {pendingActionCopy.title}
             </DialogTitle>
             <DialogDescription className="text-sm leading-6 text-[#736a58]">
-              {pendingAction?.kind === "remove-member"
-                ? `Remove ${pendingAction.label}? They keep their own Murph account and data, but their access through your Family plan ends.`
-                : pendingAction?.kind === "change-plan"
-                  ? pendingAction.recovery
-                    ? `Move your Family access from ${pendingSourceTier?.name} to ${pendingTargetTier?.name} at ${pendingTargetTier?.priceLabel}. ${pendingTargetTier?.name} includes more usage each month.`
-                    : pendingPlanChangeDirection === "upgrade"
-                      ? `Upgrade ${pendingAction.isOwner ? "your plan" : pendingAction.label} from ${pendingSourceTier?.name} to ${pendingTargetTier?.name} at ${pendingTargetTier?.priceLabel}. The prorated difference will appear on your next invoice.`
-                      : `Downgrade ${pendingAction.isOwner ? "your plan" : pendingAction.label} from ${pendingSourceTier?.name} to ${pendingTargetTier?.name} at ${pendingTargetTier?.priceLabel}. Any prorated credit will apply to your next invoice.`
-                  : `Cancel the invite for ${pendingAction?.label ?? "this person"}? The invite link stops working.`}
+              {pendingActionCopy.description}
             </DialogDescription>
           </DialogHeader>
 
@@ -1041,20 +1076,12 @@ export function HostedFamilyManager(props: {
             <Button
               type="button"
               size="xl"
-              variant={pendingAction?.kind === "remove-member" || pendingAction?.kind === "cancel-invite"
-                ? "destructive"
-                : "default"}
+              variant={pendingActionCopy.destructive ? "destructive" : "default"}
               onClick={() => void confirmPendingAction()}
               disabled={isActing}
               className="w-full"
             >
-              {isActing
-                ? "Working..."
-                : pendingAction?.kind === "remove-member"
-                  ? "Remove member"
-                  : pendingAction?.kind === "change-plan"
-                    ? `${pendingPlanChangeDirection === "upgrade" ? "Upgrade" : "Downgrade"} to ${pendingTargetTier?.name}`
-                      : "Cancel invite"}
+              {isActing ? "Working..." : pendingActionCopy.confirmLabel}
             </Button>
             {pendingAction?.kind === "change-plan" ? (
               <HostedUsageTopUpDialog

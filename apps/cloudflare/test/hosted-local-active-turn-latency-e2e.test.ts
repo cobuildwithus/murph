@@ -304,7 +304,7 @@ async function runPostDeliveryMaintenancePreemptionProbe(input: {
   const replyPath = `/chats/${encodeURIComponent(chatId)}/messages`;
 
   await startProbeScenario({
-    idleCheckpointDelayMs: 3_000,
+    runnerIdleTtlMs: 3_000,
     localDatabaseUrl: input.localDatabaseUrl,
     memberPhone,
   });
@@ -534,7 +534,7 @@ async function runIdleShutdownDelayProbe(input: {
 }
 
 async function startProbeScenario(input: {
-  idleCheckpointDelayMs?: number;
+  runnerIdleTtlMs?: number;
   localDatabaseUrl: string;
   memberPhone: string;
 }): Promise<void> {
@@ -543,7 +543,7 @@ async function startProbeScenario(input: {
     additionalEnv: {
       HOSTED_ASSISTANT_MODEL: productionLikeAssistantModel,
       HOSTED_ASSISTANT_PROVIDER: "openai",
-      HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: String(input.idleCheckpointDelayMs ?? 1_000),
+      HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: String(input.runnerIdleTtlMs ?? 1_000),
       HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS: input.memberPhone,
       LINQ_API_BASE_URL: requireLinqStub().runnerBaseUrl,
       LINQ_API_TOKEN: "linq-local-test-token",
@@ -569,8 +569,7 @@ async function startIdleShutdownDelayProbeScenario(input: {
     additionalEnv: {
       HOSTED_ASSISTANT_MODEL: productionLikeAssistantModel,
       HOSTED_ASSISTANT_PROVIDER: "openai",
-      HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: String(idleShutdownDelayProbeIdleDelayMs),
-      HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "300000",
+      HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: String(idleShutdownDelayProbeIdleDelayMs),
       HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS: input.memberPhone,
       LINQ_API_BASE_URL: requireLinqStub().runnerBaseUrl,
       LINQ_API_TOKEN: "linq-local-test-token",

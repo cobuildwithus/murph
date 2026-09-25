@@ -2,12 +2,14 @@ import { clinicalDocumentAttachmentsSchema } from "./attachments.ts";
 export * from "./attachments.ts";
 export * from "./document-eligibility.ts";
 export * from "./enrichment.ts";
+export * from "./enrichment-date.ts";
 import { createHash } from "node:crypto";
 
 import {
   clinicalEvidenceRefSchema,
   eventImportRetractionDecisionSchema,
   isStrictIsoDateTime,
+  isWritableIsoDateTime,
   publicEventImportJsonlRowPayloadSchemasByKind,
   versionedExternalRefSchema,
 } from "@murphai/contracts";
@@ -910,6 +912,32 @@ function normalizeClinicalFhirBaseUrl(value: string): string | null {
 
   const pathname = fhirBaseUrl.pathname.replace(/\/+$/u, "");
   return `${fhirBaseUrl.origin}${pathname}`;
+}
+
+export type ClinicalFhirSourceRevision =
+  | { source: "resource"; version: string }
+  | { source: "batch" }
+  | { source: "none" };
+
+/**
+ * `meta.lastUpdated` is optional in FHIR R4 and some servers omit it on every
+ * resource. An absent value defers to the retrieval batch (`manifest.fetchedAt`);
+ * a present but non-comparable value yields no revision so every owner fails
+ * closed. The importer and enrichment parent attestation share this rule so
+ * derived document facets bind to the revision the importer assigned.
+ */
+export function classifyClinicalFhirSourceRevision(lastUpdated: unknown): ClinicalFhirSourceRevision {
+  if (lastUpdated === undefined) return { source: "batch" };
+  return typeof lastUpdated === "string" && lastUpdated.length <= 200 && isWritableIsoDateTime(lastUpdated)
+    ? { source: "resource", version: lastUpdated }
+    : { source: "none" };
+}
+
+/** The comparable `externalRef.version` for a resource in its retrieval batch, or undefined when it cannot be ordered. */
+export function resolveClinicalFhirSourceRevision(input: { lastUpdated: unknown; fetchedAt: string }): string | undefined {
+  const revision = classifyClinicalFhirSourceRevision(input.lastUpdated);
+  if (revision.source === "resource") return revision.version;
+  return revision.source === "batch" ? input.fetchedAt : undefined;
 }
 
 export function externalRefForFhir(input: {

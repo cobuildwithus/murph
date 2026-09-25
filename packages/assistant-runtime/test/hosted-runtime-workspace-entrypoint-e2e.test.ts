@@ -272,7 +272,7 @@ describe("hosted workspace runtime entrypoint", () => {
     const deviceSyncWakeAt = "2026-04-27T00:10:00.000Z";
     const yieldedRetryWakeAt = "2026-04-27T00:00:30.000Z";
     const followUpWakeAt = "2026-04-27T00:11:00.000Z";
-    const idleCheckpointDelayMs = 90_000;
+    const runnerIdleTtlMs = 90_000;
     const runtimeTransitionTimeoutMs = 15_000;
     const shutdownController = new AbortController();
     const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
@@ -331,7 +331,7 @@ describe("hosted workspace runtime entrypoint", () => {
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_device_sync_pending_retry",
-            idleCheckpointDelayMs,
+            runnerIdleTtlMs,
             workspaceVersion: "0",
           },
           resolvedConfig: createDeviceSyncResolvedConfig(),
@@ -542,7 +542,7 @@ describe("hosted workspace runtime entrypoint", () => {
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_projection_stall_preempt",
-            idleCheckpointDelayMs: 180_000,
+            runnerIdleTtlMs: 180_000,
             workspaceVersion: "0",
           },
         }),
@@ -724,7 +724,7 @@ describe("hosted workspace runtime entrypoint", () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
-    const idleCheckpointDelayMs = 25;
+    const runnerIdleTtlMs = 25;
     const runtimeTransitionTimeoutMs = 15_000;
     const abortReason = new Error("pending retry observed before idle checkpoint");
     const runtimeAbortController = new AbortController();
@@ -757,7 +757,7 @@ describe("hosted workspace runtime entrypoint", () => {
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_pending_retry_system_mailbox_gate",
-            idleCheckpointDelayMs,
+            runnerIdleTtlMs,
             workspaceVersion: "0",
           },
         }),
@@ -874,10 +874,10 @@ describe("hosted workspace runtime entrypoint", () => {
     const timedParsed = parseHostedAssistantWorkspaceRuntimeJobInput({
       request: {
         ...createWorkspaceRunRequest(),
-        idleCheckpointDelayMs: 180_000,
+        runnerIdleTtlMs: 180_000,
       },
     });
-    assert.equal(timedParsed.request.idleCheckpointDelayMs, 180_000);
+    assert.equal(timedParsed.request.runnerIdleTtlMs, 180_000);
 
     expect(() =>
       parseHostedAssistantWorkspaceRuntimeJobInput({

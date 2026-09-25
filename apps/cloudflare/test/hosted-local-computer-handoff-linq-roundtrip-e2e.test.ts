@@ -65,7 +65,7 @@ describe("hosted local computer handoff Linq roundtrip e2e", () => {
       additionalEnv: {
         HOSTED_ASSISTANT_MODEL: assistantModel,
         HOSTED_ASSISTANT_PROVIDER: "openai",
-        HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: "1",
+        HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "1000",
         KERNEL_API_KEY: "kernel-local-computer-handoff-key",
         KERNEL_BASE_URL: requireKernelStub().baseUrl,
         LINQ_API_BASE_URL: requireLinqStub().runnerBaseUrl,

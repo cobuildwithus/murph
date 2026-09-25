@@ -1,6 +1,8 @@
+export const HOSTED_RUNTIME_POLL_TOOL_PATH = "/api/internal/hosted-execution/polls/tool";
 import type { HostedExecutionResolvedLinqDeliveryRoute } from "./contracts.ts";
 
 export const HOSTED_RUNTIME_MAILBOX_FETCH_PATH = "/api/internal/hosted-mailbox/fetch";
+export const HOSTED_RUNTIME_VOICE_INPUT_PATH = "/api/internal/hosted-mailbox/voice-input";
 export const HOSTED_RUNTIME_MAILBOX_PAYLOAD_FETCH_PATH =
   "/api/internal/hosted-mailbox/payload/fetch";
 export const HOSTED_RUNTIME_MEMBER_ACTION_OUTCOME_PATH =
@@ -171,6 +173,7 @@ export type HostedRuntimeLinqDeliveryPosture =
   typeof HOSTED_RUNTIME_LINQ_DELIVERY_POSTURES[number];
 
 export const HOSTED_RUNTIME_LINQ_DELIVERY_BLOCK_CODES = [
+  "automation_engagement_paused",
   "operator_disabled",
   "line_flagged",
   "line_critical",
@@ -187,6 +190,8 @@ export const HOSTED_RUNTIME_EMAIL_EGRESS_RECIPIENT_PATH =
   "/api/internal/hosted-runtime/email-egress/recipient";
 export const HOSTED_RUNTIME_THREAD_ROUTE_AUTHORITY_PATH =
   "/api/internal/hosted-runtime/thread-route/authority";
+export const HOSTED_RUNTIME_MEMBER_NOTIFICATION_ROUTE_PATH =
+  "/api/internal/hosted-runtime/member-notification-route";
 export const HOSTED_DEVICE_SYNC_RECOVERY_SWEEP_PATH =
   "/api/internal/device-sync/recovery-sweep";
 export const HOSTED_DEVICE_SYNC_RECOVERY_SWEEP_CALLBACK_USER_ID =

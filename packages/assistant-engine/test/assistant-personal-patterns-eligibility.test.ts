@@ -73,6 +73,15 @@ test.each(['Legacy history with a saved factor mute.', '{}', JSON.stringify({ ..
     expect(query).not.toHaveBeenCalled()
   },
 )
+test('keeps a cross-automation reviewed result quiet without claiming it was delivered', async () => {
+  const history = ledger()
+  history.results[0]!.firstSharedDate = null
+  const input = await setup(JSON.stringify(history))
+  expect(await canSkipManagedPersonalPatterns(input)).toBe(true)
+  const saved = await getKnowledgePage({ vault: input.vaultRoot, slug: 'personal-pattern-notifications' })
+  expect(parsePersonalPatternNotificationLedger(saved.page.body)).toEqual(history)
+})
+
 test('keeps an incomplete first digest eligible even when pending identities are known', async () => {
   expect(await canSkipManagedPersonalPatterns(await setup(JSON.stringify({ ...ledger(), initialDigestSent: false })))).toBe(false)
   expect(query).not.toHaveBeenCalled()
@@ -134,6 +143,29 @@ test('rejects duplicate identities and missing mute/history fields', () => {
   history.results.push({ ...history.results[0]!, lastSeenGrade: 'D' })
   expect(parsePersonalPatternNotificationLedger(JSON.stringify(history))).toBeNull()
   expect(parsePersonalPatternNotificationLedger(JSON.stringify({ ...ledger(), mutedFactorIds: undefined }))).toBeNull()
+})
+test('preserves legacy result history while treating an omitted grade as unknown', () => {
+  const history = ledger()
+  const legacy = { ...history.results[0], lastSeenGrade: undefined, firstSharedDate: undefined, muted: true }
+  const parsed = parsePersonalPatternNotificationLedger(JSON.stringify({ ...history, results: [legacy] }))
+  expect(parsed?.results).toEqual([{ ...history.results[0], lastSeenGrade: null, firstSharedDate: null, muted: true }])
+  expect(parsed && personalPatternReportAlreadyReviewed(report(), parsed)).toBe(false)
+})
+test('an omitted delivery date does not erase a known reviewed grade or a mute', () => {
+  const history = ledger()
+  const parsed = parsePersonalPatternNotificationLedger(JSON.stringify({
+    ...history, results: [{ ...history.results[0], firstSharedDate: undefined, muted: true }],
+  }))
+  expect(parsed?.results[0]?.firstSharedDate).toBeNull()
+  expect(parsed?.results[0]?.muted).toBe(true)
+  expect(parsed && personalPatternReportAlreadyReviewed(report(), parsed)).toBe(true)
+})
+test('still rejects invalid supplied grades and delivery dates', () => {
+  for (const change of [{ lastSeenGrade: 'unknown' }, { firstSharedDate: 'yesterday' }]) {
+    expect(parsePersonalPatternNotificationLedger(JSON.stringify({
+      ...ledger(), results: [{ ...ledger().results[0], ...change }],
+    }))).toBeNull()
+  }
 })
 test('an established empty report remains quiet; a new ungraded factor still gets reviewed', () => {
   const current = emptyPersonalPatternReport('2026-08-20')

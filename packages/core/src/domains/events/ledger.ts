@@ -103,6 +103,7 @@ export interface FindEventByExternalRefInput {
   resourceId: string;
   version?: string;
   facet?: string;
+  includeDeleted?: boolean;
 }
 
 export interface FindEventsByRawRefsInput {
@@ -361,11 +362,11 @@ function validateStoredEventRecord(record: JsonObject): EventRecord {
   );
 }
 
-function externalRefMatches(record: EventRecord, input: FindEventByExternalRefInput): boolean {
-  const externalRef = record.externalRef;
-  if (!externalRef) {
+function externalRefMatches(record: { externalRef?: unknown }, input: FindEventByExternalRefInput): boolean {
+  if (!record.externalRef || typeof record.externalRef !== "object" || Array.isArray(record.externalRef)) {
     return false;
   }
+  const externalRef = record.externalRef as Record<string, unknown>;
 
   return externalRef.system === input.system &&
     externalRef.resourceType === input.resourceType &&
@@ -387,11 +388,10 @@ export async function findEventByExternalRef(
     });
 
     for (const rawRecord of records) {
+      // Unrelated supported legacy records need not satisfy today's contract.
+      if (!externalRefMatches(rawRecord, input)) continue;
       const record = validateStoredEventRecord(rawRecord as JsonObject);
-
-      if (externalRefMatches(record, input)) {
-        candidateIds.add(record.id);
-      }
+      candidateIds.add(record.id);
     }
   }
 
@@ -407,11 +407,8 @@ export async function findEventByExternalRef(
     });
 
     for (const rawRecord of records) {
+      if (typeof rawRecord.id !== "string" || !candidateIds.has(rawRecord.id)) continue;
       const record = validateStoredEventRecord(rawRecord as JsonObject);
-      if (!candidateIds.has(record.id)) {
-        continue;
-      }
-
       const entry = { relativePath, record };
       const latest = latestByCandidateId.get(record.id);
       if (!latest || compareEventSpineEntries(latest, entry) < 0) {
@@ -429,7 +426,7 @@ export async function findEventByExternalRef(
   const latest = selectLatestEventSpineEntry(
     liveMatchingLatestEntries.length > 0 ? liveMatchingLatestEntries : matchingLatestEntries,
   );
-  if (!latest || isDeletedEventSpineRecord(latest.record)) {
+  if (!latest || (!input.includeDeleted && isDeletedEventSpineRecord(latest.record))) {
     return null;
   }
 
@@ -775,6 +772,9 @@ async function upsertEventLocked(
     ? buildTypedEventRecord(input.draft, vault.metadata.timezone, lifecycle)
     : buildEventRecord(input.payload, vault.metadata.timezone, lifecycle);
 
+  const existingPlan = await findExistingPlanCreation(input.vaultRoot, eventRecord, suppliedEventId);
+  if (existingPlan) return existingPlan;
+
   const ledgerFile = toEventLedgerFile(eventRecord.occurredAt);
 
   return runLoadedCanonicalWrite<UpsertEventResult>({
@@ -803,6 +803,33 @@ async function upsertEventLocked(
       };
     },
   });
+}
+
+async function findExistingPlanCreation(
+  vaultRoot: string,
+  eventRecord: EventRecord,
+  suppliedEventId: string | undefined,
+): Promise<UpsertEventResult | null> {
+  // A retry recovers the canonical write even when source mapping persistence
+  // failed. Updates must target the existing id explicitly.
+  if (suppliedEventId || eventRecord.kind !== "note"
+    || eventRecord.noteType !== "journal-plan" || !eventRecord.externalRef) return null;
+  const existing = await findEventByExternalRef({
+    vaultRoot, ...eventRecord.externalRef, includeDeleted: true,
+  });
+  if (!existing) return null;
+  if (existing.kind !== "note" || existing.noteType !== "journal-plan") {
+    throw new VaultError("EVENT_KIND_MISMATCH", "This source identity already belongs to another event kind.");
+  }
+  if (isDeletedEventSpineRecord(existing)) {
+    throw new VaultError("EVENT_PLAN_DELETED", "This source plan was deleted; do not recreate it without confirming the member's intent.");
+  }
+  return {
+    eventId: existing.id,
+    ledgerFile: toEventLedgerFile(existing.occurredAt),
+    created: false,
+    event: existing,
+  };
 }
 
 export async function deleteEvent(

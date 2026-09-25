@@ -2363,7 +2363,7 @@ test("Junction connect-window timeseries continuation bypasses completed setup w
         const searchParams = new URL(url).searchParams;
         return [searchParams.get("start_date"), searchParams.get("end_date")];
       }),
-    [["2026-04-01", "2026-04-01"]],
+    [["2026-04-01", "2026-04-01"], ["2026-04-02", "2026-04-02"]],
   );
   assert.equal(
     secondRequests.some((url) =>
@@ -2372,13 +2372,8 @@ test("Junction connect-window timeseries continuation bypasses completed setup w
     false,
   );
   assert.equal(secondResult.metadataPatch, undefined);
-  assert.deepEqual(secondResult.scheduledJobs?.[0]?.payload, {
-    windowStart: ownerWindowStart,
-    windowEnd: ownerWindowEnd,
-    timeseriesCursor: "2026-04-02T00:00:00.000Z",
-    timeseriesResourceCursor: "hrv",
-  });
-  assert.equal(secondImportedSnapshots.length, 1);
+  assert.equal(secondResult.scheduledJobs, undefined);
+  assert.equal(secondImportedSnapshots.length, 2);
 
   const terminalResult = await executeFullJobTimeseriesContinuations({
     context,

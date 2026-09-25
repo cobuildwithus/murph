@@ -150,7 +150,7 @@ const DEFAULT_PROVIDER_JOB_BATCH_MAX_ESTIMATED_BYTES = 2 * 1024 * 1024;
 const DEFAULT_PROVIDER_JOB_BATCH_CANDIDATE_SCAN_LIMIT = 200;
 const JUNCTION_WORKOUT_STREAM_CANDIDATE_DIAGNOSTIC_LIMIT =
   resolveJunctionTimeseriesResourcePolicy("workout_stream")?.maxRecordsPerWindow ?? 0;
-const JUNCTION_ECG_DIAGNOSTIC_COUNT_LIMIT =
+export const JUNCTION_ECG_DIAGNOSTIC_COUNT_LIMIT =
   (resolveJunctionTimeseriesResourcePolicy("electrocardiogram_voltage")?.maxSamplesPerWindow ?? 0) + 1;
 export const JUNCTION_ECG_BINDING_REASONS: ReadonlySet<string> = new Set([
   "collection_source_ambiguous",
@@ -172,6 +172,9 @@ export const JUNCTION_ECG_BINDING_REASONS: ReadonlySet<string> = new Set([
   "summary_source_inconsistent",
   "summary_window_invalid",
   "summary_windows_ambiguous",
+  "voltage_collection_empty",
+  "voltage_source_mismatch",
+  "voltage_samples_empty",
 ]);
 const DEVICE_SYNC_VALIDATION_SENSITIVE_FIELD_PATTERN =
   /(?:authorization|bearer|cookie|password|secret|token|api[-_]?key|client[-_]?secret|access[-_]?token|refresh[-_]?token|id[-_]?token|email|phone|address|user(?:name)?|owner|account(?:id)?|external(?:id)?)/iu;
@@ -262,7 +265,7 @@ export interface DeviceSyncService {
   disconnectAccount(accountId: string, expectedConnectedAt: string): Promise<DisconnectAccountResult>;
   getNextJobWakeAt(): string | null;
   getNextWakeAt(now?: string): string | null;
-  runSchedulerOnce(accountId?: string): Promise<DeviceSyncJobRecord[]>;
+  runSchedulerOnce(accountId?: string, options?: { reconcileBefore?: string }): Promise<DeviceSyncJobRecord[]>;
   runWorkerOnce(accountId?: string): Promise<DeviceSyncJobRecord | null>;
   // Drains up to `limit` durable job rows. One worker pass starts from one
   // claimed seed job, but provider batching still counts every claimed row.
@@ -842,9 +845,15 @@ class DeviceSyncServiceController {
     return this.store.readNextJobWakeAt();
   }
 
-  async runSchedulerOnce(accountId?: string): Promise<DeviceSyncJobRecord[]> {
+  async runSchedulerOnce(
+    accountId?: string,
+    options: { reconcileBefore?: string } = {},
+  ): Promise<DeviceSyncJobRecord[]> {
     return await this.schedulerMutex.runIfIdle(async () => {
       const now = this.nowIso();
+      // An already active hosted pass may pull a nearby cadence forward for
+      // this account. The same durable jobs and retry owner still perform it.
+      const reconcileBefore = accountId ? options.reconcileBefore ?? now : now;
       const queuedJobs: DeviceSyncJobRecord[] = [];
 
       try {
@@ -854,7 +863,7 @@ class DeviceSyncServiceController {
             || account.status !== "active"
             || isDeviceSyncConnectionSetupPending(account)
             || !account.nextReconcileAt
-            || Date.parse(account.nextReconcileAt) > Date.parse(now)
+            || Date.parse(account.nextReconcileAt) > Date.parse(reconcileBefore)
           ) {
             continue;
           }
@@ -935,6 +944,7 @@ class DeviceSyncServiceController {
 
     let activeJobs: DeviceSyncJobRecord[] = [job];
     let canonicalProgressCommitted = false;
+    let continuationProgressCommitted = false;
     let connectionSourceReadCount = 0;
     let connectionSourceReadElapsedMs = 0;
     let credentialRefreshCount = 0;
@@ -968,6 +978,9 @@ class DeviceSyncServiceController {
         attempts: job.attempts,
         ...(canonicalProgressCommitted
           ? { canonicalProgressCommitted: true as const }
+          : {}),
+        ...(continuationProgressCommitted
+          ? { continuationProgressCommitted: true as const }
           : {}),
         connectionSourceReadCount,
         connectionSourceReadElapsedMs,
@@ -1084,20 +1097,6 @@ class DeviceSyncServiceController {
     const preservesAcceptedCompanionHrv = isJunctionCompanionHrvRmssdJob(job);
     const retainsAcceptedCalendarRefresh = isJunctionSparseCalendarRefreshJob(job);
     const retainsAcceptedWork = preservesAcceptedCompanionHrv || retainsAcceptedCalendarRefresh;
-    const delayRetainedJobUntilAuthorityReturns = (code: string, message: string): void => {
-      const delayedAt = currentNow();
-      const transition = this.store.failJobIfOwned(
-        job.id,
-        this.workerId,
-        delayedAt,
-        code,
-        message,
-        addMilliseconds(delayedAt, computeRetryDelayMs(job.attempts)),
-        true,
-        true,
-      );
-      outcome = transition ? "deferred" : "cancelled";
-    };
 
     if (
       retainsAcceptedCalendarRefresh
@@ -1112,80 +1111,51 @@ class DeviceSyncServiceController {
       return finishPass();
     }
 
-    if (
-      storedAccount.status === "active"
-      && isDeviceSyncConnectionSetupPending(storedAccount)
-      && !retainsAcceptedWork
-    ) {
-      failClaimedJob(
-        "CONNECTION_SETUP_PENDING",
-        "Device sync setup must finish before queued jobs can run.",
-        null,
-        false,
-      );
-      return finishPass();
-    }
+    const admissionBlocker = resolveWorkerAccountAdmissionBlocker({
+      account: storedAccount,
+      preservesAcceptedCompanionHrv,
+      retainsAcceptedCalendarRefresh,
+    });
+    if (admissionBlocker) {
+      const { code, message } = admissionBlocker;
+      if (retainsAcceptedCalendarRefresh) {
+        const delayedAt = currentNow();
+        const transition = this.store.failJobIfOwned(
+          job.id,
+          this.workerId,
+          delayedAt,
+          code,
+          message,
+          addMilliseconds(delayedAt, computeRetryDelayMs(job.attempts)),
+          true,
+          true,
+        );
+        outcome = transition ? "deferred" : "cancelled";
+      } else if (storedAccount.status === "disconnected") {
+        const completed = this.store.completeJobIfOwned(job.id, this.workerId, currentNow());
 
-    if (
-      storedAccount.status === "active"
-      && isDeviceSyncConnectionSetupPending(storedAccount)
-      && retainsAcceptedCalendarRefresh
-    ) {
-      delayRetainedJobUntilAuthorityReturns(
-        "CONNECTION_SETUP_PENDING",
-        "Device sync setup must finish before retained calendar work can run.",
-      );
-      return finishPass();
-    }
-
-    if (storedAccount.status === "disconnected" && retainsAcceptedCalendarRefresh) {
-      delayRetainedJobUntilAuthorityReturns(
-        "ACCOUNT_DISCONNECTED",
-        "Device sync account must reconnect before retained calendar work can run.",
-      );
-      return finishPass();
-    }
-
-    if (storedAccount.status === "disconnected" && !preservesAcceptedCompanionHrv) {
-      const completed = this.store.completeJobIfOwned(job.id, this.workerId, currentNow());
-
-      if (!completed) {
-        this.logger.debug?.("Device sync job side effects skipped because execution was cancelled.", {
-          provider: job.provider,
-          accountId: job.accountId,
-          jobId: job.id,
-        });
+        if (!completed) {
+          this.logger.debug?.("Device sync job side effects skipped because execution was cancelled.", {
+            provider: job.provider,
+            accountId: job.accountId,
+            jobId: job.id,
+          });
+        } else {
+          outcome = "completed";
+          durableProgressCommitted = true;
+        }
       } else {
-        outcome = "completed";
-        durableProgressCommitted = true;
-      }
-      return finishPass();
-    }
-
-    if (storedAccount.status === "reauthorization_required" && retainsAcceptedCalendarRefresh) {
-      delayRetainedJobUntilAuthorityReturns(
-        "ACCOUNT_REAUTHORIZATION_REQUIRED",
-        "Device sync account must reauthorize before retained calendar work can run.",
-      );
-      return finishPass();
-    }
-
-    if (storedAccount.status === "reauthorization_required" && !preservesAcceptedCompanionHrv) {
-      const failed = failClaimedJob(
-        "ACCOUNT_REAUTHORIZATION_REQUIRED",
-        "Device sync account requires reconnection before queued jobs can run.",
-        null,
-        false,
-      );
-      if (failed) {
-        this.store.markPendingJobsDeadForAccountIfCurrent({
-          accountId: storedAccount.id,
-          code: "ACCOUNT_REAUTHORIZATION_REQUIRED",
-          expectedLocalConnectionRevision: storedAccount.localConnectionRevision,
-          expectedStatus: "reauthorization_required",
-          message: "Device sync account requires reconnection before queued jobs can run.",
-          now: currentNow(),
-        });
+        const failed = failClaimedJob(code, message, null, false);
+        if (failed && storedAccount.status === "reauthorization_required") {
+          this.store.markPendingJobsDeadForAccountIfCurrent({
+            accountId: storedAccount.id,
+            code,
+            expectedLocalConnectionRevision: storedAccount.localConnectionRevision,
+            expectedStatus: "reauthorization_required",
+            message,
+            now: currentNow(),
+          });
+        }
       }
       return finishPass();
     }
@@ -1240,8 +1210,7 @@ class DeviceSyncServiceController {
       const currentStoredAccount = this.store.getAccountById(storedAccount.id);
 
       if (!currentStoredAccount || (
-        !preservesAcceptedCompanionHrv
-        && !retainsAcceptedCalendarRefresh
+        !retainsAcceptedWork
         && (
           currentStoredAccount.status !== "active"
           || currentStoredAccount.disconnectGeneration !== disconnectGeneration
@@ -1292,7 +1261,7 @@ class DeviceSyncServiceController {
       ensureExecutionActive();
       currentAccount = this.toDecryptedAccount(storedAccount);
       const normalizedJob = normalizeConfiguredDeviceSyncJobRecord(provider.provider, job, "execution");
-      activeJobs = preservesAcceptedCompanionHrv || retainsAcceptedCalendarRefresh
+      activeJobs = retainsAcceptedWork
         ? [normalizedJob]
         : this.claimProviderJobBatch({
             accountId: storedAccount.id,
@@ -1609,6 +1578,7 @@ class DeviceSyncServiceController {
 
       outcome = "completed";
       durableProgressCommitted = true;
+      continuationProgressCommitted = result.continuationProgress === true;
       return finishPass();
     } catch (error) {
       if (isDeviceSyncJobExecutionYielded(error, jobAbortController.signal)) {
@@ -1658,15 +1628,8 @@ class DeviceSyncServiceController {
             "retry progress",
           ).payload
         : undefined;
-      const retainsAcceptedCompanionHrvUntilSuccess = preservesAcceptedCompanionHrv
-        && failure.code !== JUNCTION_COMPANION_HRV_OBSERVATION_INVALID_CODE;
-      const retainsAcceptedCalendarRefreshUntilSuccess = retainsAcceptedCalendarRefresh
-        && !isJunctionSparseCalendarRefreshTerminalFailureCode(failure.code);
-      const retainsAcceptedWorkUntilSuccess = retainsAcceptedCompanionHrvUntilSuccess
-        || retainsAcceptedCalendarRefreshUntilSuccess;
-      const retainedFailureRetryable = failure.retryable
-        || retainsAcceptedCompanionHrvUntilSuccess
-        || retainsAcceptedCalendarRefreshUntilSuccess;
+      const { retainsAcceptedWorkUntilSuccess, retainedFailureRetryable, validationRetryDelayMs } =
+        resolveDeviceSyncFailureRetryPolicy({ job, failure, preservesAcceptedCompanionHrv, retainsAcceptedCalendarRefresh });
       const failureNow = currentNow();
       if (!isAccountExecutionCurrent()) {
         const released = releaseActiveJobsIfCurrentAccountActive(failureNow);
@@ -1682,7 +1645,7 @@ class DeviceSyncServiceController {
 
       const failureTransitions = activeJobs.flatMap((activeJob) => {
         const retryAt = retainedFailureRetryable
-          ? addMilliseconds(failureNow, computeRetryDelayMs(activeJob.attempts))
+          ? addMilliseconds(failureNow, validationRetryDelayMs ?? computeRetryDelayMs(activeJob.attempts))
           : null;
         const transition = this.store.failJobIfOwned(
           activeJob.id,
@@ -2216,7 +2179,7 @@ export function createDeviceSyncService(input: CreateDeviceSyncServiceInput): De
       controller.disconnectAccount(accountId, expectedConnectedAt),
     getNextJobWakeAt: () => controller.getNextJobWakeAt(),
     getNextWakeAt: (now) => controller.getNextWakeAt(now),
-    runSchedulerOnce: (accountId) => controller.runSchedulerOnce(accountId),
+    runSchedulerOnce: (accountId, options) => controller.runSchedulerOnce(accountId, options),
     runWorkerOnce: (accountId) => controller.runWorkerOnce(accountId),
     drainWorker: (limit, accountId, options) =>
       controller.drainWorker(limit, accountId, options),
@@ -2255,6 +2218,47 @@ function earliestIsoTimestamp(...values: Array<string | null | undefined>): stri
   return values
     .filter((value): value is string => typeof value === "string" && value.length > 0)
     .sort((left, right) => Date.parse(left) - Date.parse(right))[0] ?? null;
+}
+
+function resolveWorkerAccountAdmissionBlocker(input: {
+  account: StoredDeviceSyncAccount;
+  preservesAcceptedCompanionHrv: boolean;
+  retainsAcceptedCalendarRefresh: boolean;
+}): { code: string; message: string } | null {
+  // Calendar admission takes precedence when the raw job predicates overlap.
+  if (input.preservesAcceptedCompanionHrv && !input.retainsAcceptedCalendarRefresh) {
+    return null;
+  }
+
+  if (
+    input.account.status === "active"
+    && isDeviceSyncConnectionSetupPending(input.account)
+  ) {
+    return {
+      code: "CONNECTION_SETUP_PENDING",
+      message: input.retainsAcceptedCalendarRefresh
+        ? "Device sync setup must finish before retained calendar work can run."
+        : "Device sync setup must finish before queued jobs can run.",
+    };
+  }
+
+  if (input.account.status === "disconnected") {
+    return {
+      code: "ACCOUNT_DISCONNECTED",
+      message: "Device sync account must reconnect before retained calendar work can run.",
+    };
+  }
+
+  if (input.account.status === "reauthorization_required") {
+    return {
+      code: "ACCOUNT_REAUTHORIZATION_REQUIRED",
+      message: input.retainsAcceptedCalendarRefresh
+        ? "Device sync account must reauthorize before retained calendar work can run."
+        : "Device sync account requires reconnection before queued jobs can run.",
+    };
+  }
+
+  return null;
 }
 
 function resolveProviderJobExecutor(
@@ -2399,6 +2403,52 @@ function connectionChangedDuringDisconnectError(): DeviceSyncError {
   });
 }
 
+function isRetainedJunctionValidationFailure(job: DeviceSyncJobRecord, code: string): boolean {
+  if (job.provider !== "junction" || job.kind !== "resource") return false;
+  return (job.payload.resource === "blood_oxygen"
+      && code === "JUNCTION_CALENDAR_REFRESH_INCOMPLETE_NORMALIZATION")
+    || (job.payload.resource === "electrocardiogram_voltage"
+      && code === "JUNCTION_ECG_RECORDING_BINDING_INCOMPLETE");
+}
+
+function resolveDeviceSyncFailureRetryPolicy(input: {
+  job: DeviceSyncJobRecord;
+  failure: ReturnType<typeof normalizeExecutionError>;
+  preservesAcceptedCompanionHrv: boolean;
+  retainsAcceptedCalendarRefresh: boolean;
+}) {
+  const { job, failure, preservesAcceptedCompanionHrv, retainsAcceptedCalendarRefresh } = input;
+  const retainValidation = failure.retryable && isRetainedJunctionValidationFailure(job, failure.code);
+  const retainsAcceptedWorkUntilSuccess = (
+    preservesAcceptedCompanionHrv && failure.code !== JUNCTION_COMPANION_HRV_OBSERVATION_INVALID_CODE
+  ) || (
+    retainsAcceptedCalendarRefresh && !isJunctionSparseCalendarRefreshTerminalFailureCode(failure.code)
+  ) || retainValidation;
+  const validationRetryDelayMs = retainValidation ? 30 * 60_000 : null;
+  if (validationRetryDelayMs !== null) failure.details.validationRetryDelayMs = validationRetryDelayMs;
+  return {
+    retainsAcceptedWorkUntilSuccess,
+    retainedFailureRetryable: failure.retryable || retainsAcceptedWorkUntilSuccess,
+    validationRetryDelayMs,
+  };
+}
+
+export function readSafeJunctionNormalizationDiagnostics(
+  input: Record<string, unknown>,
+): Pick<DeviceSyncJobFailureDiagnostic["details"],
+  "normalizationValueKind" | "normalizationValueRange" | "normalizationUnitKind"> {
+  const allowed = (value: unknown, values: readonly string[]): string | null =>
+    typeof value === "string" && values.includes(value) ? value : null;
+  return compactFailureDiagnostics({
+    normalizationValueKind: allowed(input.normalizationValueKind,
+      ["missing", "non_numeric", "non_finite", "numeric_string", "number"]),
+    normalizationValueRange: allowed(input.normalizationValueRange,
+      ["negative", "zero", "fraction", "percentage", "above_percentage"]),
+    normalizationUnitKind: allowed(input.normalizationUnitKind,
+      ["missing", "percent", "ratio", "other"]),
+  });
+}
+
 function normalizeExecutionError(error: unknown): {
   code: string;
   details: DeviceSyncJobFailureDiagnostic["details"];
@@ -2435,6 +2485,11 @@ function normalizeExecutionError(error: unknown): {
         normalizationTimestampSemantics: readSafeDiagnosticToken(
           error.diagnostic.timestampSemantics,
         ),
+        ...readSafeJunctionNormalizationDiagnostics({
+          normalizationValueKind: error.diagnostic.valueKind,
+          normalizationValueRange: error.diagnostic.valueRange,
+          normalizationUnitKind: error.diagnostic.unitKind,
+        }),
       }),
       message: error.message,
       retryable: true,
@@ -2660,6 +2715,12 @@ function readSafeJunctionEcgFailureContext(
   | "junctionEcgActualRecordingCount"
   | "junctionEcgActualSampleCount"
   | "junctionEcgBindingReason"
+  | "providerHttpStatusSource"
+  | "junctionEcgPageCount"
+  | "junctionEcgGroupCount"
+  | "junctionEcgProviderMatchGroupCount"
+  | "junctionEcgInstanceMatchGroupCount"
+  | "junctionEcgMatchedGroupCount"
   | "junctionEcgExpectedRecordingCount"
   | "junctionEcgExpectedSampleCount"
   | "junctionEcgMaxRecordingCount"
@@ -2680,6 +2741,12 @@ function readSafeJunctionEcgFailureContext(
       error.details?.actualSampleCount,
     ),
     junctionEcgBindingReason: reason,
+    providerHttpStatusSource: "local_validation",
+    junctionEcgPageCount: readSafeJunctionEcgDiagnosticCount(error.details?.pageCount),
+    junctionEcgGroupCount: readSafeJunctionEcgDiagnosticCount(error.details?.groupCount),
+    junctionEcgProviderMatchGroupCount: readSafeJunctionEcgDiagnosticCount(error.details?.providerMatchGroupCount),
+    junctionEcgInstanceMatchGroupCount: readSafeJunctionEcgDiagnosticCount(error.details?.instanceMatchGroupCount),
+    junctionEcgMatchedGroupCount: readSafeJunctionEcgDiagnosticCount(error.details?.matchedGroupCount),
     junctionEcgExpectedRecordingCount: readSafeJunctionEcgDiagnosticCount(
       error.details?.expectedRecordingCount,
     ),

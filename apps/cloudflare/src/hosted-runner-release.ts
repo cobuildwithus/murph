@@ -38,11 +38,6 @@ export function readHostedRunnerDeployment(source: Environment): HostedRunnerDep
   return { active: value.active, candidate: value.candidate, previous: value.previous };
 }
 
-export function isHostedRunnerImageTransition(source: Environment): boolean {
-  const deployment = readHostedRunnerDeployment(source);
-  return !!deployment?.candidate && deployment.candidate.bank === deployment.active.bank;
-}
-
 /** Admit whole image pairs, never independent fingerprint halves. */
 export function hostedRunnerImageMatches(source: Environment, bundle: unknown, fingerprint: unknown): boolean {
   const deployment = readHostedRunnerDeployment(source);

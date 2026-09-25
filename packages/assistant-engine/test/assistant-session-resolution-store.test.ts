@@ -53,7 +53,7 @@ afterEach(async () => {
 })
 
 describe('assistant session resolution store integration', () => {
-  it('prepares only session persistence directories during creation and warm lookup', async () => {
+  it('prepares secret storage only when persisting a session', async () => {
     const { parentRoot, vaultRoot } = await createTempVaultContext(
       'assistant-session-directories-',
     )
@@ -82,9 +82,10 @@ describe('assistant session resolution store integration', () => {
     expect(resolved.session.sessionId).toBe(created.session.sessionId)
     expect(await getAssistantSession(vaultRoot, created.session.sessionId))
       .toEqual(resolved.session)
-    for (const directory of persistenceDirectories) {
+    for (const directory of [paths.sessionsDirectory, paths.stateDirectory]) {
       expect((await stat(directory)).mode & 0o777).toBe(0o700)
     }
+    expect((await stat(paths.sessionSecretsDirectory)).mode & 0o777).toBe(0o755)
     for (const directory of [
       paths.transcriptsDirectory,
       paths.outboxDirectory,
@@ -95,6 +96,8 @@ describe('assistant session resolution store integration', () => {
     ]) {
       await expect(stat(directory)).rejects.toMatchObject({ code: 'ENOENT' })
     }
+    await saveAssistantSession(vaultRoot, resolved.session)
+    expect((await stat(paths.sessionSecretsDirectory)).mode & 0o777).toBe(0o700)
   })
 
   it.each([

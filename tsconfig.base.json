@@ -60,6 +60,9 @@
       "@murphai/hosted-execution/auth": [
         "./packages/hosted-execution/src/auth.ts"
       ],
+      "@murphai/hosted-execution/voice-control": [
+        "./packages/hosted-execution/src/voice-control.ts"
+      ],
       "@murphai/hosted-execution/assistant-identifiers": [
         "./packages/hosted-execution/src/assistant-identifiers.ts"
       ],
@@ -89,6 +92,9 @@
       ],
       "@murphai/hosted-execution/contracts": [
         "./packages/hosted-execution/src/contracts.ts"
+      ],
+      "@murphai/hosted-execution/conversation-polls": [
+        "./packages/hosted-execution/src/conversation-polls.ts"
       ],
       "@murphai/hosted-execution/connected-apps": [
         "./packages/hosted-execution/src/connected-apps.ts"
@@ -275,12 +281,6 @@
       ],
       "@murphai/query/browser": [
         "./packages/query/src/browser.ts"
-      ],
-      "@murphai/query/browser-murph-age": [
-        "./packages/query/src/browser-murph-age.ts"
-      ],
-      "@murphai/query/murph-age": [
-        "./packages/query/src/murph-age.ts"
       ],
       "@murphai/query/entity-families": [
         "./packages/query/src/entity-families.ts"

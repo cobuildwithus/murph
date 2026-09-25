@@ -36,7 +36,24 @@ Each imported batch with downloaded documents admits enrichment for its own
 manifest before the retrieval checkpoint advances. The runtime extracts one
 document page at a time with up to three read-only family leaves and a shared
 120-second provider timeout. The pure schemas bound each family's proposals;
-model output cannot choose canonical identities or source paths.
+model output cannot choose canonical identities or source paths. Proposals carry
+`dateBasis` (`document`, `source`, or `unknown`) and a literal `dateEvidence`
+excerpt for document dates. Persisted schemas still read older proposals, while
+fresh provider output requires a non-null date basis. Canonical admission holds
+missing or unknown provenance and document excerpts that lack a matching full
+date or mix conflicting dates. Common ISO, named-month and numeric date forms
+remain supported, including timezone normalization and calendar-only occurredAt
+values without an invented time. Source-based records use
+only the attested parent clinical date. Valid siblings still import when another
+fact is held; retrieval timestamps never establish a visit date. Before freezing,
+extraction shares the canonical date check and vault timezone, then gives an
+affected family one read-only correction turn against the same source. Only date
+fields on invalid records may change. The turn has a 30-second cap inside the
+existing page deadline and is skipped unless that budget, the child's bounded
+interrupt/stop cleanup, and five seconds to return remain. The allowance derives
+from the existing child timeout constants. It rechecks provider authority, honors cancellation, and
+uses a separate review usage identity. Failed corrections preserve successful
+facts; unresolved dates remain held without retrying frozen proposals.
 
 Vault use cases freeze proposals in private operational state. A separate
 bounded canonical apply derives source identity and raw/page evidence, checks
@@ -100,10 +117,19 @@ A complete allergy evidence family may additionally emit one aggregate
 no-known-allergies decision, keyed to one patient snapshot identity rather
 than an individual FHIR resource. Upserts and retractions share one facet-free
 external identity regardless of whether the current resource maps as a scalar,
-panel, or another supported shape. Every decision carries its raw evidence,
-while retrieval metadata stays on the plan. A strict `meta.lastUpdated` is
-required as the exact resource-local `externalRef.version`; the aggregate
-allergy identity uses manifest `fetchedAt`.
+panel, or another supported shape. FHIR ids are preserved for every resource
+type up to the canonical 200-character external-reference bound; R4 servers
+may exceed the base 64-character id length. Every decision carries its raw
+evidence, while retrieval metadata stays on the plan. A comparable
+`meta.lastUpdated` is the exact resource-local `externalRef.version`.
+`meta.lastUpdated` is optional in FHIR R4 and some servers omit it on every
+resource; when it is absent, the batch manifest `fetchedAt` is the revision, so
+a later retrieval supersedes an earlier one, the same retrieval replays
+idempotently, and an earlier retrieval replayed later stays stale. The
+aggregate allergy identity always uses manifest `fetchedAt`. The same rule
+(`resolveClinicalFhirSourceRevision`) governs enrichment parent attestation, so
+document-extraction facets bind to the revision the importer assigned to their
+parent, and Web issues document tickets for parents that omit the revision.
 
 Core bulk event import skips older revisions and source-semantically equal
 same-version replays even when retrieval paths differ. It rejects true
@@ -116,6 +142,8 @@ marker into the existing event ledger; older or equal revisions cannot later
 resurrect it, while a newer upsert can become live. At the explicit clinical
 execution seam, a comparable review for a resource family that could have
 previously produced a canonical event becomes the same retraction marker, so
-delayed older revisions remain held. A supported resource with an id but no
-comparable source revision fails closed instead of silently discarding that
-ordering information. Other review decisions remain plan-only raw evidence.
+delayed older revisions remain held. A supported resource with an id whose
+`meta.lastUpdated` is present but not comparable, or whose same-batch siblings
+mix a resource-local revision with the retrieval fallback, fails closed instead
+of silently discarding that ordering information. Other review decisions remain
+plan-only raw evidence.

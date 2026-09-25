@@ -841,7 +841,7 @@ test("Junction production timeseries resources and direct provider bound match d
   );
   assert.deepEqual(
     [productionResources.length, wideResources.length, oneDayResources.length, ordinaryOneDayResources.length],
-    [48, 6, 42, 41],
+    [48, 7, 41, 40],
   );
 
   const readme = await readFile(new URL("../README.md", import.meta.url), "utf8");
@@ -851,7 +851,7 @@ test("Junction production timeseries resources and direct provider bound match d
   );
   for (const documentation of [readme, compatibilityMatrix]) {
     assert.match(documentation, /48 production timeseries resources/u);
-    assert.match(documentation, /6 wide and 42 one-day/u);
+    assert.match(documentation, /7 wide and 41 one-day/u);
     assert.match(documentation, /three\s+sequential\s+pages/u);
     assert.match(documentation, /one attempt/u);
     assert.match(documentation, /24 seconds/u);

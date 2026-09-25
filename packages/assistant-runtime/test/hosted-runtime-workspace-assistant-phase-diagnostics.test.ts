@@ -252,7 +252,7 @@ beforeEach(() => {
     if (!Number.isFinite(nextWakeMs) || nextWakeMs <= input.nowMs) {
       return input.deferDueOrInvalid
         ? mocks.resolveHostedProviderCleanupFirstDeferredWakeAt({
-            idleCheckpointDelayMs: input.idleCheckpointDelayMs,
+            runnerIdleTtlMs: input.runnerIdleTtlMs,
             nowMs: input.nowMs,
           })
         : null;
@@ -288,6 +288,67 @@ beforeEach(() => {
 });
 
 describe("hosted workspace assistant diagnostics detail logs", () => {
+  it.each([
+    { systemWakeAt: "2026-04-26T23:59:00.000Z", expectedSystemOffsetMs: -60_000,
+      expectedNextOffsetMs: -60_000 },
+    { systemWakeAt: null, expectedSystemOffsetMs: null, expectedNextOffsetMs: 3_600_000 },
+  ])("attributes wake selection without logging timestamps: $systemWakeAt", async ({
+    systemWakeAt, expectedSystemOffsetMs, expectedNextOffsetMs,
+  }) => {
+    const logRequests: HostedRuntimeLogRequest[] = [];
+    const automationWakeAt = "2026-04-27T01:00:00.000Z";
+    mocks.resolveHostedSystemMailboxNextWakeAt.mockResolvedValue(systemWakeAt);
+    mocks.runHostedAssistantAutomationLane.mockResolvedValue({
+      deviceSyncProcessed: 0, deviceSyncSkipped: true, nextWakeAt: automationWakeAt,
+      parserProcessed: 0, postCheckpointRecord: null, progressed: false,
+      assistantAutomationProgressed: false, redactedLogEntries: [],
+    });
+    const input = createPhaseInput({ logRequests });
+    input.now = () => "2026-04-27T00:00:00.000Z";
+    await runHostedWorkspaceAssistantPhase(input);
+    const entry = logRequests.flatMap((request) => request.entries)
+      .find((entry) => entry.eventCode === "assistant.pass_finished");
+    expect(entry?.redactedJson).toEqual(expect.objectContaining({
+      nextWakeOffsetMs: expectedNextOffsetMs,
+      systemWakeOffsetMs: expectedSystemOffsetMs,
+      workspaceWakeOffsetMs: null,
+      automationWakeOffsetMs: 3_600_000,
+      outboxWakeOffsetMs: null,
+      providerCleanupWakeOffsetMs: null,
+      wakeStateProgressed: true,
+      providerCleanupStateQueued: false,
+      providerCleanupDue: false,
+      assistantAutomationProgressed: false,
+    }));
+    expect(JSON.stringify(entry?.redactedJson)).not.toContain(automationWakeAt);
+    if (systemWakeAt) expect(JSON.stringify(entry?.redactedJson)).not.toContain(systemWakeAt);
+  });
+
+  it("preserves reply skip categories through the durable log boundary", async () => {
+    const logRequests: HostedRuntimeLogRequest[] = [];
+    mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
+      deviceSyncProcessed: 0, deviceSyncSkipped: true, nextWakeAt: null,
+      parserProcessed: 0, postCheckpointRecord: null, progressed: true,
+      redactedLogEntries: [{
+        component: "runtime", level: "info", phase: "wake.running",
+        message: "Hosted assistant automation event: input.reply-skipped.",
+        redacted: {
+          type: "input.reply-skipped", safeDetails: "reply_skip:unattested_reaction",
+        },
+      }],
+    });
+    await runHostedWorkspaceAssistantPhase(createPhaseInput({ logRequests }));
+    await drainHostedRuntimeLogWritesBestEffort();
+    expect(logRequests.flatMap((request) => request.entries)).toContainEqual(
+      expect.objectContaining({
+        eventCode: "assistant.automation_detail",
+        redactedJson: expect.objectContaining({
+          type: "input.reply-skipped", safeDetails: "reply_skip:unattested_reaction",
+        }),
+      }),
+    );
+  });
+
   it("revalidates Codex resume-failure diagnostics before durable logging", async () => {
     const logRequests: HostedRuntimeLogRequest[] = [];
     mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({

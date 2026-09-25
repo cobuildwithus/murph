@@ -1,8 +1,17 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  after: vi.fn(),
+  reportHostedRuntimeUsageGateObservation: vi.fn(),
   readHostedRuntimeReconciliationFactsWithVisibleAccess: vi.fn(),
   requireHostedCloudflareCallbackRequest: vi.fn(),
+}));
+
+vi.mock("next/server", async (importOriginal) => ({
+  ...await importOriginal<typeof import("next/server")>(), after: mocks.after,
+}));
+vi.mock("@/src/lib/hosted-runtime-log/usage-gate", () => ({
+  reportHostedRuntimeUsageGateObservation: mocks.reportHostedRuntimeUsageGateObservation,
 }));
 
 vi.mock("@/src/lib/hosted-execution/cloudflare-callback-auth", () => ({
@@ -54,13 +63,30 @@ describe("visible reconciliation facts route", () => {
     expect(
       mocks.readHostedRuntimeReconciliationFactsWithVisibleAccess,
     ).toHaveBeenCalledWith(
-      { userId: "member_123" },
+      { userId: "member_123", onUsageGateDecision: expect.any(Function) },
       expect.any(Function),
     );
     await expect(response.json()).resolves.toEqual({
       blocked: null,
       mailboxLag: [],
       workspace: null,
+    });
+  });
+
+  it("records decisions after the response using the authenticated member", async () => {
+    mocks.readHostedRuntimeReconciliationFactsWithVisibleAccess.mockImplementationOnce(async (input) => {
+      input.onUsageGateDecision({ at: "2026-08-01T12:00:00.000Z", usageLimited: true });
+      return { blocked: null, mailboxLag: [], workspace: null };
+    });
+    const response = await reconciliationRoute.GET(
+      new Request("https://example.test/api/internal/hosted-orchestration/users/member_123/reconciliation-facts"),
+      { params: Promise.resolve({ userId: "member_123" }) },
+    );
+    expect(response.status).toBe(200);
+    expect(mocks.reportHostedRuntimeUsageGateObservation).not.toHaveBeenCalled();
+    await mocks.after.mock.calls[0]?.[0]();
+    expect(mocks.reportHostedRuntimeUsageGateObservation).toHaveBeenCalledExactlyOnceWith({
+      at: "2026-08-01T12:00:00.000Z", usageLimited: true, userId: "member_123",
     });
   });
 

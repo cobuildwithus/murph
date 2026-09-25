@@ -987,6 +987,25 @@ describe("hosted member assistant preferences", () => {
     });
     expect(prisma.hostedMember.update).toHaveBeenCalledTimes(1);
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+
+    // A later accepted message explicitly requesting a preference retains its
+    // own chronology and can supersede Settings, even in the same batch.
+    await expect(upsertHostedMemberAssistantPreferencesTx({
+      causalOrigin: "turn",
+      memberId: "member_123",
+      occurredAt: "2026-07-08T12:06:00.000Z",
+      preferenceCausalSeq: "41",
+      preferences: { personality: { humor: 4 } },
+      prisma,
+    })).resolves.toMatchObject({
+      appliedFields: ["humor"],
+      assistantPersonality: { humor: 4 },
+      updated: true,
+    });
+    expect(member).toMatchObject({
+      assistantHumor: 4,
+      assistantHumorCausalSeq: 41n,
+    });
   });
 
   it("keeps a newer human preference ahead of a delayed scheduled callback", async () => {

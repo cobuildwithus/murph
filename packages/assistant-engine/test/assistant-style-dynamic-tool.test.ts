@@ -82,6 +82,85 @@ describe('assistant style dynamic tool', () => {
     })?.kind).toBe('invalid-assistant-style-arguments')
   })
 
+  it.each(['direct', 'group'] as const)('keeps style intent bound to its source in a %s batch', async (conversationScope) => {
+    const first = `ain_${'1'.repeat(32)}`
+    const later = `ain_${'2'.repeat(32)}`
+    const options = { hosted: true, assistantInputId: later, conversationScope, acceptedInputIds: () => [first, later] }
+    // The instruction retains its identity for Web's stale-write comparison.
+    hostedMocks.requestPersonalization.mockResolvedValue({
+      action: 'update_personality',
+      result: {
+        outcomes: { humor: 'superseded' },
+        settings: personalitySettings({ humor: { source: 'custom', value: 0 } }),
+      },
+    })
+    const stale = await executeStyleRequest({
+      action: 'set', message_ref: first, setting: 'humor', value: 10,
+    }, options)
+    expect(stale.rpcResult.success).toBe(true)
+    expect(hostedMocks.requestPersonalization).toHaveBeenLastCalledWith(
+      { action: 'update_personality', personality: { humor: 10 } },
+      { assistantInputId: first, toolCallId: 'call-test' },
+    )
+    expect(JSON.parse(stale.rpcResult.contentItems[0]!.text)).toMatchObject({
+      outcomes: { humor: 'superseded' },
+      settings: { humor: { value: 0 } },
+      updated: false,
+    })
+
+    hostedMocks.requestPersonalization.mockResolvedValue({
+      action: 'update_personality',
+      result: {
+        outcomes: { humor: 'saved' },
+        settings: personalitySettings({ humor: { source: 'custom', value: 4 } }),
+      },
+    })
+    const fresh = await executeStyleRequest({
+      action: 'set', message_ref: later, setting: 'humor', value: 4,
+    }, options)
+    expect(fresh.rpcResult.success).toBe(true)
+    expect(hostedMocks.requestPersonalization).toHaveBeenLastCalledWith(
+      { action: 'update_personality', personality: { humor: 4 } },
+      { assistantInputId: later, toolCallId: 'call-test' },
+    )
+    expect(hostedMocks.requestPersonalization).toHaveBeenCalledTimes(2)
+  })
+
+  it('does not let live admission reattribute an earlier style request', async () => {
+    const first = `ain_${'1'.repeat(32)}`
+    const later = `ain_${'2'.repeat(32)}`
+    let accepted = [first]
+    const options = { hosted: true, acceptedInputIds: () => accepted }
+    hostedMocks.requestPersonalization.mockResolvedValue({
+      action: 'update_personality',
+      result: {
+        outcomes: { humor: 'unchanged' },
+        settings: personalitySettings({ humor: { source: 'custom', value: 4 } }),
+      },
+    })
+    const args = { action: 'set', setting: 'humor', value: 4 }
+    expect((await executeStyleRequest(args, options)).rpcResult.success).toBe(true)
+    accepted = [first, later]
+    expect((await executeStyleRequest(args, options)).rpcResult.success).toBe(false)
+    expect((await executeStyleRequest({ ...args, message_ref: first }, options)).rpcResult.success).toBe(true)
+    expect(hostedMocks.requestPersonalization).toHaveBeenCalledTimes(2)
+    for (const [, authority] of hostedMocks.requestPersonalization.mock.calls) {
+      expect(authority).toEqual({ assistantInputId: first, toolCallId: 'call-test' })
+    }
+  })
+
+  it.each([undefined, `ain_${'3'.repeat(32)}`])('rejects missing or unaccepted style source %s in a batch', async (messageRef) => {
+    const result = await executeStyleRequest({
+      action: 'reset', setting: 'all',
+      ...(messageRef ? { message_ref: messageRef } : {}),
+    }, {
+      hosted: true,
+      acceptedInputIds: () => [`ain_${'1'.repeat(32)}`, `ain_${'2'.repeat(32)}`],
+    })
+    expect(result.rpcResult.success).toBe(false)
+    expect(hostedMocks.requestPersonalization).not.toHaveBeenCalled()
+  })
+
   it('describes direct-member and synthetic-room ownership without a target selector', () => {
     expect(MURPH_ASSISTANT_STYLE_TOOL.description).toContain(
       'current conversation runtime',
@@ -525,6 +604,8 @@ async function executeStyleRequest(
   argumentsValue: unknown,
   options: {
     assistantInputId?: string | null
+    acceptedInputIds?: () => readonly string[]
+    conversationScope?: 'direct' | 'group'
     hosted?: boolean
     personalizationAvailable?: boolean
     settingsOverlay?: {
@@ -547,6 +628,16 @@ async function executeStyleRequest(
       ? null
       : {
           computerToolsAvailable: false,
+          ...(options.acceptedInputIds ? {
+            currentUserActionScope: () => ({
+              acceptedInputIds: options.acceptedInputIds!(),
+              conversationId: 'conversation_style',
+              conversationScope: options.conversationScope ?? 'direct',
+              inboundMailboxItemIds: [],
+              originSessionId: 'session_style',
+              recipientKey: 'recipient_style',
+            }),
+          } : {}),
           currentAssistantInputId: () =>
             options.assistantInputId === undefined
               ? 'ain_0123456789abcdef0123456789abcdef'

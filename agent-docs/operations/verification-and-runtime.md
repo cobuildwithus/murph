@@ -149,7 +149,8 @@ enables Git deployment only for `main`.
 For changes to the shared Playwright Chromium install wrapper or any workflow
 that calls it, run `bash -n scripts/install-playwright-chromium.sh` and the
 focused `scripts/install-playwright-chromium.test.ts` Vitest file. The test owns
-the loaded APT policy, one-shot Playwright status, Ubuntu caller inventory, and
+the loaded APT policy (including preserved key casing and rejected wrong numeric
+values), one-shot Playwright status, Ubuntu caller inventory, and
 overall step-timeout contract; exact-head Actions then prove the wrapper on the
 GitHub-hosted Ubuntu runner.
 
@@ -187,7 +188,7 @@ failure exits, exactly-once release, and awaited cleanup. Text inspection may
 supplement that proof, but it cannot establish runtime cleanup behavior.
 
 Native iOS and Android hosted E2E are production canaries, not pull-request
-statuses. The trusted default-branch controllers run on staggered six-hour
+statuses. The trusted default-branch controllers run on staggered twelve-hour
 schedules: iOS at minute 17 and Android at minute 47. An authenticated manual
 dispatch is the scheduler-drop recovery path, but its event ref must be
 `refs/heads/main` and its exact event SHA must still equal current `main` when
@@ -265,7 +266,7 @@ pnpm test:assistant:live -- --test "<unique test-name pattern>"
 ```
 
 The helper requires a name pattern so it cannot accidentally fan out across
-the paid suite. It defaults to `gpt-5.6-terra` through the authenticated local
+the paid suite. It defaults to `gpt-6-sol` through the authenticated local
 ChatGPT/Codex subscription without copying auth material; `--auth provider`
 keeps the existing isolated provider-key route. Read every printed synthetic
 reply and record a `Ready` or `Hold` UX verdict covering correctness, action
@@ -273,12 +274,12 @@ count, repetition, clarity, warmth, autonomy, and truthful recovery. Routine CI
 must never depend on local subscription state or make the paid call.
 
 The separate `.github/workflows/assistant-real-model.yml` acceptance lane runs
-only on protected `main` pushes or manual dispatch from protected `main`. Before
+daily on protected `main` or by manual dispatch from protected `main`. Before
 enabling it, configure the `assistant-real-model-sandbox` GitHub Environment to
 allow only `main` and set its `ASSISTANT_REAL_MODEL_SANDBOX_OPENAI_API_KEY` to a
 dedicated budgeted test-project credential. Do not use a production credential.
 The runner `pnpm exec tsx scripts/run-assistant-real-model-gate.ts` pins
-`gpt-5.6-terra`, the production Responses websocket-enabled provider setting,
+`gpt-6-sol`, the production Responses websocket-enabled provider setting,
 three exact scenario names, serial execution, zero test retries, and a twelve
 minute outer deadline per scenario. Codex's ordinary bounded transport retries
 remain enabled. Missing configuration, missing selection, skipped assertions,
@@ -436,7 +437,7 @@ remain external to the checkout.
 ## Live Junction Garmin Canary Verification
 
 The public live wearable workflow dispatches protected-main source to the
-private hosted-runtime executor. It runs after main pushes, daily, and on manual
+private hosted-runtime executor. It runs daily and on manual
 recovery; it accepts only an exact completed canonical-data receipt. The public
 controller has no provider credentials, private checkout, or artifact access.
 See [Live provider canaries](live-provider-canaries.md) for the execution,
@@ -450,6 +451,15 @@ pnpm --dir packages/hosted-local-harness exec vitest run \
   --config vitest.config.ts --no-coverage \
   test/junction-wearable-canary-workflow.test.ts
 ```
+
+Before starting the live wearable Vitest child, the E2E suite builds Web through
+`pnpm --dir apps/web build:hosted-local`. This uses the existing production build
+memory limits and synthetic smoke environment, with the same isolated smoke
+output suffix consumed by the harness's production-start selector. Compilation
+finishes before Web, Worker, Temporal, storage, and browser processes run
+together. Provider login and Junction/Kernel credentials remain restricted to
+the isolated test child. A failed build stops the suite before that child starts.
+Ordinary hermetic suites retain their existing preparation path.
 
 The private executor must expose and smoke-check the exact workspace Codex CLI installed
 by the frozen root dependency graph before hosted-local model-catalog
@@ -489,9 +499,13 @@ checkbox, and frame counts so a protected-main run can distinguish an
 unchanged action surface from same-route DOM progression without exposing
 provider content. The runner re-reads the route after collecting those counts;
 if Garmin departs during that asynchronous sample, the current route wins over
-the stale pre-sample observation and the callback proof continues. After the
-persisted-state reload, the runner waits for the page load boundary before
-clicking Disconnect so server-rendered state cannot outrun its client handler.
+the stale pre-sample observation and the callback proof continues. Before each
+persisted-state assertion, the runner requires a successful HTTP response and the expected same-origin `/connect` destination. Initial navigation
+and reload have distinct failure stages; HTTP errors report only their numeric
+status and redirects use a fixed message. Neither can pass through matching
+markup or be hidden by the full connection-state wait. After the persisted-state
+reload, the runner waits for the page load boundary before clicking Disconnect
+so server-rendered state cannot outrun its client handler.
 Authorization-click failures retain the fixed action and timeout category,
 plus allowlisted host-family and route categories sampled before and after the
 click. The runner captures the original stage and diagnostic message before
@@ -501,6 +515,23 @@ Changes to the checkbox count or availability, the exact `Save` count or state,
 or the paired progression markers fail closed; unrelated negative actions and
 links are not part of the selection gate. The CI boundary keeps manual
 authorization disabled and challenge handling fail-closed.
+The browser also emits fixed execution-stage messages through its existing stdout
+pipe. The parent forwards only complete messages from the harness-owned closed
+vocabulary, including browser cleanup substeps; raw child output remains buffered.
+While a live wearable scenario runs, the parent reports numeric host CPU
+parallelism, one-minute load, and available/free/total memory every 30 seconds and stops
+that heartbeat after scenario cleanup. In GitHub Actions it also emits up to ten
+notice annotations containing the last validated stage, elapsed seconds, and the
+same numeric measurements. The first sample is immediate, then every four
+minutes or sooner when available memory falls below half its last annotated
+value. This respects the runner's per-step notice limit and makes bounded
+progress available separately from the final log archive. These observations cannot satisfy or
+replace connection, canonical-data, or cleanup proof. They contain no page,
+provider, account, URL, or environment content. Focused progress/privacy proof:
+`pnpm --dir packages/hosted-local-harness exec vitest run --config vitest.config.ts
+--no-coverage test/wearable-progress.test.ts` plus the existing Web wearable
+browser suite, whose pending-cleanup case requires progress before browser exit.
+
 The profile can reuse a still-valid Garmin session, while an expired session
 falls back to the dedicated login. See
 Kernel's [SSH tunnel](https://www.kernel.sh/docs/browsers/ssh),
@@ -949,6 +980,9 @@ focused, diff-aware, and package-coverage lanes need no package-specific heap
 or invocation branch. Release checks leave job-wide `NODE_OPTIONS` unset so an
 unrelated memory regression remains visible at its owner.
 
+Vercel also bounds checker concurrency in the initial Web typecheck.
+`apps/web/README.md` § Production build memory guard owns that boundary.
+
 Hosted-web production build memory: on Linux CI, `apps/web verify` defaults to
 wrapping its production `next build` step with
 `apps/web/scripts/build-memory-guard.sh`. The guard creates a root-level
@@ -1171,9 +1205,9 @@ it is not permission to send unrelated messages, deploy, or change the webhook.
 - Repo-local source-resolved workspace aliases are intentionally limited to the package allowlists exported from `config/workspace-source-resolution.ts`; within those allowlists, Vitest subpaths resolve only through explicit workspace entries plus package-declared public exports rather than wildcarding arbitrary internals. Packages outside that helper stay on their existing emitted-JS-shaped import conventions until a caller explicitly opts them into source resolution.
 - `packages/device-syncd` exposes the local HTTP control plane for wearable OAuth/webhook/reconcile flows, binds `127.0.0.1` by default unless `DEVICE_SYNC_HOST` overrides it, rejects non-loopback control-route callers, requires a bearer token for `/providers/*`, `/accounts/*`, and other control routes, can expose only `/oauth/*/callback` plus `/webhooks/*` on a separate `DEVICE_SYNC_PUBLIC_HOST`/`PORT` listener when public ingress is needed, stores tokens outside the vault, serializes active jobs per account to avoid refresh-token races, and only allows cross-origin post-connect redirects when `DEVICE_SYNC_ALLOWED_RETURN_ORIGINS` includes the requesting origin. Murph's CLI-managed launcher may provide the default control token, state DB path, and loopback base URL for the selected vault, but it still talks to the daemon strictly over that localhost HTTP boundary.
 - The hosted integration control-plane entrypoint lives under `apps/web`; Prisma CLI configuration now lives in `apps/web/prisma.config.ts` for Prisma 7, the hosted production Next build uses the supported Webpack fallback with its explicit build worker and memory optimizations while interactive development remains on Turbopack, interactive hosted `next dev` uses `apps/web/.next-dev`, cold-boot smoke uses `apps/web/.next-smoke`, hosted-web modules that import the shared Prisma client now require `DATABASE_URL` at module load so missing DB env fails fast, package and app typecheck bootstrap the exact tracked Next route-type stub import before `tsc` so clean clones do not depend on leftover generated files, browser-authenticated device-sync routes trust only short-lived request-bound signed assertions from a trusted auth edge/proxy and consume each assertion nonce once to reject replay, hosted onboarding uses Privy as fresh proof for login, linking, and security-sensitive identity operations while successful completion mints a first-party opaque app session stored by hashed token in `HostedWebSession`; settings, account, billing, export, and deletion use that Murph app session, and identity sync routes require both the app session and fresh same-member Privy proof. Hosted onboarding stores only invite/member/billing metadata plus embedded-wallet linkage rather than canonical health data, hosted onboarding Checkout uses subscription mode while authenticated direct paid Pulse/Edge members may separately create fixed one-time usage-credit Checkout Sessions in Settings, hosted Stripe webhook ingress records minimal event receipts before authoritative subscription or usage-credit reconciliation, imports successful hosted assistant usage rows into `hosted_ai_usage` after the hosted commit succeeds so Postgres remains the canonical usage and append-only credit-ledger owner with no active Stripe meter cron, and blocks subsequent usage-bearing work when included plus purchased capacity is exhausted, hosted onboarding Linq ingress stores chat and recipient-line routing in `HostedMemberRouting`, records quota counters in `HostedLinqDailyState`, and appends canonical `conversation.message` ingress instead of using legacy `/api/linq` binding/event queues, and every Cloudflare-bound hosted execution mutation now appends canonical external ingress in the same transaction as the originating onboarding and device-sync state change so ordering, dedupe, mailbox sequencing, and checkpoint fencing stay web-owned instead of flowing through `execution_outbox`. Repo-local Next/Vitest resolution for workspace packages is centralized in `config/workspace-source-resolution.ts` and intentionally limited to the helper's explicit package lists plus package-declared public export entries.
-- The hosted execution runner entrypoint lives under `apps/cloudflare`; it verifies callback-signed Temporal ensure-processing requests plus Vercel OIDC-authenticated browser-vault, deletion, and status control requests, coordinates per-user invocations through Durable Objects, stores encrypted hosted workspace checkpoint refs in object storage through direct R2 presigned PUT upload sessions, stores legacy encrypted artifact objects only for restore compatibility, stores per-user runner env overrides in a separate encrypted hosted object, restores a temporary local execution context for hosted workspace invocations, starts the native Cloudflare container attached to the per-user Durable Object, authenticates worker-side control routes with HMAC signatures instead of static worker control tokens, routes worker-side ensure-processing/status/browser-vault calls into direct Durable Object methods, keeps the runner container warm for its configured idle lifecycle after successful invocations while still destroying it on failed, stale, deploy-smoke, explicit-cleanup, or ambiguous cleanup paths, restores v2 direct-R2 snapshots plus legacy full/base workspace bundles and legacy working `{base, delta}` commits, imports mailbox items into the local runtime, keeps dirty foreground runtime state local until the runtime-owned idle-floor—or last-chance shutdown—`idle_shutdown` checkpoint writes the updated workspace through web-owned CAS, treats RunnerContainer activity expiry as cleanup-only, drains the local outbox after checkpoint, records hosted assistant usage directly to the web-owned usage ledger through the injected runtime platform, decrypts stored snapshot/bundle/artifact/journal objects by their envelope `keyId` through the configured keyring so older ciphertext can remain readable during staged rotation, builds direct runtime config from an explicit frozen supervisor env while keeping supervisor-only secrets out of runtime env, and launches each hosted job in-process with per-user warm workspace roots and invocation-local writable cache/temp roots. Runtime internal-host requests use normal virtual hosts such as `results.worker` and `web-control.worker`; Cloudflare Container outbound interception dispatches those requests to Worker handlers and runtime write-fence headers prove invocation authority. Durable Object alarms are write-fence alarm cleanup only; Temporal reads hosted web reconciliation facts and owns runtime-returned `nextWakeAt` sleeps instead of Cloudflare rereading hosted web workspace status to decide whether runtime work is due. The Durable Object now keeps execution coordination, direct-R2 upload sessions, and opaque runtime residue only; canonical mailbox ordering, mailbox import watermarks, and workspace checkpoint fences remain web-owned.
+- The hosted execution runner entrypoint lives under `apps/cloudflare`; it verifies callback-signed Temporal ensure-processing requests plus Vercel OIDC-authenticated browser-vault, deletion, and status control requests, coordinates per-user invocations through Durable Objects, stores encrypted hosted workspace checkpoint refs in object storage through direct R2 presigned PUT upload sessions, stores legacy encrypted artifact objects only for restore compatibility, stores per-user runner env overrides in a separate encrypted hosted object, restores a temporary local execution context for hosted workspace invocations, starts the native Cloudflare container attached to the per-user Durable Object, authenticates worker-side control routes with HMAC signatures instead of static worker control tokens, routes worker-side ensure-processing/status/browser-vault calls into direct Durable Object methods, keeps the runner container warm for its configured idle lifecycle after successful invocations while still destroying it on failed, stale, deploy-smoke, explicit-cleanup, or ambiguous cleanup paths, restores v2 direct-R2 snapshots plus legacy full/base workspace bundles and legacy working `{base, delta}` commits, imports mailbox items into the local runtime, keeps dirty foreground runtime state local until the runtime-owned idle-floor—or last-chance shutdown—`idle_shutdown` checkpoint writes the updated workspace through web-owned CAS, treats RunnerContainer activity expiry as cleanup-only, drains the local outbox after checkpoint, records hosted assistant usage directly to the web-owned usage ledger through the injected runtime platform, decrypts stored snapshot/bundle/artifact/journal objects by their envelope `keyId` through the configured keyring so older ciphertext can remain readable during staged rotation, builds direct runtime config from an explicit frozen supervisor env while keeping supervisor-only secrets out of runtime env, and launches each hosted job in-process with per-user warm workspace roots and invocation-local writable cache/temp roots. Runtime internal-host requests use normal virtual hosts such as `results.worker` and `web-control.worker`; Cloudflare Container outbound interception dispatches those requests to Worker handlers and runtime write-fence headers prove invocation authority. Durable Object alarms are write-fence alarm cleanup only; Temporal reads hosted web reconciliation facts and owns runtime-returned `nextWakeAt` sleeps instead of Cloudflare rereading hosted web workspace status to decide whether runtime work is due. Postgres owns execution coordination and upload sessions; native container objects retain execution evidence. Canonical mailbox ordering, mailbox import watermarks, and workspace checkpoint fences remain web-owned.
 - R2 write-admission changes require focused proof that `paused` returns a valid
-  Temporal `retry_later` response before UserRunner dispatch, suppresses the
+  Temporal `retry_later` response before runtime-owner admission, suppresses the
   direct OIDC `waitUntil` hint, and is visible in current Worker status. Also
   validate hosted-execution parsing, deploy rendering/preflight, and
   hosted-local defaults. Local proof cannot replace the runbook's live
@@ -1213,6 +1247,6 @@ it is not permission to send unrelated messages, deploy, or change the webhook.
   origin used only as an inequality guard. An isolated Vercel preview
   database/crypto/control-plane boundary is a prerequisite; production Web or
   production stateful secrets are never a preview bootstrap fallback.
-- `Dockerfile.cloudflare-hosted-runner-base` is the checked-in scaffold for the stable native Cloudflare container base image. It installs the common Linux parser dependencies, creates the non-login runner user, and sets the default parser/runtime environment; hosted transcription has no in-image model and routes through the Worker-owned Workers AI binding. `Dockerfile.cloudflare-hosted-runner` is the small app-layer scaffold that starts from that base image, filters the native bundled Codex catalog to exactly `gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna`, adds OpenAI Flex support, forces mixed `tool_mode: code_mode`, and validates both properties for every entry. Mixed mode preserves the code executor while exposing native `tool_search`; dynamic-tool `deferLoading` remains the owner of which broad schemas stay out of the initial model-visible surface. The image then copies the prebuilt `apps/cloudflare/.deploy/runner-bundle/` artifact into `/app` and promotes the pinned native Codex binary plus adjacent sandbox resources into a compact final layer for lazy image loading; the production deploy smoke uses the same catalog for one real `gpt-5.6-terra` turn. The image starts the private `apps/cloudflare/src/container-entrypoint.ts` bridge inside the container, serves `GET /health` plus `POST /internal/workspace-invocation` on that internal bridge only, and delegates bounded hosted workspace invocation directly to `packages/assistant-runtime`. The entrypoint keeps admission, fencing, health, and fatal reporting in a small static boot kernel, starts one cached heavy-runtime hydration after listen, and overlaps that hydration with the accepted invocation's one-shot workspace restore preparation. The prepared restore remains bound to the exact request and warm vault root and is consumed by the existing runtime owner before mailbox/provider work. The default execution path runs one hosted job at a time in-process, builds runtime config from explicit supervisor env plus worker-supplied runtime fields, and uses per-user warm workspace roots plus invocation-local writable cache/temp roots. The present expectation is Node `>=24.14.1`, the preassembled runner bundle plus its materialized production dependencies, writable temp storage for restore/snapshot work, `PORT`, optional `HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS`, and shared worker/container allowlist extension vars for encrypted per-user env overrides when additional key names must be permitted.
+- `Dockerfile.cloudflare-hosted-runner-base` is the checked-in scaffold for the stable native Cloudflare container base image. It installs the common Linux parser dependencies, creates the non-login runner user, and sets the default parser/runtime environment; hosted transcription has no in-image model and routes through the Worker-owned Workers AI binding. `Dockerfile.cloudflare-hosted-runner` is the small app-layer scaffold that starts from that base image, filters the native bundled Codex catalog to exactly `gpt-5.6-sol`, `gpt-6-sol`, and `gpt-5.6-luna`, adds OpenAI Flex support, forces mixed `tool_mode: code_mode`, and validates both properties for every entry. Mixed mode preserves the code executor while exposing native `tool_search`; dynamic-tool `deferLoading` remains the owner of which broad schemas stay out of the initial model-visible surface. The image then copies the prebuilt `apps/cloudflare/.deploy/runner-bundle/` artifact into `/app` and promotes the pinned native Codex binary plus adjacent sandbox resources into a compact final layer for lazy image loading; the production deploy smoke uses the same catalog for one real `gpt-6-sol` turn. The image starts the private `apps/cloudflare/src/container-entrypoint.ts` bridge inside the container, serves `GET /health` plus `POST /internal/workspace-invocation` on that internal bridge only, and delegates bounded hosted workspace invocation directly to `packages/assistant-runtime`. The entrypoint keeps admission, fencing, health, and fatal reporting in a small static boot kernel, starts one cached heavy-runtime hydration after listen, and overlaps that hydration with the accepted invocation's one-shot workspace restore preparation. The prepared restore remains bound to the exact request and warm vault root and is consumed by the existing runtime owner before mailbox/provider work. The default execution path runs one hosted job at a time in-process, builds runtime config from explicit supervisor env plus worker-supplied runtime fields, and uses per-user warm workspace roots plus invocation-local writable cache/temp roots. The present expectation is Node `>=24.14.1`, the preassembled runner bundle plus its materialized production dependencies, writable temp storage for restore/snapshot work, `PORT`, optional `HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS`, and shared worker/container allowlist extension vars for encrypted per-user env overrides when additional key names must be permitted.
 - The current runner scaffold now ships as a preassembled deploy bundle copied into the native image rather than rebuilding the workspace from repo source inside Docker. `apps/cloudflare/DEPLOY.md` is the durable guide for the current staged manual deploy path.
 - Before adding a runtime target, document entrypoints, environment assumptions, and operational guardrails here.

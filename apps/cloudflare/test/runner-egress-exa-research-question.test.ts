@@ -1,3 +1,4 @@
+import { createPostgresTestOwner, mockPostgresOwnerCommand, forbiddenLegacyRuntime, settledNativeRuntime } from "./postgres-owner-fixtures.ts";
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   buildExaResearchScoutBatchLaneRequest,
@@ -83,15 +84,17 @@ function createLegacyBatchLaneRequestBody() {
   })
 }
 
-function createExaTestEnv(validateRuntimeWriteFence: () => Promise<boolean>) {
+function createExaTestEnv(validateRuntimeWriteFence: (input: { attemptId: string; generation: string; userId: string }) => Promise<boolean>) {
+  mockPostgresOwnerCommand(async ({ userId, command }) => {
+    if (command.operation !== "authorize_effect") throw new Error("Unexpected owner operation.");
+    const owns = await validateRuntimeWriteFence({ userId, attemptId: command.attemptId, generation: command.generation });
+    return { cutover: "postgres", status: owns ? "authorized" : "stale", owner: owns ? createPostgresTestOwner({ userId, attemptId: command.attemptId, generation: command.generation }) : null };
+  });
   return {
     ...createHostedExecutionTestEnv(),
     EXA_API_KEY: 'exa-worker-secret',
-    USER_RUNNER: {
-      getByName: () => ({
-        validateRuntimeWriteFence,
-      }),
-    },
+    USER_RUNNER: forbiddenLegacyRuntime,
+    RUNNER_CONTAINER: { getByName: () => settledNativeRuntime },
   } as unknown as RunnerOutboundEnvironmentSource
 }
 

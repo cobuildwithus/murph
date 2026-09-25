@@ -53,6 +53,7 @@ import {
 import {
   HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV,
   resolveHostedOperatorModelProvider,
+  resolveHostedVoiceModelProvider,
 } from "../src/hosted-runtime/codex-runtime-env.ts";
 import {
   buildHostedRunnerExecutablePath,
@@ -62,7 +63,7 @@ import {
 import {
   buildHostedCodexConfigToml,
   HOSTED_CODEX_OPERATOR_MEMORY_DIAGNOSTICS,
-  HOSTED_CODEX_PROVIDER_TRANSPORT_DIAGNOSTICS,
+  hostedCodexProviderTransportDiagnostics,
   prepareHostedCodexRuntimeEnvironment,
   resolveHostedCodexModelCatalogPath,
 } from "../src/hosted-runtime/codex-config.ts";
@@ -105,11 +106,12 @@ const HOSTED_CODEX_AUTOCOMPACTION_SUMMARY_SENTINEL =
   "HOSTED_CODEX_AUTOCOMPACTION_SUMMARY_SENTINEL";
 const EXPECTED_MULTI_AGENT_USAGE_HINT = [
   "When the active route or skill contract permits delegation, proactively spawn a hosted child for genuinely bounded, self-contained background work whose result is not needed in the current reply, then reply without waiting.",
-  "Use the child to replace a later root pass, not duplicate work; skip tiny tasks whose assignment and readback cost exceeds doing them once in the root.",
+  "Use the child to replace a later root pass, not duplicate work; unless the user requests delegation, skip tiny tasks whose assignment and readback cost exceeds doing them once in the root.",
+  "For explicitly requested delegation needed to answer, use a bounded child and native wait_agent, then answer in the same turn. Keep independent onboarding saves nonblocking.",
   "Follow the active route or skill contract for the exact leaf assignment and completion proof.",
 ].join(" ");
 const EXPECTED_MULTI_AGENT_MODE_HINT =
-  "Murph bounded background delegation mode is active; reply-critical work stays in the root.";
+  "Murph bounded delegation mode is active; the root owns the final answer and waits for requested child results when needed.";
 const EXPECTED_SUBAGENT_USAGE_HINT = [
   "This hosted child is a one-shot leaf.",
   "Complete only the self-contained assignment and stop.",
@@ -416,7 +418,7 @@ test("hosted Codex memory diagnostics expose only safe config metadata", () => {
 });
 
 test("hosted Codex provider transport diagnostics expose only safe config metadata", () => {
-  assert.deepEqual(HOSTED_CODEX_PROVIDER_TRANSPORT_DIAGNOSTICS, {
+  assert.deepEqual(hostedCodexProviderTransportDiagnostics("hosted-openai"), {
     codexProviderRequestMaxRetries: 4,
     codexProviderStreamIdleTimeoutMs: 90_000,
     codexProviderStreamMaxRetries: 0,
@@ -996,8 +998,14 @@ test("hosted Codex runtime config uses ChatGPT subscription auth in local dev", 
   assert.match(config, /^cli_auth_credentials_store = "file"$/mu);
   assert.match(config, /^model_provider = "hosted-chatgpt-openai"$/mu);
   assert.match(config, /\[model_providers\."hosted-chatgpt-openai"\]/u);
-  assert.doesNotMatch(config, /base_url/u);
-  assert.doesNotMatch(config, /env_key/u);
+  const memberProvider = readProviderConfigSection(config, "hosted-chatgpt-openai");
+  assert.doesNotMatch(memberProvider, /base_url/u);
+  assert.doesNotMatch(memberProvider, /env_key/u);
+  const voiceProvider = resolveHostedVoiceModelProvider(result.runtimeEnv[HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV]);
+  assert.equal(voiceProvider, "hosted-openai");
+  const voiceConfig = readProviderConfigSection(config, voiceProvider);
+  assert.match(voiceConfig, /^env_key = "OPENAI_API_KEY"$/mu);
+  assert.match(voiceConfig, /^requires_openai_auth = false$/mu);
   assert.match(config, /^supports_websockets = true$/mu);
   assert.match(config, /^stream_idle_timeout_ms = 90000$/mu);
   assert.match(config, /^requires_openai_auth = true$/mu);
@@ -1181,8 +1189,10 @@ test("hosted Codex runtime config preserves managed ChatGPT auth", async () => {
   assert.match(config, /^cli_auth_credentials_store = "file"$/mu);
   assert.match(config, /^model_provider = "hosted-chatgpt-openai"$/mu);
   assert.match(config, /\[model_providers\."hosted-chatgpt-openai"\]/u);
-  assert.doesNotMatch(config, /base_url/u);
-  assert.doesNotMatch(config, /env_key/u);
+  const memberProvider = readProviderConfigSection(config, "hosted-chatgpt-openai");
+  assert.doesNotMatch(memberProvider, /base_url/u);
+  assert.doesNotMatch(memberProvider, /env_key/u);
+  assert.match(readProviderConfigSection(config, "hosted-openai"), /^env_key = "OPENAI_API_KEY"$/mu);
   assert.match(config, /^supports_websockets = true$/mu);
   assert.match(config, /^requires_openai_auth = true$/mu);
   assert.match(config, /^stream_idle_timeout_ms = 90000$/mu);
@@ -1351,7 +1361,17 @@ test.each(["openai", "venice", "custom-inference"])(
       prepared.runtimeEnv[HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV],
     );
     assert.equal(operatorProvider, "hosted-openai");
+    assert.equal(resolveHostedVoiceModelProvider(prepared.runtimeEnv[HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV]), "hosted-openai");
     const section = readProviderConfigSection(config, "hosted-openai");
+    assert.match(section, /^stream_idle_timeout_ms = 90000$/mu);
+    assert.match(section, /^stream_max_retries = 0$/mu);
+    const selectedProviderId = prepared.runtimeEnv[HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV]!;
+    const selectedSection = readProviderConfigSection(config, selectedProviderId);
+    const diagnostics = hostedCodexProviderTransportDiagnostics(selectedProviderId);
+    assert.equal(diagnostics.codexProviderStreamIdleTimeoutMs, 90_000);
+    assert.equal(diagnostics.codexProviderRequestMaxRetries, provider === "custom-inference" ? 1 : 4);
+    assert.match(selectedSection, new RegExp(`^stream_idle_timeout_ms = ${diagnostics.codexProviderStreamIdleTimeoutMs}$`, "mu"));
+    assert.match(selectedSection, new RegExp(`^request_max_retries = ${diagnostics.codexProviderRequestMaxRetries}$`, "mu"));
     assert.match(section, /^env_key = "OPENAI_API_KEY"$/mu);
     assert.match(section, /^requires_openai_auth = false$/mu);
     assert.doesNotMatch(config, /synthetic-.*-credential/u);
@@ -1757,8 +1777,21 @@ testHostedCodexAutocompactionE2e(
   150_000,
 );
 
+testHostedCodexAutocompactionE2e(
+  "hosted compaction survives a quiet response beyond the former thirty-second window",
+  async () => {
+    await assert.rejects(
+      runHostedCodexAutocompactionE2e("managed", { idleTimeoutMs: 30_000, firstCompactionDelayMs: 35_000 }),
+      /idle timeout waiting for SSE/u,
+    );
+    await runHostedCodexAutocompactionE2e("managed", { firstCompactionDelayMs: 35_000 });
+  },
+  180_000,
+);
+
 async function runHostedCodexAutocompactionE2e(
   providerKind: "custom" | "managed",
+  options: { idleTimeoutMs?: number; firstCompactionDelayMs?: number } = {},
 ): Promise<void> {
   const workspaceRoot = await createTemporaryDirectory();
   const operatorHomeRoot = path.join(workspaceRoot, "operator-home");
@@ -1785,6 +1818,9 @@ async function runHostedCodexAutocompactionE2e(
   let expectingManualCompaction = false;
   const server = await startResponsesStubServer({
     compactionOutputKind: providerKind === "managed" ? "compaction" : "message",
+    delayBeforeStreamMs: (_body, requestIndex) =>
+      requestIndex === Math.min(...compactionRequestIndexes)
+        ? options.firstCompactionDelayMs ?? 0 : 0,
     compactionRequestIndexes,
     requestUrls,
     requests,
@@ -1869,6 +1905,12 @@ async function runHostedCodexAutocompactionE2e(
       },
     });
     const preparedConfig = await readFile(prepared.codexConfigPath, "utf8");
+    if (options.idleTimeoutMs !== undefined) {
+      await writeFile(prepared.codexConfigPath, preparedConfig.replace(
+        /^stream_idle_timeout_ms = \d+$/gmu,
+        `stream_idle_timeout_ms = ${options.idleTimeoutMs}`,
+      ));
+    }
     assert.match(
       preparedConfig,
       new RegExp(
@@ -2600,11 +2642,14 @@ test("hosted Codex config promotes permitted leaf delegation with native per-spa
     "When the active route or skill contract permits delegation, proactively spawn a hosted child for genuinely bounded, self-contained background work whose result is not needed in the current reply, then reply without waiting.",
   ));
   assert.ok(config.includes(
-    "Use the child to replace a later root pass, not duplicate work; skip tiny tasks",
+    "Use the child to replace a later root pass, not duplicate work; unless the user requests delegation, skip tiny tasks",
   ));
   assert.ok(config.includes(
     "Complete only the self-contained assignment and stop.",
   ));
+  assert.ok(config.includes("native wait_agent, then answer in the same turn"));
+  assert.ok(config.includes("Keep independent onboarding saves nonblocking"));
+  assert.doesNotMatch(config, /reply-critical work stays in the root/u);
   assert.match(config, /^expose_spawn_agent_model_overrides = true$/mu);
   assert.doesNotMatch(config, /^default_subagent_model/mu);
   assert.doesNotMatch(config, /^default_subagent_reasoning_effort/mu);
@@ -2758,6 +2803,7 @@ function isRetryableTemporaryCleanupError(error: unknown): boolean {
 }
 
 async function startResponsesStubServer(input: {
+  delayBeforeStreamMs?: (body: string, requestIndex: number) => number;
   customToolCallForRequest?: (
     body: string, requestIndex: number,
   ) => { name: string; input: string } | undefined;
@@ -2791,7 +2837,7 @@ async function startResponsesStubServer(input: {
     request.on("data", (chunk) => {
       chunks.push(Buffer.from(chunk));
     });
-    request.on("end", () => {
+    request.on("end", async () => {
       const body = Buffer.concat(chunks).toString("utf8");
       const requestIndex = input.requests.length + 1;
       input.requests.push(body);
@@ -2850,6 +2896,13 @@ async function startResponsesStubServer(input: {
       };
       const parsedBody = parseJsonObject(body);
       if (parsedBody?.stream === true) {
+        const delayMs = input.delayBeforeStreamMs?.(body, requestIndex) ?? 0;
+        if (delayMs > 0) {
+          response.setHeader("content-type", "text/event-stream");
+          response.flushHeaders();
+          await sleep(delayMs);
+          if (response.destroyed) return;
+        }
         writeResponsesStubStream({
           customToolCall: input.customToolCallForRequest?.(body, requestIndex),
           outputKind: input.compactionRequestIndexes?.has(requestIndex)
@@ -3123,9 +3176,11 @@ function writeResponsesStubStream(input: {
     usage: input.usage,
   };
 
-  input.response.statusCode = 200;
-  input.response.setHeader("cache-control", "no-cache");
-  input.response.setHeader("content-type", "text/event-stream; charset=utf-8");
+  if (!input.response.headersSent) {
+    input.response.statusCode = 200;
+    input.response.setHeader("cache-control", "no-cache");
+    input.response.setHeader("content-type", "text/event-stream; charset=utf-8");
+  }
   writeResponsesStubSseEvent(input.response, "response.created", {
     response: {
       ...completedResponse,

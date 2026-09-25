@@ -764,70 +764,69 @@ function resolveStartWindows(input: {
   }
 }
 
-async function buildExperimentPlanPayloadFromTypedOptions(input: {
-  slug: string
-  options: {
-    title?: string
-    hypothesis?: string
-    startedOn?: string
-    status?: z.infer<typeof experimentStatusSchema>
-    body?: string
-    fromProtocol?: string
-    custom?: boolean
-    publicProtocol?: boolean
-    testPlanId?: string
-    pageRevisionId?: string
-    runSpecRevisionId?: string
-    baselineStart?: string
-    baselineEnd?: string
-    baselineDays?: number
-    interventionStart?: string
-    interventionEnd?: string
-    interventionDays?: number
-    modality?: string
-    scheduleKind?: z.infer<typeof experimentRunScheduleKindSchema>
-    scheduleCron?: string
-    scheduleLocalTime?: string
-    scheduleTimeZone?: string
-    dose?: string
-    sessionsPerWeek?: number
-    targetSessions?: number
-    minimumUsefulSessions?: number
-    sessionField?: string[]
-    confounderField?: string[]
-    stopCondition?: string[]
-    primaryBiomarkerKey?: string
-    primaryOutcomeKey?: string
-    primaryOutcomeKind?: z.infer<typeof experimentPrimaryOutcomeKindSchema>
-    primaryOutcomeLabel?: string
-    primaryOutcomeSessionField?: string
-    primaryOutcomeSourceMetricKey?: string
-    primaryOutcomeUnit?: string
-    comparisonStatistic?: z.infer<typeof experimentOutcomeStatisticSchema>
-    secondaryBiomarkerKey?: string[]
-    desiredDirection?: z.infer<typeof experimentSignalDirectionSchema>
-    expectedDirection?: string[]
-    analysisAnchor?: string[]
-    plannedMeasurement?: string[]
-    analysisNote?: string[]
-    onboardingCompletedAt?: string
-    setupAnswer?: readonly string[]
-    safetyCautionLevel?: z.infer<typeof experimentSafetyCautionLevelSchema>
-    safetyDisposition?: z.infer<typeof experimentSafetyDispositionSchema>
-    positiveQuestionId?: readonly string[]
-    safetyNote?: readonly string[]
-    contextNote?: readonly string[]
-    reminderPolicy?: string
-    reminderOptionId?: string
-    remindersEnabled?: boolean
-    checkInCadence?: z.infer<typeof experimentCheckInCadenceSchema>
-    notificationStyle?: z.infer<typeof experimentNotificationStyleSchema>
-    missedLogFollowup?: z.infer<typeof experimentMissedLogFollowupSchema>
-    weeklyDigestEnabled?: boolean
-  }
-}) {
-  const fromProtocol = input.options.fromProtocol?.trim()
-  const custom = input.options.custom === true
+type ExperimentPlanOptions = {
+  title?: string
+  hypothesis?: string
+  startedOn?: string
+  status?: z.infer<typeof experimentStatusSchema>
+  body?: string
+  fromProtocol?: string
+  custom?: boolean
+  publicProtocol?: boolean
+  testPlanId?: string
+  pageRevisionId?: string
+  runSpecRevisionId?: string
+  baselineStart?: string
+  baselineEnd?: string
+  baselineDays?: number
+  interventionStart?: string
+  interventionEnd?: string
+  interventionDays?: number
+  modality?: string
+  scheduleKind?: z.infer<typeof experimentRunScheduleKindSchema>
+  scheduleCron?: string
+  scheduleLocalTime?: string
+  scheduleTimeZone?: string
+  dose?: string
+  sessionsPerWeek?: number
+  targetSessions?: number
+  minimumUsefulSessions?: number
+  sessionField?: string[]
+  confounderField?: string[]
+  stopCondition?: string[]
+  primaryBiomarkerKey?: string
+  primaryOutcomeKey?: string
+  primaryOutcomeKind?: z.infer<typeof experimentPrimaryOutcomeKindSchema>
+  primaryOutcomeLabel?: string
+  primaryOutcomeSessionField?: string
+  primaryOutcomeSourceMetricKey?: string
+  primaryOutcomeUnit?: string
+  comparisonStatistic?: z.infer<typeof experimentOutcomeStatisticSchema>
+  secondaryBiomarkerKey?: string[]
+  desiredDirection?: z.infer<typeof experimentSignalDirectionSchema>
+  expectedDirection?: string[]
+  analysisAnchor?: string[]
+  plannedMeasurement?: string[]
+  analysisNote?: string[]
+  onboardingCompletedAt?: string
+  setupAnswer?: readonly string[]
+  safetyCautionLevel?: z.infer<typeof experimentSafetyCautionLevelSchema>
+  safetyDisposition?: z.infer<typeof experimentSafetyDispositionSchema>
+  positiveQuestionId?: readonly string[]
+  safetyNote?: readonly string[]
+  contextNote?: readonly string[]
+  reminderPolicy?: string
+  reminderOptionId?: string
+  remindersEnabled?: boolean
+  checkInCadence?: z.infer<typeof experimentCheckInCadenceSchema>
+  notificationStyle?: z.infer<typeof experimentNotificationStyleSchema>
+  missedLogFollowup?: z.infer<typeof experimentMissedLogFollowupSchema>
+  weeklyDigestEnabled?: boolean
+}
+
+async function resolveExperimentPlanSource(options: ExperimentPlanOptions) {
+  const fromProtocol = options.fromProtocol?.trim()
+  const custom = options.custom === true
 
   if (fromProtocol !== undefined && custom) {
     throw new VaultCliError(
@@ -836,7 +835,7 @@ async function buildExperimentPlanPayloadFromTypedOptions(input: {
     )
   }
 
-  const noPublicProtocolFallback = input.options.publicProtocol === false
+  const noPublicProtocolFallback = options.publicProtocol === false
   const explicitNoPublicProtocolFallback = currentCommandIncludesFlag('--no-public-protocol')
   const explicitCustomFallback =
     custom &&
@@ -867,9 +866,9 @@ async function buildExperimentPlanPayloadFromTypedOptions(input: {
 
   if (
     custom &&
-    (input.options.testPlanId !== undefined ||
-      input.options.pageRevisionId !== undefined ||
-      input.options.runSpecRevisionId !== undefined)
+    (options.testPlanId !== undefined ||
+      options.pageRevisionId !== undefined ||
+      options.runSpecRevisionId !== undefined)
   ) {
     throw new VaultCliError(
       'invalid_option',
@@ -884,13 +883,13 @@ async function buildExperimentPlanPayloadFromTypedOptions(input: {
   if (protocol) {
     assertProtocolRevisionExpectation({
       actual: protocol.revision.pageRevisionId,
-      expected: input.options.pageRevisionId,
+      expected: options.pageRevisionId,
       optionName: 'page-revision-id',
       protocolKey: protocol.key,
     })
     assertProtocolRevisionExpectation({
       actual: protocol.revision.runSpecRevisionId,
-      expected: input.options.runSpecRevisionId,
+      expected: options.runSpecRevisionId,
       optionName: 'run-spec-revision-id',
       protocolKey: protocol.key,
     })
@@ -898,23 +897,88 @@ async function buildExperimentPlanPayloadFromTypedOptions(input: {
   const testPlan = protocol
     ? resolveProtocolTestPlan({
         entity: protocol,
-        testPlanId: input.options.testPlanId,
+        testPlanId: options.testPlanId,
       })
     : undefined
+
+  return { protocol, testPlan }
+}
+
+function resolveExperimentAnalysisDefaults(
+  options: ExperimentPlanOptions,
+  protocol: ProtocolVariantEntity | undefined,
+  testPlan: HealthCommonsTestPlan | undefined,
+) {
+  const measurementPlan =
+    protocol?.experimentOnboarding?.adaptationPolicy?.measurementPlan
+  const primaryBiomarkerKey =
+    options.primaryBiomarkerKey ??
+    measurementPlan?.requiredSignals?.[0] ??
+    testPlan?.primaryBiomarkerKey
+  if (
+    options.primaryOutcomeKey !== undefined &&
+    options.primaryBiomarkerKey !== undefined
+  ) {
+    throw new VaultCliError(
+      'invalid_option',
+      'experiment start accepts either --primary-outcome-key or the legacy --primary-biomarker-key, not both.',
+    )
+  }
+  const primaryOutcome = buildPrimaryOutcomeFromOptions({
+    ...options,
+    legacyOutcomeKey: primaryBiomarkerKey,
+  })
+  const effectivePrimaryOutcomeKey = primaryOutcome?.key ?? primaryBiomarkerKey
+  const secondaryBiomarkerKeys = uniqueNonEmptyStrings(
+    options.secondaryBiomarkerKey ?? [
+      ...(measurementPlan?.optionalSignals ?? []),
+      ...(testPlan?.secondaryBiomarkerKeys ?? []),
+    ],
+  ).filter((key) => key !== effectivePrimaryOutcomeKey)
+  const derivedExpectedDirections =
+    effectivePrimaryOutcomeKey === undefined || protocol === undefined
+      ? undefined
+      : uniqueNonEmptyStrings([effectivePrimaryOutcomeKey, ...secondaryBiomarkerKeys]).flatMap(
+          (biomarkerKey) => {
+            const direction = mapExpectedSignalDirection(
+              findExpectedSignal(protocol, biomarkerKey)?.expectedDirection,
+            )
+            return direction === undefined ? [] : [{ biomarkerKey, direction }]
+          },
+        )
+  const expectedDirections =
+    normalizeExpectedDirectionEntries(options.expectedDirection) ??
+    (derivedExpectedDirections && derivedExpectedDirections.length > 0
+      ? derivedExpectedDirections
+      : undefined)
+  const desiredDirection =
+    options.desiredDirection ??
+    derivedExpectedDirections?.find(
+      (signal) => signal.biomarkerKey === effectivePrimaryOutcomeKey,
+    )?.direction
+
+  return {
+    primaryBiomarkerKey: primaryOutcome ? undefined : primaryBiomarkerKey,
+    primaryOutcome,
+    secondaryBiomarkerKeys:
+      secondaryBiomarkerKeys.length > 0 ? secondaryBiomarkerKeys : undefined,
+    desiredDirection,
+    expectedDirections,
+  }
+}
+
+async function buildExperimentPlanPayloadFromTypedOptions(input: {
+  slug: string
+  options: ExperimentPlanOptions
+}) {
+  const { options } = input
+  const { protocol, testPlan } = await resolveExperimentPlanSource(options)
   const onboarding = protocol?.experimentOnboarding
-  const baselineDays =
-    input.options.baselineDays ?? testPlan?.baselineDays
-  const interventionDays =
-    input.options.interventionDays ??
-    testPlan?.interventionDays
   const windows = resolveStartWindows({
-    baselineStart: input.options.baselineStart,
-    baselineEnd: input.options.baselineEnd,
-    baselineDays,
-    clearBaselineWindow: input.options.baselineDays === 0,
-    interventionStart: input.options.interventionStart,
-    interventionEnd: input.options.interventionEnd,
-    interventionDays,
+    ...options,
+    baselineDays: options.baselineDays ?? testPlan?.baselineDays,
+    clearBaselineWindow: options.baselineDays === 0,
+    interventionDays: options.interventionDays ?? testPlan?.interventionDays,
   })
 
   if (!windows.interventionStart) {
@@ -929,87 +993,19 @@ async function buildExperimentPlanPayloadFromTypedOptions(input: {
     : undefined
 
   const protocolSpec = protocol?.protocol
-  const primaryBiomarkerKey =
-    input.options.primaryBiomarkerKey ??
-    onboarding?.adaptationPolicy?.measurementPlan?.requiredSignals?.[0] ??
-    testPlan?.primaryBiomarkerKey
-  if (
-    input.options.primaryOutcomeKey !== undefined &&
-    input.options.primaryBiomarkerKey !== undefined
-  ) {
-    throw new VaultCliError(
-      'invalid_option',
-      'experiment start accepts either --primary-outcome-key or the legacy --primary-biomarker-key, not both.',
-    )
-  }
-  const primaryOutcome = buildPrimaryOutcomeFromOptions({
-    comparisonStatistic: input.options.comparisonStatistic,
-    legacyOutcomeKey: primaryBiomarkerKey,
-    primaryOutcomeKey: input.options.primaryOutcomeKey,
-    primaryOutcomeKind: input.options.primaryOutcomeKind,
-    primaryOutcomeLabel: input.options.primaryOutcomeLabel,
-    primaryOutcomeSessionField: input.options.primaryOutcomeSessionField,
-    primaryOutcomeSourceMetricKey: input.options.primaryOutcomeSourceMetricKey,
-    primaryOutcomeUnit: input.options.primaryOutcomeUnit,
-  })
-  const effectivePrimaryOutcomeKey = primaryOutcome?.key ?? primaryBiomarkerKey
-  const secondaryBiomarkerKeys = uniqueNonEmptyStrings([
-    ...(input.options.secondaryBiomarkerKey ?? []),
-    ...(input.options.secondaryBiomarkerKey === undefined
-      ? [
-          ...(onboarding?.adaptationPolicy?.measurementPlan?.optionalSignals ?? []),
-          ...(testPlan?.secondaryBiomarkerKeys ?? []),
-        ]
-      : []),
-  ]).filter((key) => key !== effectivePrimaryOutcomeKey)
-  const derivedExpectedDirections =
-    effectivePrimaryOutcomeKey === undefined || protocol === undefined
-      ? undefined
-      : uniqueNonEmptyStrings([effectivePrimaryOutcomeKey, ...secondaryBiomarkerKeys]).flatMap(
-          (biomarkerKey) => {
-            const direction = mapExpectedSignalDirection(
-              findExpectedSignal(protocol, biomarkerKey)?.expectedDirection,
-            )
-            return direction === undefined ? [] : [{ biomarkerKey, direction }]
-          },
-        )
-  const expectedDirections =
-    normalizeExpectedDirectionEntries(input.options.expectedDirection) ??
-    (derivedExpectedDirections && derivedExpectedDirections.length > 0
-      ? derivedExpectedDirections
-      : undefined)
-  const desiredDirection =
-    input.options.desiredDirection ??
-    (effectivePrimaryOutcomeKey && protocol
-      ? mapExpectedSignalDirection(
-          findExpectedSignal(protocol, effectivePrimaryOutcomeKey)?.expectedDirection,
-        )
-      : undefined)
-  const schedule = buildRunScheduleFromOptions(input.options)
+  // Resolve outcome and direction errors before schedule/onboarding validation.
+  // The analysis schema and measurement flags still run after run-plan validation.
+  const analysisDefaults = resolveExperimentAnalysisDefaults(options, protocol, testPlan)
+  const schedule = buildRunScheduleFromOptions(options)
   const sessionFields =
-    input.options.sessionField ??
+    options.sessionField ??
     protocolSpec?.sessionFieldIds
   const confounderFields =
-    input.options.confounderField ?? onboarding?.trackingHints?.confounderFields
-  const onboardingCapture = buildExperimentOnboardingCaptureFromOptions({
-    onboardingCompletedAt: input.options.onboardingCompletedAt,
-    setupAnswer: input.options.setupAnswer,
-    safetyCautionLevel: input.options.safetyCautionLevel,
-    safetyDisposition: input.options.safetyDisposition,
-    positiveQuestionId: input.options.positiveQuestionId,
-    safetyNote: input.options.safetyNote,
-    contextNote: input.options.contextNote,
-  })
+    options.confounderField ?? onboarding?.trackingHints?.confounderFields
+  const onboardingCapture = buildExperimentOnboardingCaptureFromOptions(options)
   const assistantSupport =
-    buildExperimentAssistantSupportFromOptions({
-      reminderPolicy: input.options.reminderPolicy,
-      reminderOptionId: input.options.reminderOptionId,
-      remindersEnabled: input.options.remindersEnabled,
-      checkInCadence: input.options.checkInCadence,
-      notificationStyle: input.options.notificationStyle,
-      missedLogFollowup: input.options.missedLogFollowup,
-      weeklyDigestEnabled: input.options.weeklyDigestEnabled,
-    }) ?? experimentAssistantSupportSchema.parse({})
+    buildExperimentAssistantSupportFromOptions(options) ??
+    experimentAssistantSupportSchema.parse({})
 
   const runPlan = experimentRunPlanSchema.parse(
     compactRecord({
@@ -1017,18 +1013,18 @@ async function buildExperimentPlanPayloadFromTypedOptions(input: {
       baselineEnd: windows.baselineEnd,
       interventionStart: windows.interventionStart,
       interventionEnd: windows.interventionEnd,
-      modality: truncateBoundedText(input.options.modality ?? protocolSpec?.target, 160),
+      modality: truncateBoundedText(options.modality ?? protocolSpec?.target, 160),
       schedule,
-      dose: truncateBoundedText(input.options.dose ?? protocolSpec?.doseSignature, 160),
+      dose: truncateBoundedText(options.dose ?? protocolSpec?.doseSignature, 160),
       sessionsPerWeek:
-        input.options.sessionsPerWeek ??
+        options.sessionsPerWeek ??
         protocolSpec?.frequency?.sessionsPerWeek,
       targetSessions:
-        input.options.targetSessions ??
+        options.targetSessions ??
         testPlan?.targetAdherenceSessions ??
         protocolSpec?.interventionSessionsTarget,
       minimumUsefulSessions:
-        input.options.minimumUsefulSessions ??
+        options.minimumUsefulSessions ??
         testPlan?.minimumAdherenceSessions ??
         protocolSpec?.interventionSessionsMinimum,
       logging:
@@ -1038,26 +1034,21 @@ async function buildExperimentPlanPayloadFromTypedOptions(input: {
               sessionFields,
               confounderFields,
             }),
-      stopConditions: input.options.stopCondition ?? protocolSpec?.stopConditions,
+      stopConditions: options.stopCondition ?? protocolSpec?.stopConditions,
     }),
   )
   const analysisPlan = experimentAnalysisPlanSchema.parse(
     compactRecord({
-      primaryBiomarkerKey: primaryOutcome ? undefined : primaryBiomarkerKey,
-      primaryOutcome,
-      secondaryBiomarkerKeys:
-        secondaryBiomarkerKeys.length > 0 ? secondaryBiomarkerKeys : undefined,
-      desiredDirection,
-      expectedDirections,
+      ...analysisDefaults,
       measurementAnchors: normalizeExperimentMeasurementAnchorFlagOption(
-        input.options.analysisAnchor,
+        options.analysisAnchor,
         undefined,
       ),
       plannedMeasurements: normalizeExperimentPlannedMeasurementFlagOption(
-        input.options.plannedMeasurement,
+        options.plannedMeasurement,
         undefined,
       ),
-      notes: input.options.analysisNote,
+      notes: options.analysisNote,
     }),
   )
 
@@ -1089,11 +1080,11 @@ async function buildExperimentPlanPayloadFromTypedOptions(input: {
       },
       experiment: compactRecord({
         slug: input.slug,
-        title: input.options.title ?? protocol?.title ?? input.slug,
-        hypothesis: input.options.hypothesis,
-        startedOn: input.options.startedOn ?? windows.interventionStart,
-        status: input.options.status ?? 'active',
-        body: input.options.body,
+        title: options.title ?? protocol?.title ?? input.slug,
+        hypothesis: options.hypothesis,
+        startedOn: options.startedOn ?? windows.interventionStart,
+        status: options.status ?? 'active',
+        body: options.body,
       }),
       commonsProtocolRef:
         protocol === undefined

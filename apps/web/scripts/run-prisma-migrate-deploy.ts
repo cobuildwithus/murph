@@ -105,6 +105,57 @@ const hostedWebPrismaPredeployHistoricalMigrationIds = new Set([
 
 const hostedWebPrismaPredeployCompatibleMigrationReasons = new Map([
   [
+    "20260915223000_hosted_runtime_legacy_import",
+    // The new cursor/count fields have constant defaults, so existing rows and
+    // old writers retain the empty-inventory shape before cutover begins.
+    new Set(["ADD COLUMN NOT NULL"]),
+  ],
+  [
+    "20260915224500_hosted_runtime_upload_recovery",
+    // All three new fields are nullable. The kind check only widens admission;
+    // old writers produce the accepted all-null upload/key pair. The broad
+    // ADD COLUMN scanner also matches the later pair check's IS NOT NULL.
+    new Set(["ADD COLUMN NOT NULL", "DROP CONSTRAINT"]),
+  ],
+  [
+    "20260915230000_hosted_runtime_media_registration",
+    // A constant true default preserves existing registered/imported metadata;
+    // only the new admission writer explicitly creates provisional false rows.
+    new Set(["ADD COLUMN NOT NULL"]),
+  ],
+  [
+    "20260915234500_hosted_runtime_member_cutover",
+    // Backend phase is a new column with a legacy default accepted by its
+    // new check. Predeploy leaves legacy serving unchanged; campaign start is
+    // a separate operation after compatible readers have converged.
+    new Set(["ADD COLUMN NOT NULL", "ADD CONSTRAINT CHECK"]),
+  ],
+  [
+    "20260915234600_hosted_runtime_rolling_campaign",
+    // This replacement only widens the existing phase vocabulary. Old phase
+    // values remain valid; predeploy does not start the rolling campaign.
+    new Set(["ADD CONSTRAINT CHECK", "DROP CONSTRAINT"]),
+  ],
+  [
+    "20260915234700_hosted_runtime_managed_snapshots",
+    // Every new byte-verification field is nullable and the all-null old-writer
+    // shape passes. The broad ADD COLUMN scanner also sees the later check.
+    new Set(["ADD COLUMN NOT NULL", "ADD CONSTRAINT CHECK"]),
+  ],
+  [
+    "20260916044500_hosted_runtime_member_enrollment",
+    // The phase check widens to pending. The insert trigger grants no new
+    // execution authority and changes ownership only after rolling begins;
+    // both current and older creators remain valid in the legacy deploy window.
+    new Set(["ADD CONSTRAINT CHECK", "DROP CONSTRAINT"]),
+  ],
+  [
+    "20260916053000_hosted_runtime_late_sources",
+    // The selection is nullable. Existing source rows receive the baseline
+    // default accepted by the new check; predeploy changes no serving phase.
+    new Set(["ADD COLUMN NOT NULL", "ADD CONSTRAINT CHECK"]),
+  ],
+  [
     "20260810010000_member_owned_device_provider_applications",
     // Both application-binding columns are introduced nullable in this same
     // migration, so every existing row has the accepted all-null shape. The
@@ -175,6 +226,12 @@ const hostedWebPrismaPredeployCompatibleMigrationReasons = new Map([
     // The replacement check is a strict superset of the existing cap set.
     // Old writers remain valid, while predeploy makes the new $50 value safe
     // before a new Web build can present or persist it.
+    new Set(["ADD CONSTRAINT CHECK", "DROP CONSTRAINT"]),
+  ],
+  [
+    "20260922170000_hosted_sponsorship_topup_margin",
+    // A strict expansion from the historical $5 grant to $4 or $5 grants.
+    // Preserve old writers and frozen purchases before deploying the new catalog.
     new Set(["ADD CONSTRAINT CHECK", "DROP CONSTRAINT"]),
   ],
 ]);

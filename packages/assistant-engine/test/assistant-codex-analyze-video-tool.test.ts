@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import { mkdir, rename, rm, symlink, writeFile } from 'node:fs/promises'
 import path from 'node:path'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import {
   executeMurphDynamicToolRequest,
@@ -32,6 +32,17 @@ import { readTestMurphDynamicToolRequest } from './support/codex-app-server.ts'
 import { createTempVaultContext } from './test-helpers.ts'
 
 const tempRoots: string[] = []
+const VIDEO_FIXTURE_NOW = Date.parse('2026-08-20T12:00:00.000Z')
+
+beforeEach(() => {
+  // Keep synthetic clips inside their retention window as the real clock moves.
+  vi.useFakeTimers({ now: VIDEO_FIXTURE_NOW, toFake: ['Date'] })
+})
+
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ['Date'] })
+  vi.setSystemTime(new Date('2026-08-20T11:00:00.000Z'))
+})
 
 afterEach(async () => {
   vi.useRealTimers()
@@ -506,7 +517,8 @@ describe('executeAnalyzeVideoTool', () => {
 
   it('aborts the provider request at the trusted timeout', async () => {
     const fixture = await createVideoFixture([{ ordinal: 1, mime: 'video/mp4' }])
-    vi.useFakeTimers()
+    vi.useRealTimers()
+    vi.useFakeTimers({ now: VIDEO_FIXTURE_NOW })
     let markFetchStarted: (() => void) | null = null
     const fetchStarted = new Promise<void>((resolve) => {
       markFetchStarted = resolve

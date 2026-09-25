@@ -107,7 +107,7 @@ const latencyAlertEmail = "operator@example.test";
 const latencyAlertCronSecret = "hosted-local-priority-latency-cron-secret";
 const latencyAlertTimeZone = buildDaytimeTestTimeZone(new Date());
 const productionLikeAssistantModel = "gpt-5.6-terra";
-const productionIdleCheckpointDelayMs = 180_000;
+const testIdleCheckpointDelayMs = 180_000;
 const orderingIdleCheckpointDelayMs = 10_000;
 const promptReplyDeadlineMs = 30_000;
 const duplicateReplyObservationMs = 3_000;
@@ -178,9 +178,8 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
         HOSTED_LINQ_ALERT_EMAILS: latencyAlertEmail,
         HOSTED_RUNTIME_LATENCY_ALERT_TIME_ZONE: latencyAlertTimeZone,
         CRON_SECRET: latencyAlertCronSecret,
-        HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS:
-          String(productionIdleCheckpointDelayMs),
-        HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "300000",
+        HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS:
+          String(testIdleCheckpointDelayMs),
         HOSTED_EXECUTION_STANDBY_MODE: "allocate",
         HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS:
           [...allProbeIdentities, postEnrollmentConversationProbe]
@@ -969,7 +968,7 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
   it("pages one operator incident through the real cron, database, and Resend boundary", async () => {
     const anomalousTrace = await setLatestHostedLinqReplyLatencyForTest({
       environment: requireScenario().runtimeEnv,
-      latencyMs: 31_000,
+      latencyMs: 61_000,
       userId: retentionProbe.userId,
     });
 
@@ -1075,7 +1074,7 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
 
     await setLatestHostedLinqReplyLatencyForTest({
       environment: requireScenario().runtimeEnv,
-      latencyMs: 31_000,
+      latencyMs: 61_000,
       userId: retentionProbe.userId,
     });
     await expect(ageHostedRuntimeLatencyAlertForTest({
@@ -1242,9 +1241,8 @@ describe.sequential("hosted local foreground checkpoint ordering e2e", () => {
       additionalEnv: {
         HOSTED_ASSISTANT_MODEL: productionLikeAssistantModel,
         HOSTED_ASSISTANT_PROVIDER: "openai",
-        HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS:
+        HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS:
           String(orderingIdleCheckpointDelayMs),
-        HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "300000",
         HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS:
           orderingProbeIdentities.map((identity) => identity.memberPhone).join(","),
         LINQ_API_BASE_URL: requireOrderingLinqStub().runnerBaseUrl,
@@ -1654,7 +1652,7 @@ async function proveInterruptedSnapshotForegroundOrdering(input: {
           event.ordinal > snapshotStarted.ordinal
           && event.responseStatus === 200
           && event.conversationLaneRequested === true
-          && event.probeKind === "checkpoint_interrupt_rearm"
+          && event.probeKind === "checkpoint_interrupt"
           && event.conversationItemCount === 0
         ),
       scenario: targetScenario,
@@ -1667,7 +1665,7 @@ async function proveInterruptedSnapshotForegroundOrdering(input: {
       event.ordinal > snapshotStarted.ordinal
       && event.responseStatus === 200
       && event.conversationLaneRequested === true
-      && event.probeKind === "checkpoint_interrupt_rearm"
+      && event.probeKind === "checkpoint_interrupt"
       && event.conversationItemCount === 0
     );
     if (!emptyForegroundProbe) {
@@ -2434,7 +2432,7 @@ async function waitForEnvironmentCompletion(input: {
       };
     }, {
       interval: 250,
-      timeout: productionIdleCheckpointDelayMs + 60_000,
+      timeout: testIdleCheckpointDelayMs + 60_000,
     }).toEqual({
       handled: true,
       lastErrorCode: null,
@@ -3511,7 +3509,7 @@ async function postSignedLinqWebhookForScenario(
 function writeLatencyProof(mode: string, latencyMs: number): void {
   process.stdout.write(
     `Hosted foreground reply priority: mode=${mode} latency=${Math.round(latencyMs)}ms`
-      + ` deadline=${promptReplyDeadlineMs}ms idleFloor=${productionIdleCheckpointDelayMs}ms\n`,
+      + ` deadline=${promptReplyDeadlineMs}ms idleFloor=${testIdleCheckpointDelayMs}ms\n`,
   );
 }
 

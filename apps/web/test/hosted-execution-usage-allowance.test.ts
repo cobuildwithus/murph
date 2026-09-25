@@ -22,6 +22,11 @@ const usageCreditMocks = vi.hoisted(() => ({
   settleHostedUsageCreditForUsageTx: vi.fn(),
 }));
 
+// An allowance read must not initialize Family billing, email or signaling workflows.
+vi.mock("@/src/lib/hosted-onboarding/family-plan", () => {
+  throw new Error("Allowance reads must not load the Family mutation workflow.");
+});
+
 vi.mock("@/src/lib/hosted-execution/usage-credits", () => ({
   settleHostedUsageCreditForUsageTx:
     usageCreditMocks.settleHostedUsageCreditForUsageTx,
@@ -381,6 +386,37 @@ function buildAggregateOnlyOpenAiImageUsageRecord(): AssistantUsageRecord {
 }
 
 describe("hosted AI usage allowance pricing", () => {
+  it.each([
+    ["gpt-6-sol", 1_720_000n, 3_115_000n],
+    ["gpt-6-luna", 86_000n, 155_750n],
+  ] as const)("prices %s with published cache and service-tier rates", (model, shortCost, longCost) => {
+    for (const [tokenPricingBasis, numerator, denominator] of [
+      ["standard", 1n, 1n], ["openai-flex", 1n, 2n], ["openai-priority", 2n, 1n],
+    ] as const) {
+      for (const [inputTokens, expected] of [[200_000, shortCost], [300_000, longCost]] as const) {
+        const priced = priceHostedAiUsageForAllowance({
+          ...BASE_USAGE_RECORD,
+          requestedModel: model,
+          servedModel: `openai/${model}-2026-09-22`,
+          inputTokens,
+          cachedInputTokens: 100_000,
+          cacheWriteTokens: 100_000,
+          outputTokens: 145_000,
+          tokenPricingBasis,
+        });
+        expect(priced).toMatchObject({
+          costUsdMicros: expected * numerator / denominator,
+          counted: true,
+          pricingVersion: `openai-api-pricing-2026-09-22-gpt-6-sol-luna-${tokenPricingBasis}`,
+          pricingSnapshot: { model, modelSource: "served", pricingSource: "https://developers.openai.com/api/docs/pricing" },
+        });
+      }
+    }
+    expect(() => priceHostedAiUsageForAllowance({
+      ...BASE_USAGE_RECORD, requestedModel: model, servedModel: model, providerName: "venice",
+    })).toThrow("pricing is missing for the provider model");
+  });
+
   it("prices platform usage from uncached input, cached input, and output tokens", () => {
     expect(priceHostedAiUsageForAllowance(BASE_USAGE_RECORD)).toMatchObject({
       costUsdMicros: 759n,
@@ -457,17 +493,17 @@ describe("hosted AI usage allowance pricing", () => {
     expect(result.pricingSnapshot).toMatchObject({ model: "gpt-6-astra", modelSource: "served", pricingSource: "https://developers.openai.com/api/docs/models/gpt-6-astra" });
   });
 
-  it.each(["thread.tokenUsage.total.delta", "subagent.turn.tokenUsage.total.delta"])("does not mistake cumulative Astra input for a long request: %s", (usageExtractionSourcePath) => {
+  it.each(["gpt-6-astra", "gpt-6-sol", "gpt-6-luna"])("does not mistake cumulative %s input for a long request", (model) => {
     const result = priceHostedAiUsageForAllowance({
       ...BASE_USAGE_RECORD,
-      requestedModel: "gpt-6-astra",
-      servedModel: "gpt-6-astra",
+      requestedModel: model,
+      servedModel: model,
       inputTokens: 400_000,
       cachedInputTokens: 0,
       outputTokens: 10_000,
-      usageExtractionSourcePath,
+      usageExtractionSourcePath: "thread.tokenUsage.total.delta",
     });
-    expect(result.costUsdMicros).toBe(4_500_000n);
+    expect(result.costUsdMicros).toBe(model === "gpt-6-astra" ? 4_500_000n : model === "gpt-6-sol" ? 900_000n : 45_000n);
   });
 
   it("does not invent Venice pricing for Astra", () => {
@@ -4190,6 +4226,8 @@ describe("readHostedAiUsageGate", () => {
     expect(prisma.hostedAiUsagePeriod.update).not.toHaveBeenCalled();
     expect(prisma.$executeRaw).not.toHaveBeenCalled();
     expect(prisma.$queryRaw).not.toHaveBeenCalled();
+    expect(prisma.hostedAccountGroupMembership.findFirst).toHaveBeenCalledTimes(1);
+    expect(prisma.hostedAccountGroupBillingRef.findUnique).not.toHaveBeenCalled();
   });
 
   it("keeps direct paid billing periods for Family-sponsored members", async () => {
@@ -5030,6 +5068,12 @@ function createAllowanceTx(input: {
       findFirst: vi.fn(async () => input.familyAccessActive
         ? {
             group: {
+              billingRef: {
+                currentBillingPlanCode: input.familyBillingPlanCode ?? "launch_family_monthly",
+                currentBillingPhase: "paid",
+                currentPeriodEnd: familyPeriodEnd,
+                currentPeriodStart: familyPeriodStart,
+              },
               billingStatus: HostedBillingStatus.active,
               id: "hbag_family",
               ownerMemberId: "member_owner",
@@ -5301,6 +5345,12 @@ function createGatePrisma(input: {
       findFirst: vi.fn(async () => input.familyAccessActive
         ? {
             group: {
+              billingRef: {
+                currentBillingPlanCode: input.familyBillingPlanCode ?? "launch_family_monthly",
+                currentBillingPhase: "paid",
+                currentPeriodEnd: familyPeriodEnd,
+                currentPeriodStart: familyPeriodStart,
+              },
               billingStatus: HostedBillingStatus.active,
               id: "hbag_family",
               ownerMemberId: "member_owner",

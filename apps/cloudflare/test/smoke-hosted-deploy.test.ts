@@ -251,8 +251,8 @@ describe("runSmokeHostedDeploy", () => {
     { label: "wrong target", proof: { ready: true, readyCount: 1, provisioningCount: 0, target: 1, releaseMatches: true }, passes: false, inPlace: false },
     { label: "stale release", proof: { ready: true, readyCount: 2, provisioningCount: 0, target: 2, releaseMatches: false }, passes: false, inPlace: false },
     { label: "pending preparation", proof: { ready: true, readyCount: 2, provisioningCount: 1, target: 2, releaseMatches: true }, passes: false, inPlace: false },
-    { label: "paused transition inventory", proof: { ready: true, readyCount: 0, provisioningCount: 0, target: 0, releaseMatches: true }, passes: true, inPlace: true },
-    { label: "unpaused transition inventory", proof: { ready: true, readyCount: 2, provisioningCount: 0, target: 2, releaseMatches: true }, passes: false, inPlace: true },
+    { label: "suppressed transition inventory", proof: { ready: true, readyCount: 0, provisioningCount: 0, target: 0, releaseMatches: true }, passes: false, inPlace: true },
+    { label: "ready transition inventory", proof: { ready: true, readyCount: 2, provisioningCount: 0, target: 2, releaseMatches: true }, passes: true, inPlace: true },
   ])("requires $label proof in the protected standby smoke", async ({ proof, passes, inPlace }) => {
     const root = await mkdtemp(path.join(os.tmpdir(), "cloudflare-standby-smoke-"));
     const manifestPath = path.join(root, "manifest.json");

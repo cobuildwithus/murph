@@ -1,7 +1,8 @@
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, rm, symlink, unlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { setTimeout as sleep } from 'node:timers/promises'
+import { brotliCompressSync, gzipSync } from 'node:zlib'
 
 import { afterEach, describe, expect, it } from 'vitest'
 
@@ -445,6 +446,118 @@ describe('knowledge service helpers', () => {
     expect(savedLog).toContain('## [2026-06-17T13:30:00.000Z] append-section | Weekly health insights')
     expect(savedLog).toContain('## [2026-06-24T13:30:00.000Z] append-section | Weekly health insights')
   })
+
+  it.each([
+    { suffix: '.gz', compress: gzipSync },
+    { suffix: '.br', compress: brotliCompressSync },
+  ])('keeps knowledge sources usable after $suffix ledger compression', async ({ suffix, compress }) => {
+    const vaultRoot = await createKnowledgeVaultRoot('murph-knowledge-compressed-')
+    const sourcePath = 'ledger/events/2024/2024-01.jsonl'
+    const sourceText = '{"synthetic":true}\n'
+    await writeVaultFile(vaultRoot, sourcePath, sourceText)
+    await writeVaultFile(vaultRoot, 'journal/new.md', 'New evidence.\n')
+    const dependencies = {
+      saveText: async ({ relativePath, content }: { relativePath: string; content: string }) => {
+        await writeVaultFile(vaultRoot, relativePath, content)
+      },
+    }
+    const created = await appendKnowledgePageSection({
+      vault: vaultRoot,
+      slug: 'research-history',
+      title: 'Research history',
+      heading: 'First finding',
+      body: 'Original finding.',
+      sourcePaths: [sourcePath],
+    }, dependencies)
+
+    await writeFile(path.join(vaultRoot, `${sourcePath}${suffix}`), compress(sourceText))
+    await unlink(path.join(vaultRoot, sourcePath))
+
+    expect((await lintKnowledgePages({ vault: vaultRoot })).problems).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ code: 'missing_source_path' })]),
+    )
+    const appended = await appendKnowledgePageSection({
+      vault: vaultRoot,
+      slug: created.page.slug,
+      heading: 'Second finding',
+      body: 'New finding.',
+      sourcePaths: ['journal/new.md'],
+    }, dependencies)
+    expect(appended.page.sourcePaths).toEqual([sourcePath, 'journal/new.md'])
+    const shown = await getKnowledgePage({ vault: vaultRoot, slug: created.page.slug })
+    expect(shown.page.body).toContain('Original finding.')
+    expect(shown.page.body).toContain('New finding.')
+
+    const updated = await upsertKnowledgePage({
+      vault: vaultRoot,
+      slug: created.page.slug,
+      body: 'Revised findings.',
+      sourcePaths: ['journal/new.md'],
+    }, dependencies)
+    expect(updated.page.sourcePaths).toEqual([sourcePath, 'journal/new.md'])
+    const newPage = await upsertKnowledgePage({
+      vault: vaultRoot,
+      slug: 'new-research',
+      body: 'Another finding from the archived evidence.',
+      sourcePaths: [sourcePath],
+    }, dependencies)
+    expect(newPage.page.sourcePaths).toEqual([sourcePath])
+    await expect(readFile(path.join(vaultRoot, sourcePath))).rejects.toMatchObject({ code: 'ENOENT' })
+    expect(await readFile(path.join(vaultRoot, `${sourcePath}${suffix}`))).toEqual(compress(sourceText))
+  })
+
+  it.each(['missing', 'directory', 'symlink', 'ambiguous', 'non-ledger'] as const)(
+    'rejects a %s source without changing the knowledge page',
+    async (invalidSource) => {
+      const vaultRoot = await createKnowledgeVaultRoot('murph-knowledge-invalid-source-')
+      const sourcePath = invalidSource === 'non-ledger'
+        ? 'journal/notes.jsonl'
+        : 'ledger/events/2024/2024-01.jsonl'
+      await writeVaultFile(vaultRoot, sourcePath, '{"synthetic":true}\n')
+      const dependencies = {
+        saveText: async ({ relativePath, content }: { relativePath: string; content: string }) => {
+          await writeVaultFile(vaultRoot, relativePath, content)
+        },
+      }
+      const created = await upsertKnowledgePage({
+        vault: vaultRoot,
+        slug: 'research-history',
+        body: 'Original finding.',
+        sourcePaths: [sourcePath],
+      }, dependencies)
+      const before = await readFile(path.join(vaultRoot, created.page.pagePath), 'utf8')
+      await unlink(path.join(vaultRoot, sourcePath))
+      const archivedPath = path.join(vaultRoot, `${sourcePath}.br`)
+      if (invalidSource === 'directory') {
+        await mkdir(archivedPath)
+      } else if (invalidSource === 'symlink') {
+        const outside = await createTempDirectory('murph-knowledge-outside-')
+        await writeFile(path.join(outside, 'source.br'), brotliCompressSync('{"synthetic":true}\n'))
+        await symlink(path.join(outside, 'source.br'), archivedPath)
+      } else if (invalidSource === 'ambiguous') {
+        await writeFile(archivedPath, brotliCompressSync('{"synthetic":true}\n'))
+        await writeVaultFile(vaultRoot, sourcePath, '{"synthetic":true}\n')
+      } else if (invalidSource === 'non-ledger') {
+        await writeFile(archivedPath, brotliCompressSync('{"synthetic":true}\n'))
+      }
+
+      expect((await lintKnowledgePages({ vault: vaultRoot })).problems).toEqual(
+        expect.arrayContaining([expect.objectContaining({ code: 'missing_source_path' })]),
+      )
+      await expect(appendKnowledgePageSection({
+        vault: vaultRoot,
+        slug: created.page.slug,
+        heading: 'Blocked finding',
+        body: 'Must not persist.',
+      }, dependencies)).rejects.toMatchObject({ code: 'knowledge_source_unreadable' })
+      await expect(upsertKnowledgePage({
+        vault: vaultRoot,
+        slug: created.page.slug,
+        body: 'Must not persist.',
+      }, dependencies)).rejects.toMatchObject({ code: 'knowledge_source_unreadable' })
+      expect(await readFile(path.join(vaultRoot, created.page.pagePath), 'utf8')).toBe(before)
+    },
+  )
 
   it('does not overwrite an existing slug path that cannot be loaded for append-section', async () => {
     const vaultRoot = await createKnowledgeVaultRoot('murph-knowledge-append-unloadable-')

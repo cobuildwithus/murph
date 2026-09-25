@@ -11,22 +11,26 @@ import { test, vi } from "vitest";
 import { initializeVault, withCanonicalWriteLock } from "@murphai/core";
 import * as core from "@murphai/core";
 import { createWorkspaceSourceImportExecOptions } from "../../../config/workspace-source-resolution.js";
-import { listCanonicalEntitiesRuntime, getQueryProjectionStatus } from "../src/query-projection.ts";
+import { listCanonicalEntitiesRuntime, getQueryProjectionStatus, summarizeWearableSourceHealthRuntime, rebuildQueryProjection } from "../src/query-projection.ts";
 import { readExperimentQuerySource } from "../src/experiment-query-source.ts";
+import { isWearableProjectionFresh } from "../src/projection/freshness.ts";
+import { currentQueryProjectionLocation } from "../src/projection/schema.ts";
+import { listCanonicalSourceManifest } from "../src/vault-source.ts";
 
 const packageDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
-for (const reader of ["projection", "experiment"] as const) {
+for (const reader of ["projection", "experiment", "source-health", "source-health-fresh"] as const) {
 for (const outcome of ["commit", "rollback"] as const) {
   test(`a separate canonical writer's ${outcome} completes before a ${reader} query publishes its snapshot`, async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-query-write-"));
     await initializeVault({ vaultRoot });
+    if (reader === "source-health-fresh") await rebuildQueryProjection(vaultRoot);
     const options = createWorkspaceSourceImportExecOptions(packageDir);
     const child = spawn(process.execPath, [
       "--import", "tsx/esm", "--input-type=module", "--eval", `
         import { once } from "node:events";
-        import { addMeal, withHostedCanonicalWritePort } from "@murphai/core";
-        const [vaultRoot, outcome] = process.argv.slice(1);
+        import { addMeal, importDeviceBatch, withHostedCanonicalWritePort } from "@murphai/core";
+        const [vaultRoot, outcome, reader] = process.argv.slice(1);
         try {
           await withHostedCanonicalWritePort({
             async persistCanonicalWrite() {
@@ -35,7 +39,15 @@ for (const outcome of ["commit", "rollback"] as const) {
               await release;
               if (outcome === "rollback") throw new Error("injected persistence failure");
             },
-          }, () => addMeal({
+          }, () => reader.startsWith("source-health") ? importDeviceBatch({
+            vaultRoot, provider: "garmin", importedAt: "2026-09-01T13:00:00Z",
+            events: [{
+              kind: "observation", occurredAt: "2026-09-01T12:00:00Z",
+              recordedAt: "2026-09-01T12:01:00Z", timeZone: "UTC", title: "Synthetic steps",
+              externalRef: { system: "garmin", resourceType: "daily", resourceId: "synthetic-write" },
+              fields: { metric: "steps", value: 8000, unit: "count" },
+            }],
+          }) : addMeal({
             vaultRoot,
             occurredAt: "2026-09-01T12:00:00.000Z",
             note: "Concurrent snapshot fixture",
@@ -44,12 +56,12 @@ for (const outcome of ["commit", "rollback"] as const) {
           if (outcome !== "rollback" || !String(error).includes("injected persistence failure")) throw error;
         }
         process.stdin.pause();
-      `, vaultRoot, outcome,
+      `, vaultRoot, outcome, reader,
     ], { ...options, stdio: ["pipe", "pipe", "pipe"] });
     let stderr = "";
     child.stderr.setEncoding("utf8").on("data", (chunk: string) => { stderr += chunk; });
     const exited = once(child, "exit");
-    let query: ReturnType<typeof listCanonicalEntitiesRuntime> | null = null;
+    let query: Promise<Awaited<ReturnType<typeof listCanonicalEntitiesRuntime>> | Awaited<ReturnType<typeof summarizeWearableSourceHealthRuntime>>> | null = null;
     try {
       const ready = once(child.stdout, "data");
       const started = await Promise.race([
@@ -59,7 +71,9 @@ for (const outcome of ["commit", "rollback"] as const) {
       assert.match(started, /persistence-pending/u);
       query = reader === "projection"
         ? listCanonicalEntitiesRuntime(vaultRoot)
-        : readExperimentQuerySource(vaultRoot).then(source => source.readModel.entities);
+        : reader === "experiment"
+          ? readExperimentQuerySource(vaultRoot).then(source => source.readModel.entities)
+          : summarizeWearableSourceHealthRuntime(vaultRoot);
       // The writer is parked after canonical files changed and before persistence
       // succeeds or rolls back. A query must not expose this uncommitted state.
       const beforePersistence = await Promise.race([
@@ -71,8 +85,22 @@ for (const outcome of ["commit", "rollback"] as const) {
       const [code] = await exited;
       assert.equal(code, 0, stderr);
       const rows = await query;
-      const meals = rows.filter((row) => row.family === "event" && row.kind === "meal");
-      assert.equal(meals.length, outcome === "commit" ? 1 : 0);
+      if (reader.startsWith("source-health")) {
+        assert.equal(rows.length, outcome === "commit" ? 1 : 0);
+        if (outcome === "commit") assert.ok(rows.some(row => "provider" in row && row.provider === "garmin"));
+        assert.equal(await isWearableProjectionFresh(
+          currentQueryProjectionLocation(vaultRoot), await listCanonicalSourceManifest(vaultRoot),
+        ), true);
+        assert.deepEqual(await summarizeWearableSourceHealthRuntime(vaultRoot), rows);
+        // Rollback may invalidate manifest mtimes. Refresh only committed
+        // wearable rows, never certify unfinished global work.
+        if (outcome === "commit" || reader === "source-health") {
+          assert.equal((await getQueryProjectionStatus(vaultRoot)).fresh, false);
+        }
+      } else {
+        const meals = rows.filter(row => "family" in row && row.family === "event" && row.kind === "meal");
+        assert.equal(meals.length, outcome === "commit" ? 1 : 0);
+      }
       if (reader === "projection") assert.equal((await getQueryProjectionStatus(vaultRoot)).fresh, true);
     } finally {
       if (!child.stdin.destroyed) child.stdin.end("release\n");
@@ -105,7 +133,7 @@ test("a canonical lock owner can query while another reader waits to rebuild", a
   });
   await held;
   const originalLock = core.withCanonicalWriteLock;
-  const spy = vi.spyOn(core, "withCanonicalWriteLock").mockImplementation((...args) => {
+  const spy = vi.spyOn(core, "withCanonicalWriteLock").mockImplementation((...args: Parameters<typeof originalLock>) => {
     markRebuilding();
     return originalLock(...args);
   });
@@ -117,6 +145,40 @@ test("a canonical lock owner can query while another reader waits to rebuild", a
   } finally {
     await Promise.allSettled([owner, reader]);
     await nestedRead?.catch(() => undefined);
+    spy.mockRestore();
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+
+test("a source-health reader never joins a pending reader behind its reentrant lock owner", async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-source-reentrant-"));
+  await initializeVault({ vaultRoot });
+  let markHeld!: () => void;
+  const held = new Promise<void>(resolve => { markHeld = resolve; });
+  let markWaiting!: () => void;
+  const waiting = new Promise<void>(resolve => { markWaiting = resolve; });
+  let nested: ReturnType<typeof summarizeWearableSourceHealthRuntime> | undefined;
+  const owner = withCanonicalWriteLock(vaultRoot, async () => {
+    markHeld();
+    await waiting;
+    nested = summarizeWearableSourceHealthRuntime(vaultRoot);
+    assert.equal(await Promise.race([nested.then(() => "read"), delay(1000).then(() => "blocked")]), "read");
+  });
+  await held;
+  const originalLock = core.withCanonicalWriteLock;
+  const spy = vi.spyOn(core, "withCanonicalWriteLock").mockImplementation((...args: Parameters<typeof originalLock>) => {
+    markWaiting();
+    return originalLock(...args);
+  });
+  const reader = summarizeWearableSourceHealthRuntime(vaultRoot);
+  try {
+    await owner;
+    assert.deepEqual(await reader, []);
+    assert.equal((await getQueryProjectionStatus(vaultRoot)).fresh, false);
+  } finally {
+    await Promise.allSettled([owner, reader]);
+    await nested?.catch(() => undefined);
     spy.mockRestore();
     await rm(vaultRoot, { recursive: true, force: true });
   }

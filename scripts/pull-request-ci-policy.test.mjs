@@ -490,6 +490,35 @@ test("Host Support consumes one exhaustive plan and isolates app owners", async 
   inspectHostSupportReleaseGraph(host);
 });
 
+function inspectForegroundPriorityGate(source) {
+  const build = jobBlock(source, "release-build-typecheck-linux");
+  const step = build.match(
+    /      - name: Gate foreground priority across runtime transitions\n(?<body>(?:(?!      - (?:name|uses):)[\s\S])*)/u,
+  )?.groups?.body;
+  assert.ok(step, "The required build must run the foreground transition contract.");
+  assert.doesNotMatch(step, /^        (?:if|continue-on-error):/mu,
+    "The transition contract cannot be skipped or allowed to fail.");
+  assert.match(step, /^        timeout-minutes: 5$/mu);
+  assert.match(step,
+    /run: >-\n          pnpm --dir packages\/assistant-runtime test\n          test\/hosted-runtime-promoted-foreground-priority\.test\.ts\n/u);
+  assert.ok(build.indexOf("Gate foreground priority") < build.indexOf("name: Clean workspace build"),
+    "Detect priority inversions before the broad build.");
+}
+
+test("required release proof rejects a missing or softened foreground transition gate", async () => {
+  const host = await workflow("host-support.yml");
+  inspectForegroundPriorityGate(host);
+  for (const replacement of [
+    "Removed foreground transition gate",
+    "Gate foreground priority across runtime transitions\n        if: false",
+    "Gate foreground priority across runtime transitions\n        continue-on-error: true",
+  ]) {
+    assert.throws(() => inspectForegroundPriorityGate(host.replace(
+      "Gate foreground priority across runtime transitions", replacement,
+    )));
+  }
+});
+
 test("Host Support graph drift cannot skip, duplicate, overlap, or de-aggregate an owner", async () => {
   const host = await workflow("host-support.yml");
   const mutations = [
@@ -763,6 +792,14 @@ test("required Stripe boundary accepts docs-only skipped and full proof modes", 
   assert.equal(runWorkflowStep(source, "Enforce hermetic proof and event-scoped live result", {
     ...base,
     EVENT_NAME: "push",
+    HERMETIC_RESULT: "success",
+    LIVE_RESULT: "skipped",
+    MARKDOWN_ONLY: "",
+    SCOPE_RESULT: "skipped",
+  }).status, 0);
+  assert.equal(runWorkflowStep(source, "Enforce hermetic proof and event-scoped live result", {
+    ...base,
+    EVENT_NAME: "schedule",
     HERMETIC_RESULT: "success",
     LIVE_RESULT: "success",
     MARKDOWN_ONLY: "",
@@ -1075,7 +1112,7 @@ test("operator docs preserve the ready-only exact-head lifecycle and native cana
     assert.match(document, /synchronize[\s\S]{0,240}draft/u);
     assert.match(document, /exact head|exact-head/u);
     assert.match(document, /production canar/u);
-    assert.match(document, /six-hour/u);
+    assert.match(document, /twelve-hour/u);
     assert.doesNotMatch(
       document,
       /native-ios-hosted-e2e-retry\.mjs|--failure-code (?:android_workflow_rerun|xcodebuild_failed)/u,

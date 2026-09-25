@@ -31,6 +31,7 @@ import {
 } from "@/src/lib/hosted-onboarding/assistant-model-preference";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { readHostedWorkspace } from "@/src/lib/hosted-workspace/store";
+import { runWithHostedWorkspaceReadTiming } from "@/src/lib/hosted-workspace/read-timing";
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
 
 const HOSTED_WORKSPACE_READ_CALLBACK_BODY_LIMIT_BYTES = 0;
@@ -40,10 +41,11 @@ const HOSTED_WORKSPACE_READ_CALLBACK_BODY_LIMIT_BYTES = 0;
 // processing and confines them to `inbox_media_retention` dispatch). Repeating
 // the active-entitlement check here would block the retention run that the
 // owner just authorized, leaving raw inbox media past the 14-day retention.
-export const GET = withJsonError(async (request: Request) => {
-  const userId = await requireHostedCloudflareCallbackRequest(request, {
+export const GET = withJsonError((request: Request) => runWithHostedWorkspaceReadTiming(request, async (timing) => {
+  const userId = await timing.measure("authentication", () => requireHostedCloudflareCallbackRequest(request, {
     maxBodyBytes: HOSTED_WORKSPACE_READ_CALLBACK_BODY_LIMIT_BYTES,
-  });
+  }));
+  timing.authenticated();
   const customInferenceConsumerSupported =
     isHostedCustomInferenceConsumerVersion(
       new URL(request.url).searchParams.get(
@@ -51,12 +53,13 @@ export const GET = withJsonError(async (request: Request) => {
       ),
     );
   const prisma = getPrisma();
-  const [workspace, assistantConfiguration] = await Promise.all([
-    readHostedWorkspace({ userId }),
-    readHostedAssistantConfigurationFailingClosedForCustomInference({
+  const [workspace, assistantConfiguration, usageGate] = await Promise.all([
+    timing.measure("workspace", () => readHostedWorkspace({ userId })),
+    timing.measure("configuration", () => readHostedAssistantConfigurationFailingClosedForCustomInference({
       memberId: userId,
       prisma,
-    }),
+    })),
+    timing.measure("usage", () => resolveHostedRuntimeAiUsageGate({ mode: "read_only", prisma, userId })),
   ]);
 
   if (assistantConfiguration?.customInferenceReverificationRequired) {
@@ -112,14 +115,7 @@ export const GET = withJsonError(async (request: Request) => {
       message: "The selected custom inference connection is invalid.",
     });
   }
-  const platformAiUsageAllowed = (
-    await resolveHostedRuntimeAiUsageGate({
-      mode: "read_only",
-      prisma,
-      userId,
-    })
-  ).status === "allowed";
-  return jsonOk(parseHostedWorkspaceReadResponse({
+  return timing.measure("response", () => jsonOk(parseHostedWorkspaceReadResponse({
     fetchedAt: new Date().toISOString(),
     ...projectHostedAssistantModelAuthority(assistantConfiguration, customInferenceOverride === null),
     ...(customInferenceOverride
@@ -145,7 +141,7 @@ export const GET = withJsonError(async (request: Request) => {
             assistantConfiguration.hostedAssistantReasoningEffortOverride,
         }
       : {}),
-    platformAiUsageAllowed,
+    platformAiUsageAllowed: usageGate.status === "allowed",
     workspace: workspace
       ? {
           browserVaultReplicaRef: workspace.browserVaultReplicaRef,
@@ -166,14 +162,17 @@ export const GET = withJsonError(async (request: Request) => {
           version: workspace.version,
         }
       : null,
-  }));
-});
+  })));
+}));
 
 function projectHostedAssistantModelAuthority(
   configuration: HostedMemberAssistantModelResolution | null,
   managed: boolean,
 ) {
   return {
+    ...(managed && configuration?.provider === "openai" && configuration.hostedAssistantPriorityUntil
+      ? { hostedAssistantPriorityUntil: configuration.hostedAssistantPriorityUntil }
+      : {}),
     hostedAssistantAstraAllowed: managed
       && configuration?.provider === "openai"
       && configuration.availableModels.includes(HOSTED_ASSISTANT_ASTRA_MODEL),

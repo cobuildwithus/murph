@@ -232,9 +232,14 @@ function buildHostedTypingAlertEmailText(alertId: string, details: Record<string
     details.typingAcceptedAt === null
       ? "Typing acceptance: not observed when checked"
       : `First typing accepted: ${details.typingAcceptedAt}`,
-    details.typingAcceptedAt === null
-      ? `Time since webhook without recorded typing acceptance: ${details.elapsedMs} ms`
-      : `Webhook-to-typing wait: ${details.elapsedMs} ms`,
+    ...(typeof details.silenceStartedAt === "string"
+      ? [
+        `Silence measured from: ${details.silenceStartedAt}`,
+        `Wait without typing or a reply: ${details.elapsedMs} ms`,
+      ]
+      : [details.typingAcceptedAt === null
+        ? `Time since webhook without recorded typing acceptance: ${details.elapsedMs} ms`
+        : `Webhook-to-typing wait: ${details.elapsedMs} ms`]),
     `Threshold: strictly greater than ${details.thresholdMs} ms`,
     ...(details.workspaceState === "unconfirmed"
       ? ["Workspace warmth was not confirmed; the 10-second cold-start cutoff applies."] : []),

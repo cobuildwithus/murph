@@ -1,3 +1,5 @@
+export { createHostedRuntimeMigrationRehearsalForTest } from "./hosted-runtime-migration-testkit";
+export { initializeEmptyPostgresRuntimeForTest, readPostgresRuntimeIdentityForTest, startStuckPostgresRuntimeForTest, agePostgresRuntimeForTest } from "./hosted-runtime-owner-testkit";
 export {
   HostedBillingBrowserDriver,
   type HostedBillingBrowserActor,
@@ -314,6 +316,7 @@ interface HostedTestPrismaFactoryClient {
   };
   hostedMember: {
     create(args: unknown): Promise<{ id: string }>;
+    deleteMany(args: { where: { id: { in: string[] } } }): Promise<{ count: number }>;
     update(args: unknown): Promise<{ id: string }>;
   };
 }
@@ -2303,6 +2306,7 @@ export async function signalHostedManualRunRuntimeForTest(input: {
 export async function signalHostedMailboxAppendRuntimeForTest(input: {
   environment?: NodeJS.ProcessEnv;
   expectedUserId?: string | null;
+  knownCheckpoint?: Parameters<HostedRuntimeSignalModule["signalHostedMailboxAppendRuntime"]>[0]["knownCheckpoint"];
   mailboxItemId: string;
 }): Promise<{
   signalAccepted: true;
@@ -2314,6 +2318,7 @@ export async function signalHostedMailboxAppendRuntimeForTest(input: {
       client: deps.temporalSignalClient,
       environment: deps.environment,
       expectedUserId: input.expectedUserId ?? null,
+      knownCheckpoint: input.knownCheckpoint,
       mailboxItemId: input.mailboxItemId,
       prisma: deps.prisma,
     });

@@ -1,7 +1,7 @@
 "use client";
 
 import { MessageCircle } from "lucide-react";
-import { cloneElement, useState, type ReactElement } from "react";
+import { Children, cloneElement, isValidElement, useState, type ReactElement } from "react";
 
 import { AuthDialog } from "@/src/components/hosted-onboarding/auth-dialog";
 import { Button, buttonVariants } from "@/src/components/ui/button";
@@ -40,7 +40,10 @@ export function MurphChatAction({
   const option = options.length === 1 ? options[0] : null;
   const needsSettings = options.length === 0 && authenticated;
   const content = <><MessageCircle data-icon="inline-start" />{label}</>;
-  const trigger = button ?? <Button size="lg">{content}</Button>;
+  // A streamed server child can arrive as a lazy React node. Normalize it
+  // before cloning so the trigger keeps its actual component type during SSR.
+  const resolvedButton = Children.toArray(button).find(isValidElement<ChatTriggerProps>);
+  const trigger = resolvedButton ?? <Button size="lg">{content}</Button>;
 
   if (options.length > 1) {
     return <MurphContactDialog options={options} trigger={cloneElement(trigger, { "aria-label": label })} />;
@@ -57,8 +60,8 @@ export function MurphChatAction({
           : `Link a contact method to ${label.charAt(0).toLowerCase()}${label.slice(1)}`}
       />
     );
-    return button
-      ? cloneElement(button, { render: link })
+    return resolvedButton
+      ? cloneElement(resolvedButton, { render: link })
       : cloneElement(link, { className: buttonVariants({ size: "lg" }) }, content);
   }
 

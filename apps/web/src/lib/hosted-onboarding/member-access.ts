@@ -40,7 +40,8 @@ import type { HostedOnboardingReadClient } from "./shared";
  *   an active current participant through `readActiveHostedMemberAccess`.
  *
  * Owners cannot themselves be containers, so the derivation depth is at most
- * two and a single query loads everything the owner branch needs.
+ * two. Boolean gates select only the matching member ID; callers that need
+ * access state load the related rows.
  * Every runtime, webhook, page, and egress gate must use this module; the
  * paid-billing predicate in `entitlement.ts` is for surfaces that genuinely
  * mean "this member's own subscription".
@@ -309,7 +310,34 @@ export async function readActiveHostedMemberAccess(input: {
   now?: Date;
   prisma?: HostedOnboardingReadClient;
 }): Promise<boolean> {
-  return await readActiveHostedMemberAccessState(input) !== null;
+  const prisma = input.prisma ?? getPrisma();
+  // Keep boolean gates in one SQL statement instead of hydrating the member,
+  // memberships, groups, container and owner through separate relation reads.
+  const member = await prisma.hostedMember.findUnique({
+    select: { id: true },
+    where: {
+      id: input.memberId,
+      suspendedAt: null,
+      OR: [
+        activeHostedMemberAccessWhere(),
+        {
+          threadContainer: {
+            is: {
+              participants: {
+                some: {
+                  ...activeHostedThreadContainerParticipantWhere({
+                    now: input.now ?? new Date(),
+                  }),
+                  participant: activeHostedMemberAccessWhere(),
+                },
+              },
+            },
+          },
+        },
+      ],
+    },
+  });
+  return member !== null;
 }
 
 export async function readActiveHostedMemberAccessState(input: {

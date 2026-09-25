@@ -264,14 +264,12 @@ describe("hosted runtime log database migration", () => {
   });
 
   it("routes live Web producers through the new owner and keeps device-sync apply and hot status reads log-free", async () => {
-    const repoRoot = path.resolve(appRoot, "../..");
     const [
       callbackRoute,
       computerLog,
       deviceAuthority,
       workspaceStore,
       mailboxStore,
-      runner,
     ] =
       await Promise.all([
         readFile(path.join(
@@ -294,10 +292,6 @@ describe("hosted runtime log database migration", () => {
           appRoot,
           "src/lib/hosted-mailbox/store.ts",
         ), "utf8"),
-        readFile(path.join(
-          repoRoot,
-          "apps/cloudflare/src/user-runner/hosted-user-runner.ts",
-        ), "utf8"),
       ]);
 
     for (const producer of [callbackRoute, computerLog]) {
@@ -314,9 +308,6 @@ describe("hosted runtime log database migration", () => {
     );
     expect(mailboxStore).not.toContain("recordHostedRuntimeLog");
     expect(mailboxStore).not.toContain('"mailbox.appended"');
-    expect(runner.replace(/\s+/gu, " ")).toContain(
-      "readHostedRuntimeStatusFromWeb(userId, { logLimit: 0 })",
-    );
   });
 });
 

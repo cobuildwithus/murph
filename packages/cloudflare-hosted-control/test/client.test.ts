@@ -28,6 +28,20 @@ import {
 type ObservedRequest = { init?: RequestInit; url: string };
 
 describe("createCloudflareHostedControlClient", () => {
+  it("sends a member-bound voice control with the exact offer and runtime fence", async () => {
+    const fetchImpl = vi.fn(async () => createJsonResponse({ kind: "connected", sdp: "v=0\r\nanswer" }));
+    const client = createCloudflareHostedControlClient({
+      baseUrl: "https://runner.example.test", fetchImpl: fetchImpl as typeof fetch, getBearerToken: async () => "token-synthetic",
+    });
+    const request = { action: "connect" as const, callId: "call-synthetic", attemptId: "attempt-synthetic",
+      leaseGeneration: "3", sdp: "v=0\r\noffer" };
+    expect(await client.controlVoice({ userId: "member-synthetic", request })).toEqual({ kind: "connected", sdp: "v=0\r\nanswer" });
+    const [url, init] = vi.mocked(fetchImpl as typeof fetch).mock.calls[0]!;
+    expect(url).toBe("https://runner.example.test/internal/users/member-synthetic/runtime/voice");
+    expect(JSON.parse(String(init?.body))).toEqual(request);
+    expect(new Headers(init?.headers).get("authorization")).toBe("Bearer token-synthetic");
+    expect(new Headers(init?.headers).get("x-hosted-execution-user-id")).toBe("member-synthetic");
+  });
   afterEach(() => {
     vi.useRealTimers();
   });
@@ -39,6 +53,7 @@ describe("createCloudflareHostedControlClient", () => {
     });
 
     expect(Object.keys(client).sort()).toEqual([
+      "controlVoice",
       "createBrowserVaultExportSession",
       "createBrowserVaultSession",
       "createEnvironmentRealtimeCall",
@@ -48,6 +63,7 @@ describe("createCloudflareHostedControlClient", () => {
       "enqueueDeviceWebhook",
       "ensureRuntimeProcessing",
       "getRunnerStatus",
+      "purgeRuntimeResource",
       "reconcileRuntimeHealthDataConsent",
       "sendTelegramUsageLimitNotice",
       "stageEnvironmentVoice",
@@ -325,6 +341,7 @@ describe("createCloudflareHostedControlClient", () => {
         commandTimeoutMs: 25_000,
         onTiming,
         orchestrationAttemptId: "web-ingress-attempt-test",
+        voiceCallId: "call-synthetic",
         signal: abortController.signal,
         userId: "user_123",
       })).resolves.toEqual({
@@ -343,6 +360,7 @@ describe("createCloudflareHostedControlClient", () => {
     expect(init.method).toBe("POST");
     expect(init.body).toBe(JSON.stringify({
       orchestrationAttemptId: "web-ingress-attempt-test",
+      voiceCallId: "call-synthetic",
     }));
     const headers = new Headers(init.headers);
     expect(headers.get("authorization")).toBe("Bearer token-123");
@@ -372,6 +390,26 @@ describe("createCloudflareHostedControlClient", () => {
       tokenAcquiredAtEpochMs: Date.parse("2026-07-06T12:00:00.010Z"),
       tokenAcquireStartedAtEpochMs: Date.parse("2026-07-06T12:00:00.000Z"),
     });
+  });
+
+  it("serializes canonical Web admission in the authenticated ensure request", async () => {
+    const admission = {
+      cutover: "postgres" as const, status: "existing" as const,
+      owner: {
+        userId: "test-user", attemptId: "attempt-test", generation: "1", phase: "active" as const,
+        processingMode: "default" as const, allocationId: "allocation-test",
+        runnerContainerName: "runner-test", workspaceVersion: "0",
+        customInferenceEnvelope: null, platformAiUsageAllowed: true,
+        startedAt: "2026-01-01T00:00:00.000Z", acceptedAt: null, completedAt: null,
+        failureCount: 0, lastErrorCode: null,
+      },
+    };
+    const fetchImpl = vi.fn(async () => createJsonResponse({ kind: "retry_later", retryAt: "2026-01-01T00:00:01.000Z" }));
+    const client = createCloudflareHostedControlClient({ baseUrl: "https://runner.example.test", fetchImpl, getBearerToken: async () => "token-test" });
+    await client.ensureRuntimeProcessing({ admission, orchestrationAttemptId: "orchestration-test", userId: "test-user" });
+    expect(fetchImpl).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({
+      body: JSON.stringify({ orchestrationAttemptId: "orchestration-test", admission }),
+    }));
   });
 
   it("posts runtime health-data consent reconciliation and validates the bound result", async () => {

@@ -135,6 +135,7 @@ else
 fi
 printf 'selected=%s\\n' "$review_gpt_selected_browser_lane"
 printf 'binary=%s\\n' "$browser_binary_path"
+printf 'launch=%s\\n' "$managed_browser_launch_mode"
 `,
     ],
     {
@@ -165,6 +166,26 @@ afterEach(() => {
 });
 
 describe("ReviewGPT repository config", () => {
+  it.each(["eragon", "hercules", "mountain", "vonneumann", "apollo"])("starts %s in the background", (lane) => {
+    const result = runConfig(createHarness(), { REVIEW_GPT_BROWSER_LANE: lane });
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toContain("launch=background\n");
+  });
+
+  it("preserves personal Main profile startup without dedicated-profile tab cleanup", () => {
+    const result = runConfig(createHarness(), { REVIEW_GPT_BROWSER_LANE: "main" });
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toContain("launch=foreground\n");
+  });
+
+  it("preserves an explicit foreground launch for interactive sign-in", () => {
+    const result = runConfig(createHarness('managed_browser_launch_mode="foreground"\n'), {
+      REVIEW_GPT_BROWSER_LANE: "hercules",
+    });
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toContain("launch=foreground\n");
+  });
+
   it("includes every managed lane in the default automatic pool", () => {
     const harness = createHarness();
     const result = runConfig(harness, {
@@ -172,16 +193,16 @@ describe("ReviewGPT repository config", () => {
     });
 
     expect(result.status, result.stderr).toBe(0);
-    expect(result.stdout).toContain("count=6\n");
+    expect(result.stdout).toContain("count=5\n");
     expect(result.stdout).toContain(
-      "pool=eragon phlebas hercules mountain vonneumann apollo\n",
+      "pool=eragon hercules mountain vonneumann apollo\n",
     );
     expect(existsSync(harness.mdfindMarker)).toBe(false);
   });
 
   it("keeps an explicit per-run lane count above local preferences", () => {
     const harness = createHarness(
-      "REVIEW_GPT_BROWSER_LANE_COUNT=6\nMURPH_REVIEW_GPT_BROWSER_LANE_COUNT=5\n",
+      "REVIEW_GPT_BROWSER_LANE_COUNT=5\nMURPH_REVIEW_GPT_BROWSER_LANE_COUNT=4\n",
     );
     const result = runConfig(harness, {
       REVIEW_GPT_BROWSER_LANE: "auto",
@@ -190,12 +211,12 @@ describe("ReviewGPT repository config", () => {
 
     expect(result.status, result.stderr).toBe(0);
     expect(result.stdout).toContain("count=2\n");
-    expect(result.stdout).toContain("pool=eragon phlebas\n");
+    expect(result.stdout).toContain("pool=eragon hercules\n");
     expect(existsSync(harness.mdfindMarker)).toBe(false);
   });
 
   it("keeps the direct compatibility count above a local standard preference", () => {
-    const harness = createHarness("REVIEW_GPT_BROWSER_LANE_COUNT=6\n");
+    const harness = createHarness("REVIEW_GPT_BROWSER_LANE_COUNT=5\n");
     const result = runConfig(harness, {
       MURPH_REVIEW_GPT_BROWSER_LANE_COUNT: "3",
       REVIEW_GPT_BROWSER_LANE: "auto",
@@ -203,20 +224,20 @@ describe("ReviewGPT repository config", () => {
 
     expect(result.status, result.stderr).toBe(0);
     expect(result.stdout).toContain("count=3\n");
-    expect(result.stdout).toContain("pool=eragon phlebas hercules\n");
+    expect(result.stdout).toContain("pool=eragon hercules mountain\n");
     expect(existsSync(harness.mdfindMarker)).toBe(false);
   });
 
   it("uses the local count only when the invocation supplies no count", () => {
-    const harness = createHarness("REVIEW_GPT_BROWSER_LANE_COUNT=6\n");
+    const harness = createHarness("REVIEW_GPT_BROWSER_LANE_COUNT=5\n");
     const result = runConfig(harness, {
       REVIEW_GPT_BROWSER_LANE: "auto",
     });
 
     expect(result.status, result.stderr).toBe(0);
-    expect(result.stdout).toContain("count=6\n");
+    expect(result.stdout).toContain("count=5\n");
     expect(result.stdout).toContain(
-      "pool=eragon phlebas hercules mountain vonneumann apollo\n",
+      "pool=eragon hercules mountain vonneumann apollo\n",
     );
     expect(existsSync(harness.mdfindMarker)).toBe(false);
   });

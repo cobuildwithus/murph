@@ -3,8 +3,8 @@ schemaVersion: murph.commons.page.v1
 entityType: goal_template
 key: goal_template:reduce-stroke-risk
 slug: reduce-stroke-risk
-title: Lower My Risk of Stroke
-summary: Lower stroke risk by controlling blood pressure, tobacco, vascular risk, and conditions such as atrial fibrillation.
+title: Understand Stroke Prevention
+summary: Learn about stroke risk factors and prevention options to discuss with your clinician.
 status: field-testing
 quality: usable
 aliases:
@@ -17,7 +17,7 @@ categories:
 goal:
   category: biomarkers
   outcomeKind: function
-  goalPhrase: lower my risk of stroke
+  goalPhrase: understand stroke prevention
   successSignals:
     - id: stroke_risk_factors
       kind: biomarker
@@ -32,7 +32,7 @@ goal:
     kind: general_plan
     ownerSkillIds:
       - cardiometabolic-health
-  startPrompt: Hey Murph, help me lower my risk of stroke.
+  startPrompt: Hey Murph, help me understand stroke prevention.
   indexable: true
 safety:
   cautionLevel: moderate
@@ -89,4 +89,4 @@ Stroke symptoms are time-sensitive even if they disappear. A transient episode c
 
 ## Related goals
 
-[Lower My Blood Pressure](/goals/lower-blood-pressure) · [Lower My Risk of Heart Disease](/goals/reduce-heart-disease-risk) · [Lower My LDL Cholesterol](/goals/lower-ldl-cholesterol)
+[Track My Blood Pressure](/goals/lower-blood-pressure) · [Understand Heart Disease Prevention](/goals/reduce-heart-disease-risk) · [Understand My LDL Cholesterol](/goals/lower-ldl-cholesterol)

@@ -23,6 +23,8 @@ import type {
 } from "@murphai/device-syncd/types";
 import {
   JUNCTION_ECG_BINDING_REASONS,
+  JUNCTION_ECG_DIAGNOSTIC_COUNT_LIMIT,
+  readSafeJunctionNormalizationDiagnostics,
   resolveDeviceSyncStoreNextJobWakeAt,
   type DeviceSyncService,
 } from "@murphai/device-syncd/service";
@@ -141,6 +143,7 @@ type HostedDeviceSyncQueueSnapshot = {
   oldestJobAgeMs: number | null;
   queuedJobCount: number;
   runningJobCount: number;
+  runnableJobCount: number;
 };
 
 type HostedDeviceSyncPassQueueSnapshots = {
@@ -153,6 +156,30 @@ const HOSTED_DEVICE_SYNC_FITBIT_CUTOVER_RETRY_DELAY_MS = 30_000;
 type HostedDeviceSyncMaintenanceStore = ReturnType<
   typeof requireHostedRuntimeDeviceSyncStore
 >;
+
+async function coalesceHostedWebhookReconcile(input: {
+  wakeLocalAccountId: string | null;
+  syncState: HostedDeviceSyncRuntimeSyncState;
+  service: DeviceSyncService;
+  shouldYield: (() => boolean) | null;
+}): Promise<void> {
+  const { wakeLocalAccountId, syncState, service, shouldYield } = input;
+  if (
+    wakeLocalAccountId && syncState.pendingDirtyPayloadJobs.length > 0
+    && requireHostedRuntimeDeviceSyncStore(service).getAccountById(wakeLocalAccountId)?.provider === "junction"
+    && !shouldYieldHostedDeviceSync(shouldYield)
+  ) {
+    // Retained reconciliation owners also absorb webhook hints, so actual
+    // dirty admission, not the original wake reason, qualifies this pass.
+    // Use this already-awake pass for a nearby full pull. Never refresh a
+    // complete content proof from a partial webhook import, or delay the
+    // pull floor merely because a webhook arrived. The ordinary hourly
+    // cadence permits at most two full pulls per hour with this lookahead.
+    await service.runSchedulerOnce(wakeLocalAccountId, {
+      reconcileBefore: new Date(Date.now() + 30 * 60_000).toISOString(),
+    });
+  }
+}
 
 export async function runHostedDeviceSyncPass(
   wake: HostedRuntimeEvent,
@@ -343,6 +370,8 @@ export async function runHostedDeviceSyncPass(
         wake,
       });
     }
+
+    await coalesceHostedWebhookReconcile({ wakeLocalAccountId, syncState, service, shouldYield });
 
     if (shouldYieldHostedDeviceSync(shouldYield)) {
       return buildHostedDeviceSyncYieldedPassResult({
@@ -986,10 +1015,14 @@ function remainingHostedDeviceSyncDenseRawRetentionDeadlineMs(
   timeoutMs: number | null,
 ): number {
   const elapsedMs = Math.max(0, Date.now() - startedAtMs);
-  const passRelativeTimeoutMs = timeoutMs === null
+  // Retention has its own stage budget inside the remaining device-pass budget.
+  // Earlier provider work must not manufacture a retention continuation.
+  return timeoutMs === null
     ? HOSTED_DEVICE_SYNC_DENSE_RAW_RETENTION_TIMEOUT_MS
-    : Math.min(timeoutMs, HOSTED_DEVICE_SYNC_DENSE_RAW_RETENTION_TIMEOUT_MS);
-  return Math.max(0, passRelativeTimeoutMs - elapsedMs);
+    : Math.min(
+        HOSTED_DEVICE_SYNC_DENSE_RAW_RETENTION_TIMEOUT_MS,
+        Math.max(0, timeoutMs - elapsedMs),
+      );
 }
 
 async function drainHostedDeviceSyncWorker(input: {
@@ -1055,9 +1088,14 @@ function buildHostedDeviceSyncQueueSnapshot(
   let oldestCreatedAtMs: number | null = null;
   let queuedJobCount = 0;
   let runningJobCount = 0;
+  let runnableJobCount = 0;
 
   for (const job of sampledJobs) {
     const jobKind = toHostedDeviceSyncQueueJobKindLogCode(job.kind);
+    // Missing or invalid availability cannot prove that work is deferred.
+    if (job.status === "running" || !(Date.parse(job.availableAt) > nowMs)) {
+      runnableJobCount += 1;
+    }
     jobKindCounts.set(jobKind, (jobKindCounts.get(jobKind) ?? 0) + 1);
     maxJobAttempts = Math.max(maxJobAttempts ?? 0, job.attempts);
     const createdAtMs = Date.parse(job.createdAt);
@@ -1083,6 +1121,7 @@ function buildHostedDeviceSyncQueueSnapshot(
       : Math.max(0, nowMs - oldestCreatedAtMs),
     queuedJobCount,
     runningJobCount,
+    runnableJobCount,
   };
 }
 
@@ -1425,7 +1464,10 @@ export async function runHostedDeviceSyncWakeLane(input: {
       ...(nextWake.reason ? { nextWakeReason: nextWake.reason } : {}),
       parserProcessed: 0,
       postCheckpointRecord: deviceSyncResult.postCheckpointRecord ?? null,
-      ...(jobTimingDiagnostics.some((diagnostic) => diagnostic.canonicalProgressCommitted === true)
+      ...(jobTimingDiagnostics.some((diagnostic) =>
+        diagnostic.canonicalProgressCommitted === true
+        || diagnostic.continuationProgressCommitted === true
+      )
         ? { systemProgressed: true as const }
         : {}),
       ...(deviceSyncResult.stagedDirtyAcks
@@ -1535,7 +1577,8 @@ function writeHostedDeviceSyncPassLifecycleLog(input: {
         processedJobs: input.processedJobs,
         ...(input.lifecycle === "finished"
           ? {
-              ...buildHostedDeviceSyncPassProgressDiagnostics(input.input.wake, input.result),
+              ...summarizeJunctionMeasurementResourceOutcomes(input.jobTimingDiagnostics),
+              ...buildHostedDeviceSyncPassProgressDiagnostics(input.input.wake, input.result, queueSnapshotAfter),
               pendingJobCountAfter: queueSnapshotAfter?.jobCount ?? null,
               pendingJobCountAfterTruncated:
                 queueSnapshotAfter?.jobCountTruncated ?? null,
@@ -1560,6 +1603,10 @@ function writeHostedDeviceSyncPassLifecycleLog(input: {
                 0,
               ),
               deviceSyncJobTimingCount: input.jobTimingDiagnostics.length,
+              deviceSyncContinuationProgressCommittedCount: input.jobTimingDiagnostics.reduce(
+                (total, diagnostic) => total + (diagnostic.continuationProgressCommitted === true ? 1 : 0),
+                0,
+              ),
               deviceSyncImportAppliedCount: jobTimingSummary.importOutcomes.applied,
               deviceSyncImportNoopCount: jobTimingSummary.importOutcomes.noop,
               deviceSyncImportFailedCount: jobTimingSummary.importOutcomes.failed,
@@ -1593,9 +1640,30 @@ function writeHostedDeviceSyncPassLifecycleLog(input: {
   });
 }
 
+function summarizeJunctionMeasurementResourceOutcomes(
+  diagnostics: readonly DeviceSyncJobTimingDiagnostic[],
+): Record<string, number> {
+  return Object.fromEntries([
+    ["blood_oxygen", "deviceSyncBloodOxygen"],
+    ["electrocardiogram_voltage", "deviceSyncEcg"],
+  ].flatMap(([resource, prefix]) => {
+    const matching = diagnostics.filter((item) => item.provider === "junction" && item.resource === resource);
+    if (matching.length === 0) return [];
+    return [
+      [`${prefix}CompletedJobCount`, matching.filter((item) => item.outcome === "completed").length],
+      [`${prefix}FailedJobCount`, matching.filter((item) => item.outcome === "failed").length],
+      [`${prefix}ImportAppliedCount`, matching.reduce((total, item) => total + item.snapshotImportOutcomes.applied, 0)],
+      [`${prefix}ImportNoopCount`, matching.reduce((total, item) => total + item.snapshotImportOutcomes.noop, 0)],
+      [`${prefix}ImportFailedCount`, matching.reduce((total, item) => total + item.snapshotImportOutcomes.failed, 0)],
+      [`${prefix}ImportUnknownCount`, matching.reduce((total, item) => total + item.snapshotImportOutcomes.unknown, 0)],
+    ];
+  }));
+}
+
 function buildHostedDeviceSyncPassProgressDiagnostics(
   wake: HostedRuntimeEvent,
   result: HostedMaintenanceMetrics | null,
+  queueSnapshotAfter: HostedDeviceSyncQueueSnapshot | null,
 ): Record<string, string | number | boolean | null> {
   const record = result?.postCheckpointRecord;
   const retainedWake = record?.kind === "device-sync.dirty-processed-batch"
@@ -1603,6 +1671,7 @@ function buildHostedDeviceSyncPassProgressDiagnostics(
     : null;
   const incoming = wake.kind === "device-sync.wake" ? wake.hint?.jobs ?? [] : [];
   const outgoing = retainedWake?.hint?.jobs ?? [];
+  const nowMs = Date.now();
   const fingerprint = (jobs: typeof incoming) => createHash("sha256")
     .update(JSON.stringify(["device-sync-continuation-progress-v1", wake.userId]))
     .update(JSON.stringify(jobs.map((job) => JSON.stringify([
@@ -1617,8 +1686,17 @@ function buildHostedDeviceSyncPassProgressDiagnostics(
     ])).sort()))
     .digest("hex");
   return {
+    deviceSyncConnectionKey: wake.kind === "device-sync.wake" && wake.connectionId
+      ? createHash("sha256")
+        .update(JSON.stringify(["device-sync-connection-v1", wake.userId, wake.connectionId]))
+        .digest("hex")
+      : null,
     incomingRetainedJobCount: incoming.length,
+    pendingRunnableJobCountAfter: queueSnapshotAfter?.runnableJobCount ?? null,
     outgoingRetainedJobCount: outgoing.length,
+    outgoingRetainedRunnableJobCount: outgoing.filter(
+      (job) => !(Date.parse(job.availableAt ?? "") > nowMs),
+    ).length,
     incomingRetainedProgressFingerprint: fingerprint(incoming),
     outgoingRetainedProgressFingerprint: fingerprint(outgoing),
     retainedMailboxOwnerPresent: record?.kind === "device-sync.dirty-processed-batch"
@@ -2044,6 +2122,14 @@ const DEVICE_SYNC_FAILURE_DIAGNOSTIC_BOOLEAN_FIELDS = [
   "providerOAuthResponseErrorFieldPresent",
 ] as const satisfies readonly DeviceSyncFailureDiagnosticBooleanField[];
 
+const JUNCTION_ECG_DIAGNOSTIC_COUNT_FIELDS = [
+  "junctionEcgActualRecordingCount", "junctionEcgActualSampleCount",
+  "junctionEcgExpectedRecordingCount", "junctionEcgExpectedSampleCount",
+  "junctionEcgMaxRecordingCount", "junctionEcgMaxSampleCount",
+  "junctionEcgPageCount", "junctionEcgGroupCount", "junctionEcgProviderMatchGroupCount",
+  "junctionEcgInstanceMatchGroupCount", "junctionEcgMatchedGroupCount",
+] as const satisfies readonly DeviceSyncFailureDiagnosticNumberField[];
+
 function buildHostedDeviceSyncFailureDiagnosticRedactedJson(
   diagnostic: DeviceSyncJobFailureDiagnostic,
 ): Record<string, boolean | number | string | null> {
@@ -2059,6 +2145,27 @@ function buildHostedDeviceSyncFailureDiagnosticRedactedJson(
     && JUNCTION_ECG_BINDING_REASONS.has(ecgBindingReason)
   ) {
     redacted.junctionEcgBindingReason = ecgBindingReason;
+    for (const field of JUNCTION_ECG_DIAGNOSTIC_COUNT_FIELDS) {
+      const value = diagnostic.details[field];
+      if (typeof value === "number" && Number.isSafeInteger(value)
+        && value >= 0 && value <= JUNCTION_ECG_DIAGNOSTIC_COUNT_LIMIT) {
+        redacted[field] = value;
+      }
+    }
+    redacted.providerHttpStatusSource = "local_validation";
+  }
+  if (diagnostic.code === "JUNCTION_CALENDAR_REFRESH_INCOMPLETE_NORMALIZATION") {
+    Object.assign(redacted, readSafeJunctionNormalizationDiagnostics({
+      normalizationValueKind: diagnostic.details.normalizationValueKind,
+      normalizationValueRange: diagnostic.details.normalizationValueRange,
+      normalizationUnitKind: diagnostic.details.normalizationUnitKind,
+    }));
+  }
+  if (diagnostic.provider === "junction"
+    && (diagnostic.code === "JUNCTION_CALENDAR_REFRESH_INCOMPLETE_NORMALIZATION"
+      || diagnostic.code === "JUNCTION_ECG_RECORDING_BINDING_INCOMPLETE")
+    && diagnostic.details.validationRetryDelayMs === 30 * 60_000) {
+    redacted.validationRetryDelayMs = diagnostic.details.validationRetryDelayMs;
   }
 
   if (diagnostic.accountStatus) {

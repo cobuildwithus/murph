@@ -65,7 +65,7 @@ interface StandbyClaimRow extends Record<string, DurableObjectSqlValue> {
 type CleanupTarget = { slotName: string; claimId?: string };
 
 export class StandbyRunnerCoordinatorDurableObject extends DurableObject {
-  private fillWork: Promise<void> | null = null;
+  private readonly fillWork = new Set<Promise<void>>();
   private cleanupWork: Promise<void> | null = null;
   private fillRequested = false;
   private cleanupRequested = false;
@@ -168,24 +168,23 @@ export class StandbyRunnerCoordinatorDurableObject extends DurableObject {
   }
 
   // Independent, coalesced lanes: a slow cleanup batch cannot hold up a claim's
-  // refill. Repeated triggers set one dirty bit, never append maintenance jobs.
+  // refill. Preparation lanes and the cleanup dirty bit bound overlapping work.
   private startFill(): Promise<void> {
-    this.fillRequested = true;
-    if (this.fillWork) return this.fillWork;
-    this.fillWork = Promise.resolve().then(async () => {
-      do {
-        this.fillRequested = false;
-        await this.fillInventory();
-      } while (this.fillRequested);
-    }).catch(async () => {
-      await this.state.storage.setAlarm(Date.now() + HOSTED_STANDBY_RETRY_MS);
-    }).finally(() => {
-      this.fillWork = null;
-      // A trigger may arrive after the loop exits but before this continuation.
-      if (this.fillRequested) this.startFill();
-    });
-    this.state.waitUntil(this.fillWork);
-    return this.fillWork;
+    this.fillRequested = this.fillWork.size === STANDBY_PARALLELISM;
+    // Each trigger can occupy a free lane while earlier preparations are pending.
+    // SQLite owns reservations; this set only bounds this invocation's I/O.
+    for (let lane = this.fillWork.size; lane < STANDBY_PARALLELISM; lane += 1) {
+      const work = Promise.resolve().then(() => this.fillInventory()).catch(async () => {
+        await this.state.storage.setAlarm(Date.now() + HOSTED_STANDBY_RETRY_MS);
+      }).finally(() => {
+        this.fillWork.delete(work);
+        if (this.fillRequested) this.startFill();
+      });
+      this.fillWork.add(work);
+    }
+    const pending = Promise.all([...this.fillWork]).then(() => undefined);
+    this.state.waitUntil(pending);
+    return pending;
   }
 
   private startCleanup(): Promise<void> {
@@ -210,56 +209,50 @@ export class StandbyRunnerCoordinatorDurableObject extends DurableObject {
     // Bound attempts even when every preparation fails. A later alarm retries.
     let remaining = Math.max(STANDBY_PARALLELISM, this.desiredTarget());
     let reprobed = false;
-    const workers = await Promise.allSettled(Array.from({ length: STANDBY_PARALLELISM }, async () => {
-      while (remaining > 0) {
-        const reservation = this.transactionSync(() => {
-          this.rebalance();
-          const target = this.desiredTarget();
-          const state = this.store.readState();
-          if (!target || !state.releaseId) return null;
-          const pending = this.store.readInventory().find((row) =>
-            row.phase === "provisioning" && row.check_at_ms <= Date.now()
-            && !this.preparing.has(row.slot_name));
-          if (pending) return { slotName: pending.slot_name, fresh: false };
-          if (state.readySlotNames.length + state.provisioningSlotNames.length < target) {
-            const slotName = createHostedRunnerSlotName(state.releaseId);
-            this.store.insertProvisioning(slotName);
-            return { slotName, fresh: true };
-          }
-          if (!reprobed && state.provisioningSlotNames.length === 0) {
-            const slotName = this.store.beginReproof(Date.now(), target);
-            if (slotName) {
-              reprobed = true;
-              return { slotName, fresh: false };
-            }
-          }
-          return null;
-        });
-        if (!reservation) break;
-        remaining -= 1;
-        this.preparing.add(reservation.slotName);
-        try {
-          // Persist both the exact intent and its recovery alarm BEFORE even
-          // obtaining the external stub. A reset never substitutes a new name.
-          await this.scheduleRecovery();
-          this.transactionSync(() => this.rebalance());
-          if (!this.store.isProvisioning(reservation.slotName)) {
-            // This invocation alone knows a fresh intent never left the owner.
-            if (reservation.fresh) this.store.forgetSlot(reservation.slotName);
-            continue;
-          }
-          if (!await this.prepareSlot(reservation.slotName)) break;
-        } finally {
-          this.preparing.delete(reservation.slotName);
-          this.store.makeDrainDue(reservation.slotName, Date.now());
-          this.startCleanup();
+    while (remaining > 0) {
+      const reservation = this.transactionSync(() => {
+        this.rebalance();
+        const target = this.desiredTarget();
+        const state = this.store.readState();
+        if (!target || !state.releaseId) return null;
+        const pending = this.store.readInventory().find((row) =>
+          row.phase === "provisioning" && row.check_at_ms <= Date.now()
+          && !this.preparing.has(row.slot_name));
+        if (pending) return { slotName: pending.slot_name, fresh: false };
+        if (state.readySlotNames.length + state.provisioningSlotNames.length < target) {
+          const slotName = createHostedRunnerSlotName(state.releaseId);
+          this.store.insertProvisioning(slotName);
+          return { slotName, fresh: true };
         }
+        if (!reprobed && state.provisioningSlotNames.length === 0) {
+          const slotName = this.store.beginReproof(Date.now(), target);
+          if (slotName) {
+            reprobed = true;
+            return { slotName, fresh: false };
+          }
+        }
+        return null;
+      });
+      if (!reservation) break;
+      remaining -= 1;
+      this.preparing.add(reservation.slotName);
+      try {
+        // Persist both the exact intent and its recovery alarm BEFORE even
+        // obtaining the external stub. A reset never substitutes a new name.
+        await this.scheduleRecovery();
+        this.transactionSync(() => this.rebalance());
+        if (!this.store.isProvisioning(reservation.slotName)) {
+          // This invocation alone knows a fresh intent never left the owner.
+          if (reservation.fresh) this.store.forgetSlot(reservation.slotName);
+          continue;
+        }
+        if (!await this.prepareSlot(reservation.slotName)) break;
+      } finally {
+        this.preparing.delete(reservation.slotName);
+        this.store.makeDrainDue(reservation.slotName, Date.now());
+        this.startCleanup();
       }
-    }));
-    // A failed worker must not release the fill owner while its peer still
-    // prepares a slot, or the next trigger could start another pair.
-    const failed = workers.find((worker) => worker.status === "rejected");
-    if (failed?.status === "rejected") throw failed.reason;
+    }
     await this.scheduleRecovery();
   }
 

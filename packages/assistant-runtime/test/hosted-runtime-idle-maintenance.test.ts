@@ -34,9 +34,11 @@ vi.mock("../src/hosted-runtime/pending-input-index.ts", () => ({
 }));
 const archiveClosedIntegrationIngestShards = vi.fn();
 const archiveClosedEventLedgerShards = vi.fn();
+const archiveClosedAuditShards = vi.fn();
 const runGeneratedImageCaptureRetention = vi.fn();
 vi.mock("@murphai/core", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@murphai/core")>()),
+  archiveClosedAuditShards: (input: unknown) => archiveClosedAuditShards(input),
   archiveClosedEventLedgerShards: (input: unknown) =>
     archiveClosedEventLedgerShards(input),
   archiveClosedIntegrationIngestShards: (input: unknown) =>
@@ -150,6 +152,15 @@ beforeEach(() => {
   });
   archiveClosedEventLedgerShards.mockReset();
   archiveClosedEventLedgerShards.mockResolvedValue({
+    archivedByteCount: 0,
+    archivedShardCount: 0,
+    blockedShardCount: 0,
+    repairedShardCount: 0,
+    scannedShardCount: 0,
+    sourceByteCount: 0,
+  });
+  archiveClosedAuditShards.mockReset();
+  archiveClosedAuditShards.mockResolvedValue({
     archivedByteCount: 0,
     archivedShardCount: 0,
     blockedShardCount: 0,
@@ -1480,8 +1491,51 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     ).toEqual({ kind: "skipped", reason: "pending_work", threadContextTokensBefore: null });
     expect(compactWarmCodexThread).not.toHaveBeenCalled();
     expect(archiveClosedEventLedgerShards).not.toHaveBeenCalled();
+    expect(archiveClosedAuditShards).not.toHaveBeenCalled();
     expect(archiveClosedIntegrationIngestShards).not.toHaveBeenCalled();
   });
+
+  it.each([undefined, "default", "system_mailbox", "inbox_media_retention"] as const)(
+    "retains every content cleanup and limits unrelated archives for %s processing",
+    async (processingMode) => {
+      const nextWakeAt = "2026-10-01T12:00:00.000Z";
+      runInboxTextRetention.mockResolvedValue({
+        expiredCaptures: 1,
+        hasMoreEligibleCaptures: false,
+        legacyCapturesSkipped: 0,
+        nextEligibleAt: nextWakeAt,
+      });
+      const outcome = await runHostedIdleCheckpointMaintenance({
+        credentialSource: "platform",
+        memberId: "member_retention_scope",
+        model: null,
+        pendingWork: false,
+        processingMode,
+        providerName: null,
+        recordUsage: null,
+        resolveAssistantSessionId: null,
+        shutdownSignal: null,
+        vaultRoot: "/synthetic-vault",
+        wakeSignal: null,
+      });
+      expect(outcome).toMatchObject({ nextWakeAt, nextWakeReason: "inbox_media_retention" });
+      for (const cleanup of [
+        runHostedPendingAssistantInputContentRetention,
+        runAssistantTranscriptContentRetention,
+        runInboxMediaRetention,
+        runGeneratedImageCaptureRetention,
+        runInboxEnvelopeMigration,
+        runInboxTextRetention,
+      ]) {
+        expect(cleanup).toHaveBeenCalledOnce();
+      }
+      const expectedArchiveCalls = processingMode === "inbox_media_retention" ? 0 : 1;
+      expect(archiveClosedEventLedgerShards).toHaveBeenCalledTimes(expectedArchiveCalls);
+      expect(archiveClosedAuditShards).toHaveBeenCalledTimes(expectedArchiveCalls);
+      expect(archiveClosedIntegrationIngestShards).toHaveBeenCalledTimes(expectedArchiveCalls);
+      expect(compactWarmCodexThread).not.toHaveBeenCalled();
+    },
+  );
 
   it("archives closed event and integration shards only on a true idle checkpoint", async () => {
     compactWarmCodexThread.mockResolvedValue({
@@ -1509,9 +1563,12 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       vaultRoot: "/vault",
     });
     expect(archiveClosedIntegrationIngestShards).toHaveBeenCalledOnce();
+    expect(archiveClosedIntegrationIngestShards.mock.calls[0]?.[0]?.archiveCurrentMonth).toBe(true);
     const eventSignal = archiveClosedEventLedgerShards.mock.calls[0]?.[0]?.signal;
     const integrationSignal = archiveClosedIntegrationIngestShards.mock.calls[0]?.[0]?.signal;
     expect(integrationSignal).toBe(eventSignal);
+    expect(archiveClosedAuditShards).toHaveBeenCalledOnce();
+    expect(archiveClosedAuditShards.mock.calls[0]?.[0]?.signal).toBe(eventSignal);
   });
 
   it("archives later healthy history after a long malformed event shard", async () => {
@@ -1546,6 +1603,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       archiveClosedEventLedgerShards.mockImplementation(
         actualCore.archiveClosedEventLedgerShards,
       );
+      archiveClosedAuditShards.mockImplementation(actualCore.archiveClosedAuditShards);
 
       compactWarmCodexThread.mockResolvedValue({
         kind: "skipped",
@@ -1570,6 +1628,8 @@ describe("runHostedIdleCheckpointMaintenance", () => {
         threadContextTokensBefore: 20_000,
       });
 
+      await expect(fs.access(path.join(vaultRoot, "audit/2020/2020-01.jsonl"))).rejects.toThrow();
+      await expect(fs.access(path.join(vaultRoot, "audit/2020/2020-01.jsonl.br"))).resolves.toBeUndefined();
       await expect(fs.access(malformedRawAbsolutePath)).resolves.toBeUndefined();
       await expect(fs.access(`${malformedRawAbsolutePath}.br`)).rejects.toThrow();
       await expect(fs.access(rawAbsolutePath)).rejects.toThrow();
@@ -1745,9 +1805,10 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     expect(compactWarmCodexThread).not.toHaveBeenCalled();
   });
 
-  it("aborts event archiving before later maintenance when a member-visible wake arrives", async () => {
+  it.each(["event", "audit"] as const)("aborts %s archiving before later maintenance when a member-visible wake arrives", async (family) => {
     const wakeSignal = createCoalescingRuntimeWakeSignal();
-    archiveClosedEventLedgerShards.mockImplementation(
+    const archive = family === "audit" ? archiveClosedAuditShards : archiveClosedEventLedgerShards;
+    archive.mockImplementation(
       async (input: { signal: AbortSignal }) =>
         await new Promise((_resolve, reject) => {
           input.signal.addEventListener("abort", () => reject(input.signal.reason), {

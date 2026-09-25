@@ -28,3 +28,28 @@ Capture completed attachment bytes from the response artifact endpoint as a fall
 This blocked exact application of a production-fix patch and required multiple replacement ReviewGPT runs plus an inline gzip/base64 transfer workaround.
 
 A later exact-artifact download created the expected patch file but timed out waiting for the matching CDP event and removed that invocation-owned file. Retrying with capture metadata then rejected the otherwise unique exported turn. Independent verification of the complete response hash (restoring the export-omitted terminal newline), committed user/assistant turn identities, response model and sole artifact label permitted exact recovery through the public downloader; the original capture metadata was preserved.
+
+A subsequent implementation run completed with a patch, but exact-metadata
+download failed twice after rehydrating the closed capture target. Exporting
+with the unchanged capture metadata succeeded. The public snapshot API verified
+the exact response and artifact on its recovered target; passing that verified
+target to the public downloader recovered the patch without another model send.
+The original capture metadata remained unchanged, and the recovery target was
+closed after use. The downloader should wait for rehydration using the same
+identity-aware behavior as the exporter.
+
+An exact-metadata download also timed out while a native Save dialog prevented
+the browser download event. Export with unchanged capture metadata verified the
+same response and sole artifact; selecting that artifact and completing the
+native dialog recovered the patch without another model request. Surface this
+dialog as an actionable download state instead of a generic CDP-event timeout.
+
+With the pinned 0.5.147 toolchain, a waited implementation request also remained
+in its waiting loop after a settled response exposed the requested completion
+marker and patch button. The original metadata still had no assistant identity,
+so the CLI downloader rejected it. After stopping only the proven task-owned
+stalled capture process, exact-metadata export recovered the accepted turn.
+The public identity-completion helper validated that exported response and
+produced separate recovery metadata; the ordinary exact-metadata downloader
+then recovered the patch. The original metadata was preserved. Recovery should
+complete identity from a verified export without another model request.

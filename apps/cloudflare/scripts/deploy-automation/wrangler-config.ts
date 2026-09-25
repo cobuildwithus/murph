@@ -4,7 +4,6 @@ import { fileURLToPath } from "node:url";
 import { resolveHostedEmailSenderIdentity } from "@murphai/hosted-execution/hosted-email";
 
 import { HOSTED_EMAIL_SEND_BINDING_NAME } from "../../src/hosted-email/constants.ts";
-import { readSmallRunnerEnabled } from "../../src/small-runner-profile.ts";
 import type { HostedDeployAutomationEnvironment } from "./environment.ts";
 import { HOSTED_WORKER_REQUIRED_SECRET_NAMES } from "./secrets.ts";
 
@@ -13,7 +12,8 @@ const DEFAULT_DEPLOY_ROOT = path.resolve(
   "..",
   "..",
 );
-const RUNNER_CONTAINER_ROLLOUT_ACTIVE_GRACE_PERIOD_SECONDS = 300;
+// Connection age is not the checkpoint deadline; SIGTERM draining protects accepted work.
+const RUNNER_CONTAINER_ROLLOUT_ACTIVE_GRACE_PERIOD_SECONDS = 0;
 const DEPLOY_SMOKE_CONTAINER_ROLLOUT_ACTIVE_GRACE_PERIOD_SECONDS = 0;
 const CONTAINER_ROLLOUT_STEP_PERCENTAGE = [10, 25, 50, 100] as const;
 const DEVICE_WEBHOOK_QUEUE_SUFFIX = "device-webhooks";
@@ -36,7 +36,6 @@ export function buildHostedWranglerDeployConfig(
     } | null;
   } = {},
 ): Record<string, unknown> {
-  readSmallRunnerEnabled(environment.workerVars);
   const vars: Record<string, string> = {
     HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS: environment.maxEventAttempts,
     HOSTED_EXECUTION_RETRY_DELAY_MS: environment.retryDelayMs,
@@ -71,9 +70,7 @@ export function buildHostedWranglerDeployConfig(
       ...(input.constraints ? { constraints: input.constraints } : {}),
       image: "../../../Dockerfile.cloudflare-hosted-runner",
       image_build_context: "..",
-      instance_type: input.className === "SmallRunnerContainer"
-        ? { vcpu: 1, memory_mib: 3072, disk_mb: 6000 }
-        : environment.containerInstanceType,
+      instance_type: environment.containerInstanceType,
       max_instances: input.maxInstances,
       rollout_active_grace_period: input.rolloutActiveGracePeriodSeconds,
       // Wrangler limits the array length to max_instances. A retained zero-cap
@@ -124,20 +121,15 @@ export function buildHostedWranglerDeployConfig(
         rolloutActiveGracePeriodSeconds:
           RUNNER_CONTAINER_ROLLOUT_ACTIVE_GRACE_PERIOD_SECONDS,
       }),
+      // Existing native resources are retained by stageHostedRunnerRelease.
+      // This declaration never provisions or rolls out the retired experiment.
       buildRunnerContainerConfig({
-        className: "SmallRunnerContainer",
-        // Immutable replacement targets need admission headroom while the
-        // provider releases previous capacity. This is a ceiling, not prewarm.
-        maxInstances: 10,
+        className: "SmallRunnerContainer", maxInstances: 0,
         rolloutActiveGracePeriodSeconds: RUNNER_CONTAINER_ROLLOUT_ACTIVE_GRACE_PERIOD_SECONDS,
       }),
     ],
     durable_objects: {
       bindings: [
-        {
-          name: "USER_RUNNER",
-          class_name: "UserRunnerDurableObject",
-        },
         {
           name: "DATABASE_HEALTH_MONITOR",
           class_name: "DatabaseHealthDurableObject",
@@ -213,6 +205,7 @@ export function buildHostedWranglerDeployConfig(
         new_sqlite_classes: ["NextRunnerContainer"],
       },
       { tag: "v9", new_sqlite_classes: ["SmallRunnerContainer"] },
+      { tag: "v10", deleted_classes: ["UserRunnerDurableObject"] },
     ],
     triggers: {
       crons: ["*/5 * * * *"],

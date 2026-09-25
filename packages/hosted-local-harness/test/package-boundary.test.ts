@@ -33,6 +33,7 @@ describe("@murphai/hosted-local-harness package boundary", () => {
         ["@murphai/hosted-local-harness/dev-hosted-local/environment", ["loadHostedLocalBaseEnvironment"]],
         ["@murphai/hosted-local-harness/dev-hosted-local/stack", ["startHostedLocalDevStack"]],
         ["@murphai/hosted-local-harness/harness", ["startHostedLocalHarness"]],
+        ["@murphai/hosted-local-harness/process", ["runForegroundCommand"]],
         ["@murphai/hosted-local-harness/e2e", ["runHostedLocalE2eSuite", "resolveHostedLocalE2eScenarios"]],
       ]);
       for (const [specifier, names] of expected) {

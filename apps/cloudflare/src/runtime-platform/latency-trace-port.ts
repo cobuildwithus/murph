@@ -1,9 +1,9 @@
 import type { HostedRuntimePlatform } from "@murphai/assistant-runtime/hosted-runtime-contracts";
-import { parseHostedRuntimeLatencyTraceResponse } from "@murphai/hosted-execution/parsers";
-import type { HostedRuntimeLatencyTraceResponse } from "@murphai/hosted-execution/runtime-control";
+import { parseHostedRuntimeLatencyTraceBatchRequest, parseHostedRuntimeLatencyTraceBatchResponse, parseHostedRuntimeLatencyTraceResponse } from "@murphai/hosted-execution/parsers";
+import type { HostedRuntimeLatencyTraceBatchRequest, HostedRuntimeLatencyTraceResponse } from "@murphai/hosted-execution/runtime-control";
 
 import type { HostedWorkspaceCheckpointBridgeAuthority } from "./authority-headers.ts";
-import { writeRunnerRuntimeWriteFenceHeaders } from "../runner-outbound/write-fence.ts";
+import { writeRunnerRuntimeWriteFenceHeaders } from "../runner-outbound/headers.ts";
 import {
   fetchHostedWebControlPlaneJson,
   HOSTED_RUNNER_WEB_CONTROL_ROUTES,
@@ -24,6 +24,36 @@ export function createHostedWebRuntimeLatencyTracePort(input: {
   workspaceCheckpointBridge: HostedWorkspaceCheckpointBridgeAuthority | null;
 }) {
   return {
+    async recordBatch(request: HostedRuntimeLatencyTraceBatchRequest) {
+      const batch = parseHostedRuntimeLatencyTraceBatchRequest(request);
+      const attemptId = batch.events[0]!.runtimeAttemptId;
+      if (batch.events.some(event => event.runtimeAttemptId !== attemptId)) {
+        throw new TypeError("Hosted runtime latency batch attempts do not match.");
+      }
+      const headers = input.workspaceCheckpointBridge
+        ? await createHostedRuntimeLatencyTraceWriteFenceHeaders({
+          request: { event: batch.events[0]! },
+          workspaceCheckpointBridge: input.workspaceCheckpointBridge,
+        }) : undefined;
+      if (headers === null) {
+        return { results: batch.events.map(() => HOSTED_RUNTIME_LATENCY_TRACE_SKIPPED_RESPONSE) };
+      }
+      const payload = await fetchHostedWebControlPlaneJson({
+        body: batch,
+        boundUserId: input.boundUserId,
+        description: "Hosted runtime latency batch",
+        fetchImpl: input.fetchImpl,
+        headers,
+        route: HOSTED_RUNNER_WEB_CONTROL_ROUTES.runtimeLatencyTrace,
+        timeoutMs: input.timeoutMs,
+        transport: input.transport,
+      });
+      const response = parseHostedRuntimeLatencyTraceBatchResponse(payload);
+      if (response.results.length !== batch.events.length) {
+        throw new TypeError("Hosted runtime latency batch result count does not match.");
+      }
+      return response;
+    },
     async record(
       request: Parameters<NonNullable<HostedRuntimePlatform["latencyTracePort"]>["record"]>[0],
     ) {

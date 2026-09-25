@@ -2297,7 +2297,7 @@ describe("hosted workspace runtime entrypoint", () => {test("runs assistant outb
 
       await runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput({
         request: {
-          idleCheckpointDelayMs: 200,
+          runnerIdleTtlMs: 200,
         },
       }), {
         async createCheckpointSnapshot(snapshotInput) {
@@ -2520,7 +2520,7 @@ describe("hosted workspace runtime entrypoint", () => {test("runs assistant outb
       try {
         await runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput({
           request: {
-            idleCheckpointDelayMs: 200,
+            runnerIdleTtlMs: 200,
           },
         }), {
           async createCheckpointSnapshot() {
@@ -2621,7 +2621,7 @@ describe("hosted workspace runtime entrypoint", () => {test("runs assistant outb
       try {
         await runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput({
           request: {
-            idleCheckpointDelayMs: 200,
+            runnerIdleTtlMs: 200,
           },
         }), {
           async createCheckpointSnapshot() {
@@ -2717,7 +2717,7 @@ describe("hosted workspace runtime entrypoint", () => {test("runs assistant outb
       const outcome = await runHostedWorkspaceRuntimeJobInProcess(
         createWorkspaceRuntimeJobInput({
           request: {
-            idleCheckpointDelayMs: 200,
+            runnerIdleTtlMs: 200,
           },
         }),
         {

@@ -132,6 +132,34 @@ describe("clinical enrichment durable wake", () => {
     expect(mocks.execute).toHaveBeenCalledOnce();
   });
 
+  it.each(["pending", "sending", "recording"] as const)(
+    "lets another enrichment job advance while an earlier job is %s",
+    async (status) => {
+      const { vaultRoot, admission } = await admit();
+      await updateHostedSystemMailboxState(vaultRoot, state => ({
+        pending: state.pending.map(item => ({ ...item, status, nextAttemptAt: later })),
+      }));
+      const earlier = (await readHostedSystemMailboxState(vaultRoot)).pending[0];
+      const readyJobId = "b".repeat(64);
+      await admitHostedClinicalEnrichmentWake({ ...admission, jobId: readyJobId });
+      expect(await resolveHostedSystemMailboxNextWakeCandidate({ vaultRoot, now: () => now }))
+        .toMatchObject({ at: now });
+      mocks.execute.mockResolvedValue({
+        bootstrapResult: null, conversationMetrics: null, deliveryIntentIds: [],
+        mailboxLane: "clinical-records", postCheckpointRecord: null, redactedLogEntries: [],
+      });
+      const result = await prepareHostedSystemMailboxItemForCheckpoint({
+        allowedRouteActions: ["apply-clinical-enrichment"], now: () => now,
+        runtime: runtime(), runtimeEnv: {}, vaultRoot, retainProcessedItemUntilRecorded: true,
+      });
+      expect(result).toMatchObject({
+        status: "processed", item: { wake: { jobId: readyJobId } },
+      });
+      expect((await readHostedSystemMailboxState(vaultRoot)).pending[0]).toEqual(earlier);
+      expect(mocks.execute).toHaveBeenCalledOnce();
+    },
+  );
+
   it("yields before apply execution when foreground work is ready", async () => {
     const { vaultRoot } = await admit();
     const result = await prepareHostedSystemMailboxItemForCheckpoint({

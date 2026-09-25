@@ -1,5 +1,7 @@
 import { createHash } from "node:crypto";
 
+import registrationEvidence from "./epic-registration.v1.json";
+
 import {
   clinicalFhirRetrievalPlanSchema,
   clinicalFhirScopeAllowsOperation,
@@ -33,7 +35,7 @@ export interface EpicQuery {
   fingerprintTemplate: string;
   fixedSearchParameters: readonly Readonly<{ name: string; value: string }>[];
   registrationApiKeys: readonly string[];
-  // Used only to resume plans frozen before lifetime acquisition.
+  // Provider-native clinical-date filter; also used for overlapping daily checks.
   legacyWindowParameter?: string;
 }
 
@@ -157,8 +159,8 @@ const QUERIES: readonly EpicQuery[] = [
     queryScopeId: "care-plans",
     resourceType: "CarePlan",
     operation: "search",
-    fingerprintTemplate: "epic-fhir-r4:CarePlan:search:patient:_count={pageCount}:v1",
-    fixedSearchParameters: [],
+    fingerprintTemplate: "epic-fhir-r4:CarePlan:search:patient:category=38717003:_count={pageCount}:v2",
+    fixedSearchParameters: [{ name: "category", value: "38717003" }],
     registrationApiKeys: ["care-plan-search-longitudinal"],
   },
   {
@@ -472,6 +474,22 @@ export const EPIC_ACQUISITION_POLICY: EpicAcquisitionPolicy = {
   sourceSystem: "epic-fhir",
 };
 
+// Fail closed for new or unverified APIs; the full catalog remains the frozen-plan reader.
+const AUTOMATIC_REGISTRATION_KEYS: ReadonlySet<string> = new Set(
+  registrationEvidence.apis.filter((api) => api.automaticDistribution).map((api) => api.key),
+);
+export const EPIC_AUTOMATIC_REGISTRATION_APIS = REGISTRATION_APIS.filter((api) =>
+  AUTOMATIC_REGISTRATION_KEYS.has(api.key));
+export const EPIC_AUTOMATIC_QUERIES = QUERIES.filter((query) =>
+  query.registrationApiKeys.every((key) => AUTOMATIC_REGISTRATION_KEYS.has(key)));
+export const EPIC_AUTOMATIC_RESOURCE_TYPES: readonly string[] = [...new Set(
+  EPIC_AUTOMATIC_QUERIES.map((query) => query.resourceType),
+)];
+
+export function isEpicAutomaticQuery(queryScopeId: string): boolean {
+  return EPIC_AUTOMATIC_QUERIES.some((query) => query.queryScopeId === queryScopeId);
+}
+
 export const EPIC_BETA_RESOURCE_TYPES = Object.freeze([
   ...new Set(QUERIES.map((query) => query.resourceType)),
 ]);
@@ -480,6 +498,7 @@ const EPIC_BETA_RESOURCE_TYPE_SET: ReadonlySet<string> = new Set(EPIC_BETA_RESOU
 type SmartPermissionVersion = "v1" | "v2";
 
 export function buildEpicBetaRetrievalPlan(input: {
+  hospitalApprovedImports?: boolean;
   frozenAt: Date;
   pageCount: string;
   resourceTypes: readonly string[];
@@ -491,13 +510,32 @@ export function buildEpicBetaRetrievalPlan(input: {
   }
   return clinicalFhirRetrievalPlanSchema.parse({
     schemaVersion: "murph.clinical-retrieval-plan.v1",
-    slices: QUERIES.filter((query) => requestedResourceTypes.has(query.resourceType)).map((query) =>
+    slices: (input.hospitalApprovedImports ? QUERIES : EPIC_AUTOMATIC_QUERIES)
+      .filter((query) => requestedResourceTypes.has(query.resourceType)).map((query) =>
       buildActiveRetrievalSlice({
         frozenAt: input.frozenAt,
         pageCount: input.pageCount,
         query,
       }),
     ),
+  });
+}
+
+/** Recent clinical dates reduce daily work; every seventh check includes older corrections. */
+export function buildEpicDailyRetrievalPlan(input: {
+  previous: ClinicalFhirRetrievalPlan; now: Date; generation: number;
+}): ClinicalFhirRetrievalPlan {
+  const from = new Date(input.now.getTime() - 7 * 86_400_000).toISOString();
+  const to = new Date(input.now.getTime() + 86_400_000).toISOString();
+  return clinicalFhirRetrievalPlanSchema.parse({
+    schemaVersion: input.previous.schemaVersion,
+    slices: input.previous.slices.map((slice) => {
+      const query = requireActiveQueryForScope(slice.queryScopeId);
+      const identity = { resourceType: slice.resourceType, queryScopeId: slice.queryScopeId, queryFingerprint: slice.queryFingerprint };
+      return query.legacyWindowParameter && input.generation % 7 !== 0
+        ? { ...identity, coverage: "bounded-window", sliceId: `daily-${input.now.toISOString().slice(0, 10)}`, from, to }
+        : { ...identity, coverage: "whole-family", sliceId: "whole" };
+    }),
   });
 }
 
@@ -577,9 +615,12 @@ export function buildEpicBetaInitialFhirPageUrl(input: {
       queryScopeId: query.queryScopeId,
     }),
   );
+  // Frozen pre-fix runs keep their original request identity during deployment.
+  const legacyCarePlan = query.queryScopeId === "care-plans" && input.retrievalSlice.queryFingerprint
+    === sha256Hex(`epic-fhir-r4:CarePlan:search:patient:_count=${input.pageCount}:v1`);
   if (
     query.resourceType !== input.retrievalSlice.resourceType ||
-    expectedQueryFingerprint !== input.retrievalSlice.queryFingerprint
+    (!legacyCarePlan && expectedQueryFingerprint !== input.retrievalSlice.queryFingerprint)
   ) {
     throw new TypeError("Epic beta retrieval identity does not match its active query scope.");
   }
@@ -597,7 +638,7 @@ export function buildEpicBetaInitialFhirPageUrl(input: {
   }
   const url = new URL(`${base}/${template.resourceType}`);
   url.searchParams.set("patient", input.patientId);
-  for (const parameter of template.fixedSearchParameters) {
+  for (const parameter of legacyCarePlan ? [] : template.fixedSearchParameters) {
     url.searchParams.set(parameter.name, parameter.value);
   }
   if (input.retrievalSlice.coverage === "bounded-window" && windowParameter) {

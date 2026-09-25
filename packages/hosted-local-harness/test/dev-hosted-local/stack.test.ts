@@ -184,6 +184,8 @@ const cleanupHostedRunnerContainerLocalState = vi.fn<
 const collectDockerDevDiagnostics = vi.fn(async () => "Docker diagnostics:\n- docker version: ok");
 const DEFAULT_CODEX_MODEL_CATALOG_TEXT = JSON.stringify({
   models: [
+    { slug: "gpt-6-sol" },
+    { slug: "gpt-6-luna" },
     {
       name: "GPT-5.6-Sol",
       service_tiers: [
@@ -216,12 +218,6 @@ const DEFAULT_CODEX_MODEL_CATALOG_TEXT = JSON.stringify({
       ],
       slug: "gpt-5.6-luna",
       tool_mode: "code_mode_only",
-    },
-    {
-      display_name: "GPT-5.4-Mini",
-      priority: 4,
-      service_tiers: [],
-      slug: "gpt-5.4-mini",
     },
   ],
 });
@@ -329,9 +325,8 @@ vi.mock("node:fs/promises", () => ({
   mkdir: vi.fn(async () => {}),
   mkdtemp: vi.fn(async () => "/tmp/murph-dev-env-test"),
   readFile: vi.fn(async (filePath) => {
-    if (String(filePath).endsWith(".murph-runner-bundle-manifest.json")) {
-      return defaultRunnerBundleManifestText;
-    }
+    const fixture = readRunnerBundleManifestFixture(filePath);
+    if (fixture !== null) return fixture;
     const error = new Error("File not found") as Error & { code: string };
     error.code = "ENOENT";
     throw error;
@@ -3021,72 +3016,6 @@ describe("hosted local dev stack", () => {
     spawnChildProcess
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "cloudflare", pid: 125 }))
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "web", pid: 126 }));
-    spawnSync.mockImplementation((command, args) => {
-      if (
-        command === "codex" &&
-        args[0] === "debug" &&
-        args[1] === "models" &&
-        args[2] === "--bundled"
-      ) {
-        return {
-          error: undefined,
-          status: 0,
-          stdout: JSON.stringify({
-            models: [
-              {
-                name: "GPT-5.6-Sol",
-                service_tiers: [
-                  {
-                    id: "priority",
-                    name: "Priority",
-                  },
-                ],
-                slug: "gpt-5.6-sol",
-                tool_mode: "code_mode_only",
-              },
-              {
-                name: "GPT-5.6-Terra",
-                service_tiers: [
-                  {
-                    id: "priority",
-                    name: "Priority",
-                  },
-                ],
-                slug: "gpt-5.6-terra",
-                tool_mode: "code_mode_only",
-              },
-              {
-                name: "GPT-5.6-Luna",
-                service_tiers: [
-                  {
-                    id: "priority",
-                    name: "Priority",
-                  },
-                ],
-                slug: "gpt-5.6-luna",
-                tool_mode: "code_mode_only",
-              },
-              {
-                display_name: "GPT-5.4-Mini",
-                priority: 4,
-                service_tiers: [],
-                slug: "gpt-5.4-mini",
-              },
-              {
-                display_name: "Bundled Nano",
-                service_tiers: [{ id: "auto", name: "Auto" }],
-                slug: "gpt-5.4-nano",
-                supports_parallel_tool_calls: true,
-                supports_search_tool: true,
-              },
-            ],
-          }),
-        };
-      }
-
-      return defaultSpawnSyncImplementation(command, args);
-    });
-
     const environmentModule = await import("../../src/dev-hosted-local/environment.ts");
     const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
 
@@ -3143,6 +3072,8 @@ describe("hosted local dev stack", () => {
     expect(catalogWrite).toBeDefined();
     expect(JSON.parse(String(catalogWrite?.[1]))).toMatchObject({
       models: [
+        { slug: "gpt-6-sol", tool_mode: "code_mode" },
+        { slug: "gpt-6-luna", tool_mode: "code_mode" },
         {
           service_tiers: expect.arrayContaining([
             expect.objectContaining({ id: "flex" }),
@@ -3154,27 +3085,8 @@ describe("hosted local dev stack", () => {
           service_tiers: expect.arrayContaining([
             expect.objectContaining({ id: "flex" }),
           ]),
-          slug: "gpt-5.6-terra",
-          tool_mode: "code_mode",
-        },
-        {
-          service_tiers: expect.arrayContaining([
-            expect.objectContaining({ id: "flex" }),
-          ]),
           slug: "gpt-5.6-luna",
           tool_mode: "code_mode",
-        },
-        {
-          display_name: "GPT-5.4-Mini",
-          slug: "gpt-5.4-mini",
-        },
-        {
-          display_name: "GPT-5.4-Nano",
-          service_tiers: [],
-          slug: "gpt-5.4-nano",
-          supports_parallel_tool_calls: false,
-          supports_search_tool: false,
-          use_responses_lite: false,
         },
       ],
     });
@@ -3194,18 +3106,8 @@ describe("hosted local dev stack", () => {
       stdout: "{not-json",
     },
     {
-      expectedMessage: "Hosted local dev Codex model catalog is missing gpt-5.6-sol.",
+      expectedMessage: "Hosted local dev Codex model catalog is missing gpt-6-sol.",
       stdout: JSON.stringify({ models: [] }),
-    },
-    {
-      expectedMessage: "Hosted local dev Codex model catalog is missing gpt-5.4-mini.",
-      stdout: JSON.stringify({
-        models: [
-          { slug: "gpt-5.6-sol" },
-          { slug: "gpt-5.6-terra" },
-          { slug: "gpt-5.6-luna" },
-        ],
-      }),
     },
   ])(
     "fails closed when Codex bundled model catalog prep fails: $expectedMessage",
@@ -3434,6 +3336,11 @@ describe("hosted local dev stack", () => {
     expect(runCommand).toHaveBeenCalledWith(
       "pnpm",
       ["--dir", "apps/web", "exec", "prisma", "db", "push", "--force-reset"],
+      expect.any(Object),
+    );
+    expect(runCommand).toHaveBeenCalledWith(
+      "pnpm",
+      ["--dir", "apps/web", "exec", "prisma", "db", "execute", "--file", "scripts/initialize-local-runtime-cutover.sql"],
       expect.any(Object),
     );
     expect(runCommand).not.toHaveBeenCalledWith(

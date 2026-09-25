@@ -31,7 +31,7 @@ export async function registerDeliveredAssistantFollowUp(input: {
     schedule: { kind: 'at', at: dueAt.toISOString() },
     activeUntil: activeUntil.toISOString(),
     continuityPolicy: 'preserve',
-    assistantTargetOverride: { model: 'gpt-5.6-terra' },
+    assistantTargetOverride: { model: 'gpt-6-sol' },
     contextReferences: intent.automationContextReferences ?? [],
     route: {
       channel: intent.channel ?? intent.delivery.channel,

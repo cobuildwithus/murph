@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { readRuntimeFenceLivenessBestEffort } from "../src/user-runner/runtime-fence-liveness.js";
+
 import {
   RunnerContainer,
 } from "../src/runner-container.js";
@@ -57,6 +59,47 @@ describe("RunnerContainer internal runtime dispatch", () => {
     await expect(container.onActivityExpired()).resolves.toBeUndefined();
     expect(destroy).toHaveBeenCalledOnce();
   });
+
+  it.each(["before-response", "after-response"] as const)(
+    "stops after an exact-active observation with completion %s",
+    async (completionOrder) => {
+      const response = createDeferred<Response>();
+      const { container, containerFetch, destroy } = createActivityExpiryContainerDouble({
+        invocationResponse: response.promise,
+      });
+      const identity = {
+        attemptId: "attempt_member_123",
+        leaseGeneration: "11",
+        userId: "member_123",
+      };
+      const invocation = container.invoke({
+        job: createWorkspaceRunnerJob(identity.userId),
+        timeoutMs: 5_000,
+        userId: identity.userId,
+      });
+      await vi.waitFor(() => expect(containerFetch).toHaveBeenCalled());
+      const fetchesBeforeObservation = containerFetch.mock.calls.length;
+      await expect(readRuntimeFenceLivenessBestEffort({
+        identity,
+        runnerContainerName: "synthetic-runner",
+        runnerContainerNamespace: { getByName: () => container },
+        stepTimeoutMs: 1_000,
+      })).resolves.toEqual({ outcome: "exact-active" });
+      expect(containerFetch).toHaveBeenCalledTimes(fetchesBeforeObservation);
+      const earlyCompletion = completionOrder === "before-response"
+        ? container.onRuntimeCompletionRecorded(identity)
+        : null;
+      response.resolve(new Response(JSON.stringify(createRunnerResult()), {
+        headers: { "content-type": "application/json" },
+        status: 200,
+      }));
+      await expect(invocation).resolves.toMatchObject({ status: "idle" });
+      if (earlyCompletion) await earlyCompletion;
+      else await container.onRuntimeCompletionRecorded(identity);
+      expect(destroy).toHaveBeenCalledOnce();
+      expect(await container.listSchedules("onActivityExpired")).toEqual([]);
+    },
+  );
 
   it("stops a terminal shell when durable completion wins the outer response race", async () => {
     const invocationResponse = createDeferred<Response>();
@@ -155,7 +198,7 @@ describe("RunnerContainer internal runtime dispatch", () => {
         nextWakeAt: new Date(Date.now() + 30_000).toISOString(),
       },
     },
-  ])("keeps the warm shell for $name", async ({ resultOverrides }) => {
+  ])("does not earn warmth from $name", async ({ resultOverrides }) => {
     const { container, destroy } = createActivityExpiryContainerDouble({
       environment: {
         HOSTED_EXECUTION_RUNNER_LIFECYCLE_REEVALUATION_MS: "60000",
@@ -174,13 +217,13 @@ describe("RunnerContainer internal runtime dispatch", () => {
       leaseGeneration: "11",
       userId: "member_123",
     });
-    expect(destroy).not.toHaveBeenCalled();
+    expect(destroy).toHaveBeenCalledOnce();
+    expect(await container.listSchedules("onActivityExpired")).toEqual([]);
   });
 
   it.each([
     "active child",
     "recent conversation warmth",
-    "legacy child without a warmth watermark",
   ])("keeps the terminal shell for $name", async (name) => {
     const nowMs = Date.now();
     const healthResult = name === "active child"
@@ -188,16 +231,10 @@ describe("RunnerContainer internal runtime dispatch", () => {
           ...createRunnerHealthResult(),
           activeJobCount: 1,
         }
-      : name === "recent conversation warmth"
-        ? {
-            ...createRunnerHealthResult(),
-            conversationWarmActivityCompletedAtEpochMs: nowMs,
-          }
-        : {
-            activeJobCount: 0,
-            hostedRuntimeArchitectureVersion: HOSTED_RUNTIME_ARCHITECTURE_VERSION,
-            ok: true,
-          };
+      : {
+          ...createRunnerHealthResult(),
+          conversationActivityReceivedAtEpochMs: nowMs,
+        };
     const { container, destroy } = createActivityExpiryContainerDouble({
       healthResult,
     });
@@ -372,6 +409,10 @@ describe("RunnerContainer internal runtime dispatch", () => {
       status = "running";
     });
     const container = new RunnerContainer({
+      container: {
+        get running() { return status === "running"; },
+        getTcpPort: () => ({ fetch: containerFetch }),
+      },
       storage,
     } as never, {} as never);
     Object.assign(container, {
@@ -403,7 +444,7 @@ describe("RunnerContainer internal runtime dispatch", () => {
     expect(destroy).not.toHaveBeenCalled();
   });
 
-  it("early activity expiry renews the warm shell without dispatching a checkpoint job", async () => {
+  it("expiry does not retain a background shell or dispatch a checkpoint job", async () => {
     const renewActivityTimeout = vi.fn();
     const { container, containerFetch, destroy } = createActivityExpiryContainerDouble({
       renewActivityTimeout,
@@ -423,11 +464,11 @@ describe("RunnerContainer internal runtime dispatch", () => {
     await expect(container.onActivityExpired()).resolves.toBeUndefined();
 
     expect(countPostedRunnerRequests(containerFetch)).toBe(0);
-    expect(destroy).not.toHaveBeenCalled();
-    expect(renewActivityTimeout).toHaveBeenCalledTimes(1);
+    expect(destroy).toHaveBeenCalledOnce();
+    expect(renewActivityTimeout).not.toHaveBeenCalled();
   });
 
-  it("activity expiry cleans up when the platform timeout cannot be renewed", async () => {
+  it("activity expiry uses safe stop without dispatching another invocation", async () => {
     const { container, containerFetch, destroy } = createActivityExpiryContainerDouble();
 
     await container.invoke({
@@ -507,6 +548,10 @@ function createActivityExpiryContainerDouble(input: {
   });
   let status: "running" | "stopped" = "stopped";
   const container = new RunnerContainer({
+    container: {
+      get running() { return status === "running"; },
+      getTcpPort: () => ({ fetch: containerFetch }),
+    },
     storage,
   } as never, input.environment ?? {});
   Object.assign(container, {
@@ -560,7 +605,7 @@ function createRunnerResult(overrides: Record<string, unknown> = {}) {
 function createRunnerHealthResult(): Record<string, unknown> {
   return {
     activeJobCount: 0,
-    conversationWarmActivityCompletedAtEpochMs: null,
+    conversationActivityReceivedAtEpochMs: null,
     hostedRuntimeArchitectureVersion: HOSTED_RUNTIME_ARCHITECTURE_VERSION,
     ok: true,
   };

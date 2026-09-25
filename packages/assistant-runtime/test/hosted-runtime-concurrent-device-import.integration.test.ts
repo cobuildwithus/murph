@@ -255,7 +255,7 @@ test.each(["completed", "stalled", "absent", "persistent", "cold", "reminder", "
     runtimeCompletion = runHostedWorkspaceRuntimeJobInProcess(
       createWorkspaceRuntimeJobInput({
         request: {
-          attemptId: "attempt_synthetic_concurrent_import", idleCheckpointDelayMs: 1,
+          attemptId: "attempt_synthetic_concurrent_import", runnerIdleTtlMs: 1,
           ...(cold ? { processingMode: "system_mailbox" as const } : {}),
         },
         forwardedEnv: { LINQ_API_TOKEN: "synthetic-linq-token" },
@@ -529,7 +529,7 @@ test.each(["workspace boundary", "pass timeout"] as const)("retains unstarted de
     const run = () => runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput({
       request: {
         attemptId: firstInvocation ? "attempt_preload_initial" : "attempt_preload_restore",
-        idleCheckpointDelayMs: 1, workspace, workspaceVersion: workspace.version,
+        runnerIdleTtlMs: 1, workspace, workspaceVersion: workspace.version,
         ...(firstInvocation ? {} : { processingMode: "system_mailbox" as const }),
       },
       resolvedConfig: createDeviceSyncResolvedConfig(),

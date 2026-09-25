@@ -3,6 +3,8 @@ import {
   Prisma,
   type PrismaClient,
 } from "@prisma/client";
+import { HOSTED_ASSISTANT_GPT_6_LUNA_MODEL } from "@murphai/hosted-execution/assistant-model";
+import { readHostedLinqProductionCanaryPhoneNumber } from "./linq-production-canary";
 
 import {
   createHostedEmailLookupKeyReadCandidates,
@@ -39,6 +41,7 @@ import {
   readHostedMemberCoreState,
 } from "./hosted-member-store";
 import {
+  reconcileHostedMemberLinqPhoneBindingsTx,
   lookupHostedMemberRoutingByPendingLinqParticipantContact,
   tryCreateHostedMemberPendingLinqParticipantContactTx,
   upsertHostedMemberPendingLinqParticipantContactTx,
@@ -204,6 +207,10 @@ export async function ensureHostedMemberForPhoneResolutionTx(input: {
   const memberId = generateHostedMemberId();
 
   const createdMember = await createHostedMember({
+    assistantModelPreference:
+      normalizePhoneNumber(input.phoneNumber) === readHostedLinqProductionCanaryPhoneNumber()
+        ? HOSTED_ASSISTANT_GPT_6_LUNA_MODEL
+        : undefined,
     billingStatus: HostedBillingStatus.not_started,
     memberId,
     prisma: input.prisma,
@@ -764,6 +771,12 @@ export async function reconcileHostedPrivyIdentityOnMemberResolutionTx(input: {
     signupPhoneCodeSendAttemptStartedAt: null,
     signupPhoneCodeSentAt: null,
     signupPhoneNumber: null,
+  });
+  await reconcileHostedMemberLinqPhoneBindingsTx({
+    memberId: currentMember.id,
+    previousIdentity: currentIdentity,
+    nextPhone: phoneToPersist,
+    prisma: input.prisma,
   });
   return {
     identity,

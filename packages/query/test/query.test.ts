@@ -1,3 +1,5 @@
+import { createWearableSummaryEncoder, decodeWearableSummaryJson, readWearableSummaryShapes } from "../src/projection/wearable-summary-shapes.ts";
+import { readVaultSourceStrict } from "../src/vault-source.ts";
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 import { existsSync } from "node:fs";
@@ -4348,7 +4350,7 @@ test("query projection runtime goal progress resolves stored metric targets and 
     unit: "mg/dL",
     value: 85,
   } as const;
-  const labPoint = {
+  const labPoint: MetricPoint = {
     biomarkerKey: "biomarker:apob",
     canonicalUnit: "mg/dL",
     canonicalValue: 82,
@@ -4382,8 +4384,8 @@ test("query projection runtime goal progress resolves stored metric targets and 
     textValue: null,
     unit: "mg/dL",
     value: 82,
-  } as const;
-  const wearablePoint = {
+  };
+  const wearablePoint: MetricPoint = {
     biomarkerKey: "biomarker:apob",
     canonicalUnit: "mg/dL",
     canonicalValue: 90,
@@ -4417,92 +4419,16 @@ test("query projection runtime goal progress resolves stored metric targets and 
     textValue: null,
     unit: "mg/dL",
     value: 90,
-  } as const;
+  };
 
   try {
     await rebuildQueryProjection(vaultRoot);
 
     const database = openSqliteRuntimeDatabase(runtimeDatabasePath, { create: false });
     try {
-      const insertMetricPoint = database.prepare(`
-        INSERT INTO query_metric_points (
-          id,
-          sort_rank,
-          metric_key,
-          biomarker_key,
-          value,
-          text_value,
-          comparator,
-          unit,
-          canonical_value,
-          canonical_unit,
-          observed_at,
-          effective_date,
-          recorded_at,
-          reported_at,
-          grain,
-          statistic,
-          source_family,
-          source_kind,
-          source_record_id,
-          source_result_index,
-          source_path,
-          confidence,
-          metric_point_json
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `);
-      insertMetricPoint.run(
-        labPoint.id,
-        0,
-        labPoint.metricKey,
-        labPoint.biomarkerKey,
-        labPoint.value,
-        labPoint.textValue,
-        labPoint.comparator,
-        labPoint.unit,
-        labPoint.canonicalValue,
-        labPoint.canonicalUnit,
-        labPoint.observedAt,
-        labPoint.effectiveDate,
-        labPoint.recordedAt,
-        labPoint.reportedAt,
-        labPoint.grain,
-        labPoint.statistic,
-        labPoint.source.family,
-        labPoint.source.kind,
-        labPoint.source.recordId,
-        labPoint.source.resultIndex,
-        labPoint.source.path,
-        labPoint.confidence,
-        JSON.stringify(labPoint),
-      );
-      insertMetricPoint.run(
-        wearablePoint.id,
-        1,
-        wearablePoint.metricKey,
-        wearablePoint.biomarkerKey,
-        wearablePoint.value,
-        wearablePoint.textValue,
-        wearablePoint.comparator,
-        wearablePoint.unit,
-        wearablePoint.canonicalValue,
-        wearablePoint.canonicalUnit,
-        wearablePoint.observedAt,
-        wearablePoint.effectiveDate,
-        wearablePoint.recordedAt,
-        wearablePoint.reportedAt,
-        wearablePoint.grain,
-        wearablePoint.statistic,
-        wearablePoint.source.family,
-        wearablePoint.source.kind,
-        wearablePoint.source.recordId,
-        wearablePoint.source.resultIndex,
-        wearablePoint.source.path,
-        wearablePoint.confidence,
-        JSON.stringify(wearablePoint),
-      );
+      const points: MetricPoint[] = [labPoint, wearablePoint];
       for (let index = 0; index < 10_005; index += 1) {
-        const noisePoint = {
+        const noisePoint: MetricPoint = {
           ...wearablePoint,
           canonicalUnit: "mg/dL",
           canonicalValue: index,
@@ -4516,32 +4442,9 @@ test("query projection runtime goal progress resolves stored metric targets and 
           unit: "mg/dL",
           value: index,
         } as const;
-        insertMetricPoint.run(
-          noisePoint.id,
-          index + 2,
-          noisePoint.metricKey,
-          noisePoint.biomarkerKey,
-          noisePoint.value,
-          noisePoint.textValue,
-          noisePoint.comparator,
-          noisePoint.unit,
-          noisePoint.canonicalValue,
-          noisePoint.canonicalUnit,
-          noisePoint.observedAt,
-          noisePoint.effectiveDate,
-          noisePoint.recordedAt,
-          noisePoint.reportedAt,
-          noisePoint.grain,
-          noisePoint.statistic,
-          noisePoint.source.family,
-          noisePoint.source.kind,
-          noisePoint.source.recordId,
-          noisePoint.source.resultIndex,
-          noisePoint.source.path,
-          noisePoint.confidence,
-          JSON.stringify(noisePoint),
-        );
+        points.push(noisePoint);
       }
+      insertProjectionMetricPoints(database, points);
 
       database.prepare(`
         INSERT INTO query_metric_targets (
@@ -4785,6 +4688,7 @@ test("rebuildQueryProjection keeps dense provider telemetry out of default read 
       assert.equal(denseEventSearchDocumentCount.count, 0);
       assert.equal(wearableSummaryCount.count, 1);
       assert.ok(wearableSummaryRow);
+      wearableSummaryRow.summaryJson = decodeWearableSummaryJson(wearableSummaryRow.summaryJson, readWearableSummaryShapes(database));
       // Stored rows use the compact wearable summary codec: populated
       // envelopes drop the constant candidates array entirely and empty
       // envelopes collapse to null markers.
@@ -5010,11 +4914,16 @@ test("rebuildQueryProjection recreates v24 stores without unused indexes", async
         .all() as Array<{ name: string }>;
       const indexNames = new Set(indexRows.map((row) => row.name));
 
-      assert.ok(columnNames.includes("metric_point_json"));
+      assert.ok(columnNames.includes("payload_id"));
+      assert.equal(columnNames.includes("metric_point_json"), false);
       assert.equal(columnNames.includes("provenance_json"), false);
       assert.equal(columnNames.includes("context_json"), false);
 
       for (const indexName of [
+        "query_entities_date_idx",
+        "query_entities_occurred_at_idx",
+        "query_search_document_date_idx",
+        "query_search_document_occurred_at_idx",
         "query_entities_experiment_idx",
         "query_entities_record_class_idx",
         "query_entities_stream_idx",
@@ -5024,16 +4933,12 @@ test("rebuildQueryProjection recreates v24 stores without unused indexes", async
       }
 
       for (const indexName of [
-        "query_entities_date_idx",
         "query_entities_family_idx",
         "query_entities_kind_idx",
-        "query_entities_occurred_at_idx",
         "query_metric_points_biomarker_latest_idx",
         "query_metric_points_metric_latest_idx",
-        "query_search_document_date_idx",
         "query_search_document_experiment_idx",
         "query_search_document_kind_idx",
-        "query_search_document_occurred_at_idx",
         "query_search_document_record_type_idx",
         "query_search_document_stream_idx",
       ]) {
@@ -5129,7 +5034,7 @@ test("ordinary wearable reads rebuild carried v22 sparse-body projections before
         WHERE summary_kind = 'body_state' AND summary_date = '2026-05-20'
       `).get() as { id: string; summaryJson: string } | undefined;
       assert.ok(bodyRow);
-      const legacyBodySummary = JSON.parse(bodyRow.summaryJson) as Record<string, unknown>;
+      const legacyBodySummary = JSON.parse(decodeWearableSummaryJson(bodyRow.summaryJson, readWearableSummaryShapes(staleDatabase))) as Record<string, unknown>;
       for (const field of [
         "weightKg",
         "bodyFatPercentage",
@@ -5241,7 +5146,7 @@ test("ordinary wearable reads rebuild carried v22 sparse-body projections before
       assert.ok(rebuiltRow);
       const rebuiltBodySummary = parseStoredWearableSummary<Record<string, unknown>>(
         "body_state",
-        rebuiltRow.summaryJson,
+        decodeWearableSummaryJson(rebuiltRow.summaryJson, readWearableSummaryShapes(reopened)),
       );
       assert.ok(rebuiltBodySummary);
       for (const field of [
@@ -5526,14 +5431,14 @@ test("rebuildQueryProjection stores compact metric point payloads for rich provi
             AVG(LENGTH(metric_point_json)) AS averageBytes,
             MAX(LENGTH(metric_point_json)) AS maxBytes,
             COUNT(*) AS rowCount
-          FROM query_metric_points
+          FROM query_metric_points JOIN query_metric_payloads USING (payload_id)
           WHERE metric_key = 'caffeine'
         `)
         .get() as { averageBytes: number; maxBytes: number; rowCount: number };
       const joinedPayload = (database
         .prepare(`
           SELECT GROUP_CONCAT(metric_point_json, '\n') AS payload
-          FROM query_metric_points
+          FROM query_metric_points JOIN query_metric_payloads USING (payload_id)
           WHERE metric_key = 'caffeine'
         `)
         .get() as { payload: string }).payload;
@@ -7669,8 +7574,11 @@ function rewriteStoredWearableSummaryRowsToLegacyFullForm(
     .all() as Array<{ id: string; summaryKind: StoredWearableMetricSummaryKind; summaryJson: string }>;
   const update = database.prepare("UPDATE query_wearable_summaries SET summary_json = ? WHERE id = ?");
 
+  const shapes = readWearableSummaryShapes(database);
+  const encode = createWearableSummaryEncoder(database);
   let rewritten = 0;
   for (const row of rows) {
+    row.summaryJson = decodeWearableSummaryJson(row.summaryJson, shapes);
     const expanded = parseStoredWearableSummary<Record<string, unknown>>(
       row.summaryKind,
       row.summaryJson,
@@ -7685,7 +7593,7 @@ function rewriteStoredWearableSummaryRowsToLegacyFullForm(
     }
     const legacyJson = JSON.stringify(expanded);
     if (legacyJson !== row.summaryJson) {
-      update.run(legacyJson, row.id);
+      update.run(encode(legacyJson), row.id);
       rewritten += 1;
     }
   }
@@ -7755,6 +7663,7 @@ test("rebuildQueryProjection resets stale v7 projections that still store full-f
         `)
         .get() as { summaryJson: string } | undefined;
       assert.ok(activityRow);
+      activityRow.summaryJson = decodeWearableSummaryJson(activityRow.summaryJson, readWearableSummaryShapes(reopened));
       assert.match(activityRow.summaryJson, /"steps":\{"confidence":/u);
       assert.match(activityRow.summaryJson, /"dayStrain":null/u);
       assert.doesNotMatch(activityRow.summaryJson, /"candidates":/u);
@@ -7944,7 +7853,7 @@ test("listMetricPointsRuntime reconstructs stored metric points from scalar colu
     try {
       insertProjectionMetricPoints(database, [point]);
       const storedPayload = database
-        .prepare("SELECT metric_point_json AS metricPointJson FROM query_metric_points WHERE id = ?")
+        .prepare("SELECT metric_point_json AS metricPointJson FROM query_metric_points JOIN query_metric_payloads USING (payload_id) WHERE id = ?")
         .get(point.id) as { metricPointJson: string } | undefined;
       assert.ok(storedPayload);
       assert.doesNotMatch(storedPayload.metricPointJson, /resourceId|function-health|externalRef|dataOrigin/u);
@@ -8610,3 +8519,50 @@ function openDatabaseSync(
   const { DatabaseSync } = require("node:sqlite") as typeof import("node:sqlite");
   return new DatabaseSync(databasePath, options ?? {});
 }
+
+
+test("retired oxygen analytics leave canonical evidence and member revisions intact across restore", async () => {
+  const event = {
+    id: "evt_oxygen_legacy",
+    kind: "measurement",
+    source: "device",
+    title: "retiredoxygentoken",
+    occurredAt: "2026-07-12T09:00:00.000Z",
+    recordedAt: "2026-07-12T10:00:00.000Z",
+    dayKey: "2026-07-12",
+    externalRef: { system: "junction", resourceType: "blood_oxygen", resourceId: "legacy", facet: "features" },
+    dataOrigin: { normalizerVersion: "junction.blood_oxygen_feature_envelope.v1" },
+    measurements: [{ metric: "spo2-below-90-reading-count", value: 0, unit: "count" }],
+  };
+  const vaultRoot = await createEventLedgerVault([
+    event,
+    { ...event, id: "evt_oxygen_supported", measurements: [{ metric: "spo2-below-90-reading-count", value: 2, unit: "count" }] },
+    { ...event, id: "evt_oxygen_corrected", title: "Member correction", lifecycle: { revision: 2 } },
+    { ...event, id: "evt_oxygen_manual", title: "Manual measurement", source: "manual" },
+    { ...event, id: "evt_oxygen_other", title: "Other normalizer", dataOrigin: { normalizerVersion: "other.v1" } },
+  ]);
+  const sourcePath = path.join(vaultRoot, "ledger/events/2026/2026-07.jsonl");
+  try {
+    const originalBytes = await readFile(sourcePath);
+    const raw = (await readVaultSourceStrict(vaultRoot)).entities;
+    assert.equal(raw.length, 5);
+    const direct = buildMetricProjection(createVaultReadModel({ vaultRoot, entities: raw }));
+    assert.deepEqual(direct.metricPoints.map((point) => point.source.recordId).sort(), [
+      "evt_oxygen_corrected", "evt_oxygen_manual", "evt_oxygen_other",
+    ]);
+    await rebuildQueryProjection(vaultRoot);
+    const dbPath = path.join(vaultRoot, QUERY_DB_RELATIVE_PATH);
+    // An old restored store must be invalidated even when source files are unchanged.
+    const database = openSqliteRuntimeDatabase(dbPath, { create: false });
+    database.exec("PRAGMA user_version = 32");
+    database.close();
+    const points = await listMetricPointsRuntime(vaultRoot, { limit: null });
+    assert.deepEqual(points.map((point) => point.source.recordId).sort(), direct.metricPoints.map((point) => point.source.recordId).sort());
+    assert.equal((await listCanonicalEntities(vaultRoot, { family: "event", limit: null })).length, 3);
+    assert.equal((await searchVaultRuntime(vaultRoot, "retiredoxygentoken")).total, 0);
+    assert.equal((await getQueryProjectionStatus(vaultRoot)).fresh, true);
+    assert.deepEqual(await readFile(sourcePath), originalBytes);
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});

@@ -175,7 +175,12 @@ test("VercelTelemetry does not mount outside the explicit page allowlist", () =>
     "/join/private-invite",
     "/experiments/runs/private-run",
     "/screenshots",
+    "/settings/accounts",
+    "/settings/accounts?companion=ios#security",
+    "/voice",
+    "/voice?source=private#call",
     "/screenshots/home",
+    "/screenshots/channel-connection",
     "/unknown/private-segment",
   ]) {
     mocks.pathname = pathname;
@@ -203,6 +208,14 @@ test("VercelTelemetry drops non-allowlisted events before either vendor sends", 
   if (!analyticsProps || !speedInsightsProps) {
     assert.fail("Vercel telemetry components did not receive beforeSend props.");
   }
+
+  const voiceUrl = "/voice?source=private#call";
+  assert.equal(analyticsProps.beforeSend({ type: "pageview", url: voiceUrl }), null);
+  assert.equal(speedInsightsProps.beforeSend({ type: "vital", url: voiceUrl }), null);
+
+  const accountSettingsUrl = "/settings/accounts?companion=ios#security";
+  assert.equal(analyticsProps.beforeSend({ type: "pageview", url: accountSettingsUrl }), null);
+  assert.equal(speedInsightsProps.beforeSend({ type: "vital", url: accountSettingsUrl }), null);
 
   assert.equal(
     analyticsProps.beforeSend({
@@ -555,7 +568,11 @@ function listStaticPagePathnames(
   return appSources
     .filter(
       ({ path }) =>
-        path !== "app/screenshots/page.tsx"
+        // Synthetic screenshots, voice, and account-security settings deliberately
+        // stay outside the vendor allowlist.
+        !path.startsWith("app/screenshots/")
+        && path !== "app/settings/accounts/page.tsx"
+        && path !== "app/(dashboard)/voice/page.tsx"
         && (path === "app/page.tsx" || path.endsWith("/page.tsx")),
     )
     .flatMap(({ path }) => {

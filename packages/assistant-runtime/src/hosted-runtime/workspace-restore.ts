@@ -1,3 +1,4 @@
+import { resolveWorkspaceDurableRoot } from "./workspace-paths.ts";
 import { randomUUID } from "node:crypto";
 import { chmod, lstat, mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -215,7 +216,7 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
       };
     }
     const restoreTiming = await input.platform.workspaceSnapshotPort.restoreWorkspaceSnapshot({
-      durableRoot: resolveHostedWorkspaceDurableRoot(restored.vaultRoot),
+      durableRoot: resolveWorkspaceDurableRoot(restored.vaultRoot),
       ref: snapshotRef,
       signal: input.signal ?? null,
     });
@@ -526,7 +527,7 @@ async function assertHostedWorkspaceWarmCleanRoots(
   restored: HostedRestoredExecutionContext,
 ): Promise<void> {
   await Promise.all([
-    assertHostedWorkspaceWarmCleanDirectory(resolveHostedWorkspaceDurableRoot(restored.vaultRoot)),
+    assertHostedWorkspaceWarmCleanDirectory(resolveWorkspaceDurableRoot(restored.vaultRoot)),
     assertHostedWorkspaceWarmCleanDirectory(restored.vaultRoot),
     assertHostedWorkspaceWarmCleanDirectory(restored.assistantStateRoot),
     assertHostedWorkspaceWarmCleanDirectory(restored.operatorHomeRoot),
@@ -990,14 +991,6 @@ function readHostedWorkspaceRuntimeLocalRoots(
     operatorHomeRoot,
     vaultRoot: resolvedVaultRoot,
   };
-}
-
-function resolveHostedWorkspaceDurableRoot(vaultRoot: string): string {
-  const resolvedVaultRoot = path.resolve(vaultRoot);
-  if (path.basename(resolvedVaultRoot) === "vault") {
-    return path.dirname(resolvedVaultRoot);
-  }
-  return resolvedVaultRoot;
 }
 
 function resolveHostedWorkspaceOperatorHomeRoot(vaultRoot: string): string {

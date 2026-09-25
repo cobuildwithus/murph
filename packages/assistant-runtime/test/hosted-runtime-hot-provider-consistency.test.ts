@@ -31,7 +31,7 @@ test.each([
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-hot-provider-probe-'));
   const idleWaitStarted = createDeferred<void>();
   const providerReached = createDeferred<void>();
-  const mailboxItems: HostedMailboxItem[] = [];
+  const mailboxItems: HostedMailboxItem[] = [createMailboxItem({ id: 'mailbox_initial_conversation' })];
   const phases: string[] = [];
   let phaseCount = 0;
   let providerReads = 0;
@@ -68,7 +68,7 @@ test.each([
     const job = runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput({
       request: {
         attemptId: 'attempt_synthetic_hot_provider_probe',
-        idleCheckpointDelayMs: 500,
+        runnerIdleTtlMs: 500,
         leaseGeneration: '7',
         userId: TEST_USER_ID,
         workspaceVersion: '0',
@@ -87,6 +87,7 @@ test.each([
         }) };
       },
       async importItem(input) {
+        if (input.item.id === 'mailbox_initial_conversation') return { status: 'imported' };
         phases.push('import');
         gatedInputId = await stagePendingLinqAssistantInputForMailboxItem({
           item: input.item,
@@ -140,7 +141,7 @@ test.each([
       vaultRoot,
     });
     await withRealTimeout(idleWaitStarted.promise, 3000, () => 'Idle wait unavailable');
-    mailboxItems.push(createMailboxItem({ id: 'mailbox_synthetic_hot_provider_probe', laneSeq: '1' }));
+    mailboxItems.push(createMailboxItem({ id: 'mailbox_synthetic_hot_provider_probe', laneSeq: '2' }));
     mailboxProvider = provider;
     wakeSignal.notify();
     if (providerAllowed) {
@@ -154,7 +155,7 @@ test.each([
     if (gatedInputId !== null) assert.equal(checkpointInputStatus, 'pending');
     // A changed provider may stop before import; its original durable mailbox
     // item remains available to the replacement invocation in either case.
-    assert.equal(mailboxItems.length, 1);
+    assert.equal(mailboxItems.length, 2);
   } finally {
     await removeTempRoot(vaultRoot);
   }

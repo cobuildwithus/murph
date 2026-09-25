@@ -39,6 +39,7 @@ import {
 } from "@murphai/hosted-execution/assistant-model";
 
 import {
+  HOSTED_FAMILY_BILLING_PLAN_CODE,
   getHostedAiUsageMonthlyAllowanceUsdMicros,
   getHostedDefaultBillingPlanCode,
   getHostedFamilyAiUsageMonthlyAllowanceForPlan,
@@ -55,10 +56,6 @@ import {
   buildHostedStarterUsageLifetimePeriod,
 } from "../hosted-onboarding/starter-usage";
 import {
-  HOSTED_FAMILY_BILLING_PLAN_CODE,
-  readHostedFamilyAccessForMember,
-} from "../hosted-onboarding/family-plan";
-import {
   type HostedMemberPersonAccessState,
   hostedMemberPersonAccessSelect,
   hasActiveHostedThreadContainerAccessWithParticipants,
@@ -73,6 +70,11 @@ import {
 } from "../hosted-groups/group-usage-capacity";
 import { renderUserFacingMessage } from "../hosted-messages/user-facing-messages";
 import { settleHostedUsageCreditForUsageTx } from "./usage-credits";
+import {
+  HOSTED_LIVE_PRICING_SOURCE,
+  HOSTED_LIVE_PRICING_VERSION,
+  priceHostedLiveUsage,
+} from "./usage-live";
 import {
   HOSTED_LOB_USAGE_PRICING_SOURCE,
   HOSTED_LOB_USAGE_PRICING_VERSION,
@@ -370,9 +372,33 @@ async function readHostedFamilySponsoredBillingRefForMember(input: {
   memberId: string;
   tx: Prisma.TransactionClient;
 }): Promise<HostedAiUsageAllowanceBillingRef | null> {
-  const familyAccess = await readHostedFamilyAccessForMember({
-    memberId: input.memberId,
-    prisma: input.tx,
+  const familyAccess = await input.tx.hostedAccountGroupMembership.findFirst({
+    relationLoadStrategy: "join",
+    orderBy: { createdAt: "asc" },
+    where: {
+      memberId: input.memberId,
+      status: "active",
+      group: { billingStatus: HostedBillingStatus.active, suspendedAt: null },
+    },
+    select: {
+      planCode: true,
+      usagePlanTransitionAt: true,
+      usagePlanTransitionFromCode: true,
+      usagePlanTransitionKind: true,
+      usagePlanTransitionToCode: true,
+      group: {
+        select: {
+          billingRef: {
+            select: {
+              currentBillingPlanCode: true,
+              currentBillingPhase: true,
+              currentPeriodEnd: true,
+              currentPeriodStart: true,
+            },
+          },
+        },
+      },
+    },
   });
   if (!familyAccess) {
     return null;
@@ -382,17 +408,7 @@ async function readHostedFamilySponsoredBillingRefForMember(input: {
     return null;
   }
 
-  const billingRef = await input.tx.hostedAccountGroupBillingRef.findUnique({
-    select: {
-      currentBillingPlanCode: true,
-      currentBillingPhase: true,
-      currentPeriodEnd: true,
-      currentPeriodStart: true,
-    },
-    where: {
-      groupId: familyAccess.groupId,
-    },
-  });
+  const billingRef = familyAccess.group.billingRef;
   const periodBillingRef =
     billingRef?.currentBillingPlanCode === HOSTED_FAMILY_BILLING_PLAN_CODE &&
     billingRef.currentBillingPhase === "paid"
@@ -608,6 +624,18 @@ const HOSTED_AI_USAGE_ALLOWANCE_OPENAI_MODEL_PRICES: Record<
   HostedAiUsageAllowancePricedModel,
   HostedAiUsageAllowanceModelPrice
 > = {
+  "gpt-6-sol": {
+    cachedInputUsdMicrosPerMillionTokens: 200_000n,
+    cacheWriteUsdMicrosPerMillionTokens: 2_500_000n,
+    inputUsdMicrosPerMillionTokens: 2_000_000n,
+    outputUsdMicrosPerMillionTokens: 10_000_000n,
+  },
+  "gpt-6-luna": {
+    cachedInputUsdMicrosPerMillionTokens: 10_000n,
+    cacheWriteUsdMicrosPerMillionTokens: 125_000n,
+    inputUsdMicrosPerMillionTokens: 100_000n,
+    outputUsdMicrosPerMillionTokens: 500_000n,
+  },
   "gpt-6-astra": {
     cachedInputUsdMicrosPerMillionTokens: 1_000_000n,
     cacheWriteUsdMicrosPerMillionTokens: 12_500_000n,
@@ -677,7 +705,28 @@ const HOSTED_AI_USAGE_ALLOWANCE_GPT_56_TOKEN_PRICING_BASES = {
   },
 } as const;
 
+const HOSTED_AI_USAGE_ALLOWANCE_GPT_6_SOL_LUNA_TOKEN_PRICING_BASES = {
+  standard: {
+    ...HOSTED_AI_USAGE_ALLOWANCE_GPT_56_TOKEN_PRICING_BASES.standard,
+    requiredProviderKind: "openai",
+    pricingSource: "https://developers.openai.com/api/docs/pricing",
+    pricingVersion: "openai-api-pricing-2026-09-22-gpt-6-sol-luna-standard",
+  },
+  "openai-flex": {
+    ...HOSTED_AI_USAGE_ALLOWANCE_GPT_56_TOKEN_PRICING_BASES["openai-flex"],
+    pricingSource: "https://developers.openai.com/api/docs/pricing",
+    pricingVersion: "openai-api-pricing-2026-09-22-gpt-6-sol-luna-openai-flex",
+  },
+  "openai-priority": {
+    ...HOSTED_AI_USAGE_ALLOWANCE_GPT_56_TOKEN_PRICING_BASES["openai-priority"],
+    pricingSource: "https://developers.openai.com/api/docs/pricing",
+    pricingVersion: "openai-api-pricing-2026-09-22-gpt-6-sol-luna-openai-priority",
+  },
+} as const;
+
 const HOSTED_AI_USAGE_ALLOWANCE_MODEL_TOKEN_PRICING_BASES = {
+  "gpt-6-sol": HOSTED_AI_USAGE_ALLOWANCE_GPT_6_SOL_LUNA_TOKEN_PRICING_BASES,
+  "gpt-6-luna": HOSTED_AI_USAGE_ALLOWANCE_GPT_6_SOL_LUNA_TOKEN_PRICING_BASES,
   "gpt-6-astra": {
     "openai-flex": {
       ...HOSTED_AI_USAGE_ALLOWANCE_GPT_56_TOKEN_PRICING_BASES["openai-flex"],
@@ -715,6 +764,11 @@ function resolveHostedAiUsageAllowancePricingDecision(
   const counted = credentialSource !== "member";
   const tokenPricingBasis =
     normalizeAssistantUsageTokenPricingBasis(record.tokenPricingBasis);
+
+  const audioPricing = resolveHostedAiUsageAudioPricingDecision({
+    record, counted, credentialSource, tokenPricingBasis,
+  });
+  if (audioPricing) return audioPricing;
 
   const lobPhysicalNote = matchHostedLobPhysicalNoteUsageRecord(record);
   if (lobPhysicalNote !== null) {
@@ -802,18 +856,6 @@ function resolveHostedAiUsageAllowancePricingDecision(
     };
   }
 
-  if (isHostedAiUsageAllowanceAudioModelRecord(record)) {
-    assertHostedAiUsageAllowanceAudioTokenPricingBasis(tokenPricingBasis);
-    return {
-      kind: "priced",
-      priced: priceHostedAiUsageAudioForAllowance({
-        counted,
-        credentialSource,
-        record,
-      }),
-    };
-  }
-
   const imageMatch = matchHostedAiUsageOpenAiImageRecord(record);
   if (imageMatch !== null) {
     assertHostedAiUsageAllowanceOpenAiImageTokenPricingBasis(tokenPricingBasis);
@@ -834,34 +876,6 @@ function resolveHostedAiUsageAllowancePricingDecision(
         counted,
         credentialSource,
         match: imageMatch,
-        record,
-      }),
-    };
-  }
-
-  const ttsMatch = matchHostedAiUsageElevenLabsTtsRecord(record);
-  if (ttsMatch !== null) {
-    assertHostedAiUsageAllowanceElevenLabsTokenPricingBasis(tokenPricingBasis, "TTS");
-    return {
-      kind: "priced",
-      priced: priceHostedAiUsageElevenLabsTtsForAllowance({
-        counted,
-        credentialSource,
-        match: ttsMatch,
-        record,
-      }),
-    };
-  }
-
-  const musicMatch = matchHostedAiUsageElevenLabsMusicRecord(record);
-  if (musicMatch !== null) {
-    assertHostedAiUsageAllowanceElevenLabsTokenPricingBasis(tokenPricingBasis, "Music");
-    return {
-      kind: "priced",
-      priced: priceHostedAiUsageElevenLabsMusicForAllowance({
-        counted,
-        credentialSource,
-        match: musicMatch,
         record,
       }),
     };
@@ -3298,6 +3312,79 @@ function readHostedAiUsageNonNegativeInteger(value: unknown): bigint | null {
     : null;
 }
 
+function resolveHostedAiUsageAudioPricingDecision(input: {
+  record: AssistantUsageRecord;
+  counted: boolean;
+  credentialSource: AssistantUsageCredentialSource;
+  tokenPricingBasis: AssistantUsageTokenPricingBasis;
+}): HostedAiUsageAllowancePricingDecision | null {
+  const { record, counted, credentialSource, tokenPricingBasis } = input;
+  const liveCost = priceHostedLiveUsage(record);
+  if (liveCost !== null) {
+    return {
+      kind: "priced",
+      priced: {
+        costUsdMicros: counted ? liveCost : 0n,
+        counted,
+        pricingSnapshot: {
+          credentialSource,
+          audio: {
+            startDurationMs: String(record.rawUsageJson?.startDurationMs),
+            endDurationMs: String(record.rawUsageJson?.endDurationMs),
+            usdMicrosPerAudioMinute: "50000",
+          },
+          pricingSource: HOSTED_LIVE_PRICING_SOURCE,
+          schema: "murph.hosted-ai-usage-allowance-pricing.v1",
+          tokenPricingBasis,
+        },
+        pricingVersion: HOSTED_LIVE_PRICING_VERSION,
+      },
+    };
+  }
+
+  if (isHostedAiUsageAllowanceAudioModelRecord(record)) {
+    assertHostedAiUsageAllowanceAudioTokenPricingBasis(tokenPricingBasis);
+    return {
+      kind: "priced",
+      priced: priceHostedAiUsageAudioForAllowance({
+        counted,
+        credentialSource,
+        record,
+      }),
+    };
+  }
+
+  const ttsMatch = matchHostedAiUsageElevenLabsTtsRecord(record);
+  if (ttsMatch !== null) {
+    assertHostedAiUsageAllowanceElevenLabsTokenPricingBasis(tokenPricingBasis, "TTS");
+    return {
+      kind: "priced",
+      priced: priceHostedAiUsageElevenLabsTtsForAllowance({
+        counted,
+        credentialSource,
+        match: ttsMatch,
+        record,
+      }),
+    };
+  }
+
+  const musicMatch = matchHostedAiUsageElevenLabsMusicRecord(record);
+  if (musicMatch !== null) {
+    assertHostedAiUsageAllowanceElevenLabsTokenPricingBasis(tokenPricingBasis, "Music");
+    return {
+      kind: "priced",
+      priced: priceHostedAiUsageElevenLabsMusicForAllowance({
+        counted,
+        credentialSource,
+        match: musicMatch,
+        record,
+      }),
+    };
+  }
+
+  return null;
+}
+
 // Only Worker-recorded Workers AI transcription rows take the audio-priced
 // branch. A malformed row that merely claims the whisper id must fall through
 // to token-model pricing and fail closed instead of being accounted as free.
@@ -3709,12 +3796,12 @@ function resolveHostedAiUsageAllowanceModelPrices(input: {
   if (!prices) {
     throw new TypeError("Hosted AI usage allowance pricing is missing for the provider model.");
   }
-  // Hosted Codex caps Astra context at 272K (validated in the runner catalog).
+  // Hosted Codex caps GPT-6 context at 272K (validated in the runner catalog).
   // Its turn deltas sum multiple requests; cumulative input is not context size.
   const cumulativeCodexUsage = input.record.usageExtractionSourcePath
     ?.endsWith("tokenUsage.total.delta") === true;
   // Exact individual requests above 272K pay long-context rates in every bucket.
-  if (input.model === "gpt-6-astra" && !cumulativeCodexUsage
+  if (input.model.startsWith("gpt-6-") && !cumulativeCodexUsage
       && normalizeTokenCount(input.record.inputTokens) > 272_000n) {
     return {
       cachedInputUsdMicrosPerMillionTokens: prices.cachedInputUsdMicrosPerMillionTokens * 2n,

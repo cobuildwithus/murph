@@ -1,3 +1,4 @@
+import { emitHostedExecutionStructuredLog } from "@murphai/hosted-execution";
 import type {
   HostedCryptoDomain,
 } from "@murphai/runtime-state";
@@ -8,8 +9,7 @@ import type {
   HostedUserCryptoContext,
 } from "../hosted-crypto/runtime-user-crypto-context.ts";
 import type {
-  WorkerEnvironmentContract,
-  WorkerUserRunnerStubLike,
+  WorkerEnvironmentContract
 } from "../worker-contracts.ts";
 
 export interface RunnerOutboundEnvironmentSource
@@ -44,6 +44,19 @@ export async function resolveRunnerOutboundUserCryptoContext(input: {
   const nowMs = Date.now();
   const existing = runnerOutboundCryptoContextPendingLoads.get(cacheKey);
   if (existing && existing.expiresAtMs > nowMs) {
+    emitHostedExecutionStructuredLog({
+      component: "runner",
+      details: {
+        domain: input.domain,
+        pendingAgeMs: Math.max(0, Math.min(
+          RUNNER_OUTBOUND_CRYPTO_CONTEXT_PENDING_TTL_MS,
+          nowMs - (existing.expiresAtMs - RUNNER_OUTBOUND_CRYPTO_CONTEXT_PENDING_TTL_MS),
+        )),
+      },
+      level: "info",
+      message: "Hosted runner outbound crypto context joined pending load.",
+      phase: "wake.running",
+    });
     return await existing.promise;
   }
   if (existing) {
@@ -79,26 +92,6 @@ export async function resolveRunnerOutboundUserCryptoContext(input: {
 
 export function resetRunnerOutboundSharedCachesForTest(): void {
   runnerOutboundCryptoContextPendingLoads.clear();
-}
-
-export async function resolveRunnerOutboundUserRunnerStub(
-  env: RunnerOutboundEnvironmentSource,
-  userId: string,
-): Promise<WorkerUserRunnerStubLike> {
-  return env.USER_RUNNER.getByName(userId);
-}
-
-type WorkerUserRunnerStubWithMethod<
-  TKey extends keyof WorkerUserRunnerStubLike,
-> = WorkerUserRunnerStubLike & Required<Pick<WorkerUserRunnerStubLike, TKey>>;
-
-export function requireRunnerOutboundUserStubMethod<TKey extends keyof WorkerUserRunnerStubLike>(
-  stub: WorkerUserRunnerStubLike,
-  key: TKey,
-): asserts stub is WorkerUserRunnerStubWithMethod<TKey> {
-  if (typeof stub[key] !== "function") {
-    throw new TypeError(`User runner stub does not implement ${String(key)}.`);
-  }
 }
 
 function cryptoContextCacheKey(input: {

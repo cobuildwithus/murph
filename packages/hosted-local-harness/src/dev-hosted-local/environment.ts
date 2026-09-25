@@ -1123,14 +1123,10 @@ export function buildWranglerLocalDevConfig(
       buildRunnerContainerConfig({ className: "DeploySmokeRunnerContainer", maxInstances: 1 }),
       // Keep the legacy binding/application even after its reservation reaches zero.
       buildRunnerContainerConfig({ className: "StandbyRunnerContainer", maxInstances: 0 }),
-      buildRunnerContainerConfig({ className: "SmallRunnerContainer", maxInstances: 1 }),
+      buildRunnerContainerConfig({ className: "SmallRunnerContainer", maxInstances: 0 }),
     ],
     durable_objects: {
       bindings: [
-        {
-          name: "USER_RUNNER",
-          class_name: "UserRunnerDurableObject",
-        },
         {
           name: "DATABASE_HEALTH_MONITOR",
           class_name: "DatabaseHealthDurableObject",
@@ -1200,6 +1196,7 @@ export function buildWranglerLocalDevConfig(
       },
       { tag: "v8", new_sqlite_classes: ["NextRunnerContainer"] },
       { tag: "v9", new_sqlite_classes: ["SmallRunnerContainer"] },
+      { tag: "v10", deleted_classes: ["UserRunnerDurableObject"] },
     ],
     triggers: {
       crons: ["*/5 * * * *"],

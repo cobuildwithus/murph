@@ -20,6 +20,7 @@ import {
   resolveExperimentAdherenceRollupTarget,
   resolveAdherenceObservationActivityKind,
   resolveExperimentAdherenceTargets,
+  type AdherenceSessionCounts,
   type CalendarAdherenceSessionCounts,
   type ExperimentAdherenceCalendarResult,
   type ExperimentAdherenceCell,
@@ -2029,82 +2030,127 @@ function buildProgressResult(
   adherence: BrowserVaultExperimentAdherenceResult | null,
   occurrenceCounts: CalendarAdherenceSessionCounts | null,
 ): BrowserVaultExperimentProgressResult {
+  return {
+    adherence: buildProgressAdherence(context, schedule, adherence, occurrenceCounts),
+    dataCoverage: buildProgressDataCoverage(context, biomarkers),
+    setupReadiness: buildBrowserSetupReadiness(context),
+    analysisReadiness: buildBrowserAnalysisReadiness(context),
+    dayInRun: context.run.dayInRun,
+    phase: context.run.phase,
+    windows: context.run.windows,
+  };
+}
+
+function buildProgressAdherence(
+  context: BrowserVaultExperimentRunContext,
+  schedule: BrowserVaultExperimentScheduleResult | null,
+  adherence: BrowserVaultExperimentAdherenceResult | null,
+  occurrenceCounts: CalendarAdherenceSessionCounts | null,
+): BrowserVaultExperimentProgressResult["adherence"] {
   const rollupTarget = resolveExperimentAdherenceRollupTarget(context.adherenceTargets);
-  const hasUnknownAdherence = context.unsupportedExplicitAdherenceTargets ||
-    (context.adherenceTargets.length > 1 && !rollupTarget);
-  const targetSessions = hasUnknownAdherence
-    ? null
-    : rollupTarget?.rollup?.targetCompletions ?? context.run.runPlan.targetSessions;
-  const minimumUsefulSessions = hasUnknownAdherence
-    ? null
-    : rollupTarget?.rollup?.minimumUsefulCompletions ?? context.run.runPlan.minimumUsefulSessions;
-  const progressTarget = hasUnknownAdherence
-    ? null
-    : rollupTarget ?? context.adherenceTargets[0] ?? null;
-  const progressObservations = progressTarget
-    ? buildAdherenceObservations(context, [progressTarget])
-    : [];
-  const progressCells = progressTarget?.calendar && adherence
-    ? rollupTarget
-      ? adherence.cells.filter((cell) => cell.targetId === rollupTarget.targetId)
-      : adherence.cells
-    : null;
-  const progressCounts = occurrenceCounts ??
-    (progressTarget && !progressTarget.calendar
-      ? countCompletedAdherenceSessions({
-          asOfDate: context.evidenceThrough,
-          observations: progressObservations,
-          target: progressTarget,
-          windows: context.run.windows,
-        })
-      : null);
-  const sessionCounts = hasUnknownAdherence
-    ? null
-    : occurrenceCounts ?? (progressTarget?.calendar ? schedule : progressCounts);
-  const completedSessions = sessionCounts?.completedSessions ?? 0;
-  const partialSessions = sessionCounts?.partialSessions ?? 0;
-  const missedSessions = sessionCounts?.missedSessions ?? 0;
-  const skippedSessions = sessionCounts?.skippedSessions ?? 0;
-  const loggedSessions = completedSessions + partialSessions;
-  const progressSchedule = progressTarget?.calendar && rollupTarget && schedule
-    ? {
-        ...schedule,
-        cells: schedule.cells.filter((cell) => cell.targetId === rollupTarget.targetId),
-      }
-    : progressTarget?.calendar ? schedule : null;
-  const confidenceCounts = hasUnknownAdherence
-    ? { sensedSessions: 0, confirmedSessions: 0, assumedSessions: 0 }
-    : occurrenceCounts ??
-      (progressTarget?.calendar
-        ? countAdherenceConfidenceSessions({
-            cells: progressCells ?? [],
-            observations: progressObservations,
-          })
-        : progressCounts ?? {
-            sensedSessions: 0,
-            confirmedSessions: 0,
-            assumedSessions: 0,
-          });
-  const scheduledExpectedSessionsByNow =
-    hasUnknownAdherence
-      ? null
-      : computeExpectedSessionsByNow(
-          context.run,
-          context.evidenceThrough,
-          targetSessions,
-          progressSchedule,
-        );
+  if (
+    context.unsupportedExplicitAdherenceTargets ||
+    (context.adherenceTargets.length > 1 && !rollupTarget)
+  ) {
+    return {
+      completedSessions: 0,
+      expectedSessionsByNow: null,
+      loggedSessions: 0,
+      minimumUsefulSessions: null,
+      missedSessions: 0,
+      partialSessions: 0,
+      skippedSessions: 0,
+      status: "unknown",
+      targetSessions: null,
+    };
+  }
+
+  const targetSessions =
+    rollupTarget?.rollup?.targetCompletions ?? context.run.runPlan.targetSessions;
+  const minimumUsefulSessions =
+    rollupTarget?.rollup?.minimumUsefulCompletions ?? context.run.runPlan.minimumUsefulSessions;
+  const progressTarget = rollupTarget ?? context.adherenceTargets[0] ?? null;
+  let progressSchedule = progressTarget?.calendar ? schedule : null;
+  if (progressSchedule && rollupTarget) {
+    progressSchedule = {
+      ...progressSchedule,
+      cells: progressSchedule.cells.filter((cell) => cell.targetId === rollupTarget.targetId),
+    };
+  }
+
+  // Occurrence counts already include capped sessions and their confidence sources.
+  let counts: AdherenceSessionCounts | null = occurrenceCounts;
+  if (!counts) {
+    const observations = progressTarget
+      ? buildAdherenceObservations(context, [progressTarget])
+      : [];
+    if (progressTarget?.calendar) {
+      const cells = adherence?.cells ?? [];
+      counts = {
+        completedSessions: schedule?.completedSessions ?? 0,
+        missedSessions: schedule?.missedSessions ?? 0,
+        partialSessions: schedule?.partialSessions ?? 0,
+        skippedSessions: schedule?.skippedSessions ?? 0,
+        ...countAdherenceConfidenceSessions({
+          cells: rollupTarget
+            ? cells.filter((cell) => cell.targetId === rollupTarget.targetId)
+            : cells,
+          observations,
+        }),
+      };
+    } else {
+      counts = countCompletedAdherenceSessions({
+        asOfDate: context.evidenceThrough,
+        observations,
+        target: progressTarget,
+        windows: context.run.windows,
+      });
+    }
+  }
+
+  const scheduledExpectedSessionsByNow = computeExpectedSessionsByNow(
+    context.run,
+    context.evidenceThrough,
+    targetSessions,
+    progressSchedule,
+  );
   const expectedSessionsByNow =
     occurrenceCounts && scheduledExpectedSessionsByNow !== null
       ? occurrenceCounts.expectedSessionsByNow
       : scheduledExpectedSessionsByNow;
+  const loggedSessions = counts.completedSessions + counts.partialSessions;
+
+  return {
+    completedSessions: counts.completedSessions,
+    ...(counts.assumedSessions > 0 ? { assumedSessions: counts.assumedSessions } : {}),
+    ...(counts.confirmedSessions > 0 ? { confirmedSessions: counts.confirmedSessions } : {}),
+    expectedSessionsByNow,
+    loggedSessions,
+    minimumUsefulSessions,
+    missedSessions: counts.missedSessions,
+    partialSessions: counts.partialSessions,
+    ...(counts.sensedSessions > 0 ? { sensedSessions: counts.sensedSessions } : {}),
+    skippedSessions: counts.skippedSessions,
+    status: classifyAdherenceStatus({
+      expectedSessionsByNow,
+      loggedSessions,
+      minimumUsefulSessions,
+      targetSessions,
+    }),
+    targetSessions,
+  };
+}
+
+function buildProgressDataCoverage(
+  context: BrowserVaultExperimentRunContext,
+  biomarkers: readonly BrowserVaultExperimentBiomarkerResult[],
+): BrowserVaultExperimentProgressResult["dataCoverage"] {
   const primary = biomarkers[0] ?? null;
-  const primaryOutcome = resolveExperimentPrimaryOutcome(
-    readExperimentAnalysisPlan(context.entity.attributes),
-  );
+  const analysisPlan = readExperimentAnalysisPlan(context.entity.attributes);
+  const primaryOutcome = resolveExperimentPrimaryOutcome(analysisPlan);
   const structuredEvidence = primaryOutcome?.kind === "structured_review"
     ? summarizeExperimentOutcomeEvidencePlan(
-        readExperimentAnalysisPlan(context.entity.attributes),
+        analysisPlan,
         primaryOutcome.key,
         {
           evidenceObservedOnByRecordId: context.evidenceObservedOnByRecordId,
@@ -2126,39 +2172,11 @@ function buildProgressResult(
     : classifyCoverageStatus(context, primary);
 
   return {
-    adherence: {
-      completedSessions,
-      ...(confidenceCounts.assumedSessions > 0 ? { assumedSessions: confidenceCounts.assumedSessions } : {}),
-      ...(confidenceCounts.confirmedSessions > 0 ? { confirmedSessions: confidenceCounts.confirmedSessions } : {}),
-      expectedSessionsByNow,
-      loggedSessions,
-      minimumUsefulSessions,
-      missedSessions,
-      partialSessions,
-      ...(confidenceCounts.sensedSessions > 0 ? { sensedSessions: confidenceCounts.sensedSessions } : {}),
-      skippedSessions,
-      status: hasUnknownAdherence
-        ? "unknown"
-        : classifyAdherenceStatus({
-            expectedSessionsByNow,
-            loggedSessions,
-            minimumUsefulSessions,
-            targetSessions,
-          }),
-      targetSessions,
-    },
-    dataCoverage: {
-      baselineDaysAvailable: primaryBaselineDays,
-      interventionDaysAvailable: primaryInterventionDays,
-      primaryBiomarkerKey: primaryOutcome?.key ?? primary?.biomarkerKey ?? null,
-      primaryMetricDaysAvailable: primaryBaselineDays + primaryInterventionDays,
-      status: coverageStatus,
-    },
-    setupReadiness: buildBrowserSetupReadiness(context),
-    analysisReadiness: buildBrowserAnalysisReadiness(context),
-    dayInRun: context.run.dayInRun,
-    phase: context.run.phase,
-    windows: context.run.windows,
+    baselineDaysAvailable: primaryBaselineDays,
+    interventionDaysAvailable: primaryInterventionDays,
+    primaryBiomarkerKey: primaryOutcome?.key ?? primary?.biomarkerKey ?? null,
+    primaryMetricDaysAvailable: primaryBaselineDays + primaryInterventionDays,
+    status: coverageStatus,
   };
 }
 

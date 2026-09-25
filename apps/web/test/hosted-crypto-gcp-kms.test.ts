@@ -11,13 +11,13 @@ import {
   HOSTED_GCP_KMS_OPERATION_TIMEOUT_MS,
   type HostedGcpKmsClient,
   type HostedGcpKmsClientDependencies,
-  type HostedGcpKmsSdkAsymmetricSignRequest,
-  type HostedGcpKmsSdkCallOptions,
-  type HostedGcpKmsSdkClientConfiguration,
-  type HostedGcpKmsSdkDecryptRequest,
-  type HostedGcpKmsSdkEncryptRequest,
-  type HostedGcpKmsSdkMacSignRequest,
-  type HostedGcpKmsSdkTransport,
+  type HostedGcpKmsAsymmetricSignRequest,
+  type HostedGcpKmsCallOptions,
+  type HostedGcpKmsTransportConfiguration,
+  type HostedGcpKmsDecryptRequest,
+  type HostedGcpKmsEncryptRequest,
+  type HostedGcpKmsMacSignRequest,
+  type HostedGcpKmsTransport,
 } from "../src/lib/hosted-crypto/gcp-kms";
 
 vi.mock("@vercel/oidc", () => ({
@@ -92,9 +92,7 @@ describe("hosted crypto Google client configuration", () => {
 
     expect(harness.config).toMatchObject({
       apiEndpoint: "cloudkms.googleapis.com",
-      fallback: false,
       port: 443,
-      scopes: ["https://www.googleapis.com/auth/cloudkms"],
     });
     expect(harness.config.credentials.kind).toBe("workload-identity");
     if (harness.config.credentials.kind !== "workload-identity") {
@@ -137,14 +135,13 @@ describe("hosted crypto Google client configuration", () => {
     }
   });
 
-  it("uses REST fallback only for an exact non-production custom KMS endpoint", () => {
+  it("allows only an exact non-production custom KMS endpoint", () => {
     const harness = createClientHarness({
       ...STATIC_ENV,
       HOSTED_CRYPTO_GCP_KMS_API_ROOT: "https://kms.example.test:8443/v1",
     });
     expect(harness.config).toMatchObject({
       apiEndpoint: "kms.example.test",
-      fallback: true,
       port: 8443,
     });
 
@@ -205,8 +202,8 @@ describe("hosted crypto Google KMS integrity transport", () => {
     const plaintext = new Uint8Array([1, 2, 3]);
     const responseCiphertext = new Uint8Array([9, 8, 7, 6]);
     const captured: {
-      options?: HostedGcpKmsSdkCallOptions;
-      request?: HostedGcpKmsSdkEncryptRequest;
+      options?: HostedGcpKmsCallOptions;
+      request?: HostedGcpKmsEncryptRequest;
     } = {};
     let requestPlaintext = new Uint8Array();
     let requestAad = new Uint8Array();
@@ -275,7 +272,7 @@ describe("hosted crypto Google KMS integrity transport", () => {
       },
     ]) {
       const responseCiphertext = new Uint8Array([4, 5, 6]);
-      const captured: { request?: HostedGcpKmsSdkEncryptRequest } = {};
+      const captured: { request?: HostedGcpKmsEncryptRequest } = {};
       const client = createClientHarness(STATIC_ENV, createTransport({
         encrypt: async (request) => {
           captured.request = request;
@@ -303,7 +300,7 @@ describe("hosted crypto Google KMS integrity transport", () => {
   it("normalizes a versioned Decrypt name to its exact CryptoKey and accepts old-version ciphertext", async () => {
     const ciphertext = new TextEncoder().encode("encrypted-root-key");
     const responsePlaintext = new Uint8Array([4, 5, 6]);
-    const captured: { request?: HostedGcpKmsSdkDecryptRequest } = {};
+    const captured: { request?: HostedGcpKmsDecryptRequest } = {};
     const client = createClientHarness(STATIC_ENV, createTransport({
       decrypt: async (request) => {
         captured.request = request;
@@ -353,7 +350,7 @@ describe("hosted crypto Google KMS integrity transport", () => {
     const message = new TextEncoder().encode("sign this envelope");
     const expectedDigest = new Uint8Array(await crypto.subtle.digest("SHA-256", message));
     const responseSignature = new Uint8Array([7, 8, 9, 10]);
-    const captured: { request?: HostedGcpKmsSdkAsymmetricSignRequest } = {};
+    const captured: { request?: HostedGcpKmsAsymmetricSignRequest } = {};
     let digestBeforeClear = new Uint8Array();
     const client = createClientHarness(STATIC_ENV, createTransport({
       asymmetricSign: async (request) => {
@@ -408,7 +405,7 @@ describe("hosted crypto Google KMS integrity transport", () => {
 
   it("requires an exact 32-byte MAC with matching data and response CRCs", async () => {
     const responseMac = new Uint8Array(32).fill(7);
-    const captured: { request?: HostedGcpKmsSdkMacSignRequest } = {};
+    const captured: { request?: HostedGcpKmsMacSignRequest } = {};
     const client = createClientHarness(STATIC_ENV, createTransport({
       macSign: async (request) => {
         captured.request = request;
@@ -537,6 +534,48 @@ describe("hosted crypto Google KMS integrity transport", () => {
 });
 
 describe("hosted crypto Google KMS aborts and redacted errors", () => {
+  it.each([249, 250])("logs first-attempt provider timing only for slow responses (%i ms)", async (elapsedMs) => {
+    let now = 1_000;
+    vi.spyOn(Date, "now").mockImplementation(() => now);
+    const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    const responsePlaintext = new Uint8Array([4, 5, 6]);
+    const client = createClientHarness(STATIC_ENV, createTransport({
+      decrypt: async () => {
+        now += elapsedMs;
+        return {
+          plaintext: responsePlaintext,
+          plaintextCrc32c: crc32c(responsePlaintext),
+          usedPrimary: true,
+        };
+      },
+    })).client;
+    await expect(client.decrypt({
+      additionalAuthenticatedData: "synthetic-private-context",
+      ciphertext: Buffer.from([1, 2, 3]).toString("base64"),
+      keyName: KMS_KEY_NAME,
+    })).resolves.toEqual({ plaintext: new Uint8Array([4, 5, 6]) });
+    if (elapsedMs < 250) {
+      expect(info).not.toHaveBeenCalled();
+    } else {
+      expect(info).toHaveBeenCalledExactlyOnceWith(
+        "Hosted Google Cloud KMS slow provider response received.",
+        expect.objectContaining({
+          attempt: 1,
+          attemptElapsedMs: elapsedMs,
+          completionStage: "kms_rpc",
+          operation: "decrypt",
+          outcome: "provider_response_received",
+          sdkInitializeElapsedMs: expect.any(Number),
+          kmsRpcElapsedMs: expect.any(Number),
+          stsExchangeElapsedMs: expect.any(Number),
+          serviceAccountImpersonationElapsedMs: expect.any(Number),
+        }),
+      );
+      expect(JSON.stringify(info.mock.calls)).not.toMatch(/projects\/|synthetic-private-context|ya29\.|AQID/u);
+    }
+    expectAllZero(responsePlaintext);
+  });
+
   it.each([
     { code: 4, reason: "DEADLINE_EXCEEDED" },
     { code: 14, reason: "UNAVAILABLE" },
@@ -546,7 +585,7 @@ describe("hosted crypto Google KMS aborts and redacted errors", () => {
   }) => {
     vi.spyOn(Math, "random").mockReturnValue(0);
     const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    const requests: HostedGcpKmsSdkDecryptRequest[] = [];
+    const requests: HostedGcpKmsDecryptRequest[] = [];
     const timeouts: number[] = [];
     let calls = 0;
     const responsePlaintext = new Uint8Array([4, 5, 6]);
@@ -618,7 +657,7 @@ describe("hosted crypto Google KMS aborts and redacted errors", () => {
   }) => {
     vi.spyOn(Math, "random").mockReturnValue(0);
     vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    const requests: HostedGcpKmsSdkDecryptRequest[] = [];
+    const requests: HostedGcpKmsDecryptRequest[] = [];
     const client = createClientHarness(STATIC_ENV, createTransport({
       decrypt: async (request) => {
         requests.push(request);
@@ -744,7 +783,7 @@ describe("hosted crypto Google KMS aborts and redacted errors", () => {
   it("honors caller abort without retrying or exposing the caller reason", async () => {
     const caller = new AbortController();
     let calls = 0;
-    const captured: { request?: HostedGcpKmsSdkEncryptRequest } = {};
+    const captured: { request?: HostedGcpKmsEncryptRequest } = {};
     const client = createClientHarness(STATIC_ENV, createTransport({
       encrypt: (currentRequest, options) => {
         calls += 1;
@@ -925,13 +964,13 @@ describe("hosted crypto local KMS", () => {
 });
 
 interface TransportOverrides {
-  asymmetricSign?: HostedGcpKmsSdkTransport["asymmetricSign"];
-  decrypt?: HostedGcpKmsSdkTransport["decrypt"];
-  encrypt?: HostedGcpKmsSdkTransport["encrypt"];
-  macSign?: HostedGcpKmsSdkTransport["macSign"];
+  asymmetricSign?: HostedGcpKmsTransport["asymmetricSign"];
+  decrypt?: HostedGcpKmsTransport["decrypt"];
+  encrypt?: HostedGcpKmsTransport["encrypt"];
+  macSign?: HostedGcpKmsTransport["macSign"];
 }
 
-function createTransport(overrides: TransportOverrides = {}): HostedGcpKmsSdkTransport {
+function createTransport(overrides: TransportOverrides = {}): HostedGcpKmsTransport {
   return {
     asymmetricSign: overrides.asymmetricSign ?? (async () => {
       throw new Error("Unexpected asymmetricSign transport call.");
@@ -950,11 +989,11 @@ function createTransport(overrides: TransportOverrides = {}): HostedGcpKmsSdkTra
 
 function createClientHarness(
   env: NodeJS.ProcessEnv,
-  transport: HostedGcpKmsSdkTransport = createTransport(),
-): { client: HostedGcpKmsClient; config: HostedGcpKmsSdkClientConfiguration } {
-  const captured: { config?: HostedGcpKmsSdkClientConfiguration } = {};
+  transport: HostedGcpKmsTransport = createTransport(),
+): { client: HostedGcpKmsClient; config: HostedGcpKmsTransportConfiguration } {
+  const captured: { config?: HostedGcpKmsTransportConfiguration } = {};
   const dependencies: HostedGcpKmsClientDependencies = {
-    createSdkTransport: (config) => {
+    createTransport: (config) => {
       captured.config = config;
       return transport;
     },

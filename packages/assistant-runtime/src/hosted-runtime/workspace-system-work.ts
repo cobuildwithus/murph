@@ -33,7 +33,7 @@ export function createHostedWorkspaceSystemWork(input: {
   >;
   runnerInput: HostedWorkspaceRunnerInput;
   onCompleted(
-    result: HostedWorkspaceRunnerAssistantPhasePostCheckpoint,
+    result: HostedWorkspaceRunnerAssistantPhasePostCheckpoint & { systemProgressed?: true },
     notify: boolean,
   ): void;
   onFailure(error: unknown, notify: boolean): void;
@@ -50,6 +50,8 @@ export function createHostedWorkspaceSystemWork(input: {
     });
     input.onCompleted({
       checkpointReason: "system_mailbox_receipt",
+      ...(preparation.status === "processed" && preparation.metrics.systemProgressed === true
+        ? { systemProgressed: true as const } : {}),
       nextWakeAt: nextWake.at,
       nextWakeReason: nextWake.reason,
       ...(preparation.status === "processed" || preparation.status === "recording"
@@ -141,17 +143,37 @@ export function createHostedWorkspaceSystemWork(input: {
       try {
         while ((wakeSignal || deadline) && !input.preparation.signal?.aborted) {
           const wakeController = new AbortController();
+          const wake = wakeSignal?.wait(wakeController.signal).catch((error: unknown) => {
+            if (wakeController.signal.aborted) return null;
+            throw error;
+          });
+          let wakeHandled = false;
           try {
             const result = await Promise.race([
               completion.then(() => null),
-              ...(wakeSignal ? [wakeSignal.wait(wakeController.signal)] : []),
+              ...(wake ? [wake] : []),
               ...(deadline ? [deadline] : []),
             ]);
+            wakeController.abort();
+            // Completion can win after the waiter consumed the same-tick wake.
+            // Join the waiter before deciding that no foreground work arrived.
+            const notification = await wake;
+            if (notification) {
+              wakeHandled = true;
+              if (await onWake(notification)) return true;
+            }
             if (result === null) break;
-            if (result === "deadline") deadline = null;
-            if (await onWake(result === "deadline" ? null : result)) return true;
+            if (result === "deadline") {
+              deadline = null;
+              if (await onWake(null)) return true;
+            }
           } finally {
             wakeController.abort();
+            // A failed completion must not discard an already accepted wake.
+            if (!wakeHandled) {
+              const notification = await wake;
+              if (notification) wakeSignal?.notify(notification);
+            }
           }
         }
         await completion;

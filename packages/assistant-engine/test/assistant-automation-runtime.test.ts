@@ -2844,7 +2844,7 @@ describe('assistant auto-reply runtime', () => {
       details:
         'assistant reply terminal evidence is incomplete; will retry this input after evidence is rebuilt.',
       errorCode: undefined,
-      safeDetails: undefined,
+      safeDetails: 'reply_skip:incomplete_terminal_evidence',
     }))
   })
 
@@ -4956,7 +4956,9 @@ describe('assistant auto-reply runtime', () => {
       throw new Error('expected reply context')
     }
 
+    const onEvent = vi.fn()
     const result = await reply.processAssistantAutoReplyGroup({
+      onEvent,
       allowSelfAuthored: false,
       context,
       enabledChannels: ['telegram'],
@@ -4966,6 +4968,10 @@ describe('assistant auto-reply runtime', () => {
       vault: '/tmp/assistant-automation-vault',
     })
 
+    expect(onEvent).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'input.reply-skipped',
+      safeDetails: 'reply_skip:channel_disabled',
+    }))
     expect(result).toMatchObject({
       advanceCursor: true,
       failed: 0,
@@ -4992,7 +4998,9 @@ describe('assistant auto-reply runtime', () => {
       throw new Error('expected reply context')
     }
 
+    const onEvent = vi.fn()
     const result = await reply.processAssistantAutoReplyGroup({
+      onEvent,
       allowSelfAuthored: false,
       context,
       enabledChannels: ['telegram'],
@@ -5002,6 +5010,10 @@ describe('assistant auto-reply runtime', () => {
       vault: '/tmp/assistant-automation-vault',
     })
 
+    expect(onEvent).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'input.reply-skipped',
+      safeDetails: 'reply_skip:self_authored',
+    }))
     expect(result).toMatchObject({
       advanceCursor: true,
       failed: 0,
@@ -5182,6 +5194,40 @@ describe('assistant auto-reply runtime', () => {
       threadIsDirect: false,
     }))
     expect(replyMocks.sendAssistantMessage).toHaveBeenCalled()
+  })
+
+  it.each([
+    ['input has no text or attachment context', 'empty_input'],
+    ['private synthetic diagnostic: confidential-context', 'unclassified'],
+    ['input has no text or attachment context: confidential-context', 'unclassified'],
+    ['toString', 'unclassified'],
+  ])('logs a bounded skip category for prepared reason %s', async (reason, code) => {
+    replyMocks.prepareAssistantAutoReplyInput.mockResolvedValue({ kind: 'skip', reason })
+    const reply = await vi.importActual<typeof import('../src/assistant/automation/reply.ts')>(
+      '../src/assistant/automation/reply.ts',
+    )
+    const context = reply.createAssistantAutoReplyGroupContext([
+      createReplyGroupItem(createCaptureSummary()),
+    ])
+    if (!context) throw new Error('expected reply context')
+    const onEvent = vi.fn()
+    const result = await reply.processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context,
+      enabledChannels: ['telegram'],
+      inboxServices: createInboxServices(),
+      onEvent,
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault: '/tmp/assistant-automation-vault',
+    })
+    expect(result).toMatchObject({ advanceCursor: true, replied: 0, skipped: 1 })
+    expect(onEvent).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'input.reply-skipped',
+      details: reason,
+      safeDetails: `reply_skip:${code}`,
+    }))
+    expect(replyMocks.sendAssistantMessage).not.toHaveBeenCalled()
   })
 
   it('defers the group when prompt preparation asks to wait for more evidence', async () => {

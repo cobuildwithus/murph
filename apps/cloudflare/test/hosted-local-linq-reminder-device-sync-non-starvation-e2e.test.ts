@@ -85,8 +85,8 @@ describe("hosted local Linq reminder device-sync non-starvation e2e", () => {
         DEVICE_SYNC_SECRET: "synthetic-device-sync-runtime-secret",
         HOSTED_ASSISTANT_MODEL: productionLikeAssistantModel,
         HOSTED_ASSISTANT_PROVIDER: "openai",
-        HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS:
-          process.env.MURPH_HOSTED_LOCAL_E2E_FAST_GATE === "1" ? "1" : "10000",
+        HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS:
+          process.env.MURPH_HOSTED_LOCAL_E2E_FAST_GATE === "1" ? "1000" : "10000",
         HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS:
           buildLinqRecipientPhoneNumber(userId),
         JUNCTION_API_KEY: "sk_us_synthetic_junction_api_key",
@@ -642,12 +642,12 @@ async function holdPositiveDeviceSyncPassCheckpoint(input: {
       return pass;
     }
     expect(pass.redactedJson).toMatchObject({
-      outcome: "yielded",
       processedJobs: 0,
     });
-    // A cooperative yield after the retry fence can precede all job progress.
-    // Publish that checkpoint so its scheduled retry can establish the backlog
-    // boundary this test needs; retaining the barrier here would deadlock it.
+    expect(["completed", "yielded"]).toContain(pass.redactedJson?.outcome);
+    // A completed empty pass or a cooperative yield can precede job progress.
+    // Publish that checkpoint so later work can establish the positive backlog
+    // boundary this test requires; retaining the barrier here would deadlock it.
     await expect(requireScenario().harness
       .releaseShutdownCheckpointPublicationBarrierForTest(userId))
       .resolves.toEqual({ ok: true, released: true });

@@ -48,6 +48,18 @@ const defaultWorkflowOptions = {
   ensureRuntimeProcessingStartToCloseTimeoutMs: 25_000,
 };
 
+// Row fixtures retain their state-based access decisions; the PostgreSQL
+// proof exercises the database-filtered boolean gate.
+vi.mock("@/src/lib/hosted-onboarding/member-access", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/src/lib/hosted-onboarding/member-access")>();
+  return {
+    ...actual,
+    readActiveHostedMemberAccess: async (
+      input: Parameters<typeof actual.readActiveHostedMemberAccess>[0],
+    ) => await actual.readActiveHostedMemberAccessState(input) !== null,
+  };
+});
+
 vi.mock("@/src/lib/hosted-mailbox/store", () => ({
   appendHostedMailboxEnvelopeTx: mocks.appendHostedMailboxEnvelopeTx,
   readHostedMailboxItemCheckpointById:
@@ -249,6 +261,50 @@ describe("hosted runtime Temporal signaling", () => {
       }),
     );
   });
+
+  it.each([false, true])(
+    "requires committed checkpoint=%s to hand off a pointer after billing pauses",
+    async (hasCommittedCheckpoint) => {
+      mocks.hostedMemberFindUnique.mockResolvedValue(buildActiveMemberRecord({
+        billingStatus: "paused",
+      }));
+      const signal = signalHostedMailboxAppendRuntime({
+        client: buildClient(),
+        expectedUserId: "member_123",
+        ...(hasCommittedCheckpoint ? {
+          knownCheckpoint: {
+            lane: "system" as const,
+            laneSeq: "42",
+            userId: "member_123",
+          },
+        } : {}),
+        mailboxItemId: "mailbox_123",
+      });
+
+      if (!hasCommittedCheckpoint) {
+        await expect(signal).rejects.toThrow("Hosted runtime user is not active.");
+        expect(mocks.signalWithStart).not.toHaveBeenCalled();
+      } else {
+        await expect(signal).resolves.toEqual({
+          signalAccepted: true,
+          workflowId: "hosted-user-runtime:member_123",
+        });
+        expect(mocks.hostedMemberFindUnique).not.toHaveBeenCalled();
+        expect(mocks.signalWithStart).toHaveBeenCalledWith(
+          HOSTED_USER_RUNTIME_WORKFLOW_TYPE,
+          expect.objectContaining({
+            signalArgs: [{
+              kind: "mailbox_appended",
+              lane: "system",
+              laneSeq: "42",
+              mailboxItemId: "mailbox_123",
+            }],
+          }),
+        );
+      }
+      expect(mocks.ensureHostedWorkspace).not.toHaveBeenCalled();
+    },
+  );
 
   it("rejects planner lane facts whose owner does not match the expected user", async () => {
     const onSignalStarted = vi.fn();

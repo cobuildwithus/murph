@@ -22,7 +22,10 @@ Cloudflare execution worker.
 New hosted runtime code should import mailbox, workspace checkpoint, runtime log,
 and workspace invocation contracts from
 `@murphai/hosted-execution/runtime-control`. Temporal processing/status
-contracts live in `@murphai/hosted-execution/orchestration-control`. Use
+contracts live in `@murphai/hosted-execution/orchestration-control`. Workflow
+consumers also use that entrypoint for `isHostedMailboxLane`; its runtime graph
+stays independent of runtime-control and health schemas. Runtime-control retains
+the same exports for execution consumers. Use
 `@murphai/hosted-execution/routes` for stable route constants and builders.
 Runtime log and redacted-status validation is owned by
 `src/parsers/runtime-log.ts`, exported through `@murphai/hosted-execution/parsers`.

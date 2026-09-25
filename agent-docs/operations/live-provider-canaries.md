@@ -1,6 +1,6 @@
 # Live provider canaries
 
-Last verified: 2026-09-10
+Last verified: 2026-09-17
 
 A passing live canary means its actual journey and business assertions completed.
 A successful scheduler, skipped job, connection-only result, or unavailable
@@ -9,20 +9,60 @@ age of an executed run; this system adds no product-state receipt database.
 
 ## Existing journeys
 
-- Native iOS and Android execute on every staggered six-hour schedule, including
+- Native iOS and Android execute on every staggered twelve-hour schedule, including
   unchanged revisions. They retain immutable private-source pins, exact deployed
   revision checks, non-destructive identity ownership, and fixed non-canceling
-  concurrency. Manual recovery is restricted to current protected main.
-- Linq resolves the actual production alias before its hourly journey, verifies
+  concurrency. Manual recovery is restricted to current protected main. iOS
+  independently selects and verifies the actual production deployment, including
+  protected-main ancestry and dispatch-time equality. The Web SHA records the
+  deployment selected at launch, not an assertion that production stays frozen
+  for the entire native journey. Ordinary promotions do not invalidate successful
+  native business assertions; the canary emits no per-commit acceptance status.
+- Linq resolves the actual production alias before its six-hour journey, verifies
   protected-main ancestry and exact deployment, and repeats deployment validation
   after execution. A manual requested SHA must match the deployed revision.
   The fixed canary account is reset through its existing input-free owner.
-  After onboarding, the journey requires zero goals, one canonical fixed-goal
-  write, a later model readback, and exactly one persisted goal. Pending
-  conversation work or a checkpoint change prevents accepting an older replica. The fixed-target read-only outcome route returns counts/readiness only.
+  Phone-account creation saves an explicit GPT-6 Luna preference only for the
+  server-configured Linq canary number. Each reset recreates that preference;
+  ordinary member defaults and existing saved model choices are unchanged.
+  The canary retains the normal first-day priority policy and member pricing.
+  After the identity exchange, the person asks for a manageable walking plan
+  and accepts the proposal in ordinary language. Canonical observations require
+  zero Goals after identity and proposal, then exactly one active Goal after
+  acceptance, with valid bank/goal provenance and a distinct canonical ID. The
+  model may choose its title. The conversation contains no storage command or
+  exact-title readback demand; exact save/readback is covered separately by
+  `packages/cli/test/health-goal-save.test.ts`. A focused real-model journey
+  shares the canary messages and checks the walking plan and linked Goal;
+  production counts alone prove lifecycle and provenance, not plan semantics.
+  Deploy the active-Goal observer before running the new conversation controller.
+  Pending
+  conversation work or a checkpoint change during the read prevents accepting
+  the result. The observer parses the live v2 checkpoint and compares its complete
+  fingerprint before and after decryption. Published-replica freshness uses the
+  existing Browser Vault generation/age policy; the runtime owns canonical-content
+  hashing. A checkpoint archive fingerprint is never compared with the replica's
+  independent canonical source hash. The fixed-target read-only outcome route
+  returns counts/readiness only.
   It cannot choose another member or enqueue a refresh. Deployment movement,
   absent support, stale projection, missing effect, or duplicate effects fail.
-- Stripe retains its protected sandbox browser matrix. After the browser
+  Each canonical observation allows the shared default runner quiet window plus
+  two minutes for publication, currently twelve minutes with at most 720 serial
+  one-second polling attempts and a ten-second per-request cap inside that
+  overall deadline. A timed-out read (including its response body) or HTTP 503
+  uses the next existing poll without extending the deadline or repeating a
+  message/reset. Persistent unavailability fails at the deadline; other HTTP
+  errors, malformed evidence, and incorrect goal counts still fail immediately.
+  This accommodates the normal ten-minute quiet window before
+  checkpointing and subsequent replica publication. The separate
+  send-to-reply and inter-reply budgets remain 20 seconds; canonical observation
+  time is excluded. The workflow has a 55-minute cap covering reset, all three
+  observations, replies, setup, and final exact-deployment verification.
+- Assistant real-model journeys run daily on protected main and by manual recovery.
+  Every admitted run still requires all three real-provider journeys.
+- Stripe runs its protected sandbox browser matrix daily. Hermetic billing checks
+  remain on every eligible PR and main push; a scheduled run requires live success.
+  After the browser
   schedules Edge to Pulse, a real owned test clock advances through renewal and
   invoice collection. A different paid subscription-cycle invoice, reconciled
   Pulse period, cleared schedule, and production usage admission must agree.
@@ -42,7 +82,7 @@ age of an executed run; this system adds no product-state receipt database.
 ## Garmin execution boundary
 
 The public `.github/workflows/junction-wearable-canary.yml` controller runs on
-protected-main pushes, daily, and manual recovery. It reuses only the existing
+a daily schedule and manual recovery. It reuses only the existing
 `temporal-compatibility` Environment's repository-scoped GitHub App authority:
 private Actions write and Contents read for `cobuildwithus/murph-cloud`. It never
 checks out private source, receives provider credentials, or downloads private

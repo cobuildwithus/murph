@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-14",
+  "order": 100,
+  "item": {
+    "id": "consecutive-audio-preparation",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Less waiting after consecutive voice messages",
+    "summary": "Murph can transcribe two consecutive voice messages together in private text conversations.",
+    "details": "Messages stay in order, and each available transcript is included before Murph starts replying.",
+    "relevanceTags": ["messaging", "attachments"],
+    "sourcePullRequests": [3438]
+  }
+}

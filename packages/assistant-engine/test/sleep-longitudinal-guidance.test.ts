@@ -10,6 +10,7 @@ import {
 import { readWorkflowSkillPolicy } from './support/workflow-skill-policy.js'
 
 async function readSkill(slug: string): Promise<string> {
+  if (slug === 'behavior-followthrough') return readWorkflowSkillPolicy(slug)
   return readFile(
     path.join(resolveAssistantSkillsRoot(), slug, 'SKILL.md'),
     'utf8',
@@ -289,7 +290,7 @@ describe('plan ownership and closeout guidance', () => {
 
   it('keeps habit-plan support reconcilable while allowing explicitly ongoing cues', async () => {
     const skill = await readSkill('behavior-followthrough')
-    const automation = readSection(skill, 'Support and automation policy')
+    const automation = skill
     const compactAutomation = automation.replace(/\s+/gu, ' ')
     const closeout = readSection(skill, 'Non-Experiment Closeout')
 

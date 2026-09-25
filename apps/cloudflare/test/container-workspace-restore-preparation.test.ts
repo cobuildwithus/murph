@@ -51,6 +51,10 @@ describe("container workspace restore preparation", () => {
     "restores encrypted bytes through the real composition (prepared: %s)",
     async (prepared) => {
       const fixture = await createFixture();
+      fixture.workspace.redactedStatus = {
+        hostedMailboxConversationImportedSeq: "3",
+        hostedMailboxSystemImportedSeq: "2",
+      };
       const job = createJob(fixture, prepared);
       const requests = serveSnapshot(fixture);
 
@@ -82,6 +86,7 @@ describe("container workspace restore preparation", () => {
       expect(controlRequests.map((request) => new URL(request.url).pathname).sort())
         .toEqual([
           HOSTED_RUNNER_WEB_CONTROL_ROUTES.workspaceRead.path,
+          HOSTED_RUNNER_WEB_CONTROL_ROUTES.mailboxFetch.path,
           ...(prepared ? [] : [
             `/workspace-snapshots/${fixture.ref.snapshotId}/data-key/unwrap`,
             `/workspace-snapshots/${fixture.ref.snapshotId}/presign-get`,
@@ -94,6 +99,20 @@ describe("container workspace restore preparation", () => {
         expect(request.headers.get(HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER)).toBe(job.request.workspaceVersion);
         expect(request.headers.has(HOSTED_PROVIDER_EGRESS_TOKEN_HEADER)).toBe(false);
       }
+      expect(result.initialMailboxPrefetch).toMatchObject({
+        importedSeqByLane: { conversation: "3", system: "2" },
+        limitPerLane: 51,
+      });
+      await expect(result.initialMailboxPrefetch?.response).resolves.toMatchObject({
+        userId: job.request.userId, items: [],
+      });
+      const mailboxRequest = requests.find((request) =>
+        new URL(request.url).pathname === HOSTED_RUNNER_WEB_CONTROL_ROUTES.mailboxFetch.path);
+      expect(await mailboxRequest?.json()).toMatchObject({
+        cursorMode: "imported_seq", decodeInlinePayloads: true,
+        lanes: [{ lane: "conversation", importedSeq: "3" }, { lane: "system", importedSeq: "2" }],
+        limitPerLane: 51,
+      });
       // Cold restore leaves media external; selected access uses the real adapter.
       await expect(stat(path.join(preparation.vaultRoot, MEDIA_PATH)))
         .rejects.toMatchObject({ code: "ENOENT" });
@@ -281,6 +300,13 @@ function serveSnapshot(fixture: Fixture, workspace = fixture.workspace): Request
     requests.push(request);
     if (request.url === `${CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.mediaStore}/media/${MEDIA_ID}`) {
       return new Response(MEDIA_BYTES);
+    }
+    if (new URL(request.url).pathname === HOSTED_RUNNER_WEB_CONTROL_ROUTES.mailboxFetch.path) {
+      return Response.json({
+        assistantProvider: "openai", fetchedAt: NOW, items: [],
+        maxSeqByLane: [{ lane: "conversation", maxSeq: "3" }, { lane: "system", maxSeq: "2" }],
+        userId: fixture.workspace.userId,
+      });
     }
     if (request.url === workspaceUrl) {
       return Response.json({ fetchedAt: NOW, workspace });

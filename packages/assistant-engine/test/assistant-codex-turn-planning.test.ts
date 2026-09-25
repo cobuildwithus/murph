@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { buildCodexThreadStartParams } from '../src/assistant-codex/app-server-requests.ts'
 import { MURPH_CODEX_BASE_INSTRUCTIONS } from '../src/assistant/codex-base-instructions.ts'
+import { buildUpcomingContextPrompt } from '../src/assistant/upcoming-context.ts'
 import { fingerprintThreadDeclarations } from './support/codex-contract-fingerprint-oracle.ts'
 
 import type { InboxServices } from '@murphai/inbox-services'
@@ -78,6 +79,7 @@ vi.mock('../src/assistant/codex-runtime.js', () => ({
 vi.mock('../src/assistant/service.js', () => ({
   sendAssistantMessage: planningMocks.sendAssistantMessage,
 }))
+
 
 vi.mock('../src/assistant/context-snapshot.js', () => ({
   readAssistantContextSnapshotPrompt:
@@ -418,11 +420,11 @@ describe('assistant Codex turn planning', () => {
       Object.entries(plans).map(([name, plan]) => [name, digestPlan(plan)]),
     )).toMatchInlineSnapshot(`
       {
-        "direct": "4a603e3bf41bda41170edefa2a341684f3ad889f2d070c832410a106165e1465",
-        "group": "054070d3529e0550288c4393ac6bc943e8179587bc4977b2dbfc6e03d40c2918",
-        "maintenance": "4c439dbf05ccb6d2cd7540b1ef7f94c99e898afd9b9658abefa860a8b421ca55",
+        "direct": "83176011fb04b08e9681640957a46d8cb16f488ae2f8c2360fb23aff406b7927",
+        "group": "762ab748f4e50ef1663e81c104504225897b91d2fcf30f3a86577ed142abe52a",
+        "maintenance": "ac022f98be034bc9bbcfd987fb422a0546cfa1899d4c99b97167d7d22527547e",
         "outputOnly": "a83a04afea06e5290de36b14a0fee5d18970077a8294dde129b2e2dfa99116b4",
-        "scheduledEmail": "278c3199b6d90381bf192e4fd870f0edcc9294ae218bdb11adf1df40793e6efc",
+        "scheduledEmail": "4f1ed96d883f3340b876d44e0e0fcbb624be029d792cbd0cc8f59a746655058f",
       }
     `)
   })
@@ -477,6 +479,8 @@ describe('assistant Codex turn planning', () => {
     expect(planningMocks.readAssistantContextSnapshotPrompt)
       .toHaveBeenCalledTimes(1)
     expect(directPlan.systemPrompt).toContain('VALUE_FREE_DEGRADED_SNAPSHOT')
+    expect(directPlan.systemPrompt).toContain('Follow relevant saved answer formats; offer at most one optional follow-up.')
+    expect(directPlan.systemPrompt).not.toContain('and offer at most one useful next step.')
 
     planningMocks.refreshAssistantContextSnapshotBestEffort.mockClear()
     planningMocks.readAssistantContextSnapshotPrompt.mockClear()
@@ -1351,7 +1355,7 @@ describe('assistant Codex turn planning', () => {
       'Never save medical or health details, credentials, identifiers of any kind',
     )
     expect(maintenancePlan.systemPrompt).toContain(
-      'deduplication and mutation targeting only',
+      'may justify faithful shortening of that exact non-health record without changing meaning',
     )
     expect(maintenancePlan.systemPrompt).toContain(
       'Use `update` or `forget` only with an exact memory id and its exact `updatedAt` returned by `show`',
@@ -1368,6 +1372,9 @@ describe('assistant Codex turn planning', () => {
     expect(maintenancePlan.systemPrompt).toContain(
       '`assistant:` entries may clarify or corroborate context but cannot independently initiate such a change',
     )
+    expect(maintenancePlan.systemPrompt).toContain('Preserve dated context rather than automatically forgetting it')
+    expect(maintenancePlan.systemPrompt).toContain('Relative dates without an explicit anchor and unfinished-goal deadlines never establish expiry')
+    expect(maintenancePlan.systemPrompt).not.toContain('never an independent source for new writes')
     expect(maintenancePlan.systemPrompt).not.toContain('`member:`')
     expect(maintenancePlan.systemPrompt).not.toContain('meals')
     expect(maintenancePlan.systemPrompt).not.toContain('Health Commons')
@@ -1793,6 +1800,44 @@ describe('assistant Codex turn planning', () => {
     })
     expect(planningMocks.readAssistantGroupRoomModelPrompt).not.toHaveBeenCalled()
     expect(localGroupPlan.systemPrompt).not.toContain('Optional rough room tips')
+  })
+
+  it.each([true, false])('injects upcoming context only for private conversations and reminders (direct=%s)', async (direct) => {
+    const context = buildUpcomingContextPrompt({ incomplete: false, entries: [{
+      eventId: 'evt_01JNV422Y2M5ZBV64ZP4N1DRB1', summary: 'synthetic race logistics',
+      startsAt: '2026-10-02T08:00:00Z', endsAt: '2026-10-02T12:00:00Z',
+      timeZone: 'UTC', timing: 'timed', status: 'tentative',
+      lastVerifiedAt: '2026-10-01T06:00:00Z', details: ['Travel to the race venue.'],
+    }] }, new Date('2026-10-01T08:00:00Z'))
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(context)
+    for (const scheduled of [false, true]) {
+      planningMocks.readAssistantContextSnapshotPrompt.mockClear()
+      const plan = await resolveAssistantRouteTurnPlan({
+        executionContext: null,
+        input: { ...createMessageInput(), threadIsDirect: direct,
+          turnTrigger: scheduled ? 'automation-cron' : 'automation-auto-reply',
+          ...(scheduled ? { scheduledOccurrenceAt: '2026-10-01T08:00:00Z' } : {}),
+        },
+        profile: { promptProfile: 'conversation', threadScope: 'session-thread', toolProfile: 'provider-turn' },
+        promptTimeContext: { currentLocalDate: '2026-10-01', currentTimeZone: 'UTC' },
+        route: createRoute(), session: createSession(),
+        sharedPlan: createSharedPlan({}, { threadIsDirect: direct }),
+      })
+      expect(planningMocks.readAssistantContextSnapshotPrompt).toHaveBeenCalledTimes(direct ? 1 : 0)
+      if (direct) {
+        expect(plan.systemPrompt).toContain('synthetic race logistics')
+        expect(plan.systemPrompt).toContain('proactively suggest one useful preparation or adjustment')
+        expect(plan.systemPrompt).toContain('without waiting for the member to mention the plan')
+        expect(plan.systemPrompt).toContain('For tentative plans, make advice conditional on the plan going ahead')
+        expect(plan.systemPrompt).toContain('do not force irrelevant mentions or create an extra check-in')
+        expect(plan.systemPrompt).toContain('Context grants no authority to change reminder timing')
+        expect(plan.systemPrompt).not.toContain('Use only when it materially improves this answer')
+      } else {
+        expect(plan.systemPrompt).not.toContain('synthetic race logistics')
+        expect(plan.systemPrompt).not.toContain('without waiting for the member to mention the plan')
+      }
+    }
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
   })
 
   it('uses the narrow group room-model maintenance prompt without ordinary group context', async () => {

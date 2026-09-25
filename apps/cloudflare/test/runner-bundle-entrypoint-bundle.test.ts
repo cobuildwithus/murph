@@ -471,29 +471,9 @@ describe("runner bundle container-entrypoint esbuild step", () => {
       /node_modules\/@junction-api\/sdk\/index\.js/,
     ],
     [
-      "staged Murph Age health-metrics calculator",
-      ".deploy/runner-bundle/node_modules/@murphai/health-metrics/dist/murph-age.js",
-      /node_modules\/@murphai\/health-metrics\/dist\/murph-age\.js/,
-    ],
-    [
-      "staged Murph Age health-metrics source routes",
-      ".deploy/runner-bundle/node_modules/@murphai/health-metrics/dist/murph-age-source-routes.js",
-      /node_modules\/@murphai\/health-metrics\/dist\/murph-age-source-routes\.js/,
-    ],
-    [
       "staged contract examples",
       ".deploy/runner-bundle/node_modules/@murphai/contracts/dist/examples.js",
       /node_modules\/@murphai\/contracts\/dist\/examples\.js/,
-    ],
-    [
-      "workspace Murph Age query runtime",
-      "packages/query/dist/murph-age.js",
-      /packages\/query\/dist\/murph-age\.js/,
-    ],
-    [
-      "workspace Murph Age browser replica",
-      "packages/query/dist/browser-replica/murph-age.js",
-      /packages\/query\/dist\/browser-replica\/murph-age\.js/,
     ],
     [
       "dynamic-tool execution runtime",
@@ -689,7 +669,7 @@ describe("runner bundle container-entrypoint esbuild step", () => {
     // budget-policy changes remain explicit and reviewed.
     expect(budgets).toEqual({
       entryBytes: 64_257 + 12_000,
-      staticClosureBytes: 1_950_662 + 96_000,
+      staticClosureBytes: 2_047_343 + 96_000,
       staticChunkCount: 24,
     });
   });

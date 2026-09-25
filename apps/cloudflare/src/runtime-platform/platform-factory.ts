@@ -1,3 +1,4 @@
+import { createHostedRuntimePollToolPort } from "./poll-tool-port.ts";
 import {
   readHostedRunnerCommitTimeoutMs,
   type HostedRuntimePlatform,
@@ -259,6 +260,7 @@ export function buildHostedExecutionRuntimePlatform(input: {
             timeoutMs,
             transport,
           }),
+          pollToolPort: createHostedRuntimePollToolPort({ boundUserId: input.boundUserId, fetchImpl, timeoutMs, transport }),
           imessageContactToolPort: createHostedRuntimeIMessageContactToolPort({
             boundUserId: input.boundUserId,
             fetchImpl,

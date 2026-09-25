@@ -37,6 +37,7 @@ import {
   sanitizeHostedAssistantRuntimePlatformEnv,
   sanitizeHostedAssistantRuntimeUserEnv,
 } from "./environment.ts";
+import { createDefaultHostedManagedAutoReplyChannels } from "./managed-auto-reply.ts";
 import type {
   HostedAssistantRuntimeConfig,
   HostedAssistantRuntimeParserToolchainConfig,
@@ -379,23 +380,10 @@ export function buildHostedRuntimeResolvedConfig(
       telegramBotConfigured,
     },
     deviceSync,
-    managedAutoReplyChannels: [
-      {
-        capabilityReady: emailCapabilities.sendReady,
-        channel: "email",
-        memberChannel: "email",
-      },
-      {
-        capabilityReady: true,
-        channel: "linq",
-        memberChannel: "linq",
-      },
-      {
-        capabilityReady: telegramBotConfigured,
-        channel: "telegram",
-        memberChannel: "telegram",
-      },
-    ],
+    managedAutoReplyChannels: createDefaultHostedManagedAutoReplyChannels({
+      emailSendReady: emailCapabilities.sendReady,
+      telegramBotConfigured,
+    }),
   };
 }
 

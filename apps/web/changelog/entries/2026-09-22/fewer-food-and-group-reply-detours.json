@@ -1,0 +1,20 @@
+{
+  "publishedOn": "2026-09-22",
+  "order": 100,
+  "item": {
+    "id": "fewer-food-and-group-reply-detours",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Fewer detours before food and group replies",
+    "summary": "Murph takes fewer setup steps when looking up food labels or checking data shared with a group.",
+    "details": "Food lookups recover more directly from command mistakes, and shared-data questions can skip a discovery step. Group replies continue to use only data members have chosen to share.",
+    "relevanceTags": [
+      "food",
+      "groups",
+      "reliability"
+    ],
+    "sourcePullRequests": [
+      3650
+    ]
+  }
+}

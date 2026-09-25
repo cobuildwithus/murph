@@ -1,5 +1,6 @@
 import { rm } from "node:fs/promises";
 import path from "node:path";
+import { resolveWorkspaceDurableRoot, resolveWorkspaceScratchRoot } from "./workspace-paths.ts";
 
 import {
   HostedRuntimeCheckpointInterruptedByWakeError,
@@ -601,6 +602,17 @@ async function createHostedWorkspaceV2Snapshot(
           vaultRoot: input.vaultRoot,
         });
         assertHostedWorkspaceSnapshotConstructionLive(input.signal);
+        // A replacement must retain the canonical vault, even if a future
+        // inventory regression returns a structurally valid operator-only plan.
+        // A first bootstrap has no prior snapshot to destroy.
+        if (input.currentSnapshotRef !== null && !archivePlan.entries.some((entry) =>
+          entry.root === "vault" && entry.relativePath === "vault.json"
+          && entry.kind === "file" && (entry.size ?? 0) > 0
+        )) {
+          throw Object.assign(new Error("Hosted workspace replacement snapshot is missing canonical vault metadata."), {
+            code: "workspace_snapshot_vault_missing",
+          });
+        }
         workspaceSnapshotSizeDiagnostics =
           createHostedWorkspaceSnapshotArchivePlanSizeDiagnostics({
             archivePlan,
@@ -1545,22 +1557,6 @@ function assertHostedWorkspaceBridgeCheckpointLease(input: {
   if (input.lease.workspaceVersion !== input.request.expectedWorkspaceVersion) {
     throw new HostedRuntimeBridgeCheckpointLeaseError("stale_workspace_version", stage);
   }
-}
-
-function resolveWorkspaceDurableRoot(vaultRoot: string): string {
-  const resolvedVaultRoot = path.resolve(vaultRoot);
-  if (path.basename(resolvedVaultRoot) === "vault") {
-    return path.dirname(resolvedVaultRoot);
-  }
-  return resolvedVaultRoot;
-}
-
-function resolveWorkspaceScratchRoot(vaultRoot: string): string {
-  const durableRoot = resolveWorkspaceDurableRoot(vaultRoot);
-  if (path.basename(durableRoot) === "durable") {
-    return path.join(path.dirname(durableRoot), "scratch");
-  }
-  return path.join(path.dirname(durableRoot), `${path.basename(durableRoot)}-scratch`);
 }
 
 function resolveWorkspaceOperatorHomeRoot(vaultRoot: string): string {

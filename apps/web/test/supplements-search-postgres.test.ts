@@ -3,7 +3,8 @@ import { readFile } from "node:fs/promises";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { createFoodsQueries } from "../src/lib/foods";
+import { createFoodsQueries, createPublicFoodsQueries } from "../src/lib/foods";
+import { createPublicProductLabelsQueries } from "../src/lib/product-labels";
 import {
   createPublicSupplementsQueries,
   createSupplementsQueries,
@@ -1140,6 +1141,7 @@ type ExplainPlanNode = {
   "Index Name"?: string;
   "Node Type"?: string;
   "Parent Relationship"?: string;
+  "Sort Method"?: string;
   Plans?: ExplainPlanNode[];
 };
 
@@ -1168,6 +1170,190 @@ function expectBoundedFoodSortInputs(nodes: readonly ExplainPlanNode[]): void {
     expect(explainRowsProcessed(sortInputs[0] ?? {})).toBeLessThanOrEqual(
       FOOD_MAX_SORT_INPUT,
     );
+  }
+}
+
+async function assertFoodSearchPageRanking(client: pg.Client): Promise<void> {
+  // Reuse the exact-record evidence tables from the public query fixture.
+  await client.query("CREATE EXTENSION IF NOT EXISTS pg_trgm");
+  await client.query("SET LOCAL pg_trgm.similarity_threshold = 0.3");
+  await client.query(
+    "CREATE TEMP TABLE foods (LIKE supplements INCLUDING ALL) ON COMMIT DROP",
+  );
+  await client.query(`
+    INSERT INTO foods (
+      id, canonical_key, data_origin, data_origin_id, data_origin_priority,
+      name, brand, upc, off_market, search_text, label, serving_grams
+    )
+    SELECT
+      'food-page:' || lpad(seed::text, 3, '0'),
+      'food-page:' || lpad((CASE WHEN seed = 63 THEN 2 ELSE seed END)::text, 3, '0'),
+      CASE
+        WHEN seed = 1 THEN 'usda_foundation'
+        WHEN seed = 65 THEN 'plasticlist_bay_area_2024'
+        ELSE 'usda_branded'
+      END,
+      seed::text,
+      CASE WHEN seed IN (1, 64, 65) THEN 0 WHEN seed = 63 THEN 100 ELSE 50 END,
+      CASE WHEN seed = 62 THEN 'Pagegrain 12 oz' ELSE 'Pagegrain' END,
+      CASE WHEN seed % 2 = 0 THEN 'Page Brand A' ELSE 'Page Brand B' END,
+      CASE WHEN seed = 2 THEN '000000000002' ELSE NULL END,
+      seed = 64,
+      'Pagegrain pagetoken',
+      jsonb_build_object(
+        'fixture', seed,
+        'nutrientsPer100g', CASE WHEN seed = 4 THEN '[]'::jsonb ELSE
+          '[{"name":"Energy","unit":"kcal","amount":100},
+            {"name":"Protein","unit":"g","amount":5},
+            {"name":"Sugars","unit":"g","amount":2},
+            {"name":"Total fat","unit":"g","amount":3}]'::jsonb END
+      ),
+      25
+    FROM generate_series(1, 65) AS rows(seed)
+  `);
+  await client.query(`
+    UPDATE product_tests SET food_id = CASE
+      WHEN id = 'sibling-only-test' THEN 'food-page:063'
+      ELSE 'food-page:003'
+    END
+  `);
+  await client.query("ANALYZE foods");
+
+  const captured: { current: { text: string; values: unknown[] } | null } = {
+    current: null,
+  };
+  const queryClient = {
+    async query<T>(text: string, values: unknown[]) {
+      if (text.includes("WITH query AS")) {
+        captured.current = { text, values };
+      }
+      const result = await client.query(text, values);
+      return { rows: result.rows as T[] };
+    },
+  };
+  const privateQueries = createFoodsQueries(queryClient);
+  const publicQueries = createPublicFoodsQueries(queryClient);
+  const publicLabels = createPublicProductLabelsQueries(queryClient, "foods", {
+    excludedDataOrigins: ["usda_foundation", "usda_sr_legacy", "usda_fndds"],
+  });
+  const privateInput = { includeOffMarket: false, limit: 3, q: "Pagegrain" };
+  const expectedIds = ["food-page:001", "food-page:002", "food-page:003"];
+  const stored = await client.query<{ id: string; label: unknown }>(
+    "SELECT id, label FROM foods",
+  );
+  const labels = new Map(stored.rows.map((row) => [row.id, row.label]));
+  const typo = await client.query<{ fts_count: number; eligible: boolean }>(`
+    SELECT
+      (SELECT count(*)::integer FROM foods WHERE
+        to_tsvector('simple', search_text) @@ websearch_to_tsquery('simple', 'Pagegrin')
+      ) AS fts_count,
+      'Pagegrain' % 'Pagegrin' AS eligible
+  `);
+  expect(typo.rows[0]).toEqual({ fts_count: 0, eligible: true });
+
+  const privateFull = await privateQueries.searchFoods({ ...privateInput, limit: 100 });
+  expect(privateFull).toHaveLength(62);
+  for (const row of privateFull) {
+    expect(row.label).toEqual(labels.get(row.id));
+  }
+  for (const q of ["pagetoken", "Pagegrain", "Pagegrin"]) {
+    const rows = await privateQueries.searchFoods({ ...privateInput, q });
+    expect(rows.map((row) => row.id)).toEqual(expectedIds);
+    expect(JSON.stringify(rows)).toBe(JSON.stringify(privateFull.slice(0, 3)));
+    expect(rows[1]?.contaminants.observationCount).toBe(0);
+    expect(rows[2]?.contaminants.observationCount).toBe(21);
+  }
+  const exact = await privateQueries.getFoodById({
+    id: "food-page:002", includeOffMarket: false,
+  });
+  expect(exact?.label).toEqual(labels.get("food-page:002"));
+  expect(await privateQueries.getFoodByUpc({
+    upc: "000000000002", includeOffMarket: false,
+  })).toEqual(exact);
+  expect((await privateQueries.searchFoods({
+    ...privateInput, genericOnly: true,
+  })).map((row) => row.id)).toEqual(["food-page:001"]);
+  expect((await privateQueries.searchFoods({
+    ...privateInput, includeOffMarket: true,
+  })).map((row) => row.id)).toEqual([
+    "food-page:001", "food-page:064", "food-page:002",
+  ]);
+
+  const relevance = await publicQueries.searchPublicFoods({ q: "Pagegrain", limit: 100 });
+  expect(relevance).toHaveLength(61);
+  expect(relevance.slice(0, 3).map((row) => row.id)).toEqual([
+    "food-page:002", "food-page:003", "food-page:004",
+  ]);
+  expect(relevance[0]?.testing.observationCount).toBe(0);
+  expect(relevance[1]?.testing.observationCount).toBe(21);
+  expect(await publicQueries.searchPublicFoods({ q: "000000000002", limit: 3 }))
+    .toEqual(relevance.slice(0, 1));
+  expect(await publicQueries.searchPublicFoods({ q: "000000000002", limit: 3, offset: 1 }))
+    .toEqual([]);
+  expect(await publicQueries.searchPublicFoods({ q: "Pagegrin", limit: 3 })).toEqual([]);
+
+  const publicInputs: Array<Parameters<typeof publicLabels.searchCompact>[0]> = [
+    { q: "pagetoken", limit: 100 },
+    { q: "Pagegrain", limit: 100 },
+    { q: "Pagegrain", limit: 100, foodSearchOrder: "evidence" },
+    { q: "Pagegrain", limit: 100, foodSearchOrder: "evidence", comparisonReadyOnly: true },
+    {
+      q: "Pagegrain", limit: 100, foodSearchOrder: "popular", comparisonReadyOnly: true,
+      popularBrandKeys: ["pagebranda", "pagebrandb"],
+    },
+  ];
+  for (const input of publicInputs) {
+    const full = await publicLabels.searchCompact(input);
+    expect(full).toHaveLength(input.comparisonReadyOnly ? 60 : 61);
+    expect(new Set(full.map((row) => row.id)).size).toBe(full.length);
+    for (const excluded of ["001", "063", "064", "065"]) {
+      expect(full.map((row) => row.id)).not.toContain(`food-page:${excluded}`);
+    }
+    if (input.foodSearchOrder === "evidence") {
+      expect(full.slice(0, 3).map((row) => row.id)).toEqual([
+        "food-page:003", "food-page:062", "food-page:002",
+      ]);
+    }
+    if (input.foodSearchOrder === "popular") {
+      expect(full.slice(0, 2).map((row) => row.brand)).toEqual([
+        "Page Brand A", "Page Brand B",
+      ]);
+    }
+    if (input.comparisonReadyOnly) {
+      expect(full.map((row) => row.id)).not.toContain("food-page:004");
+    }
+    for (const offset of [0, 1, 7, full.length - 1, full.length, full.length + 3]) {
+      const page = await publicLabels.searchCompact({ ...input, limit: 3, offset });
+      expect(JSON.stringify(page)).toBe(JSON.stringify(full.slice(offset, offset + 3)));
+    }
+  }
+
+  await privateQueries.searchFoods(privateInput);
+  const search = captured.current;
+  if (!search) throw new Error("food ranking SQL was not captured");
+  for (const offset of [0, 7]) {
+    // Exercise the actual owner's SQL, including its internal offset binding.
+    const values = [...search.values];
+    values[4] = offset;
+    const explained = await client.query<{ "QUERY PLAN": Array<{ Plan: ExplainPlanNode }> }>(
+      `EXPLAIN (ANALYZE, TIMING OFF, FORMAT JSON) ${search.text}`, values,
+    );
+    const windows = flattenExplainPlan(explained.rows[0]?.["QUERY PLAN"][0]?.Plan ?? {})
+      .filter((node) => node["Node Type"] === "WindowAgg");
+    // Private relevance has the delivery window followed by canonical dedupe.
+    expect(windows).toHaveLength(2);
+    const delivery = windows[0] ?? {};
+    const input = delivery.Plans?.find((node) => node["Parent Relationship"] === "Outer");
+    expect(input).toBeDefined();
+    expect(explainRowsProcessed(input ?? {})).toBe(3);
+    const pageLimit = flattenExplainPlan(delivery).find((node) =>
+      node["Node Type"] === "Limit" && node["Actual Rows"] === 3
+    );
+    expect(pageLimit).toBeDefined();
+    const pageSort = pageLimit?.Plans?.find((node) => node["Parent Relationship"] === "Outer");
+    expect(pageSort?.["Sort Method"]).toBe("top-N heapsort");
+    const sortInput = pageSort?.Plans?.find((node) => node["Parent Relationship"] === "Outer");
+    expect(explainRowsProcessed(sortInput ?? {})).toBeGreaterThan(offset + 3);
   }
 }
 
@@ -1410,9 +1596,9 @@ describe.runIf(Boolean(testDatabaseUrl))(
 );
 
 describe.runIf(Boolean(testDatabaseUrl))(
-  "public supplement evidence PostgreSQL query",
+  "public product evidence and food ranking PostgreSQL queries",
   () => {
-    it("deduplicates, counts, bounds, and screens exact-record product evidence", async () => {
+    it("preserves exact-record evidence and selects food pages before numbering", async () => {
       const client = new pg.Client({
         connectionString: testDatabaseUrl ?? undefined,
         statement_timeout: 8_000,
@@ -1684,6 +1870,7 @@ describe.runIf(Boolean(testDatabaseUrl))(
             concernLevel: "medium",
           },
         });
+        await assertFoodSearchPageRanking(client);
       } finally {
         await client.query("ROLLBACK");
         await client.end();

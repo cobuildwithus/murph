@@ -1,3 +1,4 @@
+import { handleHostedTelegramPollWebhook } from "@/src/lib/hosted-polls/telegram-webhook";
 import { after } from "next/server";
 
 import {
@@ -27,6 +28,8 @@ export const POST = withJsonError(async (request: Request) => {
     tooLargeErrorCode: "TELEGRAM_WEBHOOK_BODY_TOO_LARGE",
     tooLargeErrorMessage: "Telegram webhook body is too large.",
   });
+  const pollResponse = await handleHostedTelegramPollWebhook(rawBody);
+  if (pollResponse) return jsonOk(pollResponse, 202);
   const reactionResponse = await handleHostedTelegramGroupReactionWebhook({
     rawBody,
     scheduleAfterResponse: scheduleAfterResponseOrFireAndForget,

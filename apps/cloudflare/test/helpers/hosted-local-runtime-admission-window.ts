@@ -84,14 +84,13 @@ function readRuntimeAdmission(
   }
   if (
     !isRecord(parsed)
-    || parsed.component !== "hosted.runner"
-    || parsed.phase !== "runtime.starting"
+    || parsed.component !== "container"
+    || parsed.phase !== "container.starting"
+    || parsed.message !== "Hosted execution container invocation received."
     || typeof parsed.time !== "string"
     || !Number.isFinite(Date.parse(parsed.time))
     || Date.parse(parsed.time) < notBefore.getTime()
     || !isRecord(parsed.details)
-    || typeof parsed.details.orchestrationAttemptId !== "string"
-    || typeof parsed.details.runtimeProcessingAction !== "string"
     || typeof parsed.details.workspaceAttemptId !== "string"
   ) {
     return null;

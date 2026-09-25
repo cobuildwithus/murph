@@ -21,7 +21,7 @@ docker run --rm --platform linux/amd64 --network none \
   --cpus 1 --memory 3g --memory-swap 3g --pids-limit 128 --user 0 \
   --mount "type=bind,src=$PWD/.artifacts/container-cpu,dst=/bench,readonly" \
   --entrypoint node \
-  ghcr.io/cobuildwithus/murph-cloudflare-runner-base:node24.14.1-codex0.153.4 \
+  ghcr.io/cobuildwithus/murph-cloudflare-runner-base:node24.14.1-codex0.156.1-live1 \
   /bench/import.mjs
 ```
 

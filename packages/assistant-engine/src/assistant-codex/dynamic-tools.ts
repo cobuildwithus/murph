@@ -1,3 +1,6 @@
+import { type ConversationPollAction } from '@murphai/hosted-execution/conversation-polls'
+import { readConversationPollDynamicToolRequest, executeConversationPollTool } from './dynamic-tools/conversation-polls.js'
+import { nutritionCardAttachmentGuidance } from '../assistant/nutrition-card-introduction.js'
 import { parseDynamicToolArguments } from './dynamic-tools/dynamic-tool-wrapper.js'
 import {
   completeDynamicToolFailureDiagnostics,
@@ -41,6 +44,10 @@ import {
   hostedRuntimePendingGroupSetupInputSchema,
 } from '@murphai/hosted-execution/pending-group-setup'
 import {
+  parseHostedGroupSharedFreshnessRequirements,
+  parseHostedGroupSharedReadOptions,
+  type HostedGroupSharedReadOptions,
+  getHostedGroupWearableReportingGaps,
   HOSTED_FAMILY_PLAN_CODES,
   HOSTED_PRODUCT_FEEDBACK_KINDS,
   HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH,
@@ -93,6 +100,7 @@ import {
   HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES,
   buildHostedVaultShareProjectionScopeKey,
   parseHostedVaultShareProjectionScope,
+  hostedVaultShareReadAuthorityScopes,
   type HostedVaultShareSelectableProjectionScope,
 } from '@murphai/hosted-execution/vault-share'
 import {
@@ -130,6 +138,7 @@ import {
   type AssistantHostedGroupSharedMember,
   type AssistantHostedGroupSharedProjection,
   type AssistantHostedGroupSharedReadResponse,
+  type AssistantHostedGroupSharedReadRequest,
   type AssistantHostedGroupSharedReader,
   type AssistantWorkspaceArtifactMaterializer,
 } from '../assistant/execution-context.js'
@@ -741,7 +750,13 @@ const groupArgumentsSchema = z.discriminatedUnion('action', [
   z
     .object({
       action: z.literal('read_shared'),
+      participantId: z.string().min(1).max(200).optional(),
+      history: z.object({ fromDate: z.string(), throughDate: z.string() }).strict().optional(),
       audience: z.literal('group_email').optional(),
+      freshness: z.array(z.object({
+        projectionScopeKey: z.string().min(1).max(191),
+        date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u),
+      }).strict()).min(1).max(21).optional(),
       projectionScopes: z
         .array(groupVaultShareProjectionScopeSchema)
         .min(1)
@@ -755,6 +770,22 @@ const groupArgumentsSchema = z.discriminatedUnion('action', [
         ),
     })
     .strict()
+    .refine((request) => {
+      try {
+        parseHostedGroupSharedReadOptions(request, request.projectionScopes)
+        if (request.audience && (request.history || request.participantId)) return false
+      } catch {
+        return false
+      }
+      if (request.freshness === undefined) return true
+      if (request.audience !== undefined) return false
+      try {
+        parseHostedGroupSharedFreshnessRequirements(request.freshness, request.projectionScopes)
+        return true
+      } catch {
+        return false
+      }
+    }, { message: 'history requires one participant, one existing health metric scope and at most 90 inclusive dates, without freshness or group_email; freshness requires exact requested wearable dates', path: ['freshness'] })
     .refine(
       (request) =>
         request.audience === 'group_email'
@@ -1278,11 +1309,12 @@ type MurphGroupToolRequest =
           | 'revoke_own_email_share'
       }
     >
-  | {
+  | (HostedGroupSharedReadOptions & {
       action: 'read_shared'
+      freshness?: readonly { projectionScopeKey: string; date: string }[]
       audience?: 'group_email'
       projectionScopes: readonly HostedVaultShareSelectableProjectionScope[]
-    }
+    })
   | {
       action: 'send_email'
       html: string
@@ -1544,6 +1576,11 @@ export type MurphDynamicToolRequest =
       validationDigest: SafeToolCallValidationDigest
     }
   | {
+      kind: 'invalid-poll-arguments'
+      validationDigest: SafeToolCallValidationDigest
+    }
+  | { kind: 'poll'; request: ConversationPollAction }
+  | {
       kind: 'invalid-imessage-contact-arguments'
       validationDigest: SafeToolCallValidationDigest
     }
@@ -1565,6 +1602,7 @@ export type MurphDynamicToolRequest =
     }
   | {
       kind: 'personalization'
+      messageRef?: string
       request: HostedRuntimeAssistantPersonalizationModelToolRequest
       toolCallId?: string
     }
@@ -1699,6 +1737,7 @@ export function readMurphDynamicToolRequest(
   }
 
   for (const readRequest of [
+    readConversationPollDynamicToolRequest,
     readDeviceDynamicToolRequest,
     readLabsDynamicToolRequest,
     readPendingVaultFilesDynamicToolRequest,
@@ -1969,6 +2008,7 @@ export function readMurphDynamicToolRequest(
       }
       return {
         kind: 'personalization',
+        messageRef: parsed.messageRef,
         request: parsed.request,
         ...(request.toolCallId ? { toolCallId: request.toolCallId } : {}),
       }
@@ -3248,6 +3288,298 @@ export async function executeMurphDynamicToolRequest(
   )
 }
 
+async function executeOversizedResponseCardDynamicTool(
+  input: ExecuteMurphDynamicToolRequestInput,
+  request: Extract<MurphDynamicToolRequest, { kind: 'response-card-envelope-too-large' }>,
+): Promise<MurphDynamicToolExecutionResult> {
+  if (input.privateDirectResponseCardAllowed !== true) {
+    return toolTextResult(
+      false,
+      'response cards require a private direct conversation',
+      'authority_rejected',
+    )
+  }
+  if (input.currentResponseCard !== null && input.currentResponseCard !== undefined) {
+    return toolTextResult(false, 'a response card is already attached', 'conflict')
+  }
+  if ((input.currentResponseMedia ?? []).length > 0) {
+    return toolTextResult(
+      false,
+      'response cards cannot be combined with response media',
+      'conflict',
+    )
+  }
+  return {
+    ...toolTextResult(
+      true,
+      'workout card envelope too large; full text recovery selected',
+    ),
+    responseCardTextFallbackPatch: { card: request.card },
+  }
+}
+
+async function executeResponseCardAttachmentDynamicTool(
+  input: ExecuteMurphDynamicToolRequestInput,
+  request: Extract<MurphDynamicToolRequest, { kind: 'attach-response-card' }>,
+): Promise<MurphDynamicToolExecutionResult> {
+  if (request.card.kind === 'challenge_standings') {
+    return toolTextResult(
+      false,
+      'challenge standings response cards require page-authorized observation input',
+      'authority_rejected',
+    )
+  }
+  const telegramPresentationAllowed =
+    input.telegramPresentationResponseCardAllowed === true &&
+    (
+      request.card.kind === 'exercise_routine' ||
+      request.card.kind === 'telegram_rich_content'
+    )
+  if (
+    input.privateDirectResponseCardAllowed !== true &&
+    !telegramPresentationAllowed
+  ) {
+    return toolTextResult(
+      false,
+      'response cards require a private direct conversation',
+      'authority_rejected',
+    )
+  }
+  if (input.currentResponseCard !== null && input.currentResponseCard !== undefined) {
+    return toolTextResult(false, 'a response card is already attached', 'conflict')
+  }
+  if ((input.currentResponseMedia ?? []).length > 0) {
+    return toolTextResult(
+      false,
+      'response cards cannot be combined with response media',
+      'conflict',
+    )
+  }
+  const { card, runtimeIssueInputs } = await attachTrustedWorkoutCardEditor({
+    card: request.card,
+    vaultRoot: input.vaultRoot ?? null,
+  })
+  if (card === null) {
+    return {
+      ...toolTextResult(false, [
+        'No card was attached: a workout card requires verified editing support.',
+        'Read this exact workout once and retry attachment once using its complete current state.',
+        'Do not repeat workout writes, discard saved fields, change exercise modes, or mark it completed to make a card fit.',
+        'If attachment still fails, use a brief ordinary-text reply with the verified workout results and explain that the editable card is unavailable.',
+        'Do not claim that a card was sent or that a saved workout update failed merely because card attachment failed.',
+      ].join(' '), 'unavailable'),
+      ...(runtimeIssueInputs ? { runtimeIssueInputs } : {}),
+    }
+  }
+  return {
+    ...toolTextResult(true, nutritionCardAttachmentGuidance(card)),
+    responseCardPatch: { card },
+    ...(runtimeIssueInputs ? { runtimeIssueInputs } : {}),
+  }
+}
+
+async function executeResponseMediaAttachmentDynamicTool(
+  input: ExecuteMurphDynamicToolRequestInput,
+  request: Extract<MurphDynamicToolRequest, { kind: 'attach-response-media' }>,
+  hostedImageCompletionEffectScope: AssistantHostedImageCompletionEffectScope | null,
+): Promise<MurphDynamicToolExecutionResult> {
+  if (
+    request.media.length > 0 &&
+    input.currentResponseCard !== null &&
+    input.currentResponseCard !== undefined
+  ) {
+    return toolTextResult(
+      false,
+      'response media cannot be combined with a response card',
+      'conflict',
+    )
+  }
+  const resolved = await resolveAttachedResponseMedia({
+    media: request.media,
+    vaultRoot: input.vaultRoot ?? null,
+  })
+  if ('failureDiagnostic' in resolved) {
+    return {
+      ...toolTextResult(
+        false,
+        'private response image could not be prepared',
+      ),
+      ...toolFailureMetadata(resolved),
+      responseMediaPatch: {
+        media: [],
+        op: 'replace',
+      },
+    }
+  }
+  const { media } = resolved
+  if (
+    hostedImageCompletionEffectScope !== null &&
+    !matchesExactHostedImageCompletionMedia({
+      actual: media,
+      expected: hostedImageCompletionEffectScope.exactMedia,
+    })
+  ) {
+    return {
+      ...toolTextResult(
+        false,
+        'the trusted completion image no longer matches its saved media',
+        'action_result_mismatch',
+      ),
+      responseMediaPatch: {
+        media: [],
+        op: 'replace',
+      },
+    }
+  }
+  return {
+    ...toolTextResult(
+      true,
+      media.length === 0
+        ? 'response media cleared'
+        : `${media.length} response image${media.length === 1 ? '' : 's'} attached`,
+    ),
+    responseMediaPatch: {
+      media,
+      op: 'replace',
+    },
+  }
+}
+
+async function executeDeviceRequestDynamicTool(
+  input: ExecuteMurphDynamicToolRequestInput,
+  request: Extract<MurphDynamicToolRequest, { kind: 'device' }>,
+): Promise<MurphDynamicToolExecutionResult> {
+  const deviceTool = input.hostedToolContext?.deviceTool ?? null
+  if (!deviceTool) {
+    return toolTextResult(
+      false,
+      'device management is unavailable for this turn',
+      'unavailable',
+    )
+  }
+  const invocationScope =
+    input.hostedToolContext?.currentInvocationScope?.() ?? null
+  const acceptedInputAuthority =
+    invocationScope?.conversationScope === 'direct'
+    && invocationScope.origin.kind === 'accepted_input'
+      ? { assistantInputId: invocationScope.origin.assistantInputId }
+      : null
+  return await executeDeviceDynamicTool({
+    acceptedInputAuthority,
+    abortSignal: input.abortSignal ?? null,
+    deviceTool,
+    request,
+  })
+}
+
+async function executeVideoAnalysisRequestDynamicTool(
+  input: ExecuteMurphDynamicToolRequestInput,
+  request: Extract<MurphDynamicToolRequest, { kind: 'analyze-video' }>,
+): Promise<MurphDynamicToolExecutionResult> {
+  if (!currentConversationMediaScope(input.hostedToolContext)) {
+    return toolTextResult(
+      false,
+      'video analysis requires a verified direct or authenticated group conversation',
+      'authority_rejected',
+    )
+  }
+  const attachmentAuthorities = input.hostedToolContext
+    ?.currentAnalyzeVideoAttachmentAuthorities?.() ?? []
+  return await executeAnalyzeVideoDynamicTool({
+    abortSignal: input.abortSignal ?? null,
+    acceptedInputIds: attachmentAuthorities.map((authority) => authority.messageRef),
+    attachmentAuthorities,
+    args: request.args,
+    materializeWorkspaceArtifacts:
+      input.materializeWorkspaceArtifacts ?? null,
+    runtime: input.analyzeVideoRuntime ?? null,
+    turnState: input.analyzeVideoTurnState ?? null,
+    vaultRoot: input.vaultRoot ?? null,
+  })
+}
+
+async function executeComputerRequestDynamicTool(
+  input: ExecuteMurphDynamicToolRequestInput,
+  request: Extract<MurphDynamicToolRequest, {
+    kind:
+      | 'computer-open'
+      | 'computer-act'
+      | 'computer-os-control'
+      | 'computer-pause-for-user'
+      | 'computer-finish-run'
+  }>,
+): Promise<MurphDynamicToolExecutionResult> {
+  switch (request.kind) {
+    case 'computer-open': {
+      return await executeHostedComputerOpenTool({
+        abortSignal: input.abortSignal ?? null,
+        args: request.args,
+        fetchImpl: input.fetchImpl,
+        hostedToolContext: input.hostedToolContext ?? null,
+      })
+    }
+    case 'computer-act': {
+      const { runId, ...body } = request.args
+      return await executeHostedComputerApiTool({
+        abortSignal: input.abortSignal ?? null,
+        body,
+        fetchImpl: input.fetchImpl,
+        path: buildHostedComputerRunOperationPath({
+          operation: 'act',
+          runId,
+        }),
+        sanitizer: 'act',
+      })
+    }
+    case 'computer-os-control': {
+      const { runId, ...body } = request.args
+      return await executeHostedComputerApiTool({
+        abortSignal: input.abortSignal ?? null,
+        body,
+        fetchImpl: input.fetchImpl,
+        path: buildHostedComputerRunOperationPath({
+          operation: 'os-control',
+          runId,
+        }),
+        sanitizer: 'os-control',
+      })
+    }
+    case 'computer-pause-for-user': {
+      const { runId, ...body } = request.args
+      return await executeHostedComputerPauseForUserTool({
+        abortSignal: input.abortSignal ?? null,
+        body: {
+          ...body,
+          pauseDeliveryContext: currentHostedDeliveryContext(
+            input.hostedToolContext ?? null,
+          ),
+        } satisfies HostedComputerPauseForUserRequest,
+        fetchImpl: input.fetchImpl,
+        path: buildHostedComputerRunOperationPath({
+          operation: 'pause-for-user',
+          runId,
+        }),
+      })
+    }
+    case 'computer-finish-run': {
+      const { runId, ...body } = request.args
+      return await executeHostedComputerApiTool({
+        abortSignal: input.abortSignal ?? null,
+        body: {
+          ...body,
+          summary: null,
+        },
+        fetchImpl: input.fetchImpl,
+        path: buildHostedComputerRunOperationPath({
+          operation: 'finish',
+          runId,
+        }),
+        sanitizer: 'finish',
+      })
+    }
+  }
+}
+
 async function dispatchMurphDynamicToolRequest(
   input: ExecuteMurphDynamicToolRequestInput,
 ): Promise<MurphDynamicToolExecutionResult> {
@@ -3292,30 +3624,7 @@ async function dispatchMurphDynamicToolRequest(
     case 'invalid-automation-arguments':
       return executeInvalidAutomationArgumentsDynamicTool(input.request)
     case 'response-card-envelope-too-large':
-      if (input.privateDirectResponseCardAllowed !== true) {
-        return toolTextResult(
-          false,
-          'response cards require a private direct conversation',
-          'authority_rejected',
-        )
-      }
-      if (input.currentResponseCard !== null && input.currentResponseCard !== undefined) {
-        return toolTextResult(false, 'a response card is already attached', 'conflict')
-      }
-      if ((input.currentResponseMedia ?? []).length > 0) {
-        return toolTextResult(
-          false,
-          'response cards cannot be combined with response media',
-          'conflict',
-        )
-      }
-      return {
-        ...toolTextResult(
-          true,
-          'workout card envelope too large; full text recovery selected',
-        ),
-        responseCardTextFallbackPatch: { card: input.request.card },
-      }
+      return await executeOversizedResponseCardDynamicTool(input, input.request)
     case 'unsupported-dynamic-tool':
       return toolTextResult(false, 'unsupported dynamic tool', 'unsupported_request')
     case 'attach-group-challenge-response-card':
@@ -3328,111 +3637,14 @@ async function dispatchMurphDynamicToolRequest(
         turnState: input.groupSharedReadTurnState ?? null,
         vaultRoot: input.vaultRoot ?? null,
       })
-    case 'attach-response-card': {
-      if (input.request.card.kind === 'challenge_standings') {
-        return toolTextResult(
-          false,
-          'challenge standings response cards require page-authorized observation input',
-          'authority_rejected',
-        )
-      }
-      const telegramPresentationAllowed =
-        input.telegramPresentationResponseCardAllowed === true &&
-        (
-          input.request.card.kind === 'exercise_routine' ||
-          input.request.card.kind === 'telegram_rich_content'
-        )
-      if (
-        input.privateDirectResponseCardAllowed !== true &&
-        !telegramPresentationAllowed
-      ) {
-        return toolTextResult(
-          false,
-          'response cards require a private direct conversation',
-          'authority_rejected',
-        )
-      }
-      if (input.currentResponseCard !== null && input.currentResponseCard !== undefined) {
-        return toolTextResult(false, 'a response card is already attached', 'conflict')
-      }
-      if ((input.currentResponseMedia ?? []).length > 0) {
-        return toolTextResult(
-          false,
-          'response cards cannot be combined with response media',
-          'conflict',
-        )
-      }
-      const card = await attachTrustedWorkoutCardEditor({
-        card: input.request.card,
-        vaultRoot: input.vaultRoot ?? null,
-      })
-      return {
-        ...toolTextResult(true, 'response card attached'),
-        responseCardPatch: { card },
-      }
-    }
-    case 'attach-response-media': {
-      if (
-        input.request.media.length > 0 &&
-        input.currentResponseCard !== null &&
-        input.currentResponseCard !== undefined
-      ) {
-        return toolTextResult(
-          false,
-          'response media cannot be combined with a response card',
-          'conflict',
-        )
-      }
-      const resolved = await resolveAttachedResponseMedia({
-        media: input.request.media,
-        vaultRoot: input.vaultRoot ?? null,
-      })
-      if ('failureDiagnostic' in resolved) {
-        return {
-          ...toolTextResult(
-            false,
-            'private response image could not be prepared',
-          ),
-          ...toolFailureMetadata(resolved),
-          responseMediaPatch: {
-            media: [],
-            op: 'replace',
-          },
-        }
-      }
-      const { media } = resolved
-      if (
-        hostedImageCompletionEffectScope !== null &&
-        !matchesExactHostedImageCompletionMedia({
-          actual: media,
-          expected: hostedImageCompletionEffectScope.exactMedia,
-        })
-      ) {
-        return {
-          ...toolTextResult(
-            false,
-            'the trusted completion image no longer matches its saved media',
-            'action_result_mismatch',
-          ),
-          responseMediaPatch: {
-            media: [],
-            op: 'replace',
-          },
-        }
-      }
-      return {
-        ...toolTextResult(
-          true,
-          media.length === 0
-            ? 'response media cleared'
-            : `${media.length} response image${media.length === 1 ? '' : 's'} attached`,
-        ),
-        responseMediaPatch: {
-          media,
-          op: 'replace',
-        },
-      }
-    }
+    case 'attach-response-card':
+      return await executeResponseCardAttachmentDynamicTool(input, input.request)
+    case 'attach-response-media':
+      return await executeResponseMediaAttachmentDynamicTool(
+        input,
+        input.request,
+        hostedImageCompletionEffectScope,
+      )
     case 'send-progress-update':
       return await executeProgressUpdateTool({
         deliveryContextOrdinal: input.deliveryContextOrdinal ?? null,
@@ -3476,29 +3688,8 @@ async function dispatchMurphDynamicToolRequest(
         request: input.request,
         vaultRoot: input.vaultRoot ?? null,
       })
-    case 'device': {
-      const deviceTool = input.hostedToolContext?.deviceTool ?? null
-      if (!deviceTool) {
-        return toolTextResult(
-          false,
-          'device management is unavailable for this turn',
-          'unavailable',
-        )
-      }
-      const invocationScope =
-        input.hostedToolContext?.currentInvocationScope?.() ?? null
-      const acceptedInputAuthority =
-        invocationScope?.conversationScope === 'direct'
-        && invocationScope.origin.kind === 'accepted_input'
-          ? { assistantInputId: invocationScope.origin.assistantInputId }
-          : null
-      return await executeDeviceDynamicTool({
-        acceptedInputAuthority,
-        abortSignal: input.abortSignal ?? null,
-        deviceTool,
-        request: input.request,
-      })
-    }
+    case 'device':
+      return await executeDeviceRequestDynamicTool(input, input.request)
     case 'labs': {
       const labsTool = input.hostedToolContext?.labsTool ?? null
       if (!labsTool) {
@@ -3527,6 +3718,7 @@ async function dispatchMurphDynamicToolRequest(
       return await executeAssistantStyleDynamicTool({
         authority: resolveHostedAssistantPersonalizationToolAuthority(
           hostedToolContext,
+          input.request.messageRef,
         ),
         hosted: hostedToolContext != null,
         hostedPersonalizationTool:
@@ -3562,14 +3754,9 @@ async function dispatchMurphDynamicToolRequest(
         request: input.request.request,
       })
     case 'plan-usage':
-      return await executePlanUsageTool({
-        hostedToolContext: input.hostedToolContext ?? null,
-        request: input.request.request,
-      })
+    case 'poll':
     case 'imessage-contact':
-      return await executeIMessageContactTool({
-        hostedToolContext: input.hostedToolContext ?? null,
-      })
+      return await executeCurrentConversationTool(input, input.request)
     case 'subscription':
       return await executeSubscriptionTool({
         hostedToolContext: input.hostedToolContext ?? null,
@@ -3578,6 +3765,7 @@ async function dispatchMurphDynamicToolRequest(
     case 'personalization':
       return await executePersonalizationTool({
         hostedToolContext: input.hostedToolContext ?? null,
+        messageRef: input.request.messageRef,
         request: input.request.request,
         toolCallId: input.request.toolCallId ?? null,
       })
@@ -3683,28 +3871,8 @@ async function dispatchMurphDynamicToolRequest(
         vaultRoot: input.vaultRoot,
       })
     }
-    case 'analyze-video': {
-      if (!currentConversationMediaScope(input.hostedToolContext)) {
-        return toolTextResult(
-          false,
-          'video analysis requires a verified direct or authenticated group conversation',
-          'authority_rejected',
-        )
-      }
-      const attachmentAuthorities = input.hostedToolContext
-        ?.currentAnalyzeVideoAttachmentAuthorities?.() ?? []
-      return await executeAnalyzeVideoDynamicTool({
-        abortSignal: input.abortSignal ?? null,
-        acceptedInputIds: attachmentAuthorities.map((authority) => authority.messageRef),
-        attachmentAuthorities,
-        args: input.request.args,
-        materializeWorkspaceArtifacts:
-          input.materializeWorkspaceArtifacts ?? null,
-        runtime: input.analyzeVideoRuntime ?? null,
-        turnState: input.analyzeVideoTurnState ?? null,
-        vaultRoot: input.vaultRoot ?? null,
-      })
-    }
+    case 'analyze-video':
+      return await executeVideoAnalysisRequestDynamicTool(input, input.request)
     case 'create-calendar-link': {
       return executeCreateCalendarLinkDynamicTool(input.request.event)
     }
@@ -3731,6 +3899,7 @@ async function dispatchMurphDynamicToolRequest(
         input.hostedToolContext?.currentUserActionScope?.() ?? null
       return await executeConnectedAppsDynamicTool({
         abortSignal: input.abortSignal ?? null,
+        vaultRoot: input.vaultRoot,
         connectedApps,
         emailSendAuthorized:
           userActionScope?.conversationScope === 'direct'
@@ -3738,87 +3907,30 @@ async function dispatchMurphDynamicToolRequest(
         request: input.request,
       })
     }
-    case 'computer-open': {
-      return await executeHostedComputerOpenTool({
-        abortSignal: input.abortSignal ?? null,
-        args: input.request.args,
-        fetchImpl: input.fetchImpl,
-        hostedToolContext: input.hostedToolContext ?? null,
-      })
-    }
-    case 'computer-act': {
-      const { runId, ...body } = input.request.args
-      return await executeHostedComputerApiTool({
-        abortSignal: input.abortSignal ?? null,
-        body,
-        fetchImpl: input.fetchImpl,
-        path: buildHostedComputerRunOperationPath({
-          operation: 'act',
-          runId,
-        }),
-        sanitizer: 'act',
-      })
-    }
-    case 'computer-os-control': {
-      const { runId, ...body } = input.request.args
-      return await executeHostedComputerApiTool({
-        abortSignal: input.abortSignal ?? null,
-        body,
-        fetchImpl: input.fetchImpl,
-        path: buildHostedComputerRunOperationPath({
-          operation: 'os-control',
-          runId,
-        }),
-        sanitizer: 'os-control',
-      })
-    }
-    case 'computer-pause-for-user': {
-      const { runId, ...body } = input.request.args
-      return await executeHostedComputerPauseForUserTool({
-        abortSignal: input.abortSignal ?? null,
-        body: {
-          ...body,
-          pauseDeliveryContext: currentHostedDeliveryContext(
-            input.hostedToolContext ?? null,
-          ),
-        } satisfies HostedComputerPauseForUserRequest,
-        fetchImpl: input.fetchImpl,
-        path: buildHostedComputerRunOperationPath({
-          operation: 'pause-for-user',
-          runId,
-        }),
-      })
-    }
-    case 'computer-finish-run': {
-      const { runId, ...body } = input.request.args
-      return await executeHostedComputerApiTool({
-        abortSignal: input.abortSignal ?? null,
-        body: {
-          ...body,
-          summary: null,
-        },
-        fetchImpl: input.fetchImpl,
-        path: buildHostedComputerRunOperationPath({
-          operation: 'finish',
-          runId,
-        }),
-        sanitizer: 'finish',
-      })
-    }
+    case 'computer-open':
+    case 'computer-act':
+    case 'computer-os-control':
+    case 'computer-pause-for-user':
+    case 'computer-finish-run':
+      return await executeComputerRequestDynamicTool(input, input.request)
   }
 }
 
 async function attachTrustedWorkoutCardEditor(input: {
   card: AssistantResponseCard
   vaultRoot: string | null
-}): Promise<AssistantResponseCard> {
+}): Promise<{
+  card: AssistantResponseCard | null
+  runtimeIssueInputs?: readonly AssistantRuntimeIssueInput[]
+}> {
   if (
-    input.vaultRoot === null
-    || input.card.kind !== 'compact_table'
+    input.card.kind !== 'compact_table'
     || !('workout' in input.card)
-    || input.card.workout.state !== 'active'
   ) {
-    return input.card
+    return { card: input.card }
+  }
+  if (input.vaultRoot === null) {
+    return workoutCardEditorFailure('missing_vault')
   }
   try {
     const trusted = await readLiveWorkoutCardEditor({
@@ -3827,16 +3939,49 @@ async function attachTrustedWorkoutCardEditor(input: {
       workoutId: input.card.tracking.entityId,
     })
     if (trusted === null) {
-      return input.card
+      return workoutCardEditorFailure('projection_rejected')
     }
     const candidate = assistantResponseCardSchema.safeParse({
       ...input.card,
       editor: trusted.editor,
       workout: trusted.workout,
     })
-    return candidate.success ? candidate.data : input.card
-  } catch {
-    return input.card
+    return candidate.success && 'editor' in candidate.data && candidate.data.editor !== undefined
+      ? { card: candidate.data }
+      : workoutCardEditorFailure('schema_rejected')
+  } catch (error) {
+    return workoutCardEditorFailure('reader_failed', error)
+  }
+}
+
+function workoutCardEditorFailure(
+  reason: 'missing_vault' | 'projection_rejected' | 'schema_rejected' | 'reader_failed',
+  error?: unknown,
+): {
+  card: null
+  runtimeIssueInputs: readonly AssistantRuntimeIssueInput[]
+} {
+  const code = error !== null && typeof error === 'object' && 'code' in error
+    ? error.code
+    : null
+  // Error messages and arbitrary error codes may contain private vault data.
+  const errorCode = typeof code === 'string' && [
+    'ENOENT', 'EACCES', 'EPERM', 'ERR_MODULE_NOT_FOUND', 'MODULE_NOT_FOUND',
+    'ERR_PACKAGE_PATH_NOT_EXPORTED', 'not_found', 'contract_invalid',
+    'invalid_operation',
+  ].includes(code) ? code : 'unclassified'
+  return {
+    card: null,
+    runtimeIssueInputs: [{
+      component: 'assistant.workout-card-editor',
+      operation: 'attach_response_card',
+      phase: 'tool_call',
+      issueKind: 'tool_error',
+      severity: 'warning',
+      errorCode: 'WORKOUT_CARD_EDITOR_UNAVAILABLE',
+      summary: 'A workout card was rejected because its editor could not be verified.',
+      details: { reason, ...(reason === 'reader_failed' ? { errorCode } : {}) },
+    }],
   }
 }
 
@@ -4098,6 +4243,18 @@ function projectHostedGroupPlanLabel(label: string): string {
   return label.replace(/\bGroup\b/gu, HOSTED_GROUP_MEMBER_PLAN_DISPLAY_NAME)
 }
 
+async function executeCurrentConversationTool(
+  input: ExecuteMurphDynamicToolRequestInput,
+  request: Extract<MurphDynamicToolRequest, { kind: 'poll' | 'plan-usage' | 'imessage-contact' }>,
+): Promise<MurphDynamicToolExecutionResult> {
+  const hostedToolContext = input.hostedToolContext ?? null
+  switch (request.kind) {
+    case 'poll': return executeConversationPollTool({ request: request.request, context: hostedToolContext })
+    case 'plan-usage': return executePlanUsageTool({ request: request.request, hostedToolContext })
+    case 'imessage-contact': return executeIMessageContactTool({ hostedToolContext })
+  }
+}
+
 async function executeIMessageContactTool(input: {
   hostedToolContext: AssistantHostedToolContext | null
 }): Promise<MurphDynamicToolExecutionResult> {
@@ -4210,24 +4367,37 @@ function isHostedBillingPlanQuoteStaleError(error: unknown): boolean {
 
 function resolveHostedAssistantPersonalizationToolAuthority(
   hostedToolContext: AssistantHostedToolContext | null,
+  messageRef?: string,
 ): HostedRuntimeAssistantPersonalizationToolAuthority | null {
-  const invocationScope: AssistantHostedInvocationScope | null =
-    hostedToolContext?.currentInvocationScope?.() ?? null
-  if (invocationScope?.origin.kind === 'accepted_input') {
-    return { assistantInputId: invocationScope.origin.assistantInputId }
+  if (!hostedToolContext) return null
+  const scope = hostedToolContext.currentUserActionScope?.()
+  if (scope) {
+    if (scope.conversationScope === 'unverified-external') return null
+    const inputIds = scope.acceptedInputIds
+    const assistantInputId = messageRef ?? (inputIds.length === 1 ? inputIds[0] : undefined)
+    return assistantInputId !== undefined && inputIds.includes(assistantInputId)
+      ? { assistantInputId }
+      : null
   }
+  if (messageRef !== undefined) return null
+  const invocationScope: AssistantHostedInvocationScope | null =
+    hostedToolContext.currentInvocationScope?.() ?? null
   if (invocationScope?.origin.kind === 'automation_occurrence') {
     return {
       automationId: invocationScope.origin.automationId,
       occurrenceAt: invocationScope.origin.occurrenceAt,
     }
   }
+  // Legacy single-input contexts have no accepted-input scope accessor.
+  // A present accessor is authoritative even when it returns no inputs.
+  if (hostedToolContext.currentUserActionScope) return null
   const assistantInputId =
-    hostedToolContext?.currentAssistantInputId?.() ?? null
+    hostedToolContext.currentAssistantInputId?.() ?? null
   return assistantInputId ? { assistantInputId } : null
 }
 
 async function executePersonalizationTool(input: {
+  messageRef?: string
   hostedToolContext: AssistantHostedToolContext | null
   request: HostedRuntimeAssistantPersonalizationModelToolRequest
   toolCallId: string | null
@@ -4240,6 +4410,7 @@ async function executePersonalizationTool(input: {
   const authority = input.request.action === 'update'
     ? resolveHostedAssistantPersonalizationToolAuthority(
         input.hostedToolContext,
+        input.messageRef,
       )
     : null
   if (input.request.action === 'update' && authority === null) {
@@ -4465,6 +4636,7 @@ function groupSharedWorkoutsModelProjection(
 
 function groupSharedModelResult(
   result: AssistantHostedGroupSharedReadResponse,
+  requirements?: AssistantHostedGroupSharedReadRequest['freshness'],
 ) {
   if (result.status === 'unavailable') {
     return {
@@ -4479,7 +4651,10 @@ function groupSharedModelResult(
       status: result.status,
     }
   }
+  const checkedAtMs = result.freshness ? Date.parse(result.freshness.checkedAt) : Date.now()
   return {
+    ...(result.freshness ? { freshness: result.freshness } : {}),
+    ...(result.dateCoverage ? { dateCoverage: result.dateCoverage } : {}),
     members: result.members.map((member) => ({
       // Empty handles and a null name carried no information but were
       // serialized for every member on every read.
@@ -4499,6 +4674,9 @@ function groupSharedModelResult(
             ? { grantedAt: projection.grantedAt }
             : {}),
           records: projection.records,
+          ...(requirements ? {
+            reportingGaps: getHostedGroupWearableReportingGaps(projection, requirements, checkedAtMs),
+          } : {}),
           status: groupSharedProjectionStatus(projection),
         },
       ])),
@@ -4912,6 +5090,7 @@ function groupAccessOfferModelResult(response: GroupAccessOfferHostResponse) {
 }
 
 async function executeGroupSharedRead(input: {
+  abortSignal?: AbortSignal | null
   hostedToolContext: AssistantHostedToolContext | null
   request: Extract<MurphGroupToolRequest, { action: 'read_shared' }>
   turnState: MurphGroupSharedReadTurnState | null
@@ -4927,10 +5106,14 @@ async function executeGroupSharedRead(input: {
   try {
     const result = await groupSharedReader.request({
       projectionScopes: input.request.projectionScopes,
-    })
-    const modelResult = groupSharedModelResultText(groupSharedModelResult(result))
+      ...(input.request.participantId ? { participantId: input.request.participantId } : {}),
+      ...(input.request.history ? { history: input.request.history } : {}),
+      ...(input.request.freshness ? { freshness: input.request.freshness } : {}),
+    }, ...(input.abortSignal ? [{ signal: input.abortSignal }] : []))
+    const modelResult = groupSharedModelResultText(groupSharedModelResult(result, input.request.freshness))
     recordGroupSharedReadProof({
-      capacityPartial: modelResult.capacityPartial,
+      // A member/date page is not a complete current room roster/standings proof.
+      capacityPartial: modelResult.capacityPartial || input.request.participantId !== undefined,
       result,
       turnState: input.turnState,
     })
@@ -4938,7 +5121,8 @@ async function executeGroupSharedRead(input: {
       true,
       modelResult.text,
     )
-  } catch {
+  } catch (error) {
+    if (input.abortSignal?.aborted) throw error;
     if (input.turnState) {
       input.turnState.invalid = true
     }
@@ -5441,6 +5625,7 @@ async function executeGroupTool(
       });
     }
     return executeGroupSharedRead({
+      abortSignal: input.abortSignal,
       hostedToolContext: input.hostedToolContext,
       request: input.request,
       turnState: input.groupSharedReadTurnState,
@@ -6513,20 +6698,18 @@ async function readGroupEmailSharedData(input: {
       return null
     }
 
-    const requestedScopeKeys = new Set(
-      input.projectionScopes.map(buildHostedVaultShareProjectionScopeKey),
-    )
+    // Keep the actual share id/key in the final send authorization proof.
+    // The shared reader already clips ordinary/email reporting windows. Only
+    // the pre-existing sleep v0/v1 mapping may match another metric scope key.
     const authorizedScopeKeysByMember = new Map(
-      input.participants
-        .filter((participant) => participant.hasEmail)
-        .map((participant) => [
-          participant.memberId,
-          new Set(
-            participant.authorizedShares
-              .map((share) => share.projectionScopeKey)
-              .filter((scopeKey) => requestedScopeKeys.has(scopeKey)),
+      input.participants.filter((participant) => participant.hasEmail).map((participant) => {
+        const liveKeys = new Set(participant.authorizedShares.map((share) => share.projectionScopeKey))
+        return [participant.memberId, new Set(input.projectionScopes.filter((scope) =>
+          hostedVaultShareReadAuthorityScopes(scope).some((authority) =>
+            liveKeys.has(buildHostedVaultShareProjectionScopeKey(authority))
           ),
-        ]),
+        ).map(buildHostedVaultShareProjectionScopeKey))] as const
+      }),
     )
     const members = new Map<string, AssistantHostedGroupSharedMember>()
 
@@ -6550,8 +6733,7 @@ async function readGroupEmailSharedData(input: {
           continue
         }
         if (
-          existing.displayName !== member.displayName
-          || existing.participantId !== member.participantId
+          existing.participantId !== member.participantId
           || !hasExactStringEntries(
             existing.currentTurnHandles,
             member.currentTurnHandles,
@@ -6559,6 +6741,8 @@ async function readGroupEmailSharedData(input: {
         ) {
           return null
         }
+        // Keep one complete host naming snapshot: optional contact labels can
+        // differ across metric batches without changing identity or authority.
         members.set(member.memberId, {
           ...existing,
           projections: [...existing.projections, ...projections],
@@ -7367,15 +7551,30 @@ function parsePersonalizationArguments(
   value: unknown,
 ):
   | {
+      messageRef?: string
       request: HostedRuntimeAssistantPersonalizationModelToolRequest
       ok: true
     }
   | { ok: false; validationDigest: SafeToolCallValidationDigest } {
   const parsed = parseDynamicToolArguments({
-    schema: hostedRuntimeAssistantPersonalizationModelToolRequestSchema,
+    schema: z.object({
+      message_ref: z.string().regex(new RegExp(ASSISTANT_ACCEPTED_MESSAGE_REF_PATTERN, 'u')).optional(),
+    }).passthrough().transform(({ message_ref, ...request }, context) => {
+      const parsed = hostedRuntimeAssistantPersonalizationModelToolRequestSchema.safeParse(request)
+      if (!parsed.success) {
+        for (const issue of parsed.error.issues) context.addIssue({ ...issue })
+        return z.NEVER
+      }
+      if (message_ref !== undefined && parsed.data.action !== 'update') {
+        context.addIssue({ code: 'custom', path: ['message_ref'], message: 'Message ref is only valid for updates.' })
+        return z.NEVER
+      }
+      return { messageRef: message_ref, request: parsed.data }
+    }),
     value,
     schemaRootKeys: [
       'action',
+      'message_ref',
       'mainPersona',
       'supportingPersona',
       'tone',
@@ -7389,7 +7588,8 @@ function parsePersonalizationArguments(
 
   return {
     ok: true,
-    request: parsed.args,
+    request: parsed.args.request,
+    ...(parsed.args.messageRef === undefined ? {} : { messageRef: parsed.args.messageRef }),
   }
 }
 
@@ -7466,16 +7666,7 @@ function parseGroupArguments(
     return { ok: true, request: currentSenderRequest };
   }
   if (parsed.args.action === "read_shared") {
-    return {
-      ok: true,
-      request: {
-        action: "read_shared",
-        ...(parsed.args.audience === undefined
-          ? {}
-          : { audience: parsed.args.audience }),
-        projectionScopes: parsed.args.projectionScopes,
-      },
-    };
+    return { ok: true, request: parsed.args };
   }
   if (parsed.args.action === "send_email") {
     return { ok: true, request: parsed.args };

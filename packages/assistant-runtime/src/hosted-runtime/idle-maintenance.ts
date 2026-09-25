@@ -15,6 +15,7 @@ import {
 import {
   normalizeHostedAiUsageAllowancePricedModelId,
   resolveHostedAiUsageTokenPricingBasis,
+  type HostedWorkspaceInvocationProcessingMode,
 } from "@murphai/hosted-execution/runtime-control";
 import {
   resolveAssistantCodexUsageProviderName,
@@ -25,6 +26,7 @@ import {
   readHostedExecutionSafeErrorName,
 } from "@murphai/hosted-execution";
 import {
+  archiveClosedAuditShards,
   archiveClosedEventLedgerShards,
   archiveClosedIntegrationIngestShards,
   runGeneratedImageCaptureRetention,
@@ -115,6 +117,7 @@ export async function runHostedIdleCheckpointMaintenance(input: {
   memberId: string;
   model: string | null;
   pendingWork: boolean;
+  processingMode?: HostedWorkspaceInvocationProcessingMode;
   persistGeneratedImageRetention?: (<T>(write: () => Promise<T>) => Promise<T>) | null;
   protectedAttachmentIds?: readonly string[];
   protectedCaptureIds?: readonly string[];
@@ -303,71 +306,14 @@ export async function runHostedIdleCheckpointMaintenance(input: {
         retentionWake,
       );
     }
-    if (input.vaultRoot) {
-      const archiveSignal = AbortSignal.any([
-        abortController.signal,
-        AbortSignal.timeout(HOSTED_IDLE_ARCHIVE_TIMEOUT_MS),
-      ]);
-      try {
-        const archiveResult = await archiveClosedEventLedgerShards({
-          signal: archiveSignal,
-          vaultRoot: input.vaultRoot,
-        });
-        if (
-          archiveResult.archivedShardCount > 0
-          || archiveResult.repairedShardCount > 0
-          || archiveResult.blockedShardCount > 0
-        ) {
-          emitEventLedgerArchiveLog({
-            memberId: input.memberId,
-            result: archiveResult,
-          });
-        }
-      } catch (error) {
-        if (abortController.signal.aborted) {
-          return buildInterruptedMaintenanceOutcome({
-            retentionWake,
-            shutdownSignal: input.shutdownSignal,
-            vaultRoot: input.vaultRoot,
-            wakeInterrupted,
-          });
-        }
-        emitEventLedgerArchiveFailureLog({
-          error,
-          memberId: input.memberId,
-        });
-      }
-      if (!archiveSignal.aborted) {
-        try {
-          const archiveResult = await archiveClosedIntegrationIngestShards({
-            signal: archiveSignal,
-            vaultRoot: input.vaultRoot,
-          });
-          if (
-            archiveResult.archivedShardCount > 0
-            || archiveResult.repairedShardCount > 0
-            || archiveResult.blockedShardCount > 0
-          ) {
-            emitIntegrationIngestArchiveLog({
-              memberId: input.memberId,
-              result: archiveResult,
-            });
-          }
-        } catch (error) {
-          if (abortController.signal.aborted) {
-            return buildInterruptedMaintenanceOutcome({
-              retentionWake,
-              shutdownSignal: input.shutdownSignal,
-              vaultRoot: input.vaultRoot,
-              wakeInterrupted,
-            });
-          }
-          emitIntegrationIngestArchiveFailureLog({
-            error,
-            memberId: input.memberId,
-          });
-        }
-      }
+    // Finite content-retention wakes must not rescan unrelated canonical
+    // history. Ordinary idle checkpoints remain the archive owner.
+    if (input.vaultRoot && input.processingMode !== "inbox_media_retention") {
+      await archiveHostedIdleCanonicalHistory({
+        memberId: input.memberId,
+        signal: abortController.signal,
+        vaultRoot: input.vaultRoot,
+      });
     }
     if (abortController.signal.aborted) {
       return buildInterruptedMaintenanceOutcome({
@@ -447,6 +393,40 @@ export async function runHostedIdleCheckpointMaintenance(input: {
     input.shutdownSignal?.removeEventListener("abort", onShutdownAbort);
     wakeWatchAbort.abort();
     await wakeWatch;
+  }
+}
+
+async function archiveHostedIdleCanonicalHistory(input: {
+  memberId: string;
+  signal: AbortSignal;
+  vaultRoot: string;
+}): Promise<void> {
+  const archiveSignal = AbortSignal.any([
+    input.signal,
+    AbortSignal.timeout(HOSTED_IDLE_ARCHIVE_TIMEOUT_MS),
+  ]);
+  await archiveClosedLedgersDuringIdle({
+    vaultRoot: input.vaultRoot,
+    memberId: input.memberId,
+    signal: archiveSignal,
+  });
+  if (archiveSignal.aborted) return;
+  try {
+    const archiveResult = await archiveClosedIntegrationIngestShards({
+      archiveCurrentMonth: true,
+      signal: archiveSignal,
+      vaultRoot: input.vaultRoot,
+    });
+    if (
+      archiveResult.archivedShardCount > 0
+      || archiveResult.repairedShardCount > 0
+      || archiveResult.blockedShardCount > 0
+    ) {
+      emitIntegrationIngestArchiveLog({ memberId: input.memberId, result: archiveResult });
+    }
+  } catch (error) {
+    if (input.signal.aborted) return;
+    emitIntegrationIngestArchiveFailureLog({ error, memberId: input.memberId });
   }
 }
 
@@ -578,7 +558,45 @@ function emitIntegrationIngestArchiveLog(input: {
   });
 }
 
-function emitEventLedgerArchiveLog(input: {
+async function archiveClosedLedgersDuringIdle(input: {
+  vaultRoot: string;
+  memberId: string;
+  signal: AbortSignal;
+}): Promise<void> {
+  for (const [family, archive] of [
+    ["eventLedger", archiveClosedEventLedgerShards],
+    ["audit", archiveClosedAuditShards],
+  ] as const) {
+    if (input.signal.aborted) break;
+    try {
+      const archiveResult = await archive({
+        signal: input.signal,
+        vaultRoot: input.vaultRoot,
+      });
+      if (
+        archiveResult.archivedShardCount > 0
+        || archiveResult.repairedShardCount > 0
+        || archiveResult.blockedShardCount > 0
+      ) {
+        emitLedgerArchiveLog({
+          family,
+          memberId: input.memberId,
+          result: archiveResult,
+        });
+      }
+    } catch (error) {
+      if (input.signal.aborted) return;
+      emitLedgerArchiveFailureLog({
+        family,
+        error,
+        memberId: input.memberId,
+      });
+    }
+  }
+}
+
+function emitLedgerArchiveLog(input: {
+  family: "eventLedger" | "audit";
   memberId: string;
   result: ArchiveClosedEventLedgerShardsResult;
 }): void {
@@ -586,23 +604,24 @@ function emitEventLedgerArchiveLog(input: {
   emitHostedExecutionStructuredLog({
     component: "runtime",
     details: {
-      eventLedgerArchiveBytes: input.result.archivedByteCount,
-      eventLedgerArchiveRepairedShards: input.result.repairedShardCount,
-      eventLedgerArchiveSourceBytes: input.result.sourceByteCount,
-      eventLedgerArchivedShards: input.result.archivedShardCount,
-      eventLedgerBlockedShards: input.result.blockedShardCount,
-      eventLedgerScannedShards: input.result.scannedShardCount,
+      [`${input.family}ArchiveBytes`]: input.result.archivedByteCount,
+      [`${input.family}ArchiveRepairedShards`]: input.result.repairedShardCount,
+      [`${input.family}ArchiveSourceBytes`]: input.result.sourceByteCount,
+      [`${input.family}ArchivedShards`]: input.result.archivedShardCount,
+      [`${input.family}BlockedShards`]: input.result.blockedShardCount,
+      [`${input.family}ScannedShards`]: input.result.scannedShardCount,
     },
     level: blocked ? "warn" : "info",
     message: blocked
-      ? "Hosted idle maintenance archived eligible event ledger shards, but one or more shards require repair."
-      : "Hosted idle maintenance archived eligible event ledger shards.",
+      ? `Hosted idle maintenance archived eligible ${input.family} shards, but one or more shards require repair.`
+      : `Hosted idle maintenance archived eligible ${input.family} shards.`,
     phase: "checkpoint",
     userId: input.memberId,
   });
 }
 
-function emitEventLedgerArchiveFailureLog(input: {
+function emitLedgerArchiveFailureLog(input: {
+  family: "eventLedger" | "audit";
   error: unknown;
   memberId: string;
 }): void {
@@ -610,7 +629,7 @@ function emitEventLedgerArchiveFailureLog(input: {
   emitHostedExecutionStructuredLog({
     component: "runtime",
     details: {
-      failureCode: "event_ledger_archive_failed",
+      failureCode: input.family === "audit" ? "audit_archive_failed" : "event_ledger_archive_failed",
       ...(typeof diagnostics?.errorCode === "string"
         ? { failureErrorCode: diagnostics.errorCode }
         : {}),
@@ -628,7 +647,7 @@ function emitEventLedgerArchiveFailureLog(input: {
     error: input.error,
     level: "warn",
     message:
-      "Hosted idle maintenance could not archive closed event ledger shards; checkpointing will continue.",
+      `Hosted idle maintenance could not archive closed ${input.family} shards; checkpointing will continue.`,
     phase: "checkpoint",
     userId: input.memberId,
   });

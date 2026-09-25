@@ -148,7 +148,7 @@ describe("hosted runtime shutdown signal", () => {
             attemptId: "attempt_synthetic_shutdown_signal_pre",
             // Far longer than the test timeout: only the shutdown signal can
             // start the idle checkpoint this fast.
-            idleCheckpointDelayMs: 120_000,
+            runnerIdleTtlMs: 120_000,
             leaseGeneration: "7",
             userId: TEST_USER_ID,
             workspaceVersion: "0",
@@ -249,7 +249,7 @@ describe("hosted runtime shutdown signal", () => {
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_shutdown_preserved_due_wake",
-            idleCheckpointDelayMs: 120_000,
+            runnerIdleTtlMs: 120_000,
             leaseGeneration: "7",
             userId: TEST_USER_ID,
             workspaceVersion: "0",
@@ -389,7 +389,7 @@ describe("hosted runtime shutdown signal", () => {
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_generated_retention_wake_shutdown",
-            idleCheckpointDelayMs: 120_000,
+            runnerIdleTtlMs: 120_000,
             leaseGeneration: "7",
             userId: TEST_USER_ID,
             workspaceVersion: "0",
@@ -573,7 +573,7 @@ describe("hosted runtime shutdown signal", () => {
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_image_shutdown_handoff_first",
-            idleCheckpointDelayMs: 120_000,
+            runnerIdleTtlMs: 120_000,
             leaseGeneration: "7",
             userId: TEST_USER_ID,
             workspaceVersion: "0",
@@ -725,7 +725,7 @@ describe("hosted runtime shutdown signal", () => {
           createWorkspaceRuntimeJobInput({
             request: {
               attemptId: "attempt_synthetic_image_shutdown_handoff_second",
-              idleCheckpointDelayMs: 1,
+              runnerIdleTtlMs: 1,
               leaseGeneration: "8",
               userId: TEST_USER_ID,
               workspaceVersion: secondWorkspace.version,
@@ -823,7 +823,7 @@ describe("hosted runtime shutdown signal", () => {
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_shutdown_pending_runtime_wake",
-            idleCheckpointDelayMs: 120_000,
+            runnerIdleTtlMs: 120_000,
             leaseGeneration: "7",
             userId: TEST_USER_ID,
             workspaceVersion: "0",
@@ -887,7 +887,9 @@ describe("hosted runtime shutdown signal", () => {
     const consoleInfo = vi.spyOn(console, "info").mockImplementation(() => undefined);
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const events: string[] = [];
-    const mailboxItems: ReturnType<typeof createMailboxItem>[] = [];
+    const mailboxItems: ReturnType<typeof createMailboxItem>[] = [
+      createMailboxItem({ id: "mailbox_item_initial_conversation" }),
+    ];
     const firstDirtyWaitStarted = createDeferred<void>();
     const retainedDirtyWaitStarted = createDeferred<void>();
     const shutdownController = new AbortController();
@@ -953,7 +955,7 @@ describe("hosted runtime shutdown signal", () => {
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_shutdown_stale_runtime_wake",
-            idleCheckpointDelayMs: 120_000,
+            runnerIdleTtlMs: 120_000,
             leaseGeneration: "7",
             userId: TEST_USER_ID,
             workspaceVersion: "0",
@@ -971,6 +973,9 @@ describe("hosted runtime shutdown signal", () => {
           },
           async importItem(item) {
             events.push(`mailbox.importItem:${item.item.id}`);
+            if (item.item.id === "mailbox_item_initial_conversation") {
+              return { status: "imported" };
+            }
             return {
               assistantInputId: "assistant_input_shutdown_stale_runtime_wake",
               status: "imported",
@@ -1027,7 +1032,7 @@ describe("hosted runtime shutdown signal", () => {
       assert.equal(assistantPhaseCalls, 1);
       assert.deepEqual(
         events.filter((event) => event.startsWith("mailbox.importItem:")),
-        [],
+        ["mailbox.importItem:mailbox_item_initial_conversation"],
       );
       assert.equal(checkpointRequests[0]?.reason, "idle_shutdown");
       assert.equal(checkpointRequests[0]?.idleCheckpointTrigger, "shutdown_signal");
@@ -1064,7 +1069,9 @@ describe("hosted runtime shutdown signal", () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const events: string[] = [];
-    const mailboxItems: ReturnType<typeof createMailboxItem>[] = [];
+    const mailboxItems: ReturnType<typeof createMailboxItem>[] = [
+      createMailboxItem({ id: "mailbox_item_initial_conversation" }),
+    ];
     const firstDirtyWaitStarted = createDeferred<void>();
     const retainedDirtyWaitStarted = createDeferred<void>();
     const shutdownController = new AbortController();
@@ -1132,7 +1139,7 @@ describe("hosted runtime shutdown signal", () => {
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_shutdown_after_idle_window_trigger",
-            idleCheckpointDelayMs: 50,
+            runnerIdleTtlMs: 50,
             leaseGeneration: "7",
             userId: TEST_USER_ID,
             workspaceVersion: "0",
@@ -1144,7 +1151,7 @@ describe("hosted runtime shutdown signal", () => {
             if (snapshotInput.runtimeWakePendingAtCheckpoint) {
               mailboxItems.push(createMailboxItem({
                 id: "mailbox_item_shutdown_after_idle_window_trigger",
-                laneSeq: "1",
+                laneSeq: "2",
               }));
               shutdownController.abort(
                 new DOMException("Synthetic container SIGTERM.", "AbortError"),
@@ -1159,6 +1166,9 @@ describe("hosted runtime shutdown signal", () => {
           },
           async importItem(item) {
             events.push(`mailbox.importItem:${item.item.id}`);
+            if (item.item.id === "mailbox_item_initial_conversation") {
+              return { status: "imported" };
+            }
             return {
               assistantInputId: "assistant_input_shutdown_after_idle_window_trigger",
               status: "imported",
@@ -1210,7 +1220,7 @@ describe("hosted runtime shutdown signal", () => {
       assert.equal(assistantPhaseCalls, 1);
       assert.deepEqual(
         events.filter((event) => event.startsWith("mailbox.importItem:")),
-        [],
+        ["mailbox.importItem:mailbox_item_initial_conversation"],
       );
       assert.equal(checkpointRequests[0]?.reason, "idle_shutdown");
       assert.equal(checkpointRequests[0]?.idleCheckpointTrigger, "idle_window");
@@ -1281,7 +1291,7 @@ describe("hosted runtime shutdown signal", () => {
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_shutdown_during_post_checkpoint_wake",
-            idleCheckpointDelayMs: 50,
+            runnerIdleTtlMs: 50,
             leaseGeneration: "7",
             userId: TEST_USER_ID,
             workspaceVersion: "0",
@@ -1412,7 +1422,7 @@ describe("hosted runtime shutdown signal", () => {
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_shutdown_after_no_work_conversation",
-            idleCheckpointDelayMs: 50,
+            runnerIdleTtlMs: 50,
             leaseGeneration: "7",
             userId: TEST_USER_ID,
             workspaceVersion: "0",
@@ -1526,7 +1536,7 @@ describe("hosted runtime shutdown signal", () => {
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_shutdown_after_system_import",
-            idleCheckpointDelayMs: 50,
+            runnerIdleTtlMs: 50,
             leaseGeneration: "7",
             userId: TEST_USER_ID,
             workspaceVersion: "0",
@@ -1698,7 +1708,7 @@ describe("hosted runtime shutdown signal", () => {
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_shutdown_after_consumed_replay",
-            idleCheckpointDelayMs: 50,
+            runnerIdleTtlMs: 50,
             leaseGeneration: "7",
             userId: TEST_USER_ID,
             workspaceVersion: "0",
@@ -1799,7 +1809,7 @@ describe("hosted runtime shutdown signal", () => {
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_shutdown_after_consumed_replay_replacement",
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "8",
             userId: TEST_USER_ID,
             workspaceVersion: "1",
@@ -1912,7 +1922,7 @@ describe("hosted runtime shutdown signal", () => {
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_shutdown_after_post_checkpoint_import",
-            idleCheckpointDelayMs: 50,
+            runnerIdleTtlMs: 50,
             leaseGeneration: "7",
             userId: TEST_USER_ID,
             workspaceVersion: "0",
@@ -2003,7 +2013,9 @@ describe("hosted runtime shutdown signal", () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const events: string[] = [];
-    const mailboxItems: ReturnType<typeof createMailboxItem>[] = [];
+    const mailboxItems: ReturnType<typeof createMailboxItem>[] = [
+      createMailboxItem({ id: "mailbox_item_initial_conversation" }),
+    ];
     const firstDirtyWaitStarted = createDeferred<void>();
     const retainedDirtyWaitStarted = createDeferred<void>();
     const shutdownController = new AbortController();
@@ -2071,7 +2083,7 @@ describe("hosted runtime shutdown signal", () => {
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_shutdown_after_pre_checkpoint_import",
-            idleCheckpointDelayMs: 50,
+            runnerIdleTtlMs: 50,
             leaseGeneration: "7",
             userId: TEST_USER_ID,
             workspaceVersion: "0",
@@ -2089,6 +2101,9 @@ describe("hosted runtime shutdown signal", () => {
           },
           async importItem(item) {
             events.push(`mailbox.importItem:${item.item.id}`);
+            if (item.item.id === "mailbox_item_initial_conversation") {
+              return { status: "imported" };
+            }
             shutdownController.abort(
               new DOMException("Synthetic container SIGTERM.", "AbortError"),
             );
@@ -2140,7 +2155,7 @@ describe("hosted runtime shutdown signal", () => {
       );
       mailboxItems.push(createMailboxItem({
         id: "mailbox_item_shutdown_after_pre_checkpoint_import",
-        laneSeq: "1",
+        laneSeq: "2",
       }));
 
       const result = await resultPromise;
@@ -2148,7 +2163,10 @@ describe("hosted runtime shutdown signal", () => {
       assert.equal(assistantPhaseCalls, 1);
       assert.deepEqual(
         events.filter((event) => event.startsWith("mailbox.importItem:")),
-        ["mailbox.importItem:mailbox_item_shutdown_after_pre_checkpoint_import"],
+        [
+          "mailbox.importItem:mailbox_item_initial_conversation",
+          "mailbox.importItem:mailbox_item_shutdown_after_pre_checkpoint_import",
+        ],
       );
       assert.equal(checkpointRequests[0]?.reason, "idle_shutdown");
       assert.equal(checkpointRequests[0]?.idleCheckpointTrigger, "idle_window");
@@ -2157,7 +2175,7 @@ describe("hosted runtime shutdown signal", () => {
       assert.equal(checkpointRequests[1]?.idleCheckpointTrigger, "shutdown_signal");
       assert.equal(
         checkpointRequests[1]?.redactedStatus?.hostedMailboxConversationImportedSeq,
-        "1",
+        "2",
       );
       const pendingAssistantWakeAt = checkpointRequests[1]?.nextWakeAt;
       assert.match(pendingAssistantWakeAt ?? "", /^\d{4}-\d{2}-\d{2}T/u);
@@ -2180,7 +2198,9 @@ describe("hosted runtime shutdown signal", () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const events: string[] = [];
-    const mailboxItems: ReturnType<typeof createMailboxItem>[] = [];
+    const mailboxItems: ReturnType<typeof createMailboxItem>[] = [
+      createMailboxItem({ id: "mailbox_item_initial_conversation" }),
+    ];
     const firstDirtyWaitStarted = createDeferred<void>();
     const retainedDirtyWaitStarted = createDeferred<void>();
     const shutdownController = new AbortController();
@@ -2248,7 +2268,7 @@ describe("hosted runtime shutdown signal", () => {
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_shutdown_during_pre_checkpoint_pass",
-            idleCheckpointDelayMs: 50,
+            runnerIdleTtlMs: 50,
             leaseGeneration: "7",
             userId: TEST_USER_ID,
             workspaceVersion: "0",
@@ -2266,6 +2286,9 @@ describe("hosted runtime shutdown signal", () => {
           },
           async importItem(item) {
             events.push(`mailbox.importItem:${item.item.id}`);
+            if (item.item.id === "mailbox_item_initial_conversation") {
+              return { status: "imported" };
+            }
             return {
               assistantInputId: await stageAssistantInputEventForMailboxItem({
                 item: item.item,
@@ -2320,7 +2343,7 @@ describe("hosted runtime shutdown signal", () => {
       );
       mailboxItems.push(createMailboxItem({
         id: "mailbox_item_shutdown_during_pre_checkpoint_pass",
-        laneSeq: "1",
+        laneSeq: "2",
       }));
 
       const result = await resultPromise;
@@ -2328,7 +2351,10 @@ describe("hosted runtime shutdown signal", () => {
       assert.equal(assistantPhaseCalls, 2);
       assert.deepEqual(
         events.filter((event) => event.startsWith("mailbox.importItem:")),
-        ["mailbox.importItem:mailbox_item_shutdown_during_pre_checkpoint_pass"],
+        [
+          "mailbox.importItem:mailbox_item_initial_conversation",
+          "mailbox.importItem:mailbox_item_shutdown_during_pre_checkpoint_pass",
+        ],
       );
       assert.equal(checkpointRequests[0]?.reason, "idle_shutdown");
       assert.equal(checkpointRequests[0]?.idleCheckpointTrigger, "idle_window");
@@ -2337,7 +2363,7 @@ describe("hosted runtime shutdown signal", () => {
       assert.equal(checkpointRequests[1]?.idleCheckpointTrigger, "shutdown_signal");
       assert.equal(
         checkpointRequests[1]?.redactedStatus?.hostedMailboxConversationImportedSeq,
-        "1",
+        "2",
       );
       const pendingAssistantWakeAt = checkpointRequests[1]?.nextWakeAt;
       assert.match(pendingAssistantWakeAt ?? "", /^\d{4}-\d{2}-\d{2}T/u);
@@ -2370,7 +2396,7 @@ describe("hosted runtime shutdown signal", () => {
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_shutdown_due_assistant_handoff",
-            idleCheckpointDelayMs: 50,
+            runnerIdleTtlMs: 50,
             leaseGeneration: "7",
             userId: TEST_USER_ID,
             workspaceVersion: "0",
@@ -2449,7 +2475,7 @@ describe("hosted runtime shutdown signal", () => {
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_shutdown_during_due_assistant_import",
-            idleCheckpointDelayMs: 50,
+            runnerIdleTtlMs: 50,
             leaseGeneration: "7",
             userId: TEST_USER_ID,
             workspaceVersion: "0",
@@ -2546,7 +2572,7 @@ describe("hosted runtime shutdown signal", () => {
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_shutdown_pending_import_wake",
-            idleCheckpointDelayMs: 120_000,
+            runnerIdleTtlMs: 120_000,
             leaseGeneration: "7",
             userId: TEST_USER_ID,
             workspaceVersion: "0",
@@ -2713,7 +2739,7 @@ describe("hosted runtime shutdown signal", () => {
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId,
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "7",
             userId: TEST_USER_ID,
             workspaceVersion: "0",
@@ -2863,7 +2889,7 @@ describe("hosted runtime shutdown signal", () => {
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_shutdown_checkpoint_accepted_wake",
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "7",
             userId: TEST_USER_ID,
             workspaceVersion: "0",
@@ -2985,7 +3011,7 @@ describe("hosted runtime shutdown signal", () => {
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_shutdown_durable_effect_handoff",
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "7",
             userId: TEST_USER_ID,
             workspaceVersion: "0",
@@ -3162,7 +3188,7 @@ describe("hosted runtime shutdown signal", () => {
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_shutdown_due_retention_wake",
-            idleCheckpointDelayMs: 120_000,
+            runnerIdleTtlMs: 120_000,
             leaseGeneration: "7",
             userId: TEST_USER_ID,
             workspaceVersion: "0",
@@ -3233,7 +3259,7 @@ describe("hosted runtime shutdown signal", () => {
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_shutdown_retention_beats_assistant_wake",
-            idleCheckpointDelayMs: 120_000,
+            runnerIdleTtlMs: 120_000,
             leaseGeneration: "7",
             userId: TEST_USER_ID,
             workspaceVersion: "0",
@@ -3314,7 +3340,7 @@ describe("hosted runtime shutdown signal", () => {
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_shutdown_after_projected_wake_retention",
-            idleCheckpointDelayMs: 75,
+            runnerIdleTtlMs: 75,
             leaseGeneration: "7",
             userId: TEST_USER_ID,
             workspaceVersion: "0",
@@ -3411,7 +3437,7 @@ describe("hosted runtime shutdown signal", () => {
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_shutdown_signal_mid",
-            idleCheckpointDelayMs: 120_000,
+            runnerIdleTtlMs: 120_000,
             leaseGeneration: "7",
             userId: TEST_USER_ID,
             workspaceVersion: "0",

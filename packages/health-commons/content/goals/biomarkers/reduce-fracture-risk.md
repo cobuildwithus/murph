@@ -3,8 +3,8 @@ schemaVersion: murph.commons.page.v1
 entityType: goal_template
 key: goal_template:reduce-fracture-risk
 slug: reduce-fracture-risk
-title: Lower My Risk of Fractures
-summary: Reduce fractures by treating fragile bone, building strength and balance, and removing the fall risks most relevant to you.
+title: Understand My Fracture Risk
+summary: Understand fracture risk factors, bone health assessments, and questions for your care team.
 status: field-testing
 quality: usable
 aliases:
@@ -18,7 +18,7 @@ goal:
   category: biomarkers
   parentGoalKey: goal_template:build-stronger-bones
   outcomeKind: function
-  goalPhrase: lower my risk of fractures
+  goalPhrase: understand my fracture risk
   successSignals:
     - id: fracture_prevention_plan
       kind: behavior
@@ -37,7 +37,7 @@ goal:
     ownerSkillIds:
       - strength-training
       - micronutrients-supplements
-  startPrompt: Hey Murph, help me lower my risk of fractures.
+  startPrompt: Hey Murph, help me understand my fracture risk.
   indexable: true
 safety:
   cautionLevel: moderate
@@ -94,4 +94,4 @@ After a fragility fracture, ask about coordinated fracture-liaison care so the c
 
 ## Related goals
 
-[Build Stronger Bones](/goals/build-stronger-bones) · [Correct My Vitamin D Deficiency](/goals/correct-vitamin-d-deficiency)
+[Build Stronger Bones](/goals/build-stronger-bones) · [Understand My Vitamin D Deficiency](/goals/correct-vitamin-d-deficiency)

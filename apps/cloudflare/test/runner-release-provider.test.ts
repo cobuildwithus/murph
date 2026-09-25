@@ -165,9 +165,10 @@ describe("native candidate admission", () => {
   const input = { applicationId: "candidate", namespaceId: "candidate-namespace", name: "candidate-app", specification };
   const envelope = (result: unknown) => Response.json({ success: true, result });
 
-  it("creates the exact namespace-backed application at its requested serving ceiling", async () => {
+  it.each([0, 300])("creates the namespace-backed application with numeric grace %s", async grace => {
+    const specification = { ...input.specification, rollout_active_grace_period: grace };
     const fetchImpl = vi.fn<typeof fetch>(async () => envelope({ id: "new-candidate" }));
-    await expect(createRunnerReleaseProvider({ accountId: "fixture", apiToken: "fixture", fetchImpl }).admitApplication({ ...input, applicationId: null })).resolves.toBe("created");
+    await expect(createRunnerReleaseProvider({ accountId: "fixture", apiToken: "fixture", fetchImpl }).admitApplication({ ...input, specification, applicationId: null })).resolves.toBe("created");
     const [, request] = fetchImpl.mock.calls[0]!;
     expect(request?.method).toBe("POST");
     expect(JSON.parse(String(request?.body))).toEqual({ ...specification, instances: 0, name: input.name, durable_objects: { namespace_id: input.namespaceId } });
@@ -299,11 +300,13 @@ describe("single-fleet rollout recovery", () => {
     expect(fetchImpl.mock.calls.every(([, init]) => init?.method === "GET")).toBe(true);
   });
 
-  it("passes gradual steps to native rollout after updating the application", async () => {
+  it.each([0, 300])("preserves numeric grace %s while updating the application and gradual steps", async grace => {
+    const specification = { ...input.specification, rollout_active_grace_period: grace };
     const fetchImpl = vi.fn<typeof fetch>(async (_url, init) => envelope(init?.method === "GET"
       ? { ...live, configuration: { ...configuration, image: "old-image" } } : {}));
-    await createRunnerReleaseProvider({ accountId: "fixture", apiToken: "fixture", fetchImpl }).admitApplication({ ...input, rolloutStepPercentage: [10, 25, 50, 100] });
+    await createRunnerReleaseProvider({ accountId: "fixture", apiToken: "fixture", fetchImpl }).admitApplication({ ...input, specification, rolloutStepPercentage: [10, 25, 50, 100] });
     expect(fetchImpl.mock.calls.map(([, init]) => init?.method)).toEqual(["GET", "PATCH", "POST"]);
+    expect(JSON.parse(String(fetchImpl.mock.calls[1]?.[1]?.body))).toEqual(specification);
     expect(JSON.parse(String(fetchImpl.mock.calls.at(-1)?.[1]?.body))).toMatchObject({ strategy: "rolling", kind: "full_auto", steps: [10, 25, 50, 100].map(percentage => ({ step_size: { percentage }, description: expect.any(String) })) });
   });
 

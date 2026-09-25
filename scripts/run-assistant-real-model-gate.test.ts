@@ -19,7 +19,7 @@ import {
 const sandboxEnv: NodeJS.ProcessEnv = {
   CI: 'true',
   GITHUB_ACTIONS: 'true',
-  GITHUB_EVENT_NAME: 'push',
+  GITHUB_EVENT_NAME: 'schedule',
   GITHUB_REF: 'refs/heads/main',
   GITHUB_REF_PROTECTED: 'true',
   GITHUB_SHA: 'a'.repeat(40),
@@ -48,6 +48,7 @@ describe('protected real-model gate admission', () => {
     { MURPH_ASSISTANT_REAL_MODEL_SANDBOX: undefined },
     { CI: undefined },
     { GITHUB_ACTIONS: undefined },
+    { GITHUB_EVENT_NAME: 'push' },
     { GITHUB_EVENT_NAME: 'pull_request' },
     { GITHUB_EVENT_NAME: 'pull_request_target' },
     { GITHUB_REF: 'refs/heads/feature', GITHUB_EVENT_NAME: 'workflow_dispatch' },
@@ -133,10 +134,10 @@ describe('real-model workflow admission and required result', () => {
   })
 
   it.each([
-    { event: 'push', ref: 'refs/heads/main', protected: 'true', status: 0 },
+    { event: 'schedule', ref: 'refs/heads/main', protected: 'true', status: 0 },
     { event: 'workflow_dispatch', ref: 'refs/heads/main', protected: 'true', status: 0 },
     { event: 'workflow_dispatch', ref: 'refs/heads/feature', protected: 'true', status: 1 },
-    { event: 'push', ref: 'refs/heads/main', protected: 'false', status: 1 },
+    { event: 'schedule', ref: 'refs/heads/main', protected: 'false', status: 1 },
     { event: 'pull_request', ref: 'refs/heads/main', protected: 'true', status: 1 },
     { event: 'pull_request_target', ref: 'refs/heads/main', protected: 'true', status: 1 },
   ])('executes admission policy for $event $ref protected=$protected', async (input) => {

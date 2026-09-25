@@ -74,6 +74,14 @@ The supported note types are:
 - `journal-outcome` for a reported feeling or result;
 - `journal-plan` for a future intention.
 
+Factor and context notes use a stable `key-*` tag and explicit `happened` or
+`did-not-happen` evidence. Subjective outcomes use a stable `key-*` plus a
+`value-*` containing a reported 0–10 score or a supported reported level.
+Numeric ratings and verbal levels use distinct outcome keys so their different
+scales are never combined. Unscored symptoms and relative changes remain Journal facts without fabricated
+scores; the Patterns reader cannot use them as scored outcomes. Completed
+actions are factors, not subjective outcomes. Missing reports remain unknown.
+
 Murph does not announce routine saves. It asks a private question only when an
 important fact is unclear. A clear correction from the member wins. If a plan
 did not happen, Murph removes the plan and can save an explicit absence for the
@@ -90,22 +98,97 @@ change also creates one idempotent canonical `journal-context` event. Journal
 therefore shows when the context changed without keeping a second Environment
 history.
 
-New calendar and email connections are eligible for automatic context only
-after one private notice. Existing connections become a silent baseline and
-remain unchanged. The member can stop all automatic capture or one category
-without disconnecting the account.
+Active calendar and email connections are eligible for automatic context in the
+first scheduled pass, regardless of connection age, missing timestamps, or legacy
+baseline/notice markers. No heads-up message is sent and no extra day is required.
+Global/provider/category opt-outs and source mappings survive migration. Opt-outs remove matching
+upcoming context without disconnecting the account or deleting Journal history.
 
-At 08:00 and 16:00 local time, calendar capture reads only the next 36 hours.
-It includes clear training, matches, races, sauna, recovery, long travel,
-flights, and outdoor plans. It excludes medical care, dental care, therapy,
-tests, procedures, work, and private social events. It reconciles a moved or
-removed source event into the same Journal plan.
+One managed pass runs at 08:00 local time. It reads a fourteen-day calendar window,
+using exact UTC boundaries from the cron host, and reconciles known ongoing and
+future plans outside that discovery window by their source identities. It retains
+training, matches, races, sauna, recovery, long travel, flights, and outdoor plans,
+and relevant non-sensitive life changes affecting existing support. Clear all-day
+travel and races preserve date-only meaning. Medical care, dental care, therapy,
+tests, procedures, ordinary work, and private social events remain excluded.
 
-The 08:00 pass also uses narrow transport and lodging confirmation searches.
-Its first pass looks back at most 90 days for future travel. It groups one trip
-into one normalized itinerary and stores no message body, price, booking code,
-attachment, exact address, or other traveler. Calendar events and trips get at
-most one follow-up after passive evidence is checked first.
+The same pass searches narrowly for transport, lodging, relevant registration,
+and change/cancellation confirmations. The first email pass looks back at most
+90 days for future travel; later passes read new or changed confirmations. One
+trip remains one normalized Journal itinerary, with linked calendar/email evidence,
+segments, departure/arrival and return timing, timezones, status, and practical
+constraints. It retains no email body, price, booking code, exact address,
+attachment, or other traveler's data. Complete source evidence reconciles moved
+or canceled plans and follow-ups; a failed read or window absence is not deletion.
+
+Existing follow-ups remain: check passive evidence first, at most one per event
+or trip, and calendar check-ins one hour after a timed event ends. Date-only
+all-day plans never infer an overnight check-in from a midnight boundary. Routine Journal
+writes and upcoming-context refreshes stay silent.
+
+The morning pass uses `gpt-6-sol` with low reasoning effort for contextual
+reconciliation of existing reminders as well as connected plans. Cron admits it
+even when there is no connected-context ledger or connected account, because
+member-supplied facts can still require reminder repairs. The skill checks saved
+opt-outs before account selection or any connected-app call. Morning runs have
+ordinary vault read/write access and the normal automation editing tool; they do
+not use a separate reminder permission list. Existing member/conversation ownership
+and version-checked writes remain authoritative. Ordinary managed
+reconciliation archives the fixed afternoon automation without removing its
+Journal records or standalone follow-ups. Existing paused/archived morning records
+retain their status; active records converge to the current recipe.
+
+Canonical `journal-plan` notes own a structured `plan` field containing end,
+status, verification time, category, and optional connected account. Existing
+fields retain start, timezone, source identity, title, and full normalized note.
+The typed note command accepts the event timezone and plan fields. Creation with
+a repeated external source identity returns the existing plan; deletion prevents
+a retry from resurrecting it. Reconciliation reads the exact event and uses
+revision-checked edits, preserving direct member corrections and secondary
+calendar/email aliases in the existing connected-source ledger.
+`event edit` exposes the same sparse plan fields plus `--expected-revision`;
+rescheduling and successful re-verification update the existing record. Source
+keys longer than 200 characters are hashed deterministically on typed creation.
+
+The existing context snapshot derives upcoming entries from current canonical
+revisions. There is no separately authored factual Knowledge page. Canonical
+and ledger-policy write receipts invalidate the Journal section, including on
+restore/replay; stale facts stay unavailable until rebuilt. The same ledger
+normalizes global/account/provider/category opt-outs and supported active accounts.
+Unrecognized legacy policy suppresses automatic context until the morning pass
+preserves and normalizes its controls. Opt-outs require no separate cleanup write.
+Historical Journal records remain intact.
+The ledger's first body line contains only compact JSON controls; its source
+mappings follow under `## Sources` in the same document. History growth cannot
+exhaust the bounded control read. Compact legacy JSON remains readable and the
+normal capture pass separates legacy mappings without discarding them. A
+successful account disconnect updates this same ledger immediately using the
+returned exact account ID and the Knowledge writer's revision check.
+
+The snapshot reader performs a bounded local read (128 KiB) and injects at most
+8 KiB of upcoming navigation and details. Projection work runs in the existing
+background lane, bounded to 128 shards and 100,000 records with preemption; its
+serialized plan section is at most 24 KiB. Incomplete source reads produce an
+unavailable indication, not false absence. Navigation takes priority over verbose
+logistics, with exact canonical retrieval when details or additional plans matter.
+Every private conversation, resumed turn, and ordinary scheduled turn reads fresh
+state; groups and maintenance retain their existing isolation. Expiry is evaluated
+at read time, and verification older than 48 hours is stale. A planned departure
+does not prove arrival, current location, or realized experiment context.
+Navigation preserves canonical all-day/period/unknown timing independently of
+optional details; legacy summaries with no precision marker remain unknown.
+
+The current Journal page still navigates today and historical days. Upcoming
+context does not add a future-date browser to that page; a saved plan appears
+on its occurrence date once that date is selectable and the view is refreshed.
+
+Before advice or reminder wording, Murph considers upcoming plans that affect
+what is practical, even when the member does not mention them. Relevant plans
+shape the answer and one useful preparation or adjustment; unrelated questions
+do not acquire plan mentions or extra check-ins. The context
+never grants permission to reschedule a fixed reminder, change the member timezone,
+pause an experiment, or treat a future plan as an observed confounder. Permanent
+experiment evidence continues through the existing canonical experiment owner.
 
 ## Read model
 
@@ -142,6 +225,19 @@ grouped source sessions once.
 
 The old `journal_day` surface stays untouched. The new Journal view does not
 depend on it.
+
+Imported clinical records use human-readable labels and source names. Raw FHIR
+objects, coding-system identifiers and source identity keys stay in canonical
+evidence rather than display copy. Records explicitly dated only by retrieval
+or source-update metadata do not enter dated Journal bands.
+
+Clinical notes and tests from the same source resource, revision and clinical
+day form one entry. Distinct source resources or clinical days remain separate.
+When a legacy document-extraction facet was placed on the retrieval/recording
+day despite an older dated source parent, without explicit date provenance,
+Journal omits the ambiguous facet from dated bands and retains the original
+source report on its documented date. Host-tagged document/source dates and
+other historical dates remain intact. The projection never rewrites evidence.
 
 The projection is built during the existing Browser Vault refresh. Opening
 `/journal` shows the available projection and requests one runtime refresh.
@@ -204,6 +300,10 @@ with its summary, metrics, additional details, and source records. Seven-day
 summary values use main sleep and grouped activity once. Additions and
 corrections remain conversational. Home and Personal Patterns keep their
 separate presentation owners.
+
+Native feed previews use at most three lines. The entry drawer retains the full
+summary, and long secondary source text expands on demand. Date-only records
+never display a fabricated clock time.
 
 The response remains in session memory using ephemeral networking. Sign-out,
 account changes, and consent recovery clear it; late responses cannot restore

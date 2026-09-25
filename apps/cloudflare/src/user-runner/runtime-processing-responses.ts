@@ -122,7 +122,7 @@ function recordRuntimeProcessingRetry(
 function computeActiveRuntimeWakeRecheckAt(env: HostedExecutionEnvironment): string {
   return new Date(
     Date.now() + computeHostedRuntimeProcessingRecheckDelayMs({
-      idleCheckpointDelayMs: env.idleCheckpointDelayMs,
+      runnerIdleTtlMs: env.runnerIdleTtlMs,
       runnerCommitTimeoutMs: env.runnerCommitTimeoutMs,
     }),
   ).toISOString();

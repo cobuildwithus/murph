@@ -10,6 +10,11 @@ import { HOSTED_MAILBOX_RETENTION_MS } from "@/src/lib/hosted-mailbox/store";
 import {
   readHostedRuntimeProgressHealth,
 } from "@/src/lib/hosted-runtime-progress/alert-monitor";
+import {
+  recordHostedIngressAssistantInputStaged,
+  recordHostedIngressDeliveryCommitted,
+  recordHostedIngressRuntimeMilestone,
+} from "@/src/lib/hosted-runtime-latency/store";
 import { createPrismaClient } from "@/src/lib/prisma";
 
 const databaseUrl = process.env.DATABASE_URL?.trim() ?? "";
@@ -28,6 +33,66 @@ if (
 describe.skipIf(!runPostgresProof)(
   "hosted runtime progress alert PostgreSQL boundary",
   () => {
+    it("waits for the exact delivered email's checkpoint, then alerts at its expired deadline", async () => {
+      const prisma = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const userId = `progress-email-proof-${randomUUID()}`;
+      const acceptedAt = new Date("2026-08-10T15:00:00.000Z");
+      const now = new Date("2026-08-10T15:20:00.000Z");
+      const deadline = "2026-08-10T15:30:00.000Z";
+      const extendedDeadline = "2026-08-10T15:40:00.000Z";
+      const mailboxItemId = `${userId}-conversation-item-1`;
+      const runtimeAttemptId = "attempt_email_completion";
+      try {
+        await prisma.hostedMember.create({ data: member(userId, HostedBillingStatus.active) });
+        await seedProgressLane({ createdAt: acceptedAt, lane: "conversation", tx: prisma, userId });
+        await expect(recordHostedIngressAssistantInputStaged({
+          authenticatedUserId: userId, mailboxItemId, assistantInputId: `${userId}-input`,
+          source: "email", at: acceptedAt, runtimeAttemptId, prisma,
+        })).resolves.toMatchObject({ recorded: true });
+        const completion = {
+          authenticatedUserId: userId, mailboxItemIds: [mailboxItemId], source: "email" as const,
+          at: "2026-08-10T15:05:00.000Z", checkpointPublicationExpectedBy: deadline,
+          runtimeAttemptId, runtimeLeaseGeneration: "2", prisma,
+        };
+        // Wrong item, member, or channel must not produce completion evidence.
+        for (const override of [
+          { mailboxItemIds: ["unrelated_mailbox"] },
+          { authenticatedUserId: "unrelated_member" },
+          { source: "telegram" as const },
+        ]) {
+          await expect(recordHostedIngressDeliveryCommitted({ ...completion, ...override }))
+            .resolves.toMatchObject({ recorded: false });
+        }
+        await expect(readHostedRuntimeProgressHealth({ now, prisma }))
+          .resolves.toMatchObject({ stalledConversationLaneCount: 1 });
+        await expect(recordHostedIngressDeliveryCommitted(completion))
+          .resolves.toMatchObject({ recorded: true });
+        await expect(readHostedRuntimeProgressHealth({ now, prisma }))
+          .resolves.toMatchObject({ stalledConversationLaneCount: 0 });
+        expect((await prisma.hostedMailboxItem.findUniqueOrThrow({ where: { id: mailboxItemId } })).consumedAt).toBeNull();
+        await expect(readHostedRuntimeProgressHealth({ now: new Date(deadline), prisma }))
+          .resolves.toMatchObject({ stalledConversationLaneCount: 0 });
+        await expect(readHostedRuntimeProgressHealth({ now: new Date(Date.parse(deadline) + 1), prisma }))
+          .resolves.toMatchObject({ stalledConversationLaneCount: 1, oldestStalledAgeMs: 30 * 60_000 + 1 });
+        // The runtime's actual idle deadline can advance; stale leases cannot extend it.
+        await recordHostedIngressRuntimeMilestone({
+          authenticatedUserId: userId, source: "email", runtimeAttemptId: "attempt_resumed",
+          runtimeLeaseGeneration: "3", milestone: "checkpoint_publication_expected_by",
+          at: extendedDeadline, prisma,
+        });
+        await recordHostedIngressDeliveryCommitted({
+          ...completion, checkpointPublicationExpectedBy: "2026-08-10T18:00:00.000Z",
+        });
+        await expect(readHostedRuntimeProgressHealth({ now: new Date(extendedDeadline), prisma }))
+          .resolves.toMatchObject({ stalledConversationLaneCount: 0 });
+        await expect(readHostedRuntimeProgressHealth({ now: new Date(Date.parse(extendedDeadline) + 1), prisma }))
+          .resolves.toMatchObject({ stalledConversationLaneCount: 1 });
+      } finally {
+        await prisma.hostedMember.deleteMany({ where: { id: userId } });
+        await prisma.$disconnect();
+      }
+    }, 60_000);
+
     it("filters exact runtime authority and usage pauses", async () => {
       const prisma = createPrismaClient({ databaseUrl, poolMax: 1 });
       const rollback = new Error("Rollback runtime progress PostgreSQL proof.");

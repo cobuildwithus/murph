@@ -3,8 +3,8 @@ schemaVersion: murph.commons.page.v1
 entityType: goal_template
 key: goal_template:manage-ibs-symptoms
 slug: manage-ibs-symptoms
-title: Manage IBS Symptoms
-summary: Match your IBS plan to constipation, diarrhea, or both, aim at the main symptom, and keep as much diet variety as you can.
+title: Track My IBS Symptoms
+summary: Keep a practical food and symptom journal to support conversations with your IBS care team.
 status: field-testing
 quality: usable
 aliases:
@@ -13,7 +13,7 @@ goal:
   category: nutrition
   parentGoalKey: goal_template:improve-digestion
   outcomeKind: symptom
-  goalPhrase: manage my IBS symptoms
+  goalPhrase: track my IBS symptoms
   successSignals:
     - id: ibs-symptom-days
       kind: symptom
@@ -32,7 +32,7 @@ goal:
       - gut-digestion
       - nutrition-strategy
       - stress-regulation
-  startPrompt: Hey Murph, help me manage my IBS symptoms.
+  startPrompt: Hey Murph, help me track my IBS symptoms.
   indexable: true
 safety:
   cautionLevel: moderate

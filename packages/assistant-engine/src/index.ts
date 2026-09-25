@@ -35,6 +35,7 @@ export type {
   AssistantGroupRoomModelInitializeResult,
 } from './assistant/group-room-model.js'
 export * from './assistant/hosted-image-completion.js'
+export { scopeAssistantAutomationToolToRoute } from './assistant/execution-context.js'
 export type {
   AssistantAutomationOccurrenceProjection,
   AssistantAutomationOccurrenceProjectionIssue,
@@ -67,9 +68,9 @@ export type {
 } from './assistant/issue-reporting.js'
 export * from './assistant/device-activity-automations.js'
 export * from './assistant/managed-automations.js'
+export * from './assistant/manual-meal-estimation.js'
 export * from './assistant/reminder-availability-maintenance.js'
 export * from './assistant/onboarding-followup-automation.js'
-export * from './assistant/onboarding-followup-seed.js'
 export * from './assistant/onboarding-first-personal-read-automation.js'
 export * from './assistant-cron.js'
 export * from './assistant-outbox.js'

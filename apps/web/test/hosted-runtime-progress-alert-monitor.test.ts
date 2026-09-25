@@ -90,6 +90,48 @@ describe("hosted runtime progress health", () => {
     });
   });
 
+  it.each(["delivery", "terminal_no_reply"])("defers a completed conversation head until its checkpoint deadline (%s)", (completion) => {
+    const row = progressRow({ progressOriginAt: "2026-08-10T15:30:00Z", lane: "conversation", runtimeKey: "runtime_a" });
+    Object.assign(row, {
+      deliveryAcceptedAt: completion === "delivery" ? instant("2026-08-10T15:56:00Z") : null,
+      checkpointEvidence: { assistant: {
+        checkpointPublicationExpectedByEpochMs: +now + 60_000,
+        ...(completion === "terminal_no_reply" ? { terminalNonReplyCommittedAtEpochMs: +now - 4 * 60_000 } : {}),
+      } },
+    });
+    const summarize = (at: Date) => summarizeHostedRuntimeProgressRows({
+      activeRuntimeKeys: ["runtime_a"], rows: [row], now: at,
+    });
+    expect(summarize(now).anomalous).toBe(false);
+    expect(summarize(new Date(+now + 60_000)).anomalous).toBe(false);
+    expect(summarize(new Date(+now + 60_001))).toMatchObject({
+      anomalous: true, stalledConversationLaneCount: 1, pendingItemCount: 1,
+    });
+  });
+
+  it("does not defer missing completion, invalid chronology, or system work", () => {
+    const deadline = +now + 60_000;
+    const completion = instant("2026-08-10T15:56:00Z");
+    const cases = [
+      { deliveryAcceptedAt: null, expected: deadline },
+      { deliveryAcceptedAt: completion, expected: null },
+      { deliveryAcceptedAt: completion, expected: String(deadline) },
+      { deliveryAcceptedAt: completion, expected: 1e100 },
+      { deliveryAcceptedAt: completion, expected: +completion - 1 },
+      { deliveryAcceptedAt: instant("2026-08-10T15:29:00Z"), expected: deadline },
+      { deliveryAcceptedAt: new Date(+now + 1), expected: deadline },
+      { deliveryAcceptedAt: completion, expected: deadline, lane: "system" },
+    ];
+    for (const test of cases) {
+      const row = Object.assign(progressRow({ progressOriginAt: "2026-08-10T15:30:00Z",
+        lane: test.lane ?? "conversation", runtimeKey: "runtime_a" }), {
+        deliveryAcceptedAt: test.deliveryAcceptedAt,
+        checkpointEvidence: { assistant: { checkpointPublicationExpectedByEpochMs: test.expected } },
+      });
+      expect(summarizeHostedRuntimeProgressRows({ activeRuntimeKeys: ["runtime_a"], rows: [row], now }).anomalous).toBe(true);
+    }
+  });
+
   it("classifies every system import and wake-owner diagnostic without identifiers", () => {
     const health = summarizeHostedRuntimeProgressRows({
       activeRuntimeKeys: [
@@ -923,6 +965,8 @@ function progressRow(input: {
   workspaceSystemImportedSeq?: bigint | null;
 }): HostedRuntimeProgressHealthRow {
   return {
+    checkpointEvidence: null,
+    deliveryAcceptedAt: null,
     chronologyInvalid: input.chronologyInvalid ?? false,
     durableHighWaterSeq: input.durableHighWaterSeq ?? 1n,
     effectiveConsumedSeq: input.effectiveConsumedSeq ?? 0n,

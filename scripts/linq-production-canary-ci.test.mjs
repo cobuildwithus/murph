@@ -14,10 +14,10 @@ const runnerPath = new URL(
   import.meta.url,
 );
 
-test("Linq production canary admits one verified serialized production journey per hour", async () => {
+test("Linq production canary admits one verified serialized production journey every six hours", async () => {
   const workflow = await readFile(workflowPath, "utf8");
 
-  assert.match(workflow, /schedule:\n\s+- cron: "17 \* \* \* \*"/u);
+  assert.match(workflow, /schedule:\n\s+- cron: "17 \*\/6 \* \* \*"/u);
   assert.match(workflow, /workflow_dispatch:/u);
   assert.doesNotMatch(workflow, /pull_request:|\npush:|deployment_status:/u);
   assert.match(workflow, /contents: read/u);
@@ -65,7 +65,7 @@ test("Linq production canary runner proves the welcome and bounded business repl
 
   assert.match(runner, /CANARY_REPLY_BUDGET_MS = 20_000/u);
   assert.match(runner, /CANARY_REPLY_WAIT_MS = 90_000/u);
-  assert.match(runner, /const CANARY_TURNS = \[/u);
+  assert.match(runner, /import CANARY_TURNS from "\.\/fixtures\/linq-production-conversation\.json"/u);
   assert.match(runner, /MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE/u);
   assert.match(runner, /message\.direction !== "inbound"/u);
   assert.match(runner, /message\.platform !== "imessage"/u);

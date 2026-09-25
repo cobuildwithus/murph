@@ -1,23 +1,11 @@
+import type { HostedExecutionContainerStubLike } from "./runner-container.ts";
 import type {
   HostedWorkspaceInvocationResult,
 } from "@murphai/hosted-execution/runtime-control";
 import type { R2BucketLike } from "./bundle-store.ts";
-import type { HostedBrowserVaultReplicaOrphanCandidate } from "./browser-vault-store.ts";
-import type {
-  HostedPrivateMediaPublishInput,
-  HostedPrivateMediaPublishResult,
-} from "./private-media.ts";
-import type {
-  HostedMediaAssetDeletionInput,
-  HostedMediaAssetDescriptor,
-  HostedMediaAssetReadAdmissionResult,
-  HostedMediaAssetRegistrationInput,
-} from "./user-runner/hosted-media-retention.ts";
+
 import { toStringEnvSource, type StringEnvSource } from "./string-env.ts";
-import type {
-  HostedWorkspaceSnapshotOrphanCandidate,
-  HostedWorkspaceSnapshotUploadSession,
-} from "./workspace-snapshot-store.ts";
+
 import type { DatabaseHealthMonitorResult } from "./database-health/monitor.ts";
 import type { DatabaseHealthStoredSample } from "./database-health/store.ts";
 import type {
@@ -119,7 +107,9 @@ export interface WorkerRuntimeCompletionReceipt {
   userId: string;
 }
 
-export interface WorkerRunnerContainerStubLike {
+export interface WorkerRunnerContainerStubLike extends Pick<HostedExecutionContainerStubLike,
+  "beginRuntimeUsageSettlement" | "finishRuntimeUsageSettlement" | "runtimeUsageSettlementAllowsProviders" | "readSupervisedInvocation" | "recordSupervisedRuntimeCompletion"
+> {
   readActiveRuntimeUserFence?(): Promise<WorkerActiveRuntimeUserFenceResult>;
 }
 
@@ -140,105 +130,6 @@ export interface WorkerRunnerContainerNamespaceLike<
   get?(id: unknown): TStub;
   getByName?(name: string): TStub;
   idFromString?(id: string): unknown;
-}
-
-export interface WorkerUserRunnerStubLike {
-  bindUser?(userId: string): Promise<{ userId: string }>;
-  deleteHostedUserData?(userId: string): Promise<unknown>;
-  reconcileRuntimeHealthDataConsentForUser?(userId: string): Promise<unknown>;
-  publishHostedPrivateMedia?(
-    input: HostedPrivateMediaPublishInput,
-  ): Promise<HostedPrivateMediaPublishResult>;
-  createHostedWorkspaceSnapshotUploadSession?(
-    input: HostedWorkspaceSnapshotUploadSession,
-  ): Promise<HostedWorkspaceSnapshotUploadSession | null>;
-  heartbeatHostedWorkspaceSnapshotUploadSession?(input: {
-    attemptId: string;
-    leaseGeneration: string;
-    snapshotId: string;
-    userId: string;
-  }): Promise<boolean>;
-  completeHostedWorkspaceSnapshotUploadSession?(input: {
-    attemptId: string;
-    leaseGeneration: string;
-    snapshotId: string;
-    userId: string;
-  }): Promise<boolean>;
-  rememberHostedWorkspaceSnapshotReplacedRef?(input: {
-    expectedSession: HostedWorkspaceSnapshotUploadSession;
-    replacedSnapshotRef: NonNullable<HostedWorkspaceSnapshotUploadSession["replacedSnapshotRef"]>;
-  }): Promise<boolean>;
-  rememberHostedWorkspaceSnapshotPresignedPut?(input: {
-    drainUntil: string;
-    expectedSession: HostedWorkspaceSnapshotUploadSession;
-    expiresAt: string;
-  }): Promise<HostedWorkspaceSnapshotUploadSession | null>;
-  admitHostedBrowserVaultReplicaDirectPut?(input: {
-    admittedAt: string;
-    attemptId: string;
-    leaseGeneration: string;
-    userId: string;
-    writeId: string;
-  }): Promise<boolean>;
-  releaseHostedBrowserVaultReplicaDirectPut?(input: {
-    userId: string;
-    writeId: string;
-  }): Promise<void>;
-  deleteHostedWorkspaceSnapshotUploadSession?(input: {
-    snapshotId: string;
-    userId: string;
-  }): Promise<{ deleted: boolean }>;
-  readHostedWorkspaceSnapshotUploadSession?(input: {
-    snapshotId: string;
-    userId: string;
-  }): Promise<HostedWorkspaceSnapshotUploadSession | null>;
-  recordHostedWorkspaceSnapshotOrphanCandidate?(
-    input: HostedWorkspaceSnapshotOrphanCandidate,
-  ): Promise<HostedWorkspaceSnapshotOrphanCandidate>;
-  recordHostedBrowserVaultReplicaOrphanCandidate?(
-    input: HostedBrowserVaultReplicaOrphanCandidate,
-  ): Promise<HostedBrowserVaultReplicaOrphanCandidate>;
-  validateRuntimeWriteFence?(input: {
-    attemptId: string;
-    generation: string;
-    userId: string;
-  }): Promise<boolean>;
-  admitHostedMediaRead?(
-    input: HostedMediaAssetDescriptor,
-  ): Promise<HostedMediaAssetReadAdmissionResult>;
-  recordHostedMediaAsset?(
-    input: HostedMediaAssetRegistrationInput,
-  ): Promise<boolean>;
-  forgetHostedMediaAsset?(
-    input: HostedMediaAssetDeletionInput,
-  ): Promise<boolean>;
-  recordRuntimeCompletionFromContainer?(
-    input: WorkerRuntimeCompletionReceipt,
-  ): Promise<{ completed: boolean }>;
-  revokeActiveRuntimePlatformAiUsage?(input: {
-    attemptId: string;
-    generation: string;
-    userId: string;
-  }): Promise<boolean>;
-  validateRuntimeProviderEgressToken?(input: {
-    providerEgressToken: string;
-    userId: string;
-  }): Promise<WorkerProviderEgressTokenValidationResult>;
-  validateRuntimeProviderEgressCredential?(input: {
-    providerKind: string;
-    runnerContainerName: string;
-    userId: string;
-  }): Promise<WorkerProviderEgressCredentialValidationResult>;
-}
-
-export interface WorkerBindUserRunnerStubLike extends WorkerUserRunnerStubLike {
-  bindUser(userId: string): Promise<{ userId: string }>;
-}
-
-export interface WorkerUserRunnerNamespaceLike<
-  TStub extends WorkerUserRunnerStubLike = WorkerUserRunnerStubLike,
-> {
-  getByName(name: string): TStub;
 }
 
 export interface WorkerDatabaseHealthStubLike {
@@ -290,9 +181,7 @@ export interface WorkerOpenAiAuthorizationAlertNamespaceLike<
   getByName(name: string): TStub;
 }
 
-export interface WorkerEnvironmentContract<
-  TStub extends WorkerUserRunnerStubLike = WorkerUserRunnerStubLike,
-> extends Readonly<Record<string, unknown>> {
+export interface WorkerEnvironmentContract extends Readonly<Record<string, unknown>> {
   AI?: WorkerAiBindingLike;
   BUNDLES: R2BucketLike;
   CF_VERSION_METADATA?: {
@@ -331,7 +220,6 @@ export interface WorkerEnvironmentContract<
   VENICE_API_KEY?: string;
   HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET?: string;
   HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON?: string;
-  HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS?: string;
   HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS?: string;
   HOSTED_EXECUTION_RETRY_DELAY_MS?: string;
   HOSTED_EXECUTION_RUNNER_ENV_PROFILES?: string;
@@ -376,12 +264,12 @@ export interface WorkerEnvironmentContract<
   MURPH_ELEVENLABS_VOICE_ID?: string;
   RUNNER_CONTAINER?: WorkerRunnerContainerNamespaceLike;
   NEXT_RUNNER_CONTAINER?: WorkerRunnerContainerNamespaceLike;
-  SMALL_RUNNER_CONTAINER?: WorkerRunnerContainerNamespaceLike;
   RUNNER_CONTAINER_SMOKE?: WorkerRunnerContainerNamespaceLike<
     WorkerDeploySmokeRunnerContainerStubLike
   >;
   STANDBY_COORDINATOR?: HostedStandbyCoordinatorNamespaceLike;
   STANDBY_RUNNER_CONTAINER?: HostedStandbyRunnerContainerNamespaceLike;
+  SMALL_RUNNER_CONTAINER?: HostedStandbyRunnerContainerNamespaceLike;
   TELEGRAM_API_BASE_URL?: string;
   TELEGRAM_BOT_TOKEN?: string;
   TELEGRAM_FILE_BASE_URL?: string;
@@ -389,7 +277,6 @@ export interface WorkerEnvironmentContract<
   HOSTED_WEB_CALLBACK_SIGNING_KEY_ID?: string;
   HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK?: string;
   HOSTED_WEB_BASE_URL?: string;
-  USER_RUNNER: WorkerUserRunnerNamespaceLike<TStub>;
 }
 
 export function asWorkerStringEnvironment(

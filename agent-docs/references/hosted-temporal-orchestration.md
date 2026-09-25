@@ -56,7 +56,16 @@ authorization. After a relevant revision reaches public `main`,
 wire proof for that exact public commit against the then-current private
 `main` and live reader set. Its `Temporal Web production admission` job must be
 configured as a Vercel production Deployment Check so a completed build cannot
-move production domains before the proof succeeds. The controller re-reads
+move production domains before the proof succeeds. The workflow also publishes
+an explicit pending commit status and a final status derived from the completed
+admission job. Only success becomes a successful status; failure, cancellation,
+and skipped proof fail closed. The proof attempt must match the current workflow
+attempt, so retrying only a failed finalizer cannot reuse historical admission.
+Both notifications use the exact `github.sha`
+and the existing check context, with the ordinary job-scoped GitHub token's
+`statuses: write` permission. The finalizer has no checkout or private credential.
+This repairs missed imported-check completion without a second admission owner
+or Vercel promotion authority. The controller re-reads
 both public and private `main` before accepting the result, while the private
 workflow independently re-reads the complete reader set. Every `main` commit
 must create its managed Vercel candidate, and the Git integration is the only
@@ -429,6 +438,18 @@ due connection create one new canonical wake when its matching `v2` wake was
 already consumed under the older handling semantics, while retries within `v3`
 remain deterministic.
 
+An exact, non-conflicting `v3` duplicate can admit a successor when the original
+scheduled item is consumed but the same active connection epoch still has that
+overdue canonical reconcile date. The scheduled mailbox append checks matching
+imported, handled, and consumed system frontiers, an empty system lane, no pending
+item or retained continuation, and no future workspace wake. Older checkpoints
+may omit the optional pending/continuation fields only when the other settled
+frontier evidence agrees. The successor identity includes the consumed frontier;
+the original dedupe lock serializes competing recovery attempts, and the normal
+post-commit signal owns its handoff. Recovery neither rewrites consumed history
+nor changes preflight eligibility or a retained retry's ownership. Conflicting
+payloads and retired payloads without exact duplicate proof remain fail-closed.
+
 The Vercel device-sync dirty-sweeper cron is not registered, and there is no
 Temporal dirty-row sweep replacement. Temporal is the single production owner of
 the due-reconcile scheduled-wake cadence, while the signed web sweep command
@@ -529,6 +550,12 @@ Execution eligibility stays unchanged, and explicitly approved continuations
 retain their foreground priority. Foreground/default work must replace an
 active system-mailbox or retention owner instead of waiting for its idle
 checkpoint.
+A completed background preparation carries its existing progress evidence into
+the workspace checkpoint. A system-mailbox invocation that advances the durable
+progress generation and retains the same due device wake requests an immediate
+owner-release recheck, even without mailbox lag. Failed or unchanged passes and
+future retry wakes do not request this continuation. This recheck stays model-free
+unless independent foreground authority also requests a handoff.
 If a default invocation's live checks disprove its overdue projection and the
 next due frontier belongs to a model-free owner, the runtime first checkpoints
 the corrected projections without advancing handled-through or the system
@@ -627,6 +654,13 @@ Request summary:
   standby claim without changing runtime admission, consent, write fences,
   activity priority, or Web-direct latency attribution. Timers, retries, and
   continued executions rederive it; it is not persisted workflow policy.
+- `mailboxWakeHighWater`: optional complete conversation/system maximum sequences
+  from mailbox-only reconciliation. It permits the startup importer to reuse a
+  covering prefetched response; it never advances a cursor or authorizes effects.
+  Due, unknown, or mixed control work omits it. The Worker and container consumer
+  must deploy before the optional Temporal producer; older readers may reject
+  the new ensure field. Disable or roll back the producer before restoring an
+  older Worker parser. Missing hints retain fresh-fetch behavior.
 - `assistantExecutionBlocked`: an optional positive-only execution guard valid
   only with `system_mailbox`. Temporal includes it when Web blocks assistant
   admission but retained model-free system work remains runnable. Cloudflare
@@ -722,7 +756,12 @@ Cloudflare uses its existing web-control/readiness timeout values as per-step
 caps inside that budget and never lets unsigned timeout metadata increase the
 configured Cloudflare wait.
 The Web direct-wake lane supplies a 25-second end-to-end command budget inside
-a shared 29-second outer deadline. Cloudflare starts its server-side clock at
+a shared 29-second outer deadline. Web executes canonical Postgres admission
+locally before each attempt and sends that response with its OIDC request,
+skipping the initial Worker-to-Web claim callback. Local admission consumes the
+same outer deadline; a blocked result stops the direct hint. Temporal callers
+continue to claim through Web, and Temporal still owns durable recovery if a
+Web claim is followed by an uncertain or absent dispatch. Cloudflare starts its server-side clock at
 runtime-control authorization, before route parsing, Durable Object dispatch,
 consent serialization, and health-data admission. Container readiness is capped at 20
 wall-clock seconds end to end: at most 15 seconds for readiness, including
@@ -814,6 +853,17 @@ The hard-cut architecture is accepted when:
   Clinical recovery does not create a second run, wake, receipt, or generation.
   There is no Vercel device-sync dirty-sweeper cron cadence and no
   Temporal dirty-row sweep replacement.
+- Background phase changes belong to the existing Temporal Schedule owner,
+  not sleeps inside Web commands or a second scheduler. A fixed interval
+  offset preserves cadence while moving the global recovery sweep away from
+  minute boundaries; it does not spread individual runtime wakes or reduce
+  total work. Review shared mailbox recovery latency, overlap/catch-up policy,
+  and schedule create/update convergence before deploying such a change.
+  Preserve canonical per-user deadlines: the shared `assistant` wake also
+  covers pending input and exact reminders, while device `nextReconcileAt`
+  can represent an earlier provider retry. Onboarding follow-ups already have
+  deterministic per-member staggering. No blanket jitter applies to these
+  aggregate wake timestamps.
 - Temporal stores only pointer fields, coalesced flags, counters, timestamps,
   and bounded metadata.
 - Temporal imports no assistant-runtime, Prisma, Cloudflare Worker, or app code

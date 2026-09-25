@@ -41,6 +41,7 @@ import {
 import {
   HOSTED_VAULT_SHARE_PROJECTION_SNAPSHOT_MAX_BYTES,
   parseHostedVaultShareProjectionSnapshot,
+  decryptHostedVaultShareProjectionSnapshots,
   serializeHostedVaultShareProjectionSnapshot,
 } from "@/src/lib/hosted-vault-share/projection-snapshot";
 import {
@@ -126,9 +127,11 @@ function snapshot(input: {
   memberId: string;
   projectionScope: TestProjectionScope;
   records: readonly HostedVaultShareDeliveryRecord[];
+  memberTimeZone?: string;
 }): string {
   const share = shareRow(input);
   return serializeHostedVaultShareProjectionSnapshot({
+    ...(input.memberTimeZone ? { memberTimeZone: input.memberTimeZone } : {}),
     records: input.records,
     share: {
       destinationMemberId: share.destinationMemberId,
@@ -231,9 +234,12 @@ function createPrisma(input: {
       : input.group,
   );
   const hostedVaultShareFindMany = vi.fn().mockImplementation(
-    (args: { where?: { id?: unknown } }) => Promise.resolve(
+    (args: { where?: { id?: { in?: string[] } } }) => Promise.resolve(
       args.where?.id
-        ? input.readableShares ?? input.shares ?? []
+        ? (input.readableShares ?? input.shares ?? []).filter((row) => {
+            const id = (row as { id: string }).id;
+            return args.where?.id?.in?.includes(id);
+          })
         : input.shares ?? [],
     ),
   );
@@ -768,8 +774,12 @@ describe("readHostedGroupSharedDataByRuntimeMemberId", () => {
     })).resolves.toEqual(records);
   });
 
-  it("reads the maximum source-tagged workout snapshot after encrypted replacement", async () => {
-    const records = maximumWidthWorkoutRecords();
+  it("preserves every record in the maximum legacy encrypted workout snapshot", async () => {
+    const today = new Date().toISOString().slice(0, 10);
+    const records = maximumWidthWorkoutRecords().map((record, index) => {
+      const date = new Date(Date.parse(today) - index * 86_400_000).toISOString().slice(0, 10);
+      return { ...record, data: { ...record.data, date }, occurredAt: `${date}T00:00:00.000Z`, recordKey: date };
+    });
     const readRecords = await replaceAndReadProjectionRecords({
       id: "share_projected_maximum_workouts",
       memberId: "member_projected_maximum_workouts",
@@ -900,7 +910,7 @@ describe("readHostedGroupSharedDataByRuntimeMemberId", () => {
     expect(result.requestedProjectionScopeKeys).toEqual([STEPS_KEY, DEVICE_KEY]);
     expect(result.members).toHaveLength(3);
     expect(result.members[0]).toMatchObject({
-      displayName: "Alex",
+      displayName: expect.stringMatching(/^Alex \([A-F0-9]{12}\)$/u),
       memberId: "member_a",
       participantId: "participant_a",
       projections: [
@@ -924,7 +934,7 @@ describe("readHostedGroupSharedDataByRuntimeMemberId", () => {
       source: "garmin",
     });
     expect(result.members[1]).toMatchObject({
-      displayName: "Alex",
+      displayName: expect.stringMatching(/^Alex \([A-F0-9]{12}\)$/u),
       memberId: "member_b",
       participantId: "participant_b",
       projections: [
@@ -948,7 +958,7 @@ describe("readHostedGroupSharedDataByRuntimeMemberId", () => {
       "participant_c",
     ]);
     expect(result.members[2]).toMatchObject({
-      displayName: null,
+      displayName: expect.stringMatching(/^Participant [A-F0-9]{12}$/u),
       memberId: "member_c",
       participantId: "participant_c",
       projections: [
@@ -1135,6 +1145,8 @@ describe("readHostedGroupSharedDataByRuntimeMemberId", () => {
     expect(result.members).toEqual([expect.objectContaining({
       memberId: "member_zero",
       participantId: "participant_zero",
+      displayName: expect.stringMatching(/^Participant [A-F0-9]{12}$/u),
+      currentTurnHandles: [],
       projections: [expect.objectContaining({
         dataStatus: "available",
         grantStatus: "granted",
@@ -1712,7 +1724,7 @@ describe("readHostedGroupSharedDataByRuntimeMemberId", () => {
     expect(hostedVaultShareFindMany).toHaveBeenNthCalledWith(
       2,
       expect.objectContaining({
-        select: { id: true, projectionSnapshotCiphertext: true },
+        select: { id: true },
         where: expect.objectContaining({
           id: { in: [inactiveGrant.id] },
           grantor: expect.objectContaining({
@@ -2039,4 +2051,115 @@ describe("readHostedGroupSharedDataByRuntimeMemberId", () => {
     });
     expect(hostedVaultShareFindMany).not.toHaveBeenCalled();
   });
+});
+
+
+describe("plain-grant group history reads", () => {
+  const date = (age: number) => new Date(Date.now() - age * 86_400_000).toISOString().slice(0, 10);
+  const records = (count: number): HostedVaultShareDeliveryRecord[] => Array.from({ length: count }, (_, age) => ({
+    recordKey: `${date(age)}.whoop`, occurredAt: `${date(age)}T00:00:00.000Z`,
+    source: { source: "whoop", label: "WHOOP" },
+    data: { date: date(age), metricKey: "steps", unit: "count", value: age + 1 },
+  }));
+  function fixture(scope: TestProjectionScope = STEPS_SCOPE, values = records(90)) {
+    const plaintext = snapshot({ id: "history", memberId: "member_a", projectionScope: scope, records: values, memberTimeZone: "UTC" });
+    installCiphertexts({ history: plaintext });
+    return createPrisma({ group: { members: [{ id: "participant_a", memberId: "member_a" }] }, shares: [
+      shareRow({ ciphertext: "history", id: "history", memberId: "member_a", projectionScope: scope }),
+    ] });
+  }
+  it("clips the 90-date snapshot to the ordinary weekly/email seven-date read boundary", async () => {
+    const { prisma } = fixture();
+    const result = await readHostedGroupSharedDataByRuntimeMemberId({ prisma, runtimeMemberId: RUNTIME_MEMBER_ID, projectionScopes: [STEPS_SCOPE] });
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") throw new Error("expected ok");
+    expect(result.members[0]?.projections[0]?.records).toHaveLength(7);
+    expect(result.dateCoverage).toBeUndefined();
+  });
+  it("reads 90 dates from the same active plain metric with exact available dates", async () => {
+    const { prisma, hostedGroupFindUnique } = fixture();
+    const result = await readHostedGroupSharedDataByRuntimeMemberId({ prisma, runtimeMemberId: RUNTIME_MEMBER_ID,
+      projectionScopes: [STEPS_SCOPE], participantId: "participant_a", history: { fromDate: date(89), throughDate: date(0) } });
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") throw new Error("expected ok");
+    expect(result.members[0]?.projections[0]?.records).toHaveLength(90);
+    expect(result.dateCoverage?.availableDates).toHaveLength(90);
+    expect(hostedGroupFindUnique).toHaveBeenCalledWith(expect.objectContaining({ select: {
+      members: expect.objectContaining({ where: { id: "participant_a" } }),
+    } }));
+  });
+  it("does not turn an unshared metric into a history permission", async () => {
+    const { prisma } = fixture();
+    const result = await readHostedGroupSharedDataByRuntimeMemberId({ prisma, runtimeMemberId: RUNTIME_MEMBER_ID,
+      projectionScopes: [PROTEIN_SCOPE], participantId: "participant_a", history: { fromDate: date(89), throughDate: date(0) } });
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") throw new Error("expected ok");
+    expect(result.members[0]?.projections[0]).toMatchObject({ grantStatus: "not_granted", records: [] });
+    expect(result.dateCoverage?.availableDates).toEqual([]);
+  });
+  it("reports only available dates when an active plain grant has a sparse publication", async () => {
+    const { prisma } = fixture(STEPS_SCOPE, [records(90)[0]!, records(90)[89]!]);
+    const result = await readHostedGroupSharedDataByRuntimeMemberId({ prisma, runtimeMemberId: RUNTIME_MEMBER_ID,
+      projectionScopes: [STEPS_SCOPE], participantId: "participant_a", history: { fromDate: date(89), throughDate: date(0) } });
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") throw new Error("expected ok");
+    expect(result.members[0]?.projections[0]).toMatchObject({ grantStatus: "granted", records: [records(90)[89]!, records(90)[0]!] });
+    expect(result.dateCoverage?.availableDates).toEqual([date(89), date(0)]);
+  });
+  it("clips dormant snapshots and preserves no-zone ordinary reads until compatible publication", async () => {
+    const share = { ...shareRow({ id: "history", memberId: "member_a", projectionScope: STEPS_SCOPE }), projectionScope: STEPS_SCOPE };
+    const current = serializeHostedVaultShareProjectionSnapshot({ share, records: records(1).map((record) => ({ ...record, occurredAt: `${date(90)}T00:00:00.000Z`, recordKey: `${date(90)}.whoop`, data: { ...record.data, date: date(90) } })), memberTimeZone: "UTC" });
+    const legacy = serializeHostedVaultShareProjectionSnapshot({ share, records: records(7) });
+    installCiphertexts({ current, legacy });
+    await expect(decryptHostedVaultShareProjectionSnapshots({ entries: [
+      { ...share, ciphertext: "current" }, { ...share, ciphertext: "legacy" },
+    ], requestedHistoryDays: 7 })).resolves.toEqual([[], records(7)]);
+    await expect(decryptHostedVaultShareProjectionSnapshots({ entries: [{ ...share, ciphertext: "legacy" }],
+      requestedHistoryDays: 90 })).resolves.toEqual([null]);
+    const published = serializeHostedVaultShareProjectionSnapshot({ share, records: records(90), memberTimeZone: "UTC" });
+    installCiphertexts({ published });
+    await expect(decryptHostedVaultShareProjectionSnapshots({ entries: [{ ...share, ciphertext: "published" }],
+      requestedHistoryDays: 90 })).resolves.toEqual([records(90)]);
+  });
+  it("cannot substitute a regrant ciphertext for an id captured before revocation", async () => {
+    const { prisma, hostedVaultShareFindMany } = fixture();
+    const original = hostedVaultShareFindMany.getMockImplementation()!;
+    hostedVaultShareFindMany.mockImplementation((args) => {
+      if (args.select?.projectionSnapshotCiphertext) return Promise.resolve([]); // exact old generation no longer exists
+      return original(args);
+    });
+    const result = await readHostedGroupSharedDataByRuntimeMemberId({ prisma, runtimeMemberId: RUNTIME_MEMBER_ID, projectionScopes: [STEPS_SCOPE] });
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") throw new Error("expected ok");
+    expect(result.members[0]?.projections[0]?.records).toEqual([]);
+    expect(hostedVaultShareFindMany).toHaveBeenLastCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ id: { in: ["history"] }, status: "granted" }), take: 4,
+    }));
+  });
+});
+
+it("bounds a maximum 200-member three-scope read to sequential four-snapshot batches", async () => {
+  const scopes = [STEPS_SCOPE, DEEP_SLEEP_SCOPE, { projectionKind: "rem-sleep-days.v0" } as const];
+  const members = Array.from({ length: 200 }, (_, index) => ({ id: `participant_load_${index}`, memberId: `member_load_${index}` }));
+  const shares = members.flatMap(({ memberId }) => [...scopes, { projectionKind: "deep-sleep-sources-days.v1" } as const,
+    { projectionKind: "rem-sleep-sources-days.v1" } as const, PROFILE_SCOPE].map((projectionScope) => shareRow({
+    id: `${memberId}_${buildHostedVaultShareProjectionScopeKey(projectionScope)}`,
+    memberId, projectionScope,
+  })));
+  const { prisma, transaction, hostedVaultShareFindMany } = createPrisma({ group: { members }, shares });
+  const result = await readHostedGroupSharedDataByRuntimeMemberId({ prisma, projectionScopes: scopes, runtimeMemberId: RUNTIME_MEMBER_ID });
+  expect(result.status).toBe("ok");
+  if (result.status !== "ok") throw new Error("Expected bounded room read");
+  expect(result.members).toHaveLength(200);
+  expect(shares).toHaveLength(1_200); // Three requests, two sleep counterparts, one profile per participant.
+  for (const [request] of hostedVaultShareFindMany.mock.calls.slice(0, 2)) {
+    expect(request.take).toBe(1_201); // One overflow sentinel, no duplicate history authority.
+  }
+  expect(transaction).toHaveBeenCalledTimes(201);
+  expect(hostedVaultShareFindMany).toHaveBeenCalledTimes(202);
+  expect(mocks.hasHostedRuntimeActiveAccess).toHaveBeenCalledTimes(201);
+  for (const [request] of hostedVaultShareFindMany.mock.calls.slice(2)) {
+    expect(request).toMatchObject({ take: 4, select: { id: true, projectionSnapshotCiphertext: true }, where: { destinationMemberId: RUNTIME_MEMBER_ID, status: "granted" } });
+    expect(request.where.id.in).toHaveLength(4);
+  }
 });

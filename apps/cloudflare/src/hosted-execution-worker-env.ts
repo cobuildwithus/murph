@@ -1,5 +1,6 @@
 import {
   assertHostedRuntimeProcessingTimeoutMs,
+  HOSTED_EXECUTION_DEFAULT_RUNNER_IDLE_TTL_MS,
 } from "@murphai/hosted-execution/contracts";
 import {
   type HostedExecutionBaseUrlNormalizationOptions,
@@ -18,13 +19,11 @@ export interface HostedExecutionWorkerEnvironment {
   hostedCryptoEnv: string;
   hostedWebAllowHttpHosts?: readonly string[];
   hostedWebBaseUrl: string;
-  idleCheckpointDelayMs: number;
   maxEventAttempts: number;
   retryDelayMs: number;
   runnerCommitTimeoutMs: number;
   runnerReadyTimeoutMs: number;
   runnerIdleTtlMs: number;
-  runnerLifecycleReevaluationMs: number;
   webControlTimeoutMs: number;
 }
 
@@ -36,7 +35,6 @@ const HOSTED_EXECUTION_LOOPBACK_HOSTS = new Set([
   "[::1]",
 ]);
 const HOSTED_EXECUTION_RUNNER_COMMIT_RESPONSE_MARGIN_MS = 5_000;
-const HOSTED_EXECUTION_MIN_PRODUCTION_IDLE_CHECKPOINT_DELAY_MS = 180_000;
 
 export interface HostedExecutionWorkerEnvironmentOptions {
   allowHostedWebHttpHosts?: readonly string[];
@@ -57,29 +55,9 @@ export function readHostedExecutionWorkerEnvironment(
   const isProduction = isHostedWorkerProductionEnvironment(source, hostedCryptoEnv);
   const runnerIdleTtlMs = parsePositiveInteger(
     normalizeHostedExecutionString(source.HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS),
-    300_000,
+    HOSTED_EXECUTION_DEFAULT_RUNNER_IDLE_TTL_MS,
     "HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS",
   );
-  const runnerLifecycleReevaluationMs = parsePositiveInteger(
-    normalizeHostedExecutionString(
-      source.HOSTED_EXECUTION_RUNNER_LIFECYCLE_REEVALUATION_MS,
-    ),
-    runnerIdleTtlMs,
-    "HOSTED_EXECUTION_RUNNER_LIFECYCLE_REEVALUATION_MS",
-  );
-  const idleCheckpointDelayMs = parsePositiveInteger(
-    normalizeHostedExecutionString(source.HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS),
-    180_000,
-    "HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS",
-  );
-  if (
-    isProduction
-    && idleCheckpointDelayMs < HOSTED_EXECUTION_MIN_PRODUCTION_IDLE_CHECKPOINT_DELAY_MS
-  ) {
-    throw new TypeError(
-      "HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS must be at least 180000 in production.",
-    );
-  }
   const runnerCommitTimeoutMs = parsePositiveInteger(
     normalizeHostedExecutionString(source.HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS),
     45_000,
@@ -142,7 +120,6 @@ export function readHostedExecutionWorkerEnvironment(
         rejectHttpLoopbackInProduction: isProduction,
       },
     ),
-    idleCheckpointDelayMs,
     maxEventAttempts: parsePositiveInteger(
       normalizeHostedExecutionString(source.HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS),
       3,
@@ -160,7 +137,6 @@ export function readHostedExecutionWorkerEnvironment(
       "HOSTED_EXECUTION_RUNNER_READY_TIMEOUT_MS",
     ),
     runnerIdleTtlMs,
-    runnerLifecycleReevaluationMs,
     webControlTimeoutMs,
   };
 }

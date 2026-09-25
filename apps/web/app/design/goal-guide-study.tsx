@@ -94,8 +94,8 @@ const DESIGN_GOAL_PERSONAS: HomepageGoalPersona[] = [
   designPersona("live-long", "Live long", [
     ["stay-independent-as-i-age", "stay independent as I age"],
     ["keep-my-brain-healthy-as-i-age", "keep my brain healthy as I age"],
-    ["lower-blood-pressure", "lower my blood pressure"],
-    ["lower-cholesterol", "lower my cholesterol"],
+    ["lower-blood-pressure", "track my blood pressure"],
+    ["lower-cholesterol", "understand my cholesterol"],
   ]),
   designPersona("motherhood", "Motherhood", [
     ["stay-strong-during-pregnancy", "stay strong during pregnancy"],

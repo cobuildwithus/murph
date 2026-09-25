@@ -39,7 +39,6 @@ const WORKLOAD_IDENTITY_ENV = {
 } satisfies NodeJS.ProcessEnv;
 const requireFromTest = createRequire(import.meta.url);
 const requireFromGoogleAuth = createRequire(requireFromTest.resolve("google-auth-library"));
-const requireFromKms = createRequire(requireFromTest.resolve("@google-cloud/kms"));
 const prototypeStubs: PrototypeStub[] = [];
 
 afterEach(() => {
@@ -52,10 +51,11 @@ afterEach(() => {
   vi.mocked(getVercelOidcToken).mockReset().mockResolvedValue(
     "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJob3N0ZWQtdGVzdCJ9.synthetic-signature",
   );
+  vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
 
-describe("installed Google Cloud KMS SDK boundary", () => {
+describe("installed Google auth and KMS REST boundary", () => {
   it.each([
     {
       adapterFailure: "http_503",
@@ -752,66 +752,19 @@ function installRealKmsClientStub(
   onAuthHeaderRequest?: () => void,
   kmsFailure?: unknown,
 ): void {
-  installPrototypeStub(
-    requireConstructorPrototype(requireFromKms("google-gax"), "GrpcClient"),
-    "createStub",
-    async function(this: object) {
-      const googleAuth = Reflect.get(this, "auth");
-      if (!isRecord(googleAuth)) {
-        throw new TypeError("Expected the real Google KMS auth owner.");
-      }
-      const getClient = googleAuth.getClient;
-      if (typeof getClient !== "function") {
-        throw new TypeError("Expected the real Google KMS auth owner.");
-      }
-      const makeCall = () => (...args: unknown[]) => {
-        const callback = args.at(-1);
-        if (typeof callback !== "function") {
-          throw new TypeError("Expected a Google GAX unary callback.");
-        }
-        let canceled = false;
-        void Promise.resolve(Reflect.apply(getClient, googleAuth, []))
-          .then((authClient: unknown) => {
-            if (!isRecord(authClient)) {
-              throw new TypeError("Expected the configured Google auth client.");
-            }
-            const getRequestHeaders = authClient.getRequestHeaders;
-            if (typeof getRequestHeaders !== "function") {
-              throw new TypeError("Expected the configured Google auth client.");
-            }
-            onAuthHeaderRequest?.();
-            return Reflect.apply(getRequestHeaders, authClient, []);
-          })
-          .then(
-            () => {
-              if (!canceled) {
-                Reflect.apply(
-                  callback,
-                  undefined,
-                  kmsFailure === undefined ? [null, {}] : [kmsFailure],
-                );
-              }
-            },
-            (error: unknown) => {
-              if (!canceled) {
-                Reflect.apply(callback, undefined, [error]);
-              }
-            },
-          );
-        return {
-          cancel() {
-            canceled = true;
-          },
-        };
-      };
-      return {
-        asymmetricSign: makeCall(),
-        decrypt: makeCall(),
-        encrypt: makeCall(),
-        macSign: makeCall(),
-      };
-    },
-  );
+  const prototype = requireConstructorPrototype(requireFromTest("google-auth-library"), "IdentityPoolClient");
+  const inherited = Reflect.get(prototype, "getRequestHeaders");
+  Object.defineProperty(prototype, "getRequestHeaders", {
+    configurable: true, writable: true, value: inherited,
+  });
+  installPrototypeStub(prototype, "getRequestHeaders", function(this: object, ...args: unknown[]) {
+    onAuthHeaderRequest?.();
+    return Reflect.apply(inherited, this, args);
+  });
+  vi.stubGlobal("fetch", vi.fn(async () => {
+    if (kmsFailure !== undefined) throw kmsFailure;
+    return Response.json({});
+  }));
 }
 
 interface Deferred<T> {

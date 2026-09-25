@@ -34,7 +34,6 @@ import {
 } from "../hosted-mailbox/ai-usage-gate";
 import {
   decodeHostedMailboxStoredPayload,
-  hasHostedMailboxAutomationEngagementSince,
   readHostedMailboxConsumedSeqByLane,
   readHostedMailboxFirstLiveSystemItemAfterSeq,
   readHostedMailboxLatestPendingConversationItem,
@@ -49,19 +48,6 @@ import {
 import { projectHostedAiUsageLimitNoticeForDelivery } from "../hosted-execution/usage-limit-notice-message";
 import { readActiveHostedMemberAccess } from "../hosted-onboarding/member-access";
 import {
-  hasHostedMemberEstablishedLinqHomeRoute,
-} from "../hosted-onboarding/hosted-member-routing-store";
-import {
-  HOSTED_AUTOMATION_ENGAGEMENT_WINDOW_DAYS,
-  hasHostedLinqInboundWithinDays,
-} from "../hosted-onboarding/linq-daily-state";
-import type {
-  HostedOnboardingReadClient,
-} from "../hosted-onboarding/shared";
-import {
-  hasHostedMemberEstablishedLinqThreadRoute,
-} from "../hosted-routing/thread-route-store";
-import {
   readHostedWorkspace,
   type HostedWorkspaceRecord,
 } from "../hosted-workspace/store";
@@ -73,6 +59,7 @@ import {
   resolveHostedRuntimeAiUsageGate,
   type HostedRuntimeUsageGateCheck,
 } from "./runtime-usage-decision";
+import type { HostedRuntimeUsageGateObservation } from "../hosted-runtime-log/usage-gate";
 import {
   readSelectedHostedInferenceConnectionOverride,
 } from "../hosted-inference/connection-store";
@@ -95,8 +82,6 @@ export type HostedRuntimeReconciliationFactsStage =
 
 const HOSTED_RUNTIME_RECONCILIATION_FACTS_LOG_SCHEMA =
   "murph.hosted-runtime.reconciliation-facts.v1";
-const HOSTED_RUNTIME_RECONCILIATION_ENGAGEMENT_PAUSE_RETRY_MS =
-  24 * 60 * 60 * 1000;
 
 export async function readHostedRuntimeOwnerReleaseActionable(input: {
   now?: Date | string;
@@ -147,6 +132,7 @@ export async function readHostedRuntimeReconciliationFacts(
     decisionSource?: HostedRuntimeReconciliationDecisionSource;
     now?: Date | string;
     usageGateMode?: HostedRuntimeReconciliationUsageGateMode;
+    onUsageGateDecision?: (observation: HostedRuntimeUsageGateObservation) => void;
   },
   reportStage?: (stage: HostedRuntimeReconciliationFactsStage) => void,
 ): Promise<HostedRuntimeReconciliationFacts> {
@@ -269,48 +255,6 @@ export async function readHostedRuntimeReconciliationFacts(
     mailboxLag,
   });
 
-  if (
-    hostedRuntimeReconciliationNeedsAutomationEngagement({
-      freshConversationMailboxLag,
-      now,
-      workspace: workspaceWithSystemMailboxFrontier,
-    })
-    && await hasHostedMemberEstablishedLinqRoute({
-      memberId: input.userId,
-      prisma,
-    })
-    && !(await hasHostedLinqInboundWithinDays({
-      memberId: input.userId,
-      now,
-      prisma,
-    }))
-    && !(await hasHostedMailboxAutomationEngagementSince({
-      prisma,
-      since: new Date(
-        now.getTime()
-          - HOSTED_AUTOMATION_ENGAGEMENT_WINDOW_DAYS * 24 * 60 * 60 * 1000,
-      ),
-      userId: input.userId,
-    }))
-  ) {
-    const facts = buildHostedRuntimeBlockedFacts({
-      mailboxLag,
-      reason: "automation_engagement_paused",
-      retryAt: new Date(
-        now.getTime() + HOSTED_RUNTIME_RECONCILIATION_ENGAGEMENT_PAUSE_RETRY_MS,
-      ).toISOString(),
-      workspace: workspaceWithSystemMailboxFrontier,
-    });
-    emitHostedRuntimeReconciliationFacts({
-      now,
-      facts,
-      request: input,
-      usageGateRequired: false,
-      usageGateStatus: "not_required",
-    });
-    return facts;
-  }
-
   reportStage?.("canonical_usage");
   const usageGateRequired = hostedRuntimeReconciliationNeedsAiUsageGate({
     freshConversationMailboxLag,
@@ -392,6 +336,7 @@ export async function readHostedRuntimeReconciliationFacts(
         request: input,
         usageGateRequired: true,
         usageGateStatus: gate.status,
+        usageLimitExceeded: gate.decision.reason === "ai_usage_limit_exceeded",
       });
       return facts;
     }
@@ -465,30 +410,6 @@ function hostedRuntimeReconciliationNeedsAiUsageGate(input: {
 
   return isHostedRuntimeWakeDue(defaultProcessingWake.at, input.now)
     && isHostedRuntimeModelCapableWorkspaceWakeReason(defaultProcessingWake.reason);
-}
-
-function hostedRuntimeReconciliationNeedsAutomationEngagement(input: {
-  freshConversationMailboxLag: boolean;
-  now: Date;
-  workspace: HostedRuntimeReconciliationFactsWorkspace;
-}): boolean {
-  const defaultProcessingWake = readHostedRuntimeDefaultProcessingWake(
-    input.workspace,
-  );
-  return !input.freshConversationMailboxLag
-    && isHostedRuntimeWakeDue(defaultProcessingWake.at, input.now)
-    && isHostedRuntimeModelCapableWorkspaceWakeReason(defaultProcessingWake.reason);
-}
-
-async function hasHostedMemberEstablishedLinqRoute(input: {
-  memberId: string;
-  prisma: HostedOnboardingReadClient;
-}): Promise<boolean> {
-  if (await hasHostedMemberEstablishedLinqHomeRoute(input)) {
-    return true;
-  }
-
-  return await hasHostedMemberEstablishedLinqThreadRoute(input);
 }
 
 function resolveHostedRuntimeAiBlockedRetryAt(input: {
@@ -714,13 +635,13 @@ function parseHostedMailboxReconciliationSeq(
 function emitHostedRuntimeReconciliationFacts(event: {
   now: Date;
   facts: HostedRuntimeReconciliationFacts;
-  request: HostedRuntimeReconciliationFactsRequest & {
-    decisionSource?: HostedRuntimeReconciliationDecisionSource;
-  };
+  request: Parameters<typeof readHostedRuntimeReconciliationFacts>[0];
   usageGateRequired: boolean;
+  usageLimitExceeded?: boolean;
   usageGateStatus: HostedRuntimeReconciliationUsageGateStatus;
 }): void {
   const { blocked, mailboxLag, workspace } = event.facts;
+  observeHostedRuntimeUsageGateDecision(event);
   const workspaceWakeDue = [
     workspace?.nextWakeAt,
     workspace?.nextDefaultProcessingWakeAt,
@@ -761,6 +682,24 @@ function emitHostedRuntimeReconciliationFacts(event: {
       workspace?.systemMailboxProgressGeneration !== undefined,
     workspacePresent: workspace !== null,
   });
+}
+
+function observeHostedRuntimeUsageGateDecision(
+  event: Parameters<typeof emitHostedRuntimeReconciliationFacts>[0],
+): void {
+  if (
+    event.request.usageGateMode !== "read_only"
+    && (event.usageGateStatus === "allowed" || event.usageGateStatus === "denied")
+  ) {
+    try {
+      event.request.onUsageGateDecision?.({
+        at: event.now.toISOString(),
+        usageLimited: event.usageLimitExceeded === true,
+      });
+    } catch {
+      console.warn("Runtime usage-gate diagnostic could not be scheduled.");
+    }
+  }
 }
 
 function describeHostedRuntimeWakeReasonForLog(reason: string | null): string | null {

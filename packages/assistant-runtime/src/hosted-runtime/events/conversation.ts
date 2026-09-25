@@ -14,6 +14,7 @@ import {
   parseHostedEmailThreadTarget,
 } from "@murphai/runtime-state";
 import {
+  normalizeHostedVoiceConversationCapture,
   normalizeHostedEmailConversationCapture,
   normalizeHostedLinqConversationCapture,
   normalizeHostedTelegramConversationCapture,
@@ -26,6 +27,8 @@ import {
 import {
   createConfiguredParserRegistry,
   createInboxParserService,
+  type PreparedAttachmentParseJob,
+  type RunAttachmentParseJobResult,
 } from "@murphai/parsers";
 
 import {
@@ -86,10 +89,10 @@ export async function importHostedConversationMessageWakeIntoLocalInbox(input: {
   const runtime = await openInboxRuntime({
     vaultRoot: input.vaultRoot,
   });
-  assertHostedConversationProjectionLive(input.signal ?? null);
   let pipeline: Awaited<ReturnType<typeof createInboxPipeline>> | null = null;
 
   try {
+    assertHostedConversationProjectionLive(input.signal ?? null);
     pipeline = await createInboxPipeline({
       runtime,
       vaultRoot: input.vaultRoot,
@@ -130,6 +133,184 @@ export async function importHostedConversationMessageWakeIntoLocalInbox(input: {
   }
 }
 
+export type HostedConversationAudioPreparationResult =
+  | { status: "prepared"; result: HostedConversationWakeLocalImportResult; elapsedMs: number }
+  | { status: "failed"; error: unknown; elapsedMs: number };
+
+/** Only the mailbox owner may supply an admitted, single-audio, same-context pair. */
+export async function prepareHostedConversationAudioPairIntoLocalInbox(input: {
+  wakes: readonly [HostedExecutionConversationMessageWake, HostedExecutionConversationMessageWake];
+  runtime: Parameters<typeof importHostedConversationMessageWakeIntoLocalInbox>[0]["runtime"];
+  signal?: AbortSignal | null;
+  vaultRoot: string;
+}): Promise<{
+  results: readonly [HostedConversationAudioPreparationResult, HostedConversationAudioPreparationResult | null];
+  timing: {
+    audioPairCount: number;
+    audioPairPreparationMs: number;
+    audioParsePreparationOverlapMs: number;
+  };
+}> {
+  const signal = input.signal ?? null;
+  assertHostedConversationProjectionLive(signal);
+  const startedAt = Date.now();
+  // Exactly two downloads, each retaining the connector's existing byte/time bounds.
+  // Catch immediately: an earlier failure must still join the already-owned sibling.
+  const captures = input.wakes.map((wake) =>
+    normalizeHostedConversationMessageWake({ ...input, wake }).then(
+      (capture) => ({ status: "prepared" as const, capture }),
+      (error: unknown) => ({ status: "failed" as const, error }),
+    ),
+  );
+  let runtime: Awaited<ReturnType<typeof openInboxRuntime>> | null = null;
+  let pipeline: Awaited<ReturnType<typeof createInboxPipeline>> | null = null;
+  const results: [HostedConversationAudioPreparationResult | null, HostedConversationAudioPreparationResult | null] = [null, null];
+  const claimed: Array<{
+    index: 0 | 1;
+    capture: PersistedCapture;
+    job: PreparedAttachmentParseJob;
+    startedAt: number;
+    readyAt: number | null;
+  }> = [];
+  let activeIndex: 0 | 1 = 0;
+  try {
+    runtime = await openInboxRuntime({ vaultRoot: input.vaultRoot });
+    assertHostedConversationProjectionLive(signal);
+    pipeline = await createInboxPipeline({ runtime, vaultRoot: input.vaultRoot });
+    for (const index of [0, 1] as const) {
+      activeIndex = index;
+      assertHostedConversationProjectionLive(signal);
+      const normalized = await captures[index];
+      assertHostedConversationProjectionLive(signal);
+      if (normalized.status === "failed") {
+        results[index] = { ...normalized, elapsedMs: elapsedAudioPreparationMs(startedAt) };
+        break;
+      }
+      let capture: PersistedCapture;
+      try {
+        // Never overlap raw/ledger/index mutation or allow a later raw write past a failure.
+        capture = await pipeline.processCapture(normalized.capture);
+      } catch (error) {
+        results[index] = {
+          status: "failed",
+          error: new HostedConversationInboxProjectionError("Canonical inbox capture projection failed.", { cause: error }),
+          elapsedMs: elapsedAudioPreparationMs(startedAt),
+        };
+        break;
+      }
+      assertHostedConversationProjectionLive(signal);
+      if (!hasPendingHostedConversationMediaParseJob({ captureId: capture.captureId, runtime })) {
+        results[index] = {
+          status: "prepared",
+          result: { capture, metrics: createHostedConversationParserMetrics() },
+          elapsedMs: elapsedAudioPreparationMs(startedAt),
+        };
+        continue;
+      }
+      try {
+        const service = await createHostedConversationParserService({
+          parserToolchain: input.runtime.parserToolchain ?? null,
+          runtime,
+          vaultRoot: input.vaultRoot,
+        });
+        assertHostedConversationProjectionLive(signal);
+        // A pair contains exactly one audio attachment per capture. Claim in order;
+        // only the preparation promise runs concurrently. No cooperative parser abort.
+        const parseStartedAt = Date.now();
+        const job = service.prepareOnce({ captureId: capture.captureId });
+        if (!job) throw new Error("Hosted audio parse job was not available for preparation.");
+        const owned: (typeof claimed)[number] = { index, capture, job, startedAt: parseStartedAt, readyAt: null };
+        claimed.push(owned);
+        void job.ready.then(() => { owned.readyAt = Date.now(); });
+      } catch (error) {
+        assertHostedConversationProjectionLive(signal);
+        results[index] = {
+          status: "prepared",
+          result: {
+            capture,
+            metrics: await logHostedConversationParserRetryFailure({
+              captureId: capture.captureId,
+              error,
+              platform: input.runtime.platform,
+              safeFallbackMessage: "Hosted conversation parser setup failed.",
+            }),
+          },
+          elapsedMs: elapsedAudioPreparationMs(startedAt),
+        };
+        break;
+      }
+    }
+  } catch (error) {
+    if (isHostedConversationProjectionAbortError(error, signal)) {
+      throw readHostedConversationProjectionAbortReason(error, signal);
+    }
+    results[activeIndex] = {
+      status: "failed", error, elapsedMs: elapsedAudioPreparationMs(startedAt),
+    };
+  } finally {
+    // Even on preemption or failure, finish every claim before runtime.close().
+    // A completed sibling stays reusable, but this does not admit its assistant input.
+    try {
+      await Promise.all(captures);
+      for (const owned of claimed) {
+        try {
+          const result = await owned.job.complete();
+          if (!runtime) throw new Error("Hosted audio preparation runtime is unavailable.");
+          const metrics = await reportHostedConversationParserResults({
+            captureId: owned.capture.captureId,
+            platform: input.runtime.platform,
+            runtime,
+          }, result ? [result] : []);
+          results[owned.index] = {
+            status: "prepared", result: { capture: owned.capture, metrics },
+            elapsedMs: elapsedAudioPreparationMs(startedAt),
+          };
+        } catch (error) {
+          results[owned.index] = {
+            status: "prepared",
+            result: {
+              capture: owned.capture,
+              metrics: await logHostedConversationParserRetryFailure({
+                captureId: owned.capture.captureId, error, platform: input.runtime.platform,
+                safeFallbackMessage: "Hosted conversation parser drain failed.",
+              }),
+            },
+            elapsedMs: elapsedAudioPreparationMs(startedAt),
+          };
+        }
+      }
+    } finally {
+      if (pipeline) pipeline.close();
+      else runtime?.close();
+    }
+  }
+  assertHostedConversationProjectionLive(signal);
+  const first = results[0];
+  if (!first) throw new Error("Hosted audio pair did not prepare its first capture.");
+  return {
+    results: [first, results[1]],
+    timing: {
+      audioPairCount: 1,
+      audioPairPreparationMs: elapsedAudioPreparationMs(startedAt),
+      // Intersection of artifact/parse/scratch-cleanup spans, not isolated
+      // download or transcription timers. Carried on the existing import log.
+      audioParsePreparationOverlapMs: readAudioParsePreparationOverlapMs(claimed),
+    },
+  };
+}
+
+function readAudioParsePreparationOverlapMs(
+  claimed: readonly { startedAt: number; readyAt: number | null }[],
+): number {
+  const [left, right] = claimed;
+  if (!left || !right || left.readyAt === null || right.readyAt === null) return 0;
+  return Math.max(0, Math.min(left.readyAt, right.readyAt) - Math.max(left.startedAt, right.startedAt));
+}
+
+function elapsedAudioPreparationMs(startedAt: number): number {
+  return Math.max(0, Date.now() - startedAt);
+}
+
 async function drainHostedConversationParsers(input: {
   captureId: string;
   parserToolchain: NormalizedHostedAssistantRuntimeConfig["parserToolchain"];
@@ -155,26 +336,7 @@ async function drainHostedConversationParsers(input: {
 
   let parserService: ReturnType<typeof createInboxParserService>;
   try {
-    const parserConfig = await createConfiguredParserRegistry({
-      ...(input.parserToolchain
-        ? {
-            allowEnvToolchain: false,
-            allowSystemToolchainLookup: false,
-            readVaultToolchainConfig: false,
-            toolchain: {
-              source: "platform",
-              tools: input.parserToolchain.tools,
-            },
-          }
-        : {}),
-      vaultRoot: input.vaultRoot,
-    });
-    parserService = createInboxParserService({
-      ffmpeg: parserConfig.ffmpeg,
-      registry: parserConfig.registry,
-      runtime: input.runtime,
-      vaultRoot: input.vaultRoot,
-    });
+    parserService = await createHostedConversationParserService(input);
   } catch (error) {
     return await logHostedConversationParserRetryFailure({
       captureId: input.captureId,
@@ -201,6 +363,42 @@ async function drainHostedConversationParsers(input: {
       safeFallbackMessage: "Hosted conversation parser drain failed.",
     });
   }
+  return await reportHostedConversationParserResults(input, results);
+}
+
+async function createHostedConversationParserService(input: {
+  parserToolchain: NormalizedHostedAssistantRuntimeConfig["parserToolchain"];
+  runtime: Awaited<ReturnType<typeof openInboxRuntime>>;
+  vaultRoot: string;
+}): Promise<ReturnType<typeof createInboxParserService>> {
+  const parserConfig = await createConfiguredParserRegistry({
+    ...(input.parserToolchain
+      ? {
+          allowEnvToolchain: false,
+          allowSystemToolchainLookup: false,
+          readVaultToolchainConfig: false,
+          toolchain: {
+            source: "platform",
+            tools: input.parserToolchain.tools,
+          },
+        }
+      : {}),
+    vaultRoot: input.vaultRoot,
+  });
+  return createInboxParserService({
+    ffmpeg: parserConfig.ffmpeg,
+    registry: parserConfig.registry,
+    runtime: input.runtime,
+    vaultRoot: input.vaultRoot,
+  });
+}
+
+async function reportHostedConversationParserResults(input: {
+  captureId: string;
+  platform: Pick<NormalizedHostedAssistantRuntimeConfig["platform"], "logPort">;
+  runtime: Awaited<ReturnType<typeof openInboxRuntime>>;
+  signal?: AbortSignal | null;
+}, results: readonly RunAttachmentParseJobResult[]): Promise<HostedConversationWakeMetrics> {
   const failedResults = results.filter((result) => result.status === "failed");
   const observedFailedJobs = input.runtime.listAttachmentParseJobs({
     captureId: input.captureId,
@@ -377,6 +575,12 @@ async function normalizeHostedConversationMessageWake(input: {
     & Partial<Pick<NormalizedHostedAssistantRuntimeConfig, "parserToolchain">>;
   signal?: AbortSignal | null;
 }) {
+  if (input.wake.message.channel === "voice") {
+    return normalizeHostedVoiceConversationCapture({
+      ...input.wake.message,
+      occurredAt: input.wake.occurredAt,
+    });
+  }
   if (isHostedLinqConversationMessageWake(input.wake)) {
     return normalizeHostedLinqConversationCapture({
       accountId: readHostedLinqConversationMessageAccountLookupKey(input.wake.message),

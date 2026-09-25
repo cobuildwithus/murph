@@ -98,6 +98,11 @@ export interface DeviceSyncJobFailureDiagnosticDetails {
   junctionEcgActualRecordingCount?: number;
   junctionEcgActualSampleCount?: number;
   junctionEcgBindingReason?: string;
+  junctionEcgPageCount?: number;
+  junctionEcgGroupCount?: number;
+  junctionEcgProviderMatchGroupCount?: number;
+  junctionEcgInstanceMatchGroupCount?: number;
+  junctionEcgMatchedGroupCount?: number;
   junctionEcgExpectedRecordingCount?: number;
   junctionEcgExpectedSampleCount?: number;
   junctionEcgMaxRecordingCount?: number;
@@ -107,6 +112,11 @@ export interface DeviceSyncJobFailureDiagnosticDetails {
   normalizationSourceProvider?: string;
   normalizationTimestampKind?: string;
   normalizationTimestampSemantics?: string;
+  normalizationValueKind?: string;
+  normalizationValueRange?: string;
+  normalizationUnitKind?: string;
+  validationRetryDelayMs?: number;
+  providerHttpStatusSource?: string;
   providerHttpStatus?: number;
   providerHttpStatusText?: string;
   providerRequestAuthKind?: string;
@@ -202,6 +212,8 @@ export interface DeviceSyncJobTimingDiagnostic {
   at: string;
   attempts: number;
   canonicalProgressCommitted?: true;
+  /** Provider-proven forward coverage, published with the owned continuation. */
+  continuationProgressCommitted?: true;
   connectionSourceReadCount: number;
   connectionSourceReadElapsedMs: number;
   credentialRefreshCount: number;
@@ -1043,6 +1055,8 @@ export interface ProviderJobContext {
 }
 
 export interface ProviderJobResult {
+  /** A finite existing scan advanced; retries, rescheduling, and new jobs are not progress. */
+  continuationProgress?: true;
   scheduledJobs?: DeviceSyncJobInput[];
   metadataPatch?: Record<string, unknown>;
   nextReconcileAt?: string | null;
@@ -1158,7 +1172,24 @@ export interface DeviceWebhookHandler {
   verifyAndParseWebhook(context: ProviderWebhookContext): Promise<ProviderWebhookResult>;
 }
 
+export interface ScheduledReconcileProbeResult {
+  outcome: "unchanged" | "changed" | "ineligible";
+  reason: string;
+  nextReconcileAt?: string;
+  /** Complete logical collection reads, including inventory; not HTTP pages. */
+  requestCount: number;
+  recordCount: number;
+  /** Serialized decoded records, not transport/billing bytes. */
+  responseBytes: number;
+  elapsedMs: number;
+}
+
 export interface DeviceJobExecutor {
+  probeScheduledReconcile?(
+    account: StoredDeviceSyncAccount,
+    now: string,
+    options?: { signal?: AbortSignal },
+  ): Promise<ScheduledReconcileProbeResult>;
   // Optional execution scope for one bounded worker drain. Never retains live
   // authorization; a new drain or standalone worker call gets a fresh scope.
   createPassExecutor?(): DeviceJobExecutor;

@@ -11,7 +11,6 @@ import {
   type HostedExecutionContainerNamespaceLike,
   type RunnerContainerEnsureProcessingResult,
   type RunnerRuntimeWakeInput,
-  type RunnerRuntimeWakeResult,
 } from "../runner-container.js";
 import {
   buildHostedRunnerMetadataOnlyErrorDetails,
@@ -63,50 +62,7 @@ export async function ensureActiveRuntimeProcessing(
 
   const container = input.runnerContainerNamespace.getByName(runnerContainerName);
 
-  if (container.ensureProcessing) {
-    try {
-      const result = await runRuntimeProcessingCommandStep({
-        budget: input.commandBudget,
-        operation: async () => {
-          input.diagnostics.details.activeWakeRpcDispatchedAtEpochMs = Date.now();
-          return await container.ensureProcessing!({
-            activeRuntime: input.activeRuntime,
-            userId: input.activeRuntime.userId,
-          });
-        },
-        stepTimeoutMs: input.env.webControlTimeoutMs,
-      });
-      input.diagnostics.details.activeWakeRpcOutcome = "returned";
-      copyRuntimeWakeDiagnostics(input.diagnostics, result);
-      if (
-        result.kind === "accepted"
-        || result.kind === "start-required"
-        || result.kind === "wake-unconfirmed"
-      ) {
-        return result;
-      }
-      return { kind: "wake-unconfirmed", reason: "container-rpc-error" };
-    } catch (error) {
-      input.diagnostics.details.activeWakeRpcOutcome = isRuntimeProcessingCommandBudgetTimeout(error)
-        ? "caller_timeout" : "rpc_error";
-      emitHostedExecutionStructuredLog({
-        component: "hosted.runner",
-        details: buildHostedRunnerMetadataOnlyErrorDetails(error),
-        level: "warn",
-        message: "Hosted runner could not ensure active runtime processing.",
-        phase: "scheduled",
-        userId: input.activeRuntime.userId,
-      });
-      return {
-        kind: "wake-unconfirmed",
-        reason: isRuntimeProcessingCommandBudgetTimeout(error)
-          ? "container-rpc-timeout"
-          : "container-rpc-error",
-      };
-    }
-  }
-
-  if (!container.wakeRuntime) {
+  if (!container.ensureProcessing) {
     return { kind: "wake-unconfirmed", reason: "missing-wake-method" };
   }
 
@@ -115,20 +71,23 @@ export async function ensureActiveRuntimeProcessing(
       budget: input.commandBudget,
       operation: async () => {
         input.diagnostics.details.activeWakeRpcDispatchedAtEpochMs = Date.now();
-        return await container.wakeRuntime!(input.activeRuntime);
+        return await container.ensureProcessing!({
+          activeRuntime: input.activeRuntime,
+          userId: input.activeRuntime.userId,
+        });
       },
       stepTimeoutMs: input.env.webControlTimeoutMs,
     });
     input.diagnostics.details.activeWakeRpcOutcome = "returned";
     copyRuntimeWakeDiagnostics(input.diagnostics, result);
-    const runtimeWake = normalizeRunnerRuntimeWakeResult(result);
-    if (runtimeWake.kind === "accepted") {
-      return { action: runtimeWake.action, kind: "accepted" };
+    if (
+      result.kind === "accepted"
+      || result.kind === "start-required"
+      || result.kind === "wake-unconfirmed"
+    ) {
+      return result;
     }
-    if (runtimeWake.kind === "not-wakeable") {
-      return { kind: "start-required", reason: "no-active-child" };
-    }
-    return { kind: "wake-unconfirmed", reason: runtimeWake.reason };
+    return { kind: "wake-unconfirmed", reason: "container-rpc-error" };
   } catch (error) {
     input.diagnostics.details.activeWakeRpcOutcome = isRuntimeProcessingCommandBudgetTimeout(error)
       ? "caller_timeout" : "rpc_error";
@@ -147,40 +106,6 @@ export async function ensureActiveRuntimeProcessing(
         : "container-rpc-error",
     };
   }
-}
-
-export function normalizeRunnerRuntimeWakeResult(value: unknown): RunnerRuntimeWakeResult {
-  if (isObjectRecord(value)) {
-    if (value.kind === "accepted") {
-      return {
-        action: value.action === "already_running" ? "already_running" : "woken",
-        kind: "accepted",
-      };
-    }
-    if (value.kind === "not-wakeable" && value.reason === "no-active-child") {
-      return { kind: "not-wakeable", reason: "no-active-child" };
-    }
-    if (value.kind === "unknown" && typeof value.reason === "string") {
-      return {
-        kind: "unknown",
-        reason: isRunnerRuntimeWakeUnknownReason(value.reason)
-          ? value.reason
-          : "container-rpc-error",
-      };
-    }
-  }
-
-  return { kind: "unknown", reason: "container-rpc-error" };
-}
-
-function isRunnerRuntimeWakeUnknownReason(
-  value: string,
-): value is Extract<RunnerRuntimeWakeResult, { kind: "unknown" }>["reason"] {
-  return value === "active-child-rejected"
-    || value === "container-rpc-error"
-    || value === "container-rpc-timeout"
-    || value === "missing-container-binding"
-    || value === "missing-wake-method";
 }
 
 function isObjectRecord(value: unknown): value is Record<string, unknown> {

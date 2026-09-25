@@ -1,5 +1,7 @@
 import "server-only";
 
+import { CLEAR_CLINICAL_PERSISTENT_ACCESS } from "./persistent-access";
+
 import { Prisma } from "@prisma/client";
 
 import { lockHostedMemberRow } from "../hosted-onboarding/shared";
@@ -9,7 +11,6 @@ import { requireHostedAppSessionFromRequest } from "../hosted-onboarding/app-ses
 import { getPrisma } from "../prisma";
 import {
   CLINICAL_RECORD_CONNECTION_STATUSES,
-  CLINICAL_RECORD_MAX_IMPORTS_PER_SOURCE,
   CLINICAL_RECORD_RUN_STATUSES,
   type ClinicalRecordConnectionContract,
 } from "./client-contracts";
@@ -33,6 +34,8 @@ export async function listClinicalRecordConnectionsForMember(
       id: true,
       lastErrorCode: true,
       lastSyncCompletedAt: true,
+      lastCheckedAt: true,
+      nextSyncAt: true,
       providerDirectoryEntryId: true,
       retrievalGeneration: true,
       retrievalRuns: {
@@ -58,17 +61,14 @@ export async function listClinicalRecordConnectionsForMember(
     return {
       canImport: Boolean(
         latestRun?.completedAt &&
-          (latestRun.status !== "needs_reauth" || latestRun.outcomeCountsJson !== null) &&
-          connection.retrievalGeneration < CLINICAL_RECORD_MAX_IMPORTS_PER_SOURCE,
-      ),
-      importsRemaining: Math.max(
-        0,
-        CLINICAL_RECORD_MAX_IMPORTS_PER_SOURCE - connection.retrievalGeneration,
+          (latestRun.status !== "needs_reauth" || latestRun.outcomeCountsJson !== null),
       ),
       connectedAt: connection.connectedAt.toISOString(),
       connectionId: connection.id,
       displayName: connection.displayName,
       lastErrorCode: sanitizeErrorCode(connection.lastErrorCode),
+      lastCheckedAt: connection.lastCheckedAt?.toISOString() ?? null,
+      nextSyncAt: connection.nextSyncAt?.toISOString() ?? null,
       lastSyncCompletedAt: connection.lastSyncCompletedAt?.toISOString() ?? null,
       latestRun: latestRun
         ? {
@@ -109,6 +109,7 @@ export async function disconnectClinicalRecordConnection(input: {
     if (!connection) throw connectionNotFoundError();
     const updated = await tx.clinicalRecordConnection.updateMany({
       data: {
+        ...CLEAR_CLINICAL_PERSISTENT_ACCESS,
         accessTokenEncrypted: null,
         accessTokenExpiresAt: null,
         disconnectedAt: now,

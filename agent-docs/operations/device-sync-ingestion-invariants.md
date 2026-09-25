@@ -1,6 +1,6 @@
 # Device Sync Ingestion Invariants
 
-Last verified: 2026-08-20
+Last verified: 2026-09-20
 
 ## Purpose
 
@@ -20,12 +20,20 @@ These are durable behavioral invariants. The current owning code lives in
 implementation and the only push-primary provider today), with the generic
 drain/batch service seam in `packages/device-syncd/src/service.ts`.
 
+## Runtime control callbacks
+
+Hosted connection reconciliation sends apply callbacks only when it has a
+connection, credential, source, or local-state delta. An unchanged hydrated
+snapshot is already reconciled; it does not need an empty Web callback.
+
 ## Invariants
 
 1. **Pull is a floor, not a fallback.** The scheduled `reconcile`/`backfill`
-   pass fires on cadence unconditionally. It is the sole owner of source
-   projection (`projectJunctionSources`), so `last_seen_at` stays fresh even
-   when only direct imports are happening. Non-floor completions may move
+   pass remains due on cadence independently of webhook traffic. Hosted Web
+   may finish an unchanged check using the checkpointed content preflight below.
+   The runtime floor remains the sole owner of source projection
+   (`projectJunctionSources`); a Web preflight does not claim an import or advance
+   `last_seen_at`. Non-floor completions may move
    `nextReconcileAt` only *earlier* (min-only clamp), never later; a stream of
    webhooks can never starve or defer the floor. Projection does not own source
    admission: it rereads the live source rows and does not mutate a
@@ -34,16 +42,22 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
    durable summary or timeseries import and remove records for disconnected
    sources. While any source is pending admission, unresolved source-reference
    identities fail closed. Outside hosted Web, a provider with no source row
-   remains admitted for legacy accounts. Hosted Web instead defers an
-   authenticated, source-attributed Junction event to the existing source
+   remains admitted for legacy accounts. A hosted summary resource operation
+   with listed-only admission may share its fresh post-provider Web source read
+   between local inventory projection and canonical import admission. Local
+   discovery must read SQLite source authority after projection, because that
+   projection can disconnect sources. Pass inventory reuse retains provider
+   metadata only; later imports still read current source authority. Hosted Web instead
+   defers an authenticated, source-attributed Junction event to the existing source
    owner, which may create only a disconnected candidate before live provider
    proof and final locked admission.
 
 2. **Push delivers early; pull guarantees eventually; neither disables the
    other.** A webhook that carries a parseable payload imports inline (early,
    no fetch). The floor still runs later and refetches the same window. Because
-   the merge is idempotent (invariant 4), this overlap is free — so there is no
-   exclusivity logic deciding which path "wins."
+   the merge is idempotent (invariant 4), this overlap is safe, but still costs
+   provider reads and execution. Webhook execution never consults a polling
+   fingerprint to decide whether to import.
 
 3. **Unknown input degrades to fetch, never to silence.** Any webhook branch
    that has "nothing to import right now" — empty payload, unknown
@@ -414,7 +428,9 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
    with any row rejected by the canonical aggregate parser retries only that
    date on the existing bounded ladder before it becomes terminal.
    Historical-pull status is re-read at the first date and before
-   coverage. Source matching canonicalizes supported connect-route aliases on
+   coverage. An exact-record scan whose first date observed a pending pull
+   carries that observation through every continuation and cannot close
+   coverage until a later scan starts ready. Source matching canonicalizes supported connect-route aliases on
    both the persisted and introspection sides before applying the status table:
    A matching pulled entry owns contradictory envelopes: `success` permits
    terminal empty history, nonterminal state waits, and explicit failure remains
@@ -643,6 +659,103 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
    flight, `DISCONNECT_IN_PROGRESS` still rejects runtime connection, local
    state, credential, source, and heartbeat mutations under the connection
    lock, without cancelling already accepted credential-free import work.
+
+## Coalescing full pulls with active webhook work
+
+An active hosted Junction webhook pass with admitted dirty jobs may bring the
+next full reconciliation forward by at most thirty minutes. It uses the same
+account-scoped scheduler, durable jobs, retries and checkpoint publication.
+Webhook arrival alone never delays the pull floor or refreshes the complete
+content proof. The ordinary sweeper remains responsible when no such pass runs.
+Foreground yielding remains higher priority.
+
+## Hosted scheduled content preflight
+
+Only the ordinary global due sweep can avoid a container wake using
+`junctionReconcileProofV1`. The provider computes a keyed digest over actual
+summary records, the latest globally closed calendar-day collections normally
+pulled hourly, configuration, provider inventory, and admitted source lifecycle
+facts. Object key and outer collection ordering are ignored; values and nested
+array ordering remain significant. Counts, newest timestamps, and Junction
+introspection never prove absence of changes. No raw provider records are stored
+in control metadata or telemetry.
+
+A bounded scalar proof carries its original rolling summary start, expiry,
+source/configuration binding, digest, and vault timezone. An optional sixth numeric
+field records a future history deadline only when the restored runtime's bounded
+scheduler lookup proves every current history root already has a queued owner
+and all retained jobs are in the future. The deadline cannot exceed proof expiry.
+It travels with the exact retained jobs through the existing checkpoint fence;
+Web still compares content and live authority before avoiding a cadence wake.
+Missing or expired deferral retains normal history admission. Legacy readers
+reject the extended proof and fall back to ordinary work. Summary continuations
+carry partial proof in their existing job payload. Only successful completion
+of all ordinary summary/calendar work can write the final local metadata. Web
+publication is withheld until the existing checkpointed wake/completion fence
+proves durable recovery. Warm hydration retains unpublished progress without
+turning it into a hosted baseline; old continuations lacking proof still import.
+After the post-record checkpoint, a successfully reconciled current admission
+publishes its provider cadence and completed proof even while future jobs remain;
+the mailbox keeps their exact retry hints and time. Yielded passes and restored
+recording state have no transient publication authority. An exact same-epoch
+retained wake can also recover already checkpointed cadence on the next admission,
+capped by its hint and any earlier local due time. Newly produced progress stays
+withheld until its own checkpoint.
+
+Web refetches the same summary start through current time, retaining older rows
+rather than shrinking the comparison window. It uses complete collection
+responses and existing calendar filtering. Proof expires at the earliest next
+UTC midnight, global provider-day closure, vault-local midnight, or the next
+fixed-lag temporal-authority boundary across an offset transition. The digest
+also binds the original start, expiry, and timezone, so edited scope cannot
+reuse matching record evidence. Binding version `junction-reconcile-v2` recognizes
+SDK-decoded sleep-cycle and menstrual-cycle collections as records; a v1/v2 mismatch requires
+ordinary reconciliation. Both runtime imports and Web comparisons accept the
+wire `sleep_cycle`/`menstrual_cycle` and SDK `sleepCycle`/`menstrualCycle` keys, including valid empty arrays,
+while strict preflight still rejects missing or malformed collections. Expiry and
+pending scheduler-owned history/recovery cause ordinary execution. New config,
+source lifecycle, or provider inventory changes also require the runtime. A
+future change to comparison/normalization semantics must advance the binding
+version; daily repair remains the independent recovery floor.
+
+The sweeper checks every ordinary Junction candidate in its selected cohort;
+there is no separate preflight-count cap. The existing five-worker recovery
+executor and selected-cohort limit bound fanout. Each probe retains a 20-second
+provider budget, two simultaneous summary units, and collection page limits. Web checks
+current member access, consent, connection/source state, dirty payloads, mailbox
+counters, and checkpoint continuation frontier before provider egress and again
+before a cadence-only compare-and-set. Existing member/connection, mailbox
+append, and workspace locks serialize the final decision; provider and securebox
+work stay outside transactions. Missing proof/authority, accepted work, failed or
+incomplete reads, provider timeouts, and failed CAS keep the ordinary wake.
+A valid checkpoint-owned continuation behind the settled mailbox frontier does
+not block ordinary content comparison: its retained payload and workspace wake
+remain untouched. The bounded, strictly increasing continuation sequence list
+is included in authority revalidation. Missing or malformed ownership still
+falls back. An explicitly empty admitted source inventory can reuse a completed
+proof; absent source authority cannot. Live inventory and source additions still
+invalidate the binding or final source fingerprint.
+
+The existing 16-field metadata envelope prioritizes historical coverage, profile
+completion timestamp/revision, completed content proof, and temporal sweep
+progress over diagnostic counters on success and failure writes. Retention
+priority does not expand historical merge authority or revive a stale proof
+during hydration. Diagnostic patches cannot erase already completed work.
+
+The recovery route intentionally reaches the existing provider registry only
+through this preflight; other control-plane routes and recovery paths retain
+their provider-free package graph. Continuation proof is declared in both the
+provider manifest and the generic hosted job-hint reader's closed field set.
+Changed results use the existing durable scheduled wake and canonical importer;
+that path intentionally refetches instead of adding another payload store.
+
+The sweeper's `preflight` aggregate reports attempted/eligible comparisons,
+reasons, avoided wakes, logical collection reads, decoded record count/bytes,
+provider elapsed time, and outcomes by last-webhook-age bucket. `avoidedWakes`
+counts only successful cadence CAS, not observed equality, cold starts, or
+billing savings. Compare complete unchanged/changed results within each age
+bucket before changing cadence; track timeout, history, missing/expired proof,
+and authority exclusions separately. Pull frequency is unchanged by this feature.
 
 ## Consequences for changes
 

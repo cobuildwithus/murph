@@ -22,6 +22,26 @@ import {
 } from "../src/providers/junction-client.ts";
 import { createJsonResponse, makeTempDirectory, readUrl, requireValue } from "./helpers.ts";
 
+for (const strict of [false, true]) {
+  test.each(["sleep_cycle", "menstrual_cycle"])(`Junction extracts SDK-decoded %s records (strict=${strict})`, async (resource) => {
+    let records: unknown[] = [];
+    const client = new JunctionClient({
+      apiKey: "sk_us_synthetic", environment: "sandbox", region: "us",
+      fetchImpl: async () => createJsonResponse({ [resource]: records }),
+    });
+    const read = () => client.listSummary({
+      resource, userId: "synthetic-user",
+      windowStart: "2026-04-02T00:00:00.000Z", windowEnd: "2026-04-03T00:00:00.000Z",
+      requireStructurallyCompleteCollection: strict,
+    });
+    assert.deepEqual(await read(), []);
+    records = [{ id: "synthetic-cycle", start: "2026-04-02T22:00:00.000Z", end: "2026-04-03T06:00:00.000Z" }];
+    const result = await read();
+    assert.equal(result.length, 1);
+    assert.equal((result[0] as { id: string }).id, "synthetic-cycle");
+  });
+}
+
 test("Junction createLinkToken accepts documented Link web URL hosts", async () => {
   const linkWebUrl = "https://link.tryvital.io/?token=link-token-1&env=sandbox&region=us";
   const client = new JunctionClient({

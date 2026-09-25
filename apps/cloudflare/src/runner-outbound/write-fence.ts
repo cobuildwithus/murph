@@ -1,13 +1,10 @@
-import type {
-  HostedRuntimeUsageRecordResponse,
-} from "@murphai/hosted-execution/runtime-control";
+import { commandHostedRuntimeOwner } from "../runtime-owner-client.ts";
 
 import {
-  requireRunnerOutboundUserStubMethod,
-  resolveRunnerOutboundUserRunnerStub,
-  type RunnerOutboundEnvironmentSource,
+  type RunnerOutboundEnvironmentSource
 } from "./shared.ts";
 import {
+  RunnerRuntimeWriteFenceError,
   HOSTED_RUNTIME_ATTEMPT_ID_HEADER,
   HOSTED_RUNTIME_LEASE_GENERATION_HEADER,
   HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER,
@@ -22,20 +19,6 @@ export interface RunnerRuntimeWriteFenceHeaders {
 export interface RunnerRuntimeWriteFenceWorkspaceAuthority
   extends RunnerRuntimeWriteFenceHeaders {
   workspaceVersion: string;
-}
-
-export interface RunnerRuntimeWriteFenceToken {
-  attemptId: string;
-  generation?: string;
-  leaseGeneration?: string;
-  workspaceVersion: string;
-}
-
-export class RunnerRuntimeWriteFenceError extends Error {
-  constructor(message = "Hosted runner runtime write fence is not valid.") {
-    super(message);
-    this.name = "RunnerRuntimeWriteFenceError";
-  }
 }
 
 export function readRunnerRuntimeWriteFenceHeaders(
@@ -62,16 +45,10 @@ export async function requireRunnerRuntimeWriteFence(input: {
   userId: string;
 }): Promise<RunnerRuntimeWriteFenceHeaders> {
   const headers = requireRunnerRuntimeWriteFenceHeaders(input.request);
-  const stub = await resolveRunnerOutboundUserRunnerStub(input.env, input.userId);
-  const ownsWriteFence = await validateRunnerRuntimeWriteFence(stub, {
-    attemptId: headers.attemptId,
-    generation: headers.generation,
-    userId: input.userId,
-  });
-  if (!ownsWriteFence) {
-    throw new RunnerRuntimeWriteFenceError();
-  }
-
+  const result = await commandHostedRuntimeOwner({ source: input.env, userId: input.userId, command: {
+    operation: "authorize_effect", attemptId: headers.attemptId, generation: headers.generation, runnerContainerName: null, managedAi: false,
+  } });
+  if (result.cutover !== "postgres" || result.status !== "authorized") throw new RunnerRuntimeWriteFenceError();
   return headers;
 }
 
@@ -82,18 +59,8 @@ export async function requireRunnerRuntimeWriteFenceWorkspaceWrite(input: {
 }): Promise<RunnerRuntimeWriteFenceWorkspaceAuthority> {
   const headers = requireRunnerRuntimeWriteFenceHeaders(input.request);
   const workspaceVersion = readValidWorkspaceVersionOrNull(headers.workspaceVersion);
-  if (!workspaceVersion) {
-    throw new RunnerRuntimeWriteFenceError();
-  }
-  const stub = await resolveRunnerOutboundUserRunnerStub(input.env, input.userId);
-  const ownsWriteFence = await validateRunnerRuntimeWriteFence(stub, {
-    attemptId: headers.attemptId,
-    generation: headers.generation,
-    userId: input.userId,
-  });
-  if (!ownsWriteFence) {
-    throw new RunnerRuntimeWriteFenceError();
-  }
+  if (!workspaceVersion) throw new RunnerRuntimeWriteFenceError();
+  await requireRunnerRuntimeWriteFence(input);
 
   return {
     ...headers,
@@ -101,44 +68,11 @@ export async function requireRunnerRuntimeWriteFenceWorkspaceWrite(input: {
   };
 }
 
-export async function applyRunnerRuntimeUsageSettlement(input: {
-  env: RunnerOutboundEnvironmentSource;
-  settlement: HostedRuntimeUsageRecordResponse | null;
-  userId: string;
-  writeAuthority: RunnerRuntimeWriteFenceHeaders;
-}): Promise<void> {
-  if (input.settlement?.platformAiUsageAllowedAfter === true) {
-    return;
-  }
-
-  const stub = await resolveRunnerOutboundUserRunnerStub(input.env, input.userId);
-  requireRunnerOutboundUserStubMethod(stub, "revokeActiveRuntimePlatformAiUsage");
-  await stub.revokeActiveRuntimePlatformAiUsage({
-    attemptId: input.writeAuthority.attemptId,
-    generation: input.writeAuthority.generation,
-    userId: input.userId,
-  });
-}
-
 function readValidWorkspaceVersionOrNull(value: string | null): string | null {
   if (!value || !/^[0-9]+$/u.test(value)) {
     return null;
   }
   return value;
-}
-
-async function validateRunnerRuntimeWriteFence(
-  stub: Awaited<ReturnType<typeof resolveRunnerOutboundUserRunnerStub>>,
-  input: {
-    attemptId: string;
-    generation: string;
-    userId: string;
-  },
-): Promise<boolean> {
-  if (typeof stub.validateRuntimeWriteFence !== "function") {
-    throw new TypeError("Hosted user runner does not implement validateRuntimeWriteFence.");
-  }
-  return await stub.validateRuntimeWriteFence(input);
 }
 
 export function requireRunnerRuntimeWriteFenceHeaders(
@@ -152,15 +86,4 @@ export function requireRunnerRuntimeWriteFenceHeaders(
   return headers;
 }
 
-export function writeRunnerRuntimeWriteFenceHeaders(
-  headers: Headers,
-  token: RunnerRuntimeWriteFenceToken,
-): void {
-  const generation = token.generation ?? token.leaseGeneration;
-  if (!generation) {
-    throw new RunnerRuntimeWriteFenceError("Hosted runner runtime write fence generation is missing.");
-  }
-  headers.set(HOSTED_RUNTIME_ATTEMPT_ID_HEADER, token.attemptId);
-  headers.set(HOSTED_RUNTIME_LEASE_GENERATION_HEADER, generation);
-  headers.set(HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER, token.workspaceVersion);
-}
+export { RunnerRuntimeWriteFenceError, writeRunnerRuntimeWriteFenceHeaders, type RunnerRuntimeWriteFenceToken } from "./headers.ts";

@@ -24,6 +24,7 @@ import {
   enqueueDeviceSyncSystemMailboxItemForTest,
   removeTempRoot,
   runHostedWorkspaceRuntimeJobInProcess,
+  stagePendingLinqAssistantInputForMailboxItem,
   writeMailboxImportStateFile,
 } from "./hosted-runtime-workspace-entrypoint.harness.ts";
 import { createEmptyHostedMailboxImportState } from "../src/hosted-runtime/mailbox-state.ts";
@@ -33,9 +34,13 @@ import {
 } from "../src/hosted-runtime/system-mailbox-state.ts";
 import { createCoalescingRuntimeWakeSignal } from "../src/hosted-runtime/runtime-wake.ts";
 
-const completionStages = ["scopes", "delivery", "browser-write", "browser-publish", "acknowledgment", "checkpoint"] as const;
+const completionStages = ["scopes", "capture", "delivery", "browser-write", "browser-publish", "acknowledgment", "checkpoint"] as const;
 type CompletionStage = typeof completionStages[number];
 const scenarios = [
+  ...(["before-completion", "scopes", "capture", "delivery"] as const).flatMap((stage) => [
+    { stage, wake: "shutdown" as const },
+    { stage, wake: "shutdown without notifications" as const },
+  ]),
   { stage: "scopes" as const, wake: "quiet" as const },
   { stage: "before-completion" as const, wake: "empty" as const },
   { stage: "before-completion" as const, wake: "conversation after empty" as const },
@@ -48,8 +53,10 @@ const scenarios = [
 test.each(scenarios)(
   "checkpointed completion at $stage with $wake wakes",
   async ({ stage, wake }) => {
+    const shutdown = wake === "shutdown" || wake === "shutdown without notifications";
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-projection-convergence-"));
     const controller = new AbortController();
+    const shutdownController = new AbortController();
     const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const events: string[] = [];
@@ -65,6 +72,7 @@ test.each(scenarios)(
     const mailboxItems: ReturnType<typeof createMailboxItem>[] = [];
     const emptyWakeChecked = createDeferred<void>();
     const releaseDelivery = createDeferred<void>();
+    const shutdownObserved = createDeferred<void>();
     const foregroundReached = new Error("Synthetic foreground phase reached.");
     let wakeChecks = 0;
     let injected = false;
@@ -74,6 +82,13 @@ test.each(scenarios)(
     const injectWake = async (at: CompletionStage, signal?: AbortSignal | null) => {
       if (wake === "quiet" || at !== stage || injected) return;
       injected = true;
+      if (shutdown) {
+        shutdownController.abort(new DOMException("Synthetic container shutdown.", "AbortError"));
+        shutdownObserved.resolve();
+        await withRealTimeout(releaseDelivery.promise, 2_000, () => "Shutdown did not drain owned projection work.");
+        signal?.throwIfAborted();
+        return;
+      }
       // Same-tick duplicate hints must collapse into one bounded mailbox read.
       for (let duplicate = 0; duplicate < 3; duplicate += 1) {
         runtimeWakeSignal.notify({ requestedProcessingMode: "default" });
@@ -86,8 +101,8 @@ test.each(scenarios)(
         id: "mailbox_item_projection_foreground", lane: "conversation", laneSeq: "1",
       }));
       runtimeWakeSignal.notify({ requestedProcessingMode: "default" });
-      if (at === "delivery") {
-        await withRealTimeout(releaseDelivery.promise, 2_000, () => "Foreground waited for projection delivery.");
+      if (at === "delivery" || at === "scopes" || at === "capture") {
+        await withRealTimeout(releaseDelivery.promise, 2_000, () => "Foreground waited for background projection work.");
         return;
       }
       assert.ok(signal, "Interruptible work must receive its owner's cancellation signal.");
@@ -99,7 +114,22 @@ test.each(scenarios)(
     };
     let acknowledgments = 0;
     let scopeReads = 0;
+    let projectionSignal: AbortSignal | null = null;
     let emptyMailboxReads = 0;
+    const withCaptureGate = (platform: ReturnType<typeof createPlatform>) => {
+      const snapshotPort = platform.workspaceSnapshotPort!;
+      return {
+        ...platform,
+        workspaceSnapshotPort: {
+          ...snapshotPort,
+          async restoreWorkspaceSnapshot(request: Parameters<typeof snapshotPort.restoreWorkspaceSnapshot>[0]) {
+            if (request.usePreparedRestore === false) await injectWake("capture", request.signal);
+            return await snapshotPort.restoreWorkspaceSnapshot(request);
+          },
+        },
+      };
+    };
+    let settledCheckpointCount = 0;
     const returnedWakes: (string | null)[] = [];
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date(TEST_NOW));
@@ -139,12 +169,17 @@ test.each(scenarios)(
           }),
           {
             vaultRoot,
-            runtimeWakeSignal,
+            runtimeWakeSignal: wake === "shutdown without notifications" ? undefined : runtimeWakeSignal,
             signal: controller.signal,
+            shutdownSignal: invocation === 0 ? shutdownController.signal : null,
             async createCheckpointSnapshot(_input, context) {
               if (stage === "before-completion" && !injected) {
                 injected = true;
-                runtimeWakeSignal.notify({ requestedProcessingMode: "default" });
+                if (shutdown) {
+                  shutdownController.abort(new DOMException("Synthetic container shutdown.", "AbortError"));
+                } else {
+                  runtimeWakeSignal.notify({ requestedProcessingMode: "default" });
+                }
               }
               if ((await readHostedSystemMailboxState(vaultRoot)).pending.length === 0) {
                 await injectWake("checkpoint", context?.signal);
@@ -153,16 +188,25 @@ test.each(scenarios)(
               artifactBytesByHash.set(snapshot.hash, snapshot.bytes);
               return { snapshotRef: snapshot.snapshotRef };
             },
-            async importItem() {
-              throw new Error("The completion was already imported and checkpointed.");
+            async importItem({ item }) {
+              assert.equal(item.lane, "conversation", "Previously imported system work must not repeat.");
+              const assistantInputId = await stagePendingLinqAssistantInputForMailboxItem({ item, vaultRoot });
+              events.push("foreground.imported");
+              return { assistantInputId, status: "imported" };
             },
             async runAssistantPhase() {
+              assert.equal(events.filter((event) => event === "foreground.imported").length, 1,
+                "Import the qualified conversation exactly once before foreground admission.");
               assert.equal(wake, "conversation after empty");
               assert.equal(wakeChecks, 2, "Reuse the prefetched conversation batch for handoff.");
+              if (stage === "scopes" || stage === "capture") {
+                assert.equal(projectionSignal?.aborted, false,
+                  "Foreground must start without canceling the pending projection.");
+              }
               releaseDelivery.resolve();
               throw foregroundReached;
             },
-            platform: createPlatform({
+            platform: withCaptureGate(createPlatform({
               artifactBytesByHash,
               deviceSyncPort: {
                 ...deviceSyncPort,
@@ -189,7 +233,7 @@ test.each(scenarios)(
                   const response = await baseMailboxPort.fetch(request);
                   if (request.requestId.includes(":system-work-assistant-upgrade")) {
                     wakeChecks += 1;
-                    assert.deepEqual(request.lanes.map((lane) => lane.lane), ["conversation"]);
+                    assert.deepEqual(request.lanes.map((lane) => lane.lane), ["conversation", "system"]);
                     assert.ok(request.limitPerLane > 0 && request.limitPerLane <= 100);
                     if (response.items.length === 0) {
                       emptyWakeChecked.resolve();
@@ -209,6 +253,7 @@ test.each(scenarios)(
               vaultSharePort: {
                 async listActiveProjectionScopes(request) {
                   scopeReads += 1;
+                  projectionSignal = request?.signal ?? null;
                   await injectWake("scopes", request?.signal);
                   return {
                     projectionKinds: ["profile-name.v0"],
@@ -244,9 +289,17 @@ test.each(scenarios)(
                   return response;
                 },
               },
-            }),
+            })),
           },
         );
+        if (shutdown && invocation === 0 && stage !== "before-completion") {
+          let settled = false;
+          void run.then(() => { settled = true; }, () => { settled = true; });
+          await withRealTimeout(shutdownObserved.promise, 2_000, () => "Shutdown did not reach projection work.");
+          await setImmediate();
+          assert.equal(settled, false, "Shutdown must join owned work before returning.");
+          releaseDelivery.resolve();
+        }
         if (wake === "conversation after empty") {
           await assert.rejects(run, (error) => error === foregroundReached);
           assert.equal(injected, true);
@@ -258,8 +311,20 @@ test.each(scenarios)(
         const result = await run;
         returnedWakes.push(result.nextWakeAt ?? null);
         assert.notEqual(result.immediateRecheckRequested, true);
-        if (invocation > 0) {
-          assert.equal(checkpointRequests.length, 2, "Restores of completed work must not checkpoint again.");
+        if (shutdown && invocation === 0) {
+          assert.equal(injected, true);
+          assert.equal(acknowledgments, 0, "Shutdown must leave unfinished work unacknowledged.");
+          assert.equal(scopeReads, stage === "before-completion" ? 0 : 1);
+          assert.equal(browserWrites, 0, "Shutdown must not admit browser publication.");
+          assert.equal((await readHostedSystemMailboxState(vaultRoot)).pending[0]?.status, "recording");
+          assert.notEqual(workspace.redactedStatus?.hostedMailboxSystemHandledThroughSeq, "1");
+          assert.ok(result.nextWakeAt && Date.parse(result.nextWakeAt) <= Date.now(),
+            "Saved recording must remain due for the successor.");
+        } else if (settledCheckpointCount === 0) {
+          settledCheckpointCount = checkpointRequests.length;
+        } else {
+          assert.equal(checkpointRequests.length, settledCheckpointCount,
+            "Restores of completed work must not checkpoint again.");
         }
       }
 
@@ -274,16 +339,17 @@ test.each(scenarios)(
         handledThrough: workspace.redactedStatus?.hostedMailboxSystemHandledThroughSeq,
       });
       assert.equal(injected, wake !== "quiet");
-      assert.equal(wakeChecks, wake === "quiet" ? 0 : 1, evidence);
-      assert.equal(scopeReads, 1, evidence);
-      assert.equal(deliveries, 1, evidence);
+      assert.equal(wakeChecks, wake === "quiet" || shutdown ? 0 : 1, evidence);
+      assert.equal(scopeReads, shutdown && stage !== "before-completion" ? 2 : 1, evidence);
+      assert.equal(deliveries, shutdown && stage === "delivery" ? 2 : 1, evidence);
       assert.equal(browserWrites, 1, evidence);
       assert.equal(browserPublishes, 1, evidence);
-      assert.equal(checkpointRequests.length, 2, evidence);
+      if (!shutdown) assert.equal(checkpointRequests.length, 2, evidence);
       assert.equal(acknowledgments, 1, evidence);
       assert.deepEqual(pending.pending, [], evidence);
       assert.equal(workspace.redactedStatus?.hostedMailboxSystemHandledThroughSeq, "1", evidence);
-      assert.deepEqual(returnedWakes, [null, null, null], evidence);
+      assert.deepEqual(shutdown ? returnedWakes.slice(1) : returnedWakes,
+        shutdown ? [null, null] : [null, null, null], evidence);
       assert.equal(deviceSyncPort.fetchSnapshotCalls, 0, "Restored completion must not repeat provider work.");
     } finally {
       releaseDelivery.resolve();

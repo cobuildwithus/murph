@@ -23,7 +23,7 @@ import {
 import { normalizeNullableString } from "../primitives";
 import { getPrisma } from "../prisma";
 
-export const HOSTED_RUNTIME_REPLY_LATENCY_ALERT_THRESHOLD_MS = 30_000;
+export const HOSTED_RUNTIME_REPLY_LATENCY_ALERT_THRESHOLD_MS = 60_000;
 export const HOSTED_RUNTIME_LATENCY_ALERT_MINIMUM_INTERVAL_MS =
   HOSTED_OPERATIONAL_ALERT_MINIMUM_INTERVAL_MS;
 
@@ -561,11 +561,15 @@ export function summarizeHostedRuntimeLatencyRows(input: {
   };
 }
 
-function readHostedRuntimeTerminalNonReplyCommittedAt(value: unknown): Date | null {
+export function readHostedRuntimeTerminalNonReplyCommittedAt(value: unknown): Date | null {
   return readHostedRuntimeAssistantEpochDate(
     value,
     "terminalNonReplyCommittedAtEpochMs",
   );
+}
+
+export function readHostedRuntimeTerminalReplyCommittedAt(value: unknown): Date | null {
+  return readHostedRuntimeAssistantEpochDate(value, "terminalReplyCommittedAtEpochMs");
 }
 
 function readHostedRuntimeProgressUpdateAcceptedAt(value: unknown): Date | null {
@@ -575,7 +579,7 @@ function readHostedRuntimeProgressUpdateAcceptedAt(value: unknown): Date | null 
   );
 }
 
-function readHostedRuntimeCheckpointPublicationExpectedBy(
+export function readHostedRuntimeCheckpointPublicationExpectedBy(
   value: unknown,
 ): Date | null {
   return readHostedRuntimeAssistantEpochDate(
@@ -589,7 +593,8 @@ function readHostedRuntimeAssistantEpochDate(
   leaf:
     | "checkpointPublicationExpectedByEpochMs"
     | "progressUpdateAcceptedAtEpochMs"
-    | "terminalNonReplyCommittedAtEpochMs",
+    | "terminalNonReplyCommittedAtEpochMs"
+    | "terminalReplyCommittedAtEpochMs",
 ): Date | null {
   if (!isHostedRuntimeLatencyPhaseRecord(value)) {
     return null;
@@ -661,10 +666,10 @@ function buildHostedRuntimeLatencyAlertMessage(input: {
 }): string {
   const evidence = [
     input.health.recentSlowInitialResponseCount > 0
-      ? `${input.health.recentSlowInitialResponseCount} completed ${pluralizeReply(input.health.recentSlowInitialResponseCount)} with no progress or final response within 30 seconds`
+      ? `${input.health.recentSlowInitialResponseCount} completed ${pluralizeReply(input.health.recentSlowInitialResponseCount)} with no progress or final response within ${input.health.thresholdMs / 1_000} seconds`
       : null,
     input.health.unresolvedReplyCount > 0
-      ? `${input.health.unresolvedReplyCount} unresolved ${pluralizeTurn(input.health.unresolvedReplyCount)} with no visible response or durable acknowledgement after 30 seconds`
+      ? `${input.health.unresolvedReplyCount} unresolved ${pluralizeTurn(input.health.unresolvedReplyCount)} with no visible response or durable acknowledgement after ${input.health.thresholdMs / 1_000} seconds`
       : null,
     input.health.scanTruncated
       ? "the bounded latency scan was truncated"

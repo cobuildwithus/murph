@@ -68,7 +68,7 @@ describe("document laboratory specimen publication", () => {
         const input = await source(vaultRoot, "urine");
         expect(await readNextClinicalEnrichment(input)).toMatchObject({ status: "extract" });
         await persistClinicalEnrichmentProposals({ ...input, sourceSha256: input.sha256, page: 1, totalPages: 1,
-          outputs: { labs: { status: "complete", records: [{ page: 1, excerpt: "Urine glucose 250 mg/dL", payload: lab("urine", 250) }] }, measurements: empty, history: empty },
+          outputs: { labs: { status: "complete", records: [{ dateBasis: "source", page: 1, excerpt: "Urine glucose 250 mg/dL", payload: lab("urine", 250) }] }, measurements: empty, history: empty },
         });
         const applied = await applyClinicalEnrichmentProposals(input);
         const points = await listMetricPoints(vaultRoot, { limit: 10 });
@@ -89,7 +89,7 @@ describe("document laboratory specimen publication", () => {
       const input = await source(vaultRoot, "serum");
       await readNextClinicalEnrichment(input);
       await persistClinicalEnrichmentProposals({ ...input, sourceSha256: input.sha256, page: 1, totalPages: 1,
-        outputs: { labs: { status: "complete", records: [{ page: 1, payload: lab("serum", 90) }] }, measurements: empty, history: empty },
+        outputs: { labs: { status: "complete", records: [{ dateBasis: "source", page: 1, payload: lab("serum", 90) }] }, measurements: empty, history: empty },
       });
       expect((await applyClinicalEnrichmentProposals(input)).counts).toMatchObject({ created: 1, held: 0 });
       expect(await listMetricPoints(vaultRoot, { limit: 10 })).toEqual(expect.arrayContaining([expect.objectContaining({

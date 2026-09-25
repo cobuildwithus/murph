@@ -120,7 +120,7 @@ describe("hosted workspace runtime entrypoint", () => {test("foreground runtime 
             budget: {
               maxMailboxItems: 12,
             },
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
@@ -267,7 +267,7 @@ describe("hosted workspace runtime entrypoint", () => {test("foreground runtime 
             budget: {
               maxMailboxItems: 12,
             },
-            idleCheckpointDelayMs: 25,
+            runnerIdleTtlMs: 25,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
@@ -423,7 +423,7 @@ describe("hosted workspace runtime entrypoint", () => {test("foreground runtime 
             budget: {
               maxMailboxItems: 2,
             },
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
@@ -535,7 +535,7 @@ describe("hosted workspace runtime entrypoint", () => {test("foreground runtime 
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_runtime_foreground_uncapped",
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
@@ -638,7 +638,7 @@ describe("hosted workspace runtime entrypoint", () => {test("foreground runtime 
             budget: {
               maxMailboxItems: 2,
             },
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
@@ -754,7 +754,7 @@ describe("hosted workspace runtime entrypoint", () => {test("foreground runtime 
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_runtime_first_owner_activation",
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "0",
@@ -895,7 +895,7 @@ describe("hosted workspace runtime entrypoint", () => {test("foreground runtime 
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_runtime_foreground_activation",
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
@@ -1042,7 +1042,7 @@ describe("hosted workspace runtime entrypoint", () => {test("foreground runtime 
             budget: {
               maxMailboxItems: 2,
             },
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
@@ -1178,7 +1178,7 @@ describe("hosted workspace runtime entrypoint", () => {test("foreground runtime 
               budget: {
                 maxMailboxItems: 2,
               },
-              idleCheckpointDelayMs: 1,
+              runnerIdleTtlMs: 1,
               leaseGeneration: "9",
               userId: TEST_USER_ID,
               workspaceVersion: input.workspace.version,
@@ -1295,7 +1295,10 @@ describe("hosted workspace runtime entrypoint", () => {test("foreground runtime 
       workspace,
     });
     assert.equal(second.result.status, "budget_exhausted");
-    assert.deepEqual(conversationFetchImportedSeqs(second.fetchRequests), ["2"]);
+    // These fixture snapshots contain only mailbox state, so bootstrap discards
+    // the speculative page and fetches the same authoritative cursor afresh.
+    assert.deepEqual(conversationFetchImportedSeqs(second.fetchRequests), ["2", "2"]);
+    assert.deepEqual(conversationFetches(second.fetchRequests).map((request) => request.limitPerLane), [3, 3]);
     assert.deepEqual(second.importedSeqs, ["3:consumed", "4:consumed"]);
     assert.deepEqual(second.snapshotWatermarks, ["4"]);
     assert.equal(second.state.watermarks.conversation, "4");
@@ -1311,7 +1314,8 @@ describe("hosted workspace runtime entrypoint", () => {test("foreground runtime 
       workspace,
     });
     assert.equal(third.result.status, "idle");
-    assert.deepEqual(conversationFetchImportedSeqs(third.fetchRequests), ["4"]);
+    assert.deepEqual(conversationFetchImportedSeqs(third.fetchRequests), ["4", "4"]);
+    assert.deepEqual(conversationFetches(third.fetchRequests).map((request) => request.limitPerLane), [3, 3]);
     assert.deepEqual(third.importedSeqs, ["5:consumed", "6:fresh"]);
     assert.deepEqual(third.snapshotWatermarks, ["6"]);
     assert.equal(third.state.watermarks.conversation, "6");
@@ -1375,7 +1379,7 @@ describe("hosted workspace runtime entrypoint", () => {test("foreground runtime 
             budget: {
               maxMailboxItems: 2,
             },
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
@@ -1477,7 +1481,7 @@ describe("hosted workspace runtime entrypoint", () => {test("foreground runtime 
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_checkpoint_conversation_wake_prepublication",
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
@@ -1649,7 +1653,7 @@ describe("hosted workspace runtime entrypoint", () => {test("foreground runtime 
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_runtime_idle_checkpoint_wake_during_checkpoint",
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
@@ -1816,7 +1820,7 @@ describe("hosted workspace runtime entrypoint", () => {test("foreground runtime 
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_deferred_usage_idle_checkpoint",
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
@@ -1962,7 +1966,7 @@ describe("hosted workspace runtime entrypoint", () => {test("foreground runtime 
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_deferred_usage_previous_invocation",
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
@@ -2106,7 +2110,7 @@ describe("hosted workspace runtime entrypoint", () => {test("foreground runtime 
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_deferred_usage_idle_checkpoint_failure",
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
@@ -2236,7 +2240,7 @@ describe("hosted workspace runtime entrypoint", () => {test("foreground runtime 
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_deferred_usage_host_abort",
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
@@ -2773,7 +2777,7 @@ describe("hosted workspace runtime entrypoint", () => {test("foreground runtime 
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_runtime_idle_checkpoint_pending_wake",
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",

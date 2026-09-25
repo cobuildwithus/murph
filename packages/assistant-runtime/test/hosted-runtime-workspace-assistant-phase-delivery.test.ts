@@ -160,16 +160,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
     );
     expect(outboxLogIndex).toBeGreaterThanOrEqual(0);
     expect(finishLogIndex).toBeGreaterThan(outboxLogIndex);
-    expect(
-      mocks.drainHostedPreparedAssistantDeliveries.mock.invocationCallOrder[0],
-    ).toBeLessThan(
-      mocks.maintainAssistantAutoReplyRouteState.mock.invocationCallOrder[0] ?? 0,
-    );
-    expect(mocks.maintainAssistantAutoReplyRouteState).toHaveBeenCalledWith({
-      shouldYield: shouldYieldBackgroundMaintenance,
-      signal: backgroundMaintenanceController.signal,
-      vault: "/tmp/murph-vault",
-    });
+    expect(mocks.maintainAssistantAutoReplyRouteState).not.toHaveBeenCalled();
   });
 
   it("waits for optional product feedback only after a queue-only foreground reply is sent", async () => {
@@ -2461,6 +2452,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
     }));
 
     expect(result.afterCheckpoint).toEqual(expect.any(Function));
+    expect(mocks.getAssistantCronStatus).not.toHaveBeenCalled();
     await expect(result.afterCheckpoint?.()).resolves.toBeNull();
     expect(result.checkpointReason).toBe("outbox_receipt");
     expect(result.redactedStatus).toEqual(expect.objectContaining({
@@ -2473,7 +2465,9 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
     expect(result.nextWakeAt).toBeNull();
     expect(mocks.drainHostedPreparedAssistantDeliveries)
       .toHaveBeenCalledTimes(1);
-    expect(mocks.getAssistantCronStatus).not.toHaveBeenCalled();
+    expect(mocks.getAssistantCronStatus).toHaveBeenCalledTimes(1);
+    expect(mocks.drainHostedPreparedAssistantDeliveries.mock.invocationCallOrder[0])
+      .toBeLessThan(mocks.getAssistantCronStatus.mock.invocationCallOrder[0]!);
   });
 
   it.each([
@@ -2710,7 +2704,9 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
     ]);
     const postCheckpoint = await result.afterCheckpoint?.();
 
-    expect(mocks.getAssistantCronStatus).not.toHaveBeenCalled();
+    expect(mocks.getAssistantCronStatus).toHaveBeenCalledTimes(1);
+    expect(mocks.drainHostedPreparedAssistantDeliveries.mock.invocationCallOrder[0])
+      .toBeLessThan(mocks.getAssistantCronStatus.mock.invocationCallOrder[0]!);
     expect(postCheckpoint).toEqual(expect.objectContaining({
       checkpointReason: "outbox_receipt",
       nextWakeAt: reconciliationWakeAt,

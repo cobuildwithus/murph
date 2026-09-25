@@ -51,7 +51,7 @@ describe("hosted local Messages member-action timestamp e2e", () => {
   beforeAll(async () => {
     scenario = await startHostedLocalFullStackScenario({
       additionalEnv: {
-        HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: "1",
+        HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "1000",
         MURPH_DEV_SKIP_HEALTH_COMMONS_WATCH: "1",
       },
       localDatabaseUrl,

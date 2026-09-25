@@ -128,7 +128,7 @@ test('an empty settings-only hot wake hands off without another assistant turn o
   try {
     await initializeVault({ createdAt: TEST_NOW, vaultRoot });
     const job = runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput({
-      request: { idleCheckpointDelayMs: 500 },
+      request: { runnerIdleTtlMs: 500 },
     }), {
       async importItem() { throw new Error('Settings-only wake must not import an item.'); },
       async createCheckpointSnapshot() {
@@ -185,12 +185,12 @@ test('an acknowledged provider update blocks the next boundary without rereading
       action: 'update' as const,
       result: {
         appliesAt: 'next_turn' as const,
-        availableModels: ['gpt-5.6-terra' as const],
+        availableModels: ['gpt-6-sol' as const],
         availableProviders: ['openai' as const, 'venice' as const],
         availableReasoningEfforts: ['low' as const],
         configurationAvailable: true,
         dormantSolPreference: false,
-        model: 'gpt-5.6-terra' as const,
+        model: 'gpt-6-sol' as const,
         provider: 'venice' as const,
         reasoningEffort: 'low' as const,
         requiredPlan: null,

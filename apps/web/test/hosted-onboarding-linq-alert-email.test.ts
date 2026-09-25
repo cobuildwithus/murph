@@ -72,6 +72,27 @@ describe("sendPendingHostedLinqAlertsBestEffort", () => {
     expect(text).toContain("Line: ***0000");
   });
 
+  it.each([null, "2026-09-01T12:00:04.000Z"])("renders frozen legacy typing alerts with endpoint %s", async (typingAcceptedAt) => {
+    const fixture = createAlertEmailPrismaFixture();
+    fixture.hostedLinqAlertFindMany.mockResolvedValue([{
+      id: "synthetic-legacy-typing-alert", kind: "runtime_warm_typing_slow", subject: "Typing delay",
+      detailsJson: { source: "linq", workspaceState: "warm", webhookReceivedAt: "2026-09-01T12:00:00.000Z",
+        typingAcceptedAt, elapsedMs: 4000, thresholdMs: 3000 },
+    }]);
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(JSON.stringify({ id: "synthetic-email" }), { status: 200 }),
+    );
+    await sendPendingHostedLinqAlertsBestEffort({
+      alertIds: ["synthetic-legacy-typing-alert"], env: buildAlertEmailEnv(), fetchImpl,
+      prisma: fixture.prisma as never,
+    });
+    const body = String(fetchImpl.mock.calls[0]?.[1]?.body);
+    expect(body).toContain(typingAcceptedAt === null
+      ? "Time since webhook without recorded typing acceptance: 4000 ms"
+      : "Webhook-to-typing wait: 4000 ms");
+    expect(body).not.toContain("Silence measured from");
+  });
+
   it("marks alerts failed without throwing when Resend rejects the send", async () => {
     const fixture = createAlertEmailPrismaFixture();
     const fetchImpl = vi.fn(async () => new Response("nope", {

@@ -947,12 +947,12 @@ function createPlatform(input: {
   > = {
     async request(request) {
       const snapshot: HostedRuntimeAssistantConfigurationSnapshot = {
-        availableModels: ["gpt-5.6-luna", "gpt-5.6-terra"],
+        availableModels: ["gpt-5.6-luna", "gpt-6-sol"],
         availableProviders: ["openai", "venice"],
         availableReasoningEfforts: ["low", "medium", "high", "xhigh"],
         configurationAvailable: true,
         dormantSolPreference: false,
-        model: "gpt-5.6-terra",
+        model: "gpt-6-sol",
         provider: "openai",
         reasoningEffort: "low",
         solAvailable: false,
@@ -1069,7 +1069,7 @@ function createPlatform(input: {
       async completeSnapshotSession() { throw new Error("Snapshot publication is injected by each test."); },
       async putSnapshotObjectDirect() { throw new Error("Snapshot publication is injected by each test."); },
       async startSnapshotSession() { throw new Error("Snapshot publication is injected by each test."); },
-      async restoreWorkspaceSnapshot({ durableRoot, ref }) {
+      async restoreWorkspaceSnapshot({ durableRoot, ref, usePreparedRestore }) {
         // Fixture archives use the portable codec; the runtime sees only the v2 port.
         // Encrypted tar transport and staged installation are covered by Cloudflare tests.
         const bytes = await platform.artifactStore.get(ref.archive.plaintextArchiveSha256, { purpose: "workspace_restore" });
@@ -1079,7 +1079,7 @@ function createPlatform(input: {
           await restoreHostedBundleRoots({
             bytes,
             expectedKind: "vault",
-            roots: { vault: path.join(stagedRoot, input.snapshotFixtureVaultRelativePath ?? "") },
+            roots: { vault: path.join(stagedRoot, input.snapshotFixtureVaultRelativePath ?? (usePreparedRestore === false ? "vault" : "")) },
           });
           await rm(durableRoot, { force: true, recursive: true });
           await rename(stagedRoot, durableRoot);
@@ -2024,7 +2024,7 @@ function createWorkspaceRunRequest(
 ): HostedWorkspaceInvocationRequest {
   return {
     attemptId: "attempt_synthetic_workspace_run",
-    idleCheckpointDelayMs: 1,
+    runnerIdleTtlMs: 1,
     leaseGeneration: "1",
     userId: TEST_USER_ID,
     workspaceVersion: "0",
@@ -2096,10 +2096,10 @@ function createAssistantUsageRecord(
     rawUsageJsonHash: null,
     reasoningTokens: null,
     reportingUserId: null,
-    requestedModel: "gpt-5.6-terra",
+    requestedModel: "gpt-6-sol",
     routeId: "primary",
     schema: ASSISTANT_USAGE_SCHEMA,
-    servedModel: "gpt-5.6-terra",
+    servedModel: "gpt-6-sol",
     sessionId: "asst_entrypoint_usage",
     stripeMeterSource: "murph",
     surface: null,
@@ -2169,6 +2169,7 @@ function createDeviceSyncResolvedConfig(): HostedAssistantRuntimeResolvedConfig 
 
 function createSnapshotDeviceSyncPort(input: {
   connectionId: string;
+  connectionStatus?: "active" | "disconnected";
   nextReconcileAt: string;
   onApplyUpdates?: (() => Promise<void> | void) | null;
   onFetchSnapshot?: ((signal: AbortSignal | null) => Promise<void> | void) | null;
@@ -2187,7 +2188,13 @@ function createSnapshotDeviceSyncPort(input: {
       await input.onApplyUpdates?.();
       return {
         appliedAt: request.occurredAt ?? new Date().toISOString(),
-        updates: [],
+        updates: request.updates.map((update) => ({
+          connection: null,
+          connectionId: update.connectionId,
+          status: "updated" as const,
+          tokenUpdate: "unchanged" as const,
+          writeUpdate: "applied" as const,
+        })),
         userId: TEST_USER_ID,
       };
     },
@@ -2221,7 +2228,7 @@ function createSnapshotDeviceSyncPort(input: {
               metadata: {},
               provider: "whoop",
               scopes: ["offline", "read:recovery", "read:sleep", "read:workout"],
-              status: "active",
+              status: input.connectionStatus ?? "active",
               updatedAt: TEST_NOW,
             },
             credential: {

@@ -470,7 +470,19 @@ if [[ "$review_gpt_context_mode" != "same_thread_delta" ]]; then
 fi
 package_audit_context_bin="$(cobuild_repo_tool_bin cobuild-package-audit-context)"
 if [[ -z "$review_gpt_pr_ref" ]]; then
-  exec "$package_audit_context_bin" "$@"
+  mkdir -p "$ROOT_DIR/audit-packages"
+  review_gpt_custom_dir="$(mktemp -d "$ROOT_DIR/audit-packages/review-gpt-custom.XXXXXX")"
+  review_gpt_custom_status=0
+  "$package_audit_context_bin" "$@" 2> "$review_gpt_custom_dir/package-errors.txt" \
+    || review_gpt_custom_status=$?
+  # Custom authoring uses the same guarded snapshot and can exceed the same
+  # child-output buffer as PR review. Preserve diagnostics and the exit status.
+  awk '
+    /^Warning: excluding path from audit package: / { excluded++; next }
+    { print }
+    END { if (excluded) printf "Warning: excluded %d paths from audit package.\n", excluded }
+  ' "$review_gpt_custom_dir/package-errors.txt" >&2
+  exit "$review_gpt_custom_status"
 fi
 
 if [[ "$review_gpt_has_explicit_output_dir" != "1" ]]; then
@@ -480,10 +492,21 @@ if [[ "$review_gpt_has_explicit_output_dir" != "1" ]]; then
 fi
 
 review_gpt_package_stdout="$review_gpt_invocation_dir/package-output.txt"
-if ! "$package_audit_context_bin" "${review_gpt_package_args[@]}" \
-  > "$review_gpt_package_stdout"; then
+review_gpt_package_stderr="$review_gpt_invocation_dir/package-errors.txt"
+review_gpt_package_status=0
+"$package_audit_context_bin" "${review_gpt_package_args[@]}" \
+  > "$review_gpt_package_stdout" 2> "$review_gpt_package_stderr" \
+  || review_gpt_package_status=$?
+# Thousands of expected exclusions can overflow ReviewGPT's child-output buffer.
+# Capture diagnostics in the private invocation and preserve other messages verbatim.
+awk '
+  /^Warning: excluding path from audit package: / { excluded++; next }
+  { print }
+  END { if (excluded) printf "Warning: excluded %d paths from audit package.\n", excluded }
+' "$review_gpt_package_stderr" >&2
+if [[ "$review_gpt_package_status" != "0" ]]; then
   cat "$review_gpt_package_stdout"
-  exit 1
+  exit "$review_gpt_package_status"
 fi
 review_gpt_zip_path="$(
   sed -nE 's/^ZIP: (.*) \([^)]*\)$/\1/p' "$review_gpt_package_stdout" | tail -n 1

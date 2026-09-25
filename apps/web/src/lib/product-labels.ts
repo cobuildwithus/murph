@@ -3009,21 +3009,8 @@ async function searchGenericProductLabels(
             ) AS dedupe_rank
           FROM candidates
         )${publicCandidatesCteSql}${evidence.candidatesCteSql},
-        selected AS (
-          SELECT
-            *,
-            row_number() OVER (
-              ORDER BY
-                ${evidence.orderSql}
-                name_phrase_match DESC,
-                name_phrase_length DESC,
-                stemmed_name_match DESC,
-                name_similarity DESC,
-                search_rank DESC,
-                data_origin_priority ASC,
-                name ASC,
-                id ASC
-            ) AS result_rank
+        selected_page AS (
+          SELECT *
           FROM ${evidence.selectedSourceSql}
           WHERE dedupe_rank = 1
           ${evidence.selectedComparisonReadyFilterSql}
@@ -3039,6 +3026,25 @@ async function searchGenericProductLabels(
             id ASC
           LIMIT $3
           OFFSET $5
+        ),
+        selected AS (
+          -- Number only the selected page. Keeping LIMIT below this window
+          -- allows top-N selection without changing the complete ranking order.
+          SELECT
+            *,
+            row_number() OVER (
+              ORDER BY
+                ${evidence.orderSql}
+                name_phrase_match DESC,
+                name_phrase_length DESC,
+                stemmed_name_match DESC,
+                name_similarity DESC,
+                search_rank DESC,
+                data_origin_priority ASC,
+                name ASC,
+                id ASC
+            ) AS result_rank
+          FROM selected_page
         )
         ${productLabelSearchFinalProjectionSql(tableSql, input.projection)}
         `;

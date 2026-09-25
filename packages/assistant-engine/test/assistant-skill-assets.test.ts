@@ -280,6 +280,10 @@ describe('assistant skill assets', () => {
     )
     expect(daily).toContain('current-local-day totals as provisional and say "so far."')
     expect(daily).toContain('not proof of failed provider sync or import')
+    expect(ASSISTANT_SKILLS.find((skill) => skill.slug === 'running-cardio')?.triggerHint).toContain('Use daily-activity for ordinary walking breaks and everyday movement targets.')
+    expect(daily).toContain('For a simple time-based walking plan, use the person\'s stated current activity, available window, and chosen duration plus relevant saved context.')
+    expect(daily).toContain('Do not collect step counts, labs, body measurements, or unrelated event history unless symptoms, a known condition, or the requested target makes them decision-changing.')
+    expect(daily).toContain('Missing wearable coverage alone does not require more data reads or a step target.')
   })
 
   managedGroupSkillIt('keeps shared activity interpretation in its owner', async () => {
@@ -305,6 +309,7 @@ describe('assistant skill assets', () => {
     )
     expect(experimentSkill.triggerHint).not.toContain('private direct')
     expect(experimentSkill.triggerHint).not.toContain('proactively use it')
+    expect(experimentSkill.triggerHint).toContain('Ordinary goal setup with a chosen action belongs to goal-setup.')
 
     const raw = await readSkillFile(experimentSkill)
     const compact = raw.replace(/\s+/gu, ' ')
@@ -1294,6 +1299,12 @@ describe('assistant skill assets', () => {
       return
     }
 
+    const setup = await readSkillFile(behaviorSkill)
+    expect(Buffer.byteLength(setup)).toBeLessThan(29_000)
+    expect(setup).toContain('$MURPH_ASSISTANT_SKILLS_ROOT/behavior-followthrough/references/support-runtime.md')
+    expect(setup).toContain('Quiet\nchanges to an existing plan still require that reference and reconciliation.')
+    expect(setup).not.toContain('## Notification decision policy')
+
     expect(behaviorSkill.triggerHint).toContain('ignored reminders')
     expect(behaviorSkill.triggerHint).toContain('reminder fatigue')
     expect(behaviorSkill.triggerHint).toContain(
@@ -1309,7 +1320,7 @@ describe('assistant skill assets', () => {
     }
 
     const [raw, stressRaw] = await Promise.all([
-      readSkillFile(behaviorSkill),
+      Promise.all([readSkillFile(behaviorSkill), readFile(path.join(resolveAssistantSkillsRoot(), 'behavior-followthrough/references/support-runtime.md'), 'utf8')]).then((parts) => parts.join('\n')),
       readSkillFile(stressSkill),
     ])
     const compact = raw.replace(/\s+/gu, ' ')
@@ -1853,7 +1864,7 @@ describe('assistant skill assets', () => {
       'A vague opener—including bare “Let’s continue” without a visible onboarding referent—and generic saved records—even a goal plus aspiration readiness and all six areas—do not establish onboarding stage.',
     )
     expect(root.replace(/\s+/gu, ' ')).toContain(
-      'This skill may create only the scheduled early-stall check-in defined in the injected onboarding instructions and the post-completion first-personal-read one-shot defined in `references/return-launch-completion.md`.',
+      'This skill may create only the post-completion first-personal-read one-shot defined in `references/return-launch-completion.md`.',
     )
     for (const movedSection of [
       '## Delegating onboarding work',
@@ -1925,7 +1936,7 @@ describe('assistant skill assets', () => {
       },
       {
         owner: 'system-prompt',
-        rule: 'arm only when handling the answer or skip to the bundled identity question actually asked in this conversation, never on a later resume.',
+        rule: 'Do not schedule a check-in during this opening exchange.',
       },
       {
         owner: 'persistence-recovery-follow-up.md',
@@ -2144,11 +2155,17 @@ describe('assistant skill assets', () => {
     expect(onboardingSystemPrompt).toContain('Do not announce optionality')
     expect(onboardingSystemPrompt).toContain('Name, age, and gender are one bundled checkpoint')
     expect(onboardingSystemPrompt).toContain('spawn one fresh one-shot leaf')
+    expect(onboardingSystemPrompt).toContain('On the next full assistant turn')
+    expect(onboardingSystemPrompt).toContain('newer instructions win')
+    expect(onboardingSystemPrompt).toContain('do not repeat that exchange')
     expect(onboardingSystemPrompt).toContain('Do not wait, poll, repeat the child')
     expect(onboardingSystemPrompt).toContain('No progress message is needed for this short exchange')
     expect(onboardingSystemPrompt).toContain('If spawning is unavailable or fails')
     expect(root).not.toContain('every minimal-identity answer that continues onboarding requires both')
-    expect(persistenceReference).not.toContain('slug: "onboarding-early-stall-check-in"')
+    expect(onboardingSystemPrompt).toContain('Do not schedule a check-in during this opening exchange.')
+    for (const text of [onboardingSystemPrompt, root, persistenceReference]) {
+      expect(text).not.toContain('onboarding-early-stall-check-in')
+    }
     expect(onboardingSystemPrompt).toContain('What would you most like from your health')
     expect(onboardingSystemPrompt).toContain("Following through is often the hard part. That's where I can help.")
     expect(raw).toContain('**Change:**')

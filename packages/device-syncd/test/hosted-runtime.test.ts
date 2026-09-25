@@ -61,6 +61,16 @@ function isDeviceSyncCredentialIndependentImportJob(input: {
 }
 
 describe("hosted continuation producer and reader compatibility", () => {
+  it("round-trips bounded reconcile proofs and rejects invalid continuation values", () => {
+    const hint = { jobs: [], junctionReconcileProof: "v1|2026-04-24T12:00:00.000Z|" + "a".repeat(64) };
+    expect(parseHostedExecutionDeviceSyncWakeHint(JSON.parse(JSON.stringify(hint)))).toEqual(hint);
+    expect(parseHostedExecutionDeviceSyncWakeHint({ junctionReconcileProof: "a".repeat(256) })?.junctionReconcileProof)
+      .toHaveLength(256);
+    for (const junctionReconcileProof of [null, 123, "", "  ", "a".repeat(257)]) {
+      expect(() => parseHostedExecutionDeviceSyncWakeHint({ junctionReconcileProof })).toThrow(/256 characters/u);
+    }
+  });
+
   it("round-trips bounded sweep recovery hashes and rejects malformed markers", () => {
     const hint = { jobs: [], junctionTemporalSweepKey: "a".repeat(64) };
     expect(parseHostedExecutionDeviceSyncWakeHint(JSON.parse(JSON.stringify(hint)))).toEqual(hint);
@@ -180,6 +190,66 @@ describe("hosted device-sync dirty timing source parsing", () => {
       timingSourceProviderSlug: null,
     });
     expect(parsed?.dirtyResources[2]).not.toHaveProperty("timingSourceProviderSlug");
+  });
+
+  it("carries the provider dedupe key only when the resource declares one", () => {
+    const buildResource = (providerDedupeKey: string | null | undefined) => ({
+      count: 1,
+      jobKind: "resource",
+      payload: {
+        eventType: "historical.data.steps.created",
+        resource: "steps",
+        resourceCategory: "timeseries",
+        sourceProviderSlug: "apple_health_kit",
+        windowEnd: "2026-04-08T00:04:00.000Z",
+        windowStart: "2026-03-09T00:00:00.000Z",
+      },
+      ...(providerDedupeKey === undefined ? {} : { providerDedupeKey }),
+      resource: "steps",
+      resourceCategory: "timeseries",
+      sourceProviderSlug: "apple_health_kit",
+      windowEnd: "2026-04-08T00:04:00.000Z",
+      windowStart: "2026-03-09T00:00:00.000Z",
+    });
+
+    const parsed = parseHostedExecutionDeviceSyncDirtyStateResponse({
+      connectionId: "dsc_provider_keys",
+      dirtyRevision: "4",
+      dirtyResources: [
+        buildResource("junction-webhook:history-steps"),
+        buildResource(null),
+        buildResource(undefined),
+      ],
+      eventCount: "3",
+      latestDirtyAt: "2026-04-08T00:04:00.000Z",
+      processedRevision: "0",
+      provider: "junction",
+      resourceCategoryCounts: { timeseries: 3 },
+      sourceProviderCounts: { apple_health_kit: 3 },
+      userId: "member_provider_keys",
+      windowEnd: "2026-04-08T00:04:00.000Z",
+      windowStart: "2026-03-09T00:00:00.000Z",
+    });
+
+    expect(parsed?.dirtyResources[0]).toMatchObject({
+      providerDedupeKey: "junction-webhook:history-steps",
+    });
+    expect(parsed?.dirtyResources[1]).not.toHaveProperty("providerDedupeKey");
+    expect(parsed?.dirtyResources[2]).not.toHaveProperty("providerDedupeKey");
+    expect(() => parseHostedExecutionDeviceSyncDirtyStateResponse({
+      connectionId: "dsc_provider_keys",
+      dirtyRevision: "5",
+      dirtyResources: [{ ...buildResource(undefined), providerDedupeKey: 42 }],
+      eventCount: "1",
+      latestDirtyAt: "2026-04-08T00:04:00.000Z",
+      processedRevision: "0",
+      provider: "junction",
+      resourceCategoryCounts: { timeseries: 1 },
+      sourceProviderCounts: { apple_health_kit: 1 },
+      userId: "member_provider_keys",
+      windowEnd: "2026-04-08T00:04:00.000Z",
+      windowStart: "2026-03-09T00:00:00.000Z",
+    })).toThrow(/providerDedupeKey/u);
   });
 });
 
@@ -421,6 +491,22 @@ describe("serializeHostedExecutionDeviceSyncDirtyPayloadIdentity", () => {
 });
 
 describe("mergeHostedDeviceSyncConnectionMetadata", () => {
+  it("keeps unpublished reconcile proofs out of the accepted Web baseline during warm hydration", () => {
+    const hostedMetadata = { junctionReconcileProofV1: "previous-proof", otherProgress: "remote" };
+    const input = { hostedMetadata, localConnectionStateUnpublished: false };
+    expect(mergeHostedDeviceSyncConnectionMetadata({ ...input,
+      localMetadata: { junctionReconcileProofV1: "new-proof" },
+    })).toEqual({
+      metadata: { ...hostedMetadata, junctionReconcileProofV1: "new-proof" },
+      preservedLocalProgress: true,
+    });
+    expect(mergeHostedDeviceSyncConnectionMetadata({ ...input,
+      localMetadata: { junctionReconcileProofV1: "previous-proof" },
+    }).preservedLocalProgress).toBe(false);
+    expect(mergeHostedDeviceSyncConnectionMetadata({ ...input, localMetadata: undefined }).metadata)
+      .toEqual(hostedMetadata);
+  });
+
   it("preserves uncheckpointed local sweep scheduling but drops it when the epoch has no local state", () => {
     const localKey = "a".repeat(64);
     const hostedKey = "b".repeat(64);
@@ -3445,6 +3531,7 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
         {
           kind: "resource",
           payload: {
+            historicalPullPending: true,
             objectId: "",
             resource: "workout_stream",
             resourceCategory: "timeseries",
@@ -3458,6 +3545,7 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
     });
 
     expect(hint?.jobs?.[0]?.payload).toEqual({
+      historicalPullPending: true,
       resource: "workout_stream",
       resourceCategory: "timeseries",
       workoutStreamEmptyReplay: true,

@@ -31,6 +31,7 @@ import {
 import {
   type AssistantCodexModelProviderConfig,
   HOSTED_CHATGPT_OPENAI_CODEX_MODEL_PROVIDER_ID,
+  HOSTED_OPENAI_CODEX_MODEL_PROVIDER_ID,
   HOSTED_CUSTOM_INFERENCE_CODEX_MODEL_PROVIDER_ID,
   HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID,
   HOSTED_LOCAL_TEST_VENICE_CODEX_MODEL_PROVIDER_ID,
@@ -74,11 +75,12 @@ const DEFAULT_HOSTED_CODEX_APPROVAL_POLICY = "never";
 const DEFAULT_HOSTED_CODEX_SANDBOX = "danger-full-access";
 const HOSTED_CODEX_MULTI_AGENT_USAGE_HINT_TEXT = [
   "When the active route or skill contract permits delegation, proactively spawn a hosted child for genuinely bounded, self-contained background work whose result is not needed in the current reply, then reply without waiting.",
-  "Use the child to replace a later root pass, not duplicate work; skip tiny tasks whose assignment and readback cost exceeds doing them once in the root.",
+  "Use the child to replace a later root pass, not duplicate work; unless the user requests delegation, skip tiny tasks whose assignment and readback cost exceeds doing them once in the root.",
+  "For explicitly requested delegation needed to answer, use a bounded child and native wait_agent, then answer in the same turn. Keep independent onboarding saves nonblocking.",
   "Follow the active route or skill contract for the exact leaf assignment and completion proof.",
 ].join(" ");
 const HOSTED_CODEX_MULTI_AGENT_MODE_HINT_TEXT =
-  "Murph bounded background delegation mode is active; reply-critical work stays in the root.";
+  "Murph bounded delegation mode is active; the root owns the final answer and waits for requested child results when needed.";
 const HOSTED_CODEX_SUBAGENT_USAGE_HINT_TEXT = [
   "This hosted child is a one-shot leaf.",
   "Complete only the self-contained assignment and stop.",
@@ -100,6 +102,10 @@ const HOSTED_CODEX_PROVIDER_REQUEST_MAX_RETRIES = 4;
 // HTTPS. Repeating the full idle window here can outlive the enclosing hosted
 // attempt and make Codex's native transport fallback unreachable.
 const HOSTED_CODEX_PROVIDER_STREAM_MAX_RETRIES = 0;
+// Native Responses compaction shares this window with ordinary sampling and
+// can be silent while producing its replacement history. A 30-second window
+// can abort valid slow compactions. Keep retries owned by Codex
+// and retain the existing outer attempt/idle-maintenance wall-clock bounds.
 const HOSTED_CODEX_PROVIDER_STREAM_IDLE_TIMEOUT_MS = 90_000;
 const HOSTED_CODEX_NATIVE_MEMORY_CONFIG = {
   featureEnabled: false,
@@ -115,13 +121,15 @@ export const HOSTED_CODEX_OPERATOR_MEMORY_DIAGNOSTICS = {
   codexOperatorMemoryUseMemories:
     HOSTED_CODEX_NATIVE_MEMORY_CONFIG.useMemories,
 } as const;
-export const HOSTED_CODEX_PROVIDER_TRANSPORT_DIAGNOSTICS = {
-  codexProviderRequestMaxRetries: HOSTED_CODEX_PROVIDER_REQUEST_MAX_RETRIES,
-  codexProviderStreamIdleTimeoutMs:
-    HOSTED_CODEX_PROVIDER_STREAM_IDLE_TIMEOUT_MS,
-  codexProviderStreamMaxRetries: HOSTED_CODEX_PROVIDER_STREAM_MAX_RETRIES,
-  codexProviderTransportMode: "codex-native-provider-transport",
-} as const;
+export function hostedCodexProviderTransportDiagnostics(providerId: string) {
+  return {
+    codexProviderRequestMaxRetries: providerId === HOSTED_CUSTOM_INFERENCE_CODEX_MODEL_PROVIDER_ID
+      ? 1 : HOSTED_CODEX_PROVIDER_REQUEST_MAX_RETRIES,
+    codexProviderStreamIdleTimeoutMs: HOSTED_CODEX_PROVIDER_STREAM_IDLE_TIMEOUT_MS,
+    codexProviderStreamMaxRetries: HOSTED_CODEX_PROVIDER_STREAM_MAX_RETRIES,
+    codexProviderTransportMode: "codex-native-provider-transport",
+  } as const;
+}
 const HOSTED_CODEX_REJECTED_SEED_ENV_KEYS = [
   HOSTED_ASSISTANT_API_KEY_ENV,
   HOSTED_ASSISTANT_BASE_URL_ENV,
@@ -579,8 +587,7 @@ function buildHostedCodexProviderTomlLines(input: {
   const modelProviderId = input.chatGptAuth
     ? HOSTED_CHATGPT_OPENAI_CODEX_MODEL_PROVIDER_ID
     : input.provider.id;
-  const customInferenceProvider =
-    input.provider.id === HOSTED_CUSTOM_INFERENCE_CODEX_MODEL_PROVIDER_ID;
+  const transport = hostedCodexProviderTransportDiagnostics(modelProviderId);
   return [
     `[model_providers.${tomlQuotedKey(modelProviderId)}]`,
     `name = ${tomlString(input.provider.name)}`,
@@ -594,12 +601,10 @@ function buildHostedCodexProviderTomlLines(input: {
     ...(input.provider.supportsWebSockets
       ? ["supports_websockets = true"]
       : []),
-    `stream_idle_timeout_ms = ${HOSTED_CODEX_PROVIDER_STREAM_IDLE_TIMEOUT_MS}`,
+    `stream_idle_timeout_ms = ${transport.codexProviderStreamIdleTimeoutMs}`,
     `requires_openai_auth = ${input.chatGptAuth ? "true" : "false"}`,
-    `request_max_retries = ${
-      customInferenceProvider ? 1 : HOSTED_CODEX_PROVIDER_REQUEST_MAX_RETRIES
-    }`,
-    `stream_max_retries = ${HOSTED_CODEX_PROVIDER_STREAM_MAX_RETRIES}`,
+    `request_max_retries = ${transport.codexProviderRequestMaxRetries}`,
+    `stream_max_retries = ${transport.codexProviderStreamMaxRetries}`,
     "",
   ];
 }
@@ -625,6 +630,9 @@ export function buildHostedCodexConfigToml(input: {
   const operatorModelProvider = resolveHostedOperatorModelProvider(modelProviderId);
   const providerConfigLines = [
     ...buildHostedCodexProviderTomlLines(input),
+    ...(input.chatGptAuth ? buildHostedCodexProviderTomlLines({
+      provider: { ...OPENAI_CODEX_MODEL_PROVIDER_CONFIG, id: HOSTED_OPENAI_CODEX_MODEL_PROVIDER_ID },
+    }) : []),
     ...(operatorModelProvider === modelProviderId ? [] : buildHostedCodexProviderTomlLines({
       provider: {
         ...OPENAI_CODEX_MODEL_PROVIDER_CONFIG,

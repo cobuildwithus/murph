@@ -27,6 +27,21 @@ export interface MurphOnboardingFollowupAutomationDefinition {
   title: string
 }
 
+export const MURPH_ONBOARDING_EARLY_STALL_AUTOMATION = {
+  slug: 'onboarding-early-stall-check-in',
+  title: 'Onboarding early-stall check-in',
+  summary: 'One low-pressure opportunity to resume a stalled opening conversation.',
+  delayMs: 15 * 60_000,
+  windowMs: 30 * 60_000,
+  tags: ['assistant', 'scheduled', 'murph-managed', 'onboarding'],
+  instructions: [
+    'This is the single early onboarding stall check-in. Read the current onboarding state and recent conversation before deciding. If either is unavailable or unclear, return skip.',
+    'Send only if onboarding is still open, the latest message is a Murph onboarding question, that question has been unanswered for at least ten minutes, and the member has not asked to pause, continue later, or stop follow-ups. Otherwise return skip.',
+    'If eligible, send one brief, natural, pressure-free check-in that you are still around, they can continue anytime, and you can change approach. Do not repeat the unanswered question or introduce another setup question. Do not imply urgency or mention scheduling or internal state.',
+    'This opportunity is consumed whether you send or skip. Never create, re-enable, extend, or reschedule it. Do not mutate onboarding state. Later-day onboarding recovery is owned separately.',
+  ].join('\n\n'),
+} as const
+
 export const MURPH_ONBOARDING_FOLLOWUP_AUTOMATION =
   {
     slug: 'finish-onboarding-followup',

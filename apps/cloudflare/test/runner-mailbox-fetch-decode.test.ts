@@ -4,22 +4,28 @@ import { buildHostedSecureBoxAad, sealHostedSecureBox, serializeHostedSecureBoxE
 import { buildHostedMailboxPayloadScope, buildHostedMailboxPayloadSecureBoxAad, HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA } from "@murphai/hosted-execution/runtime-control";
 import { parseHostedMailboxFetchResponse } from "@murphai/hosted-execution/parsers";
 
-const mocks = vi.hoisted(() => ({ forward: vi.fn(), fence: vi.fn(), crypto: vi.fn() }));
+const mocks = vi.hoisted(() => ({ forward: vi.fn(), crypto: vi.fn(),
+  suppliedCrypto: vi.fn(), cached: vi.fn(), log: vi.fn() }));
+vi.mock("@murphai/hosted-execution", async (original) => ({
+  ...await original<typeof import("@murphai/hosted-execution")>(),
+  emitHostedExecutionStructuredLog: mocks.log,
+}));
+vi.mock("../src/hosted-crypto/runtime-user-crypto-context.ts", async (original) => ({
+  ...await original<typeof import("../src/hosted-crypto/runtime-user-crypto-context.ts")>(),
+  requireHostedUserCryptoContextFromResponse: mocks.suppliedCrypto,
+  hasCachedHostedUserCryptoContextEnvelope: mocks.cached,
+}));
 vi.mock("../src/web-control-plane.ts", async (original) => ({
   ...await original<typeof import("../src/web-control-plane.ts")>(),
   fetchHostedExecutionWebControlPlaneResponse: mocks.forward,
 }));
-vi.mock("../src/runner-outbound/write-fence.ts", async (original) => ({
-  ...await original<typeof import("../src/runner-outbound/write-fence.ts")>(),
-  requireRunnerRuntimeWriteFence: mocks.fence,
-}));
+
 vi.mock("../src/runner-outbound/shared.ts", async (original) => ({
   ...await original<typeof import("../src/runner-outbound/shared.ts")>(),
   resolveRunnerOutboundUserCryptoContext: mocks.crypto,
 }));
 import { HOSTED_RUNNER_WEB_CONTROL_ROUTES } from "../src/runner-outbound/shared-web-control-policy.ts";
 import { handleRunnerWebControlRequest } from "../src/runner-outbound/web-control.ts";
-import { RunnerRuntimeWriteFenceError } from "../src/runner-outbound/write-fence.ts";
 import { createHostedWebMailboxPort } from "../src/runtime-platform/mailbox-port.ts";
 import { createHostedExecutionTestEnv } from "./hosted-execution-fixtures.ts";
 import { readHostedExecutionEnvironment } from "../src/env.ts";
@@ -55,6 +61,11 @@ async function mailboxFixture(index = 1) {
     consumedSeqByLane: [{ lane: "conversation", consumedSeq: "0" }] };
 }
 async function handle(request: Request) {
+  const headers = new Headers(request.headers);
+  headers.set("x-hosted-runtime-attempt-id", "synthetic-attempt");
+  headers.set("x-hosted-runtime-lease-generation", "1");
+  headers.set("x-hosted-runtime-workspace-version", "1");
+  request = new Request(request, { headers });
   const env = {
     ...createHostedExecutionTestEnv(),
     BUNDLES: { get: async () => null, put: async () => undefined },
@@ -71,10 +82,11 @@ function request(optIn = true) {
 describe("Worker mailbox fetch/decode composition", () => {
   beforeEach(() => {
     vi.resetAllMocks();
-    mocks.fence.mockResolvedValue({ attemptId: "synthetic-attempt", generation: "1", workspaceVersion: "1" });
     mocks.crypto.mockResolvedValue({ resolveKeyById: async (id: string) => id === rootKeyId ? rootKey : null });
+    mocks.suppliedCrypto.mockResolvedValue({ resolveKeyById: async (id: string) => id === rootKeyId ? rootKey : null });
+    mocks.cached.mockReturnValue(false);
   });
-  it("returns a parsed wake through one container request, one Web fetch and one fence check", async () => {
+  it("returns a parsed wake through one container request, one Web fetch carrying canonical authority", async () => {
     const mailbox = await mailboxFixture();
     mocks.forward.mockImplementation(async () => Response.json(mailbox));
     const fetchImpl = vi.fn<typeof fetch>(async (url, init) => handle(new Request(url, init)));
@@ -85,7 +97,9 @@ describe("Worker mailbox fetch/decode composition", () => {
     expect(fetched.items[0]?.payloadInlineCiphertext).toBe(mailbox.items[0]!.payloadInlineCiphertext);
     expect(fetchImpl).toHaveBeenCalledTimes(1);
     expect(mocks.forward).toHaveBeenCalledTimes(1);
-    expect(mocks.fence).toHaveBeenCalledTimes(1);
+    const headers = new Headers(mocks.forward.mock.calls[0]![0].headers);
+    expect(headers.get("x-hosted-runtime-attempt-id")).toBe("synthetic-attempt");
+    expect(headers.get("x-hosted-runtime-lease-generation")).toBe("1");
     // Canonical Web parsing never accepts the ephemeral plaintext field.
     expect(parseHostedMailboxFetchResponse(fetched).items[0]).not.toHaveProperty("decodedWake");
   });
@@ -104,11 +118,76 @@ describe("Worker mailbox fetch/decode composition", () => {
     })) });
     expect(mocks.crypto).toHaveBeenCalledTimes(1);
   });
+  it("logs finite Web phases and Worker decoding on the same mailbox response", async () => {
+    const mailbox = await mailboxFixture();
+    mocks.forward.mockImplementation(async (input) => {
+      Object.assign(input.timing, { prepareMs: 4, fetchHeadersMs: 750 });
+      return Response.json(mailbox, { headers: {
+      "server-timing": "murph_mailbox_total;dur=640, murph_mailbox_auth;dur=120, murph_mailbox_projection;dur=400, private_field;dur=99",
+      "x-vercel-id": "sfo1::iad1::synthetic-private-request",
+    } });
+    });
+    expect((await handle(request())).status).toBe(200);
+    const entry = mocks.log.mock.calls.map(([entry]) => entry).find((entry) =>
+      entry.message === "Hosted runner web-control response received.");
+    expect(entry.details).toMatchObject({ mailboxWebTotalMs: 640, mailboxWebAuthMs: 120,
+      mailboxWebProjectionMs: 400, mailboxWorkerDecodedCount: 1, mailboxWorkerDecodeFailedCount: 0,
+      mailboxWorkerCallbackPrepareMs: 4, mailboxWorkerFetchHeadersMs: 750, mailboxVercelRegions: "sfo1::iad1" });
+    for (const field of ["mailboxWorkerPrepareMs", "mailboxWorkerWebFetchMs", "mailboxWorkerResponseBodyMs",
+      "mailboxWorkerCryptoContextMs", "mailboxWorkerPayloadDecryptMs", "mailboxWorkerSerializeMs", "mailboxWorkerTotalMs"]) {
+      expect(entry.details[field]).toBeGreaterThanOrEqual(0);
+    }
+    expect(JSON.stringify(entry)).not.toContain("private_field");
+    expect(JSON.stringify(entry)).not.toContain("Hello");
+    expect(JSON.stringify(entry)).not.toContain("synthetic-private-request");
+    expect(mocks.forward).toHaveBeenCalledTimes(1);
+    expect(mocks.crypto).toHaveBeenCalledTimes(1);
+  });
+  it.each([2, 100])("decodes %i items with one supplied ingress context and no context RPC", async (count) => {
+    const mailbox = await mailboxFixture();
+    for (let index = 2; index <= count; index += 1) {
+      mailbox.items.push((await mailboxFixture(index)).items[0]!);
+    }
+    const ingressCryptoContext = { syntheticSignedContext: true };
+    mocks.forward.mockResolvedValue(Response.json({ ...mailbox, ingressCryptoContext }));
+    const fetchImpl = vi.fn<typeof fetch>(async (url, init) => handle(new Request(url, init)));
+    const port = createHostedWebMailboxPort({ boundUserId: wake.userId, fetchImpl,
+      timeoutMs: 1000, transport: { mode: "proxy" } });
+    const fetched = await port.fetch(requestBody);
+    expect(fetched.items.every((item) => item.decodedWake?.kind === "conversation.message")).toBe(true);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(mocks.forward).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(mocks.forward.mock.calls[0]![0].body).includeIngressCryptoContext).toBe(true);
+    expect(mocks.suppliedCrypto).toHaveBeenCalledTimes(1);
+    expect(mocks.suppliedCrypto).toHaveBeenCalledWith(expect.objectContaining({ context: ingressCryptoContext,
+      domain: "ingress", userId: wake.userId }));
+    expect(mocks.crypto).not.toHaveBeenCalled();
+    expect(fetched).not.toHaveProperty("ingressCryptoContext");
+  });
+  it("omits the context request when the encrypted-envelope cache is warm", async () => {
+    mocks.cached.mockReturnValue(true);
+    mocks.forward.mockResolvedValue(Response.json(await mailboxFixture()));
+    await expect((await handle(request())).json()).resolves.toMatchObject({ items: [{ decodedWake: wake }] });
+    expect(JSON.parse(mocks.forward.mock.calls[0]![0].body).includeIngressCryptoContext).toBe(false);
+    expect(mocks.suppliedCrypto).not.toHaveBeenCalled();
+  });
+  it("attempts a rejected supplied context once and leaves items for lazy retry", async () => {
+    const mailbox = await mailboxFixture();
+    mailbox.items.push((await mailboxFixture(2)).items[0]!);
+    mocks.forward.mockResolvedValue(Response.json({ ...mailbox, ingressCryptoContext: {} }));
+    mocks.suppliedCrypto.mockRejectedValue(new Error("Invalid envelope signature"));
+    const response = await handle(request());
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual(parseHostedMailboxFetchResponse(mailbox));
+    expect(mocks.suppliedCrypto).toHaveBeenCalledTimes(1);
+    expect(mocks.crypto).not.toHaveBeenCalled();
+  });
   it("leaves old containers on the original fetch contract", async () => {
     const mailbox = await mailboxFixture();
     mocks.forward.mockResolvedValue(Response.json(mailbox));
     expect(await (await handle(request(false))).json()).toEqual(mailbox);
     expect(mocks.crypto).not.toHaveBeenCalled();
+    expect(JSON.parse(mocks.forward.mock.calls[0]![0].body).includeIngressCryptoContext).toBe(false);
   });
   it.each(["consumed", "floor", "sidecar", "corrupt"])("preserves lazy import for %s items", async (kind) => {
     const mailbox = await mailboxFixture();
@@ -130,13 +209,12 @@ describe("Worker mailbox fetch/decode composition", () => {
     HOSTED_RUNNER_WEB_CONTROL_ROUTES.vaultShareDeliver,
   ])("rejects GET for POST-only $operation before authority or forwarding", async (route) => {
     expect((await handle(new Request(`http://web-control.worker${route.path}`, { method: "GET" }))).status).toBe(404);
-    expect(mocks.fence).not.toHaveBeenCalled();
     expect(mocks.forward).not.toHaveBeenCalled();
   });
-  it("rejects a stale write fence before Web or crypto work", async () => {
-    mocks.fence.mockRejectedValue(new RunnerRuntimeWriteFenceError());
+  it("returns a canonical stale-fence rejection before crypto work", async () => {
+    mocks.forward.mockResolvedValue(Response.json({ error: "Unauthorized" }, { status: 401 }));
     expect((await handle(request())).status).toBe(401);
-    expect(mocks.forward).not.toHaveBeenCalled();
+    expect(mocks.forward).toHaveBeenCalledOnce();
     expect(mocks.crypto).not.toHaveBeenCalled();
   });
   it("rejects a wrong-user mailbox before decrypting", async () => {

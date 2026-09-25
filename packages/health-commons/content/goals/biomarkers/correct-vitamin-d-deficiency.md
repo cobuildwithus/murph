@@ -3,8 +3,8 @@ schemaVersion: murph.commons.page.v1
 entityType: goal_template
 key: goal_template:correct-vitamin-d-deficiency
 slug: correct-vitamin-d-deficiency
-title: Correct My Vitamin D Deficiency
-summary: Restore confirmed vitamin D deficiency with an appropriate dose, adequate calcium and nutrition, and a plan for the underlying cause.
+title: Understand My Vitamin D Deficiency
+summary: Understand vitamin D deficiency, test results, and questions about supplementation and follow-up.
 status: field-testing
 quality: usable
 aliases:
@@ -17,7 +17,7 @@ categories:
 goal:
   category: biomarkers
   outcomeKind: biomarker
-  goalPhrase: correct my vitamin D deficiency
+  goalPhrase: understand my vitamin D deficiency
   successSignals:
     - id: vitamin_d_status
       kind: biomarker
@@ -34,7 +34,7 @@ goal:
     kind: care_support
     ownerSkillIds:
       - micronutrients-supplements
-  startPrompt: Hey Murph, help me correct my vitamin D deficiency.
+  startPrompt: Hey Murph, help me understand my vitamin D deficiency.
   indexable: true
 safety:
   cautionLevel: moderate
@@ -91,4 +91,4 @@ Nausea, vomiting, constipation, confusion, marked thirst, or frequent urination 
 
 ## Related goals
 
-[Build Stronger Bones](/goals/build-stronger-bones) · [Lower My Risk of Fractures](/goals/reduce-fracture-risk)
+[Build Stronger Bones](/goals/build-stronger-bones) · [Understand My Fracture Risk](/goals/reduce-fracture-risk)

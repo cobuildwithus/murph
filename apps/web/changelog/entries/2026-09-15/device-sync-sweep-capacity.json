@@ -1,0 +1,19 @@
+{
+  "publishedOn": "2026-09-15",
+  "order": 100,
+  "item": {
+    "id": "device-sync-sweep-capacity",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Scheduled device sync handles larger batches",
+    "summary": "When many connected devices are due for a sync check, more can start in the same scheduled batch.",
+    "details": "Device permissions and retry behavior stay the same. Checks still run in limited groups to control background load.",
+    "relevanceTags": [
+      "devices",
+      "sync"
+    ],
+    "sourcePullRequests": [
+      3471
+    ]
+  }
+}

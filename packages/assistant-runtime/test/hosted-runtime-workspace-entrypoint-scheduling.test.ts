@@ -158,7 +158,7 @@ describe("hosted workspace runtime entrypoint", () => {
       artifactBytesByHash.set(restoredWorkspace.hash, restoredWorkspace.bytes);
       await runHostedWorkspaceRuntimeJobInProcess(
         createWorkspaceRuntimeJobInput({
-          request: { idleCheckpointDelayMs: 1, processingMode: "default" },
+          request: { runnerIdleTtlMs: 1, processingMode: "default" },
           resolvedConfig: createDeviceSyncResolvedConfig(),
         }),
         {
@@ -216,7 +216,7 @@ describe("hosted workspace runtime entrypoint", () => {
     let assistantPasses = 0;
     try {
       await runHostedWorkspaceRuntimeJobInProcess(
-        createWorkspaceRuntimeJobInput({ request: { idleCheckpointDelayMs: 1 } }),
+        createWorkspaceRuntimeJobInput({ request: { runnerIdleTtlMs: 1 } }),
         {
           vaultRoot,
           platform: createPlatform({
@@ -263,7 +263,7 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const imported: string[] = [];
     const importObserved = createDeferred<void>();
-    const idleCheckpointDelayMs = 180_000;
+    const runnerIdleTtlMs = 180_000;
 
     vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
     try {
@@ -275,7 +275,7 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
               budget: {
                 maxMailboxItems: 1,
               },
-              idleCheckpointDelayMs,
+              runnerIdleTtlMs,
             },
           }),
           {
@@ -337,7 +337,7 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
         "workspace.read",
         "mailbox.fetch",
       ]);
-      await vi.advanceTimersByTimeAsync(idleCheckpointDelayMs - 1_000);
+      await vi.advanceTimersByTimeAsync(runnerIdleTtlMs - 1_000);
       assert.equal(checkpointRequests.length, 0);
       await vi.advanceTimersByTimeAsync(1_000);
       const result = await resultPromise;
@@ -375,6 +375,65 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
         },
         status: "budget_exhausted",
       });
+    } finally {
+      vi.useRealTimers();
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test.each([
+    { limit: 1, decline: false, expectedPairs: 0 },
+    { limit: 2, decline: false, expectedPairs: 1 },
+    { limit: 2, decline: true, expectedPairs: 1 },
+  ])("reserves/refunds audio pair slots through the workspace owner: $limit/$decline", async ({ limit, decline, expectedPairs }) => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-audio-budget-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const imported: string[] = [];
+    let pairCalls = 0;
+    const items = [1, 2, 3].map((ordinal) => createMailboxItem({
+      id: `mailbox_audio_budget_${ordinal}`, laneSeq: String(ordinal), causalSeq: String(ordinal),
+    }));
+    const importItem: HostedWorkspaceRuntimeJobOptions["importItem"] = Object.assign(
+      async (item: Parameters<HostedWorkspaceRuntimeJobOptions["importItem"]>[0]) => {
+        imported.push(item.item.id);
+        return { status: "imported" as const };
+      },
+      {
+        importAudioPair: async (
+          pair: readonly [Parameters<HostedWorkspaceRuntimeJobOptions["importItem"]>[0], Parameters<HostedWorkspaceRuntimeJobOptions["importItem"]>[0]],
+          context?: Parameters<HostedWorkspaceRuntimeJobOptions["importItem"]>[1],
+        ) => {
+          pairCalls += 1;
+          assert.ok(context); // Both wrappers must forward the runtime import context.
+          if (decline) return null;
+          imported.push(...pair.map((item) => item.item.id));
+          return [{ status: "imported" }, { status: "imported" }] as const;
+        },
+      },
+    );
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(TEST_NOW));
+    try {
+      const result = await withRealTimeout(runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({ request: { budget: { maxMailboxItems: limit }, runnerIdleTtlMs: 1 } }),
+        {
+          vaultRoot, importItem,
+          async createCheckpointSnapshot() {
+            return { snapshotRef: createSnapshotFixtureRef({ hash: "b".repeat(64), size: 512 }) };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({ events, items }),
+            workspacePort: createWorkspacePort({ checkpointRequests, events, workspace: createWorkspaceState({ version: "0" }) }),
+          }),
+          async runAssistantPhase() { return { progressed: false, redactedStatus: { hostedAssistantProgressed: false } }; },
+        },
+      ), 15_000, () => events.join(","));
+      assert.equal(pairCalls, expectedPairs);
+      assert.deepEqual(imported, items.slice(0, limit).map((item) => item.id));
+      assert.equal(result.status, "budget_exhausted");
+      assert.equal(result.redactedStatus?.hostedMailboxConversationImportedSeq, String(limit));
+      assert.equal(result.redactedStatus?.hostedMailboxImportedCount, limit);
     } finally {
       vi.useRealTimers();
       await removeTempRoot(vaultRoot);
@@ -490,7 +549,7 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
     const imported: string[] = [];
     const dueAssistantWakeAt = new Date(Date.parse(TEST_NOW) - 1_000).toISOString();
     const assistantObserved = createDeferred<void>();
-    const idleCheckpointDelayMs = 180_000;
+    const runnerIdleTtlMs = 180_000;
     let assistantPhaseCalls = 0;
 
     vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
@@ -503,7 +562,7 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
               budget: {
                 maxMailboxItems: 1,
               },
-              idleCheckpointDelayMs,
+              runnerIdleTtlMs,
             },
           }),
           {
@@ -573,7 +632,7 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
         "mailbox.fetch",
         "assistant:1",
       ]);
-      await vi.advanceTimersByTimeAsync(idleCheckpointDelayMs - 1_000);
+      await vi.advanceTimersByTimeAsync(runnerIdleTtlMs - 1_000);
       assert.equal(checkpointRequests.length, 0);
       await vi.advanceTimersByTimeAsync(1_000);
       const result = await resultPromise;
@@ -738,7 +797,7 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
 
   test("binds provider batches to stored input ids and conversation activity", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
-    const conversationActivity: string[] = [];
+    const conversationActivity: number[] = [];
 
     try {
       await runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput(), {
@@ -791,7 +850,7 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
             ],
           });
           assert.equal(input.currentAssistantInputId?.(), null);
-          assert.deepEqual(conversationActivity, ["uncertain"]);
+          assert.deepEqual(conversationActivity, []);
           await invalidRelease?.();
           const release = await input.beforeProviderAcceptedInputs?.({
             turnId: "turn_hosted_runtime_test",
@@ -807,7 +866,7 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
           assert.equal(typeof release, "function");
           await release?.();
           assert.equal(input.currentAssistantInputId?.(), null);
-          assert.deepEqual(conversationActivity, ["uncertain", "observed"]);
+          assert.deepEqual(conversationActivity, [Date.parse(TEST_NOW)]);
 
           const systemInputId = await stageAssistantInputEventForMailboxItem({
             causalSeq: "43",
@@ -834,7 +893,7 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
             ],
           });
           await genericRelease?.();
-          assert.deepEqual(conversationActivity, ["uncertain", "observed"]);
+          assert.deepEqual(conversationActivity, [Date.parse(TEST_NOW)]);
           return { progressed: false };
         },
         vaultRoot,
@@ -876,7 +935,7 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
           }),
           request: {
             attemptId: "attempt_provider_handoff",
-            idleCheckpointDelayMs: 180_000,
+            runnerIdleTtlMs: 180_000,
             leaseGeneration: "1",
             userId: TEST_USER_ID,
             workspaceVersion: "0",
@@ -906,12 +965,12 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
                 return {
                   action: "read",
                   result: {
-                    availableModels: ["gpt-5.6-luna", "gpt-5.6-terra"],
+                    availableModels: ["gpt-5.6-luna", "gpt-6-sol"],
                     availableProviders: ["openai", "venice"],
                     availableReasoningEfforts: ["low", "medium", "high", "xhigh"],
                     configurationAvailable: true,
                     dormantSolPreference: false,
-                    model: "gpt-5.6-terra",
+                    model: "gpt-6-sol",
                     provider: "venice",
                     reasoningEffort: "low",
                     solAvailable: false,
@@ -1006,7 +1065,7 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
           }),
           request: {
             attemptId: "attempt_provider_authority_unavailable",
-            idleCheckpointDelayMs: 180_000,
+            runnerIdleTtlMs: 180_000,
             leaseGeneration: "1",
             userId: TEST_USER_ID,
             workspaceVersion: "0",
@@ -1099,7 +1158,7 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
           createWorkspaceRuntimeJobInput({
             request: {
               attemptId: "attempt_detached_provider_handoff",
-              idleCheckpointDelayMs: 180_000,
+              runnerIdleTtlMs: 180_000,
               leaseGeneration: "1",
               userId: TEST_USER_ID,
               workspaceVersion: "0",
@@ -1149,12 +1208,12 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
                     action: "update",
                     result: {
                       appliesAt: "next_turn",
-                      availableModels: ["gpt-5.6-luna", "gpt-5.6-terra"],
+                      availableModels: ["gpt-5.6-luna", "gpt-6-sol"],
                       availableProviders: ["openai", "venice"],
                       availableReasoningEfforts: ["low", "medium", "high", "xhigh"],
                       configurationAvailable: true,
                       dormantSolPreference: false,
-                      model: "gpt-5.6-terra",
+                      model: "gpt-6-sol",
                       provider: "venice",
                       reasoningEffort: "low",
                       requiredPlan: null,
@@ -1343,7 +1402,7 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
           const baseHash = sha256HostedBundleHex(baseBundle);
           const snapshotRef = createSnapshotFixtureRef({ hash: baseHash, size: baseBundle.byteLength });
           const result = await runHostedWorkspaceRuntimeJobInProcess(
-            createWorkspaceRuntimeJobInput({ request: { idleCheckpointDelayMs: 1, processingMode } }),
+            createWorkspaceRuntimeJobInput({ request: { runnerIdleTtlMs: 1, processingMode } }),
             {
               async createCheckpointSnapshot() {
                 return { snapshotRef: createSnapshotFixtureRef({
@@ -1414,7 +1473,7 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
       const result = await runHostedWorkspaceRuntimeJobInProcess(
         createWorkspaceRuntimeJobInput({
           request: {
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             workspaceVersion: "0",
           },
         }),
@@ -1725,7 +1784,7 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_stale_supersede",
-            idleCheckpointDelayMs: 25,
+            runnerIdleTtlMs: 25,
             leaseGeneration: "3",
             userId: TEST_USER_ID,
             workspaceVersion: "0",
@@ -2002,7 +2061,7 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
     const artifactBytesByHash = new Map<string, Uint8Array>();
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
-    const idleCheckpointDelayMs = 180_000;
+    const runnerIdleTtlMs = 180_000;
     const olderDueWakeAt = new Date(Date.parse(TEST_NOW) - 60_000).toISOString();
     const reconciliationWakeAt = TEST_NOW;
     const reminderWakeAt = new Date(
@@ -2093,7 +2152,7 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_assistant_carry_mask",
-            idleCheckpointDelayMs,
+            runnerIdleTtlMs,
             leaseGeneration: "3",
             userId: TEST_USER_ID,
             workspaceVersion: "0",
@@ -2528,7 +2587,7 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
       }
       await new Promise((resolve) => REAL_SET_TIMEOUT(resolve, 0));
       await waitForFakeTimerScheduled(() => events.join(","));
-      await vi.advanceTimersByTimeAsync(idleCheckpointDelayMs);
+      await vi.advanceTimersByTimeAsync(runnerIdleTtlMs);
       await withRealTimeout(olderWakePersisted.promise, 15_000, () => events.join(","));
       if (checkpointTrustedCompletionRetry) {
         await withRealTimeout(
@@ -2550,7 +2609,7 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
           false,
           events.join(","),
         );
-        await vi.advanceTimersByTimeAsync(idleCheckpointDelayMs - 1);
+        await vi.advanceTimersByTimeAsync(runnerIdleTtlMs - 1);
         assert.equal(
           events.some((event) => event.startsWith("snapshot:2:")),
           false,
@@ -2622,7 +2681,7 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
         await new Promise((resolve) => REAL_SET_TIMEOUT(resolve, 0));
         await waitForFakeTimerScheduled(() => events.join(","));
 
-        await vi.advanceTimersByTimeAsync(idleCheckpointDelayMs - 1);
+        await vi.advanceTimersByTimeAsync(runnerIdleTtlMs - 1);
         assert.equal(
           events.some((event) => event.startsWith("snapshot:2:")),
           false,
@@ -2644,7 +2703,7 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
           false,
           events.join(","),
         );
-        await vi.advanceTimersByTimeAsync(idleCheckpointDelayMs - 1);
+        await vi.advanceTimersByTimeAsync(runnerIdleTtlMs - 1);
         assert.equal(
           events.some((event) => event.startsWith("snapshot:2:")),
           false,
@@ -2666,7 +2725,7 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
         assert.equal(
           events[secondSnapshotIndex],
           `snapshot:2:idle_shutdown:${
-            Date.parse(TEST_NOW) + 2 * idleCheckpointDelayMs
+            Date.parse(TEST_NOW) + 2 * runnerIdleTtlMs
           }`,
         );
         assert.ok(
@@ -2705,7 +2764,7 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
         await new Promise((resolve) => REAL_SET_TIMEOUT(resolve, 0));
         await waitForFakeTimerScheduled(() => events.join(","));
 
-        await vi.advanceTimersByTimeAsync(idleCheckpointDelayMs - 1);
+        await vi.advanceTimersByTimeAsync(runnerIdleTtlMs - 1);
         assert.equal(
           events.some((event) => event.startsWith("snapshot:2:")),
           false,
@@ -2780,9 +2839,9 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
           events[secondSnapshotIndex],
           `snapshot:2:idle_shutdown:${
             Date.parse(TEST_NOW)
-            + idleCheckpointDelayMs
+            + runnerIdleTtlMs
             + 1_000
-            + idleCheckpointDelayMs
+            + runnerIdleTtlMs
           }`,
         );
         return;
@@ -2791,7 +2850,7 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
         assert.equal(
           events[secondSnapshotIndex],
           `snapshot:2:idle_shutdown:${
-            Date.parse(TEST_NOW) + 2 * idleCheckpointDelayMs
+            Date.parse(TEST_NOW) + 2 * runnerIdleTtlMs
           }`,
         );
         assert.ok(
@@ -2812,7 +2871,7 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
       if (!checkpointConversation) {
         assert.equal(
           events[secondSnapshotIndex],
-          `snapshot:2:idle_shutdown:${Date.parse(TEST_NOW) + idleCheckpointDelayMs}`,
+          `snapshot:2:idle_shutdown:${Date.parse(TEST_NOW) + runnerIdleTtlMs}`,
         );
         const reconciliationAssistantIndex = events.findIndex((event) =>
           event.includes(`:${reconciliationWakeAt}:`)
@@ -2855,7 +2914,7 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
       assert.equal(
         events[secondSnapshotIndex],
         `snapshot:2:idle_shutdown:${
-          Date.parse(TEST_NOW) + idleCheckpointDelayMs + 1_000 + idleCheckpointDelayMs
+          Date.parse(TEST_NOW) + runnerIdleTtlMs + 1_000 + runnerIdleTtlMs
         }`,
       );
       assert.ok(
@@ -2906,7 +2965,7 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_stale_device_wake_preserved",
-            idleCheckpointDelayMs: 25,
+            runnerIdleTtlMs: 25,
             leaseGeneration: "3",
             userId: TEST_USER_ID,
             workspaceVersion: "0",
@@ -3071,9 +3130,12 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
       expectedWorkspaceVersion: "1",
       label: "post-checkpoint with earlier future assistant work",
     },
-  ])(
-    "preserves continuation priority in the $label path when forced browser-vault refresh maintenance times out",
-    async ({ assistantWakeAt, checkpointed, expectedWorkspaceVersion, label }) => {
+  ].flatMap((scenario) => [false, true].map((withSourceReadTiming) => ({
+    ...scenario,
+    withSourceReadTiming,
+  }))))(
+    "preserves continuation priority in the $label path when forced browser-vault refresh maintenance times out (source timing: $withSourceReadTiming)",
+    async ({ assistantWakeAt, checkpointed, expectedWorkspaceVersion, label, withSourceReadTiming }) => {
       const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
       const attemptId = `attempt_synthetic_browser_vault_marker_force_${label}`;
       const consoleInfo = vi.spyOn(console, "info").mockImplementation(() => undefined);
@@ -3083,8 +3145,12 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
       const previousStdIoLogSetting = process.env.MURPH_HOSTED_EXECUTION_STDIO_LOGS;
       const retryAt = new Date(Date.parse(TEST_NOW) + 60_000).toISOString();
 
+      const sourceReadAtDeadline = withSourceReadTiming
+        ? { step: "read_model_construction" as const, elapsedMs: 11_000 }
+        : undefined;
       mocks.refreshHostedBrowserVaultReplicaFromRuntime.mockClear();
       mocks.refreshHostedBrowserVaultReplicaFromRuntime.mockResolvedValueOnce({
+        ...(sourceReadAtDeadline ? { sourceReadAtDeadline } : {}),
         attempt: "initial",
         configuredTimeoutMs: 30_000,
         currentStepElapsedMs: 12_000,
@@ -3179,6 +3245,10 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
           browserVaultRefreshConfiguredTimeoutMs: 30_000,
           browserVaultRefreshCurrentStepElapsedMs: 12_000,
           browserVaultRefreshElapsedMs: 30_000,
+          ...(sourceReadAtDeadline ? {
+            browserVaultRefreshSourceReadStep: "read_model_construction",
+            browserVaultRefreshSourceReadStepElapsedMs: 11_000,
+          } : {}),
           browserVaultRefreshStage: "replica_write",
           browserVaultRefreshStatus: "deferred_timeout",
           browserVaultRefreshStep: "replica_write",
@@ -3238,7 +3308,7 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_browser_refresh_browser_only_wake",
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             workspaceVersion: "0",
           },
         }),
@@ -3381,7 +3451,7 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
       const result = await runHostedWorkspaceRuntimeJobInProcess(
         createWorkspaceRuntimeJobInput({
           request: {
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             workspaceVersion: "0",
           },
           resolvedConfig: createDeviceSyncResolvedConfig(),

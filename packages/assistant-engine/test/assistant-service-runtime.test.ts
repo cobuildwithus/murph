@@ -137,6 +137,7 @@ import {
 } from "../src/assistant/delivery-service.ts";
 import {
   type AssistantGeneratedImageCapturePersistence,
+  type AssistantHostedExecutionContext,
   normalizeAssistantExecutionContext,
   resolveAssistantExecutionDefaultTarget,
   resolveAssistantExecutionOperatorDefaults,
@@ -3646,6 +3647,132 @@ describe("assistant delivery orchestration seam", () => {
 });
 
 describe("assistant execution context normalization", () => {
+  it("keeps absent contexts and absent optional fields distinct", () => {
+    for (const input of [undefined, null, { hosted: null }]) {
+      expect(normalizeAssistantExecutionContext(input)).toEqual({ hosted: null });
+    }
+    const onTypingAccepted = vi.fn();
+    expect(normalizeAssistantExecutionContext({
+      hosted: {
+        memberId: " member-synthetic ",
+        userEnvKeys: [" SYNTHETIC_KEY ", "", "SYNTHETIC_KEY"],
+        actionApprovalPort: null,
+        deviceTool: undefined,
+        dynamicContextPrompts: ["", "  "],
+        channelTypingDependencies: { onTypingAccepted },
+        progressDeliveryDependencies: { signal: new AbortController().signal },
+        releaseSha: "  ",
+        runtimeName: null,
+      },
+    })).toEqual({
+      hosted: {
+        memberId: "member-synthetic",
+        userEnvKeys: ["SYNTHETIC_KEY", "SYNTHETIC_KEY"],
+      },
+    });
+    expect(onTypingAccepted).not.toHaveBeenCalled();
+  });
+
+  it("preserves accessor order, field order, and bound versus forwarded helpers", async () => {
+    const reads: string[] = [];
+    const receivers: unknown[] = [];
+    const request = async function (this: unknown) {
+      receivers.push(this);
+      return {
+        action: "list_accounts" as const,
+        accounts: [],
+        provider: null,
+        sourceProvider: null,
+      };
+    };
+    const deviceTool = {
+      get request() {
+        reads.push("device.request");
+        return request;
+      },
+    };
+    const assertTurnCommitAuthority = async function (this: unknown) {
+      receivers.push(this);
+    };
+    const currentAssistantInputId = () => "input-synthetic";
+    const recordUsage = async () => {};
+    const launcher = { launch: () => "started" as const };
+    const hosted: AssistantHostedExecutionContext = {
+      get memberId() {
+        reads.push("memberId");
+        return " member-synthetic ";
+      },
+      get deviceTool() {
+        reads.push("deviceTool");
+        return deviceTool;
+      },
+      get releaseSha() {
+        reads.push("releaseSha");
+        return " release-synthetic ";
+      },
+      get usageRecorder() {
+        reads.push("usageRecorder");
+        return { recordUsage };
+      },
+      get assertTurnCommitAuthority() {
+        reads.push("assertTurnCommitAuthority");
+        return assertTurnCommitAuthority;
+      },
+      get currentAssistantInputId() {
+        reads.push("currentAssistantInputId");
+        return currentAssistantInputId;
+      },
+      get imageGenerationLauncher() {
+        reads.push("imageGenerationLauncher");
+        return launcher;
+      },
+      get userEnvKeys() {
+        reads.push("userEnvKeys");
+        return [];
+      },
+    };
+    const normalized = normalizeAssistantExecutionContext({ hosted }).hosted;
+    expect(reads).toEqual([
+      "memberId", "deviceTool", "device.request", "device.request",
+      "releaseSha", "usageRecorder",
+      "assertTurnCommitAuthority", "assertTurnCommitAuthority",
+      "currentAssistantInputId", "currentAssistantInputId",
+      "imageGenerationLauncher", "imageGenerationLauncher", "userEnvKeys",
+    ]);
+    expect(Object.keys(normalized!)).toEqual([
+      "assertTurnCommitAuthority", "currentAssistantInputId", "imageGenerationLauncher",
+      "deviceTool", "releaseSha", "usageRecorder", "memberId", "userEnvKeys",
+    ]);
+    expect(normalized?.currentAssistantInputId).toBe(currentAssistantInputId);
+    expect(normalized?.usageRecorder?.recordUsage).toBe(recordUsage);
+    expect(normalized?.imageGenerationLauncher).toBe(launcher);
+    const boundAuthority = normalized?.assertTurnCommitAuthority;
+    expect(boundAuthority).toBeTypeOf("function");
+    await boundAuthority!({ acceptedInputs: [], turnId: "turn-synthetic" });
+    await normalized!.deviceTool!.request({ action: "list_accounts" });
+    expect(receivers).toEqual([hosted, deviceTool]);
+  });
+
+  it("normalizes ports before rejecting a blank member without reading return-only helpers", () => {
+    const reads: string[] = [];
+    const failure = new Error("synthetic port accessor failure");
+    const hosted: AssistantHostedExecutionContext = {
+      memberId: " ",
+      userEnvKeys: [],
+      get deviceTool() {
+        reads.push("deviceTool");
+        return undefined;
+      },
+      get assertTurnCommitAuthority(): never {
+        throw failure;
+      },
+    };
+    expect(normalizeAssistantExecutionContext({ hosted })).toEqual({ hosted: null });
+    expect(reads).toEqual(["deviceTool"]);
+    Object.defineProperty(hosted, "deviceTool", { get() { throw failure; } });
+    expect(() => normalizeAssistantExecutionContext({ hosted })).toThrow(failure);
+  });
+
   it("drops hosted execution context when the hosted member id is blank", () => {
     expect(
       normalizeAssistantExecutionContext({

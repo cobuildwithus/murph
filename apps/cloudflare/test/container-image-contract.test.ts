@@ -37,9 +37,10 @@ const runnerPythonPathFinallyCleanupBlock = `} finally {
   }`;
 
 const hostedRunnerProductModelSlugs = [
+  "gpt-6-sol",
+  "gpt-6-luna",
   "gpt-6-astra",
   "gpt-5.6-sol",
-  "gpt-5.6-terra",
   "gpt-5.6-luna",
 ] as const;
 
@@ -452,7 +453,8 @@ describe("hosted runner container image contract", () => {
       "utf8",
     );
 
-    expect(baseDockerfile).toContain("ARG CODEX_CLI_VERSION=0.153.4");
+    expect(baseDockerfile).toContain("ARG CODEX_UPSTREAM_REVISION=b412ff32c417f855c2b2d1581b77058eed87c84b");
+    expect(baseDockerfile).toContain("ARG CODEX_CLI_VERSION=0.156.1");
     expect(baseDockerfile).toContain("ARG NODE_VERSION=24.14.1");
     expect(baseDockerfile).toContain(
       "ARG NODE_IMAGE_DIGEST=sha256:b506e7321f176aae77317f99d67a24b272c1f09f1d10f1761f2773447d8da26c",
@@ -493,21 +495,17 @@ describe("hosted runner container image contract", () => {
     expect(baseDockerfile).not.toContain("worker-secrets.json");
     expect(baseDockerfile).not.toContain("runner-bundle-builder");
     expect(baseDockerfile).not.toContain("pnpm install --frozen-lockfile");
-    expect(baseDockerfile).toContain(
-      'npm install --global --omit=dev --no-audit --no-fund --ignore-scripts "@openai/codex@${CODEX_CLI_VERSION}"',
-    );
-    expect(baseDockerfile).toContain(
-      'native_codex="$(find "$(npm root -g)/@openai" -path \'*/vendor/*/bin/codex\' -type f -perm /111 -print -quit)"',
-    );
-    expect(baseDockerfile).toContain(
-      'native_bwrap="$(find "$(npm root -g)/@openai" -path \'*/vendor/*/codex-resources/bwrap\' -type f -perm /111 -print -quit)"',
-    );
-    expect(baseDockerfile).toContain('test -n "${native_bwrap}"');
-    expect(baseDockerfile).toContain(
-      '"${native_bwrap}" --help | grep -Fq -- \'--argv0\'',
-    );
-    expect(baseDockerfile).toContain('ln -sfn "${native_codex}" /usr/local/bin/codex');
-    expect(baseDockerfile).toContain("npm cache clean --force");
+    expect(baseDockerfile).toContain("COPY patches/codex-public-live.patch");
+    expect(baseDockerfile).toContain("git apply --check /tmp/codex-public-live.patch");
+    expect(baseDockerfile).toContain("export CODEX_BWRAP_SHA256=");
+    expect(baseDockerfile).toContain("ARG CODEX_CLI_VERSION=0.156.1");
+    expect(baseDockerfile).toContain("COPY --from=codex-package /opt/codex/ /opt/codex/");
+    expect(baseDockerfile).toContain("cargo build --locked --release --target x86_64-unknown-linux-gnu --bin codex --jobs 2");
+    expect(baseDockerfile).toContain("sha256sum /opt/codex/codex-resources/bwrap");
+    expect(baseDockerfile).toContain("COPY --from=codex-builder /opt/codex/ /usr/local/lib/murph-codex/");
+    expect(baseDockerfile).toContain("test -x /usr/local/lib/murph-codex/bin/codex-code-mode-host");
+    expect(baseDockerfile).toContain("ln -sfn /usr/local/lib/murph-codex/bin/codex /usr/local/bin/codex");
+    expect(runnerBasePublishWorkflow).toContain('"patches/codex-public-live.patch"');
     expect(baseDockerfile).toContain("PATH=/app/node_modules/.bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin");
     expect(baseDockerfile).not.toContain("/etc/profile.d/murph-runner-path.sh");
     expect(baseDockerfile).not.toContain("export PATH=");
@@ -613,7 +611,7 @@ describe("hosted runner container image contract", () => {
     expect(finalDockerfile).not.toContain("future_gpt_model_from");
     expect(finalDockerfile).toContain('"id":"flex"');
     expect(finalDockerfile).toContain(
-      'jq -s -e \'length == 1 and (.[0] as $catalog | ([$catalog.models[]?.slug] | sort) == (["gpt-6-astra","gpt-5.6-sol","gpt-5.6-terra","gpt-5.6-luna"] | sort)',
+      'jq -s -e \'length == 1 and (.[0] as $catalog | ([$catalog.models[]?.slug] | sort) == (["gpt-6-sol","gpt-6-luna","gpt-6-astra","gpt-5.6-sol","gpt-5.6-luna"] | sort)',
     );
     expect(finalDockerfile).toContain(
       'LABEL murph.hosted.local-build-id="${HOSTED_RUNNER_LOCAL_BUILD_ID}"',
@@ -732,6 +730,8 @@ describe("hosted runner container image contract", () => {
     const { patchFilter, standardFilter, validationFilter } = readFinalImageCodexModelCatalogJqFilters(finalDockerfile);
     const stockCatalogWithoutFlex: CodexModelCatalog = {
       models: [
+        { slug: "gpt-6-sol", context_window: 272_000, service_tiers: [{ id: "priority", name: "Priority" }] },
+        { slug: "gpt-6-luna", context_window: 272_000, service_tiers: [{ id: "priority", name: "Priority" }] },
         {
           slug: "gpt-6-astra",
           context_window: 272_000,
@@ -774,7 +774,7 @@ describe("hosted runner container image contract", () => {
 
     const standardCatalog = parseCodexModelCatalogJson(runJqFilter(standardFilter, patchedCatalog));
     expect(readCodexModelSlugs(standardCatalog)).toEqual([
-      "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna",
+      "gpt-6-sol", "gpt-6-luna", "gpt-5.6-sol", "gpt-5.6-luna",
     ]);
     expect(standardCatalog.models).toEqual(patchedCatalog.models.filter((model) => model.slug !== "gpt-6-astra"));
     expect(finalDockerfile).toContain('"${MURPH_HOSTED_CODEX_MODEL_CATALOG_JSON}.astra"');
@@ -788,10 +788,7 @@ describe("hosted runner container image contract", () => {
       description: "Flagship agentic coding model for complex professional work.",
       display_name: "GPT-5.6-Sol",
     });
-    expect(readCodexModel(patchedCatalog, "gpt-5.6-terra")).toMatchObject({
-      description: "Balanced agentic coding model for everyday work.",
-      display_name: "GPT-5.6-Terra",
-    });
+    expect(readCodexModelSlugs(patchedCatalog)).not.toContain("gpt-5.6-terra");
     expect(readCodexModel(patchedCatalog, "gpt-5.6-luna")).toMatchObject({
       description: "Fast, cost-efficient agentic coding model.",
       display_name: "GPT-5.6-Luna",
@@ -816,7 +813,7 @@ describe("hosted runner container image contract", () => {
     const repatchedCatalog = parseCodexModelCatalogJson(
       runJqFilter(patchFilter, patchedCatalog),
     );
-    const repatchedTargetTierIds = readCodexModelServiceTierIds(repatchedCatalog, "gpt-5.6-terra");
+    const repatchedTargetTierIds = readCodexModelServiceTierIds(repatchedCatalog, "gpt-6-sol");
     const twicePatchedCatalog = parseCodexModelCatalogJson(
       runJqFilter(patchFilter, repatchedCatalog),
     );
@@ -828,7 +825,7 @@ describe("hosted runner container image contract", () => {
     }
     expect(runJqFilter(validationFilter, repatchedCatalog, { slurp: true }).trim()).toBe("true");
     expect(runJqFilter(validationFilter, {
-      models: patchedCatalog.models.filter((model) => model.slug !== "gpt-5.6-terra"),
+      models: patchedCatalog.models.filter((model) => model.slug !== "gpt-6-sol"),
     }, { slurp: true }).trim()).toBe("false");
     expect(runJqFilter(validationFilter, {
       models: [
@@ -838,14 +835,14 @@ describe("hosted runner container image contract", () => {
     }, { slurp: true }).trim()).toBe("false");
     expect(runJqFilter(validationFilter, {
       models: patchedCatalog.models.map((model) =>
-        model.slug === "gpt-5.6-terra"
+        model.slug === "gpt-6-sol"
           ? { ...model, tool_mode: "code_mode_only" }
           : model
       ),
     }, { slurp: true }).trim()).toBe("false");
   });
 
-  it("validates the product catalogs against the installed native Codex release", async () => {
+  it("validates product entries directly from the native Codex catalog", async () => {
     const finalDockerfile = await readFile(
       new URL("../../../Dockerfile.cloudflare-hosted-runner", import.meta.url),
       "utf8",
@@ -859,13 +856,15 @@ describe("hosted runner container image contract", () => {
     const nativeCatalog = parseCodexModelCatalogJson(nativeCatalogJson);
     const productCatalog = parseCodexModelCatalogJson(runJqFilter(patchFilter, nativeCatalog));
     expect(runJqFilter(validationFilter, productCatalog, { slurp: true }).trim()).toBe("true");
-    expect(readCodexModel(productCatalog, "gpt-6-astra")).toMatchObject({
-      ...readCodexModel(nativeCatalog, "gpt-6-astra"),
-      service_tiers: expect.any(Array),
-      tool_mode: "code_mode",
-    });
+    for (const slug of hostedRunnerProductModelSlugs) {
+      expect(readCodexModel(productCatalog, slug)).toMatchObject({
+        ...readCodexModel(nativeCatalog, slug),
+        service_tiers: expect.any(Array),
+        tool_mode: "code_mode",
+      });
+    }
     expect(readCodexModelSlugs(parseCodexModelCatalogJson(runJqFilter(standardFilter, productCatalog))).sort())
-      .toEqual(["gpt-5.6-luna", "gpt-5.6-sol", "gpt-5.6-terra"]);
+      .toEqual(["gpt-5.6-luna", "gpt-5.6-sol", "gpt-6-luna", "gpt-6-sol"]);
   });
 
   it("pins the checked-in and rendered Wrangler config to an app-local build context", async () => {
@@ -1013,7 +1012,7 @@ describe("hosted runner container image contract", () => {
     expect(hostedRunnerSmokeChild).toContain("buildCodexEnvironmentProbeScript");
     expect(hostedRunnerSmokeChild).toContain("cwd: input.vaultRoot");
     expect(hostedRunnerSmokeChild).toContain("cwdRebound: process.cwd() === expectedVaultRoot");
-    expect(hostedRunnerSmokeChild).toContain('model = "gpt-5.6-terra"');
+    expect(hostedRunnerSmokeChild).toContain('model = "gpt-6-sol"');
     expect(hostedRunnerSmokeChild).toContain('model_reasoning_effort = "low"');
     expect(hostedRunnerSmokeChild).toContain("model_auto_compact_token_limit = 132000");
     expect(hostedRunnerSmokeChild).toContain("runCodexVaultCliProof");

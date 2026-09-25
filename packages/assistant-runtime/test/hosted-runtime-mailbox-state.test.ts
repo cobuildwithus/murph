@@ -1027,7 +1027,7 @@ describe("hosted runtime system mailbox state", () => {
         now: () => now, vaultRoot,
       })).resolves.toEqual({
         defaultOwned: { at: now, reason: "assistant" },
-        next: { at: now, executionClass: "model_free", reason: "device-sync.reconcile" },
+        next: { at: retryAt, executionClass: null, reason: "device-sync.reconcile" },
       });
       // An already-running default pass keeps its ordinary foreground choice.
       await expect(resolveHostedSystemMailboxWakeCandidates({ now: () => now, vaultRoot }))
@@ -1071,8 +1071,8 @@ describe("hosted runtime system mailbox state", () => {
         } });
         await updateHostedSystemMailboxState(vaultRoot, () => state);
         await expect(resolveHostedSystemMailboxNextWakeCandidate({ vaultRoot, now: () => now }))
-          .resolves.toEqual({ at: boundary === "same-connection" ? retryAt : now,
-            executionClass: boundary === "same-connection" ? null : "model_free",
+          .resolves.toEqual({ at: now,
+            executionClass: "model_free",
             reason: "device-sync.reconcile" });
         const restored = await readHostedSystemMailboxState(vaultRoot);
         expect(restored.pending).toEqual(state.pending);

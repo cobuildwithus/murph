@@ -97,7 +97,7 @@ const directRetryRecoveryReplyText =
 const richLinkLostAckUrl = "https://example.test/continue/lost-ack";
 const richLinkRetryRecoveryUrl = "https://example.test/continue/recovered";
 const richLinkFallbackUrl = "https://example.test/continue/fallback";
-const productionLikeAssistantModel = "gpt-5.6-terra";
+const productionLikeAssistantModel = "gpt-6-sol";
 const localRunnerIdleTtlMs = "300000";
 const runRealInstantFirstTurn =
   process.env.MURPH_RUN_REAL_LINQ_FIRST_TURN_E2E === "1";
@@ -1515,7 +1515,7 @@ testControlsDescribe("hosted local Linq direct retry recovery e2e", () => {
   beforeAll(async () => {
     directWakeRetryBarrier = await startHostedLocalDirectWakeRetryBarrier();
     await restartLinqScenario({
-      HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: "1",
+      HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "1000",
     }, {
       faultInjection: true,
       webProcessEnvOverrides: {
@@ -1677,7 +1677,7 @@ testControlsDescribe("hosted local Linq direct retry recovery e2e", () => {
 testControlsDescribe("hosted local Linq stale scheduled wake e2e", () => {
   beforeAll(async () => {
     await restartLinqScenario({
-      HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: "1200",
+      HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "1200",
     }, {
       faultInjection: true,
     });
@@ -2165,7 +2165,7 @@ async function ensureLinqScenario(): Promise<void> {
   }
 
   await startLinqScenario({
-    HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: "1",
+    HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "1000",
   });
 }
 

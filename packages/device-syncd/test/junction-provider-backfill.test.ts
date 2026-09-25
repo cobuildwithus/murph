@@ -573,11 +573,11 @@ test("Junction page-heavy timeseries adapt to a smaller complete window before t
     context,
     createJobFromInput(hourlyContinuation),
   );
-  assert.equal(requests.length, 3);
+  assert.equal(requests.length, 48);
   assert.equal(importedSnapshots.length, 1);
   assert.deepEqual(hourlyResult.scheduledJobs?.[0]?.payload, {
     emptyBackfillAttempts: 1,
-    timeseriesCursor: "2026-04-02T01:00:00.000Z",
+    timeseriesCursor: "2026-04-02T16:00:00.000Z",
     timeseriesResourceCursor: "heartrate",
     timeseriesWindowHours: 1,
     windowEnd: "2026-04-03T00:00:00.000Z",
@@ -716,12 +716,8 @@ test("Junction cancellation retains the deterministic timeseries continuation", 
     context,
     createJobFromInput(continuation, 1),
   );
-  assert.deepEqual(retryResult.scheduledJobs?.[0]?.payload, {
-    timeseriesCursor: "2026-04-02T00:00:00.000Z",
-    timeseriesResourceCursor: "hrv",
-    windowEnd: "2026-04-03T00:00:00.000Z",
-    windowStart: "2026-04-01T00:00:00.000Z",
-  });
+  assert.equal(retryResult.scheduledJobs, undefined);
+  assert.equal(requests.filter((url) => url.includes("/v2/timeseries/")).length, 3);
   assert.equal(
     requests.filter((url) => url.includes("/v2/user/providers/")).length,
     1,

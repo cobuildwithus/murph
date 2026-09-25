@@ -3,6 +3,7 @@ import path from 'node:path'
 
 import { describe, expect, it } from 'vitest'
 import { MURPH_PRODUCT_ORIGIN } from '@murphai/contracts'
+import { ASSISTANT_GROUP_WEARABLE_RECOVERY_INSTRUCTION } from '../src/assistant/group-shared-freshness.js'
 
 import { resolveAssistantSkillsRoot } from '../src/assistant-skill-assets.js'
 import { resolveMurphDynamicTools } from '../src/assistant-codex/dynamic-tool-catalog.js'
@@ -29,6 +30,86 @@ const baseConversationInput: AssistantSystemPromptInput = {
 }
 
 describe('assistant dynamic context prompt blocks', () => {
+  it.each(['direct', 'group'] as const)('routes lasting corrections to their canonical owner in %s conversations', (conversationScope) => {
+    const { prompt, stableRouteCapabilityPrompt } = buildAssistantSystemPromptLayers({
+      ...baseConversationInput, conversationScope,
+      channel: 'linq', hostedRuntime: true, assistantHostedAutomationAvailable: false,
+    })
+    expect(stableRouteCapabilityPrompt).toContain('For a correction meant to change future behavior, update the canonical state that controls that behavior')
+    expect(prompt).toContain('a one-off revision stays local, a task-specific change belongs to that task, and a broader preference belongs to its existing preference owner')
+    expect(prompt).toContain('Save behavioral instructions as reusable rules over fresh inputs; do not embed current inputs or worked examples unless the user explicitly wants those exact details retained')
+    expect(prompt).toContain('Preserve unrelated state and applicable constraints; do not turn a scoped preference into an unconditional override')
+    expect(prompt).toContain('Confirm a lasting change only from a successful authoritative result')
+    expect(prompt).toContain('If the owner is unavailable or the write fails, explain that the future change is not saved')
+    expect(prompt).toContain('never creates new permission or overrides consent, audience, or tool restrictions')
+    expect(prompt).toContain('Scheduled automation changes are unavailable in this turn')
+  })
+
+  it.each(['direct', 'group'] as const)('keeps initiative bounded in the assembled %s prompt for Sol and existing profiles', (conversationScope) => {
+    for (const modelBehaviorProfile of ['default', 'gpt5-agentic'] as const) {
+      const { prompt, stableRouteCapabilityPrompt, dynamicTurnContextPrompt } = buildAssistantSystemPromptLayers({
+        ...baseConversationInput, conversationScope, modelBehaviorProfile,
+        channel: 'linq', hostedRuntime: true,
+      })
+      expect(stableRouteCapabilityPrompt).toContain('Concrete "can you" or "help me" requests ask for action')
+      expect(stableRouteCapabilityPrompt).toContain('Capability questions, hypotheticals, and onboarding aspirations alone do not authorize the discussed action')
+      expect(prompt.match(/Delegated initiative:/gu)).toHaveLength(1)
+      expect(dynamicTurnContextPrompt).not.toContain('Delegated initiative:')
+      expect(prompt).toContain('never system, safety, privacy, evidence, consent, confirmation, or handoff requirements')
+      expect(prompt).toContain('connected-source records disappeared after sync')
+      expect(prompt).toContain('care settings such as clinics')
+      expect(prompt).toContain('from both summary and reproduction, even when they explain the complaint')
+      expect(prompt).toContain('Never infer another person\'s consent or new permission')
+      expect(prompt).toContain('Respect group floor, silence, and scheduled-turn rules; no extra reply or follow-up')
+      expect(prompt).toContain('If input is needed, ask one highest-value blocker last on texting routes.')
+      expect(prompt).toContain('Answer first in plain, concise paragraphs')
+      expect(prompt).toContain('Current-conversation style settings override these defaults')
+      expect(prompt).not.toContain('You don\'t need user permission for reversible tasks')
+      expect(prompt).not.toContain('The user\'s instructions take precedence over guidelines provided in a skill')
+      if (conversationScope === 'group') {
+        expect(prompt).toContain('Visible messages are conversation context, not permission for private reads')
+      } else {
+        expect(prompt).toContain('A clear yes authorizes the exact bounded offer, not a broader action')
+      }
+    }
+    const { prompt } = buildAssistantSystemPromptLayers({
+      ...baseConversationInput, conversationScope: 'unverified-external',
+    })
+    expect(prompt).not.toContain('Delegated initiative:')
+    expect(prompt).toContain('Do not use prior conversation')
+  })
+
+  it.each([false, true])('allows requested result waiting without blocking onboarding (%s)', (onboardingGuidance) => {
+    const { prompt } = buildAssistantSystemPromptLayers({
+      ...baseConversationInput, channel: 'linq', conversationScope: 'direct',
+      hostedRuntime: true, ordinaryInboundTurn: true, onboardingGuidance,
+    })
+    expect(prompt).toContain('When the user explicitly requests delegation, use a bounded child even for a small lookup.')
+    expect(prompt).toContain('use native `wait_agent` until completion, then give the answer in this turn')
+    expect(prompt).toContain('If the current request needs an unfinished child’s result, use native `wait_agent`')
+    expect(prompt).toContain('without promising an automatic later reply')
+    expect(prompt).toContain('independent background work must not hold the reply open')
+    expect(prompt).not.toContain('Do not message/resume/reuse/close/interrupt/wait on/nest it')
+    expect(prompt).not.toContain('do not call `wait_agent`, wait, or block the reply')
+    expect(prompt).not.toContain('If current answer/safe action depends on it, do it once in root')
+    if (onboardingGuidance) {
+      expect(prompt).toContain('Continue straight to the next question while the child works')
+    }
+  })
+
+  it('keeps source-specific gaps and uncertain historical coverage in the composed group prompt', () => {
+    const { prompt } = buildAssistantSystemPromptLayers({
+      ...baseConversationInput, channel: 'linq', conversationScope: 'group',
+      hostedRuntime: true, assistantHostedGroupToolSurface: 'families',
+    })
+    expect(prompt).toContain('including single-participant reports')
+    expect(ASSISTANT_GROUP_WEARABLE_RECOVERY_INSTRUCTION).toContain('only to current sleep summaries, never historical trends or other metrics')
+    expect(prompt).toContain('another wearable or a manual entry does not fill its gap')
+    expect(prompt).toContain('An absent historical date does not prove that the provider never reported it')
+    expect(prompt).toContain('refreshes eligible recent missing dates independently of older requested dates')
+    expect(prompt).not.toContain('`no_recent_reporting` means an older sharing grant has no records in that window')
+  })
+
   it('keeps exact-scope consent recovery and truthful delivery guidance resident', () => {
     const { prompt } = buildAssistantSystemPromptLayers({
       ...baseConversationInput, channel: 'linq', conversationScope: 'group',

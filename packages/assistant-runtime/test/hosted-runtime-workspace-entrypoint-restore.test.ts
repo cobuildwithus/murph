@@ -158,6 +158,180 @@ async function createWorkspaceRestoreFixture(snapshotId: string) {
 }
 
 describe("hosted workspace runtime entrypoint", () => {
+  test.each([true, false])("observes provider facts only from a selected startup prefetch (match: %s)", async (matches) => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "mailbox-provider-runtime-"));
+    const sourceRoot = await mkdtemp(path.join(tmpdir(), "mailbox-provider-source-"));
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot: sourceRoot });
+      const state = createEmptyHostedMailboxImportState();
+      state.watermarks = { conversation: "3", system: "2" };
+      await writeMailboxImportStateFile(sourceRoot, state);
+      const snapshot = await createVaultSnapshotBundle({ vaultRoot: sourceRoot });
+      const ordinary = createMailboxPort({ events: [], items: [] });
+      let fetches = 0;
+      let providerEgressCount = 0;
+      await runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput({
+        forwardedEnv: { HOSTED_ASSISTANT_PROVIDER: "openai" },
+      }), {
+        vaultRoot,
+        async createCheckpointSnapshot() { return { snapshotRef: snapshot.snapshotRef }; },
+        async importItem() { throw new Error("Empty mailbox must not import."); },
+        async runAssistantPhase(input) {
+          try {
+            await input.beforeProviderAcceptedInputs?.({
+              turnId: "turn_prefetch_provider",
+              acceptedInputs: [{ id: "system_prefetch_provider", source: "system" }],
+            });
+          } catch (error) {
+            expect(error).toMatchObject({ name: "AssistantActiveTurnInputUnavailableError" });
+            return { progressed: false };
+          }
+          providerEgressCount += 1;
+          return { progressed: false };
+        },
+        platform: createPlatform({
+          artifactBytesByHash: new Map([[snapshot.hash, snapshot.bytes]]),
+          mailboxPort: {
+            ...ordinary,
+            async fetch(request, context) {
+              const response = await ordinary.fetch(request, context);
+              fetches += 1;
+              return { ...response, assistantProvider: fetches === 1 ? "venice" : "openai" };
+            },
+          },
+          workspacePort: createWorkspacePort({
+            checkpointRequests: [], events: [],
+            workspace: createWorkspaceState({
+              snapshotRef: snapshot.snapshotRef,
+              redactedStatus: {
+                hostedMailboxConversationImportedSeq: matches ? "3" : "1",
+                hostedMailboxSystemImportedSeq: "2",
+              },
+            }),
+          }),
+        }),
+      });
+      expect(providerEgressCount).toBe(matches ? 0 : 1);
+    } finally {
+      await removeTempRoot(vaultRoot);
+      await removeTempRoot(sourceRoot);
+    }
+  });
+
+  test.each(["match", "cursor mismatch", "pending wake", "covered wake", "newer conversation wake", "newer system wake", "mixed unknown wake", "fetch failure", "covered wake fetch failure", "missing hints"] as const)(
+    "overlaps the ordinary fetch with restore and preserves staging for %s",
+    async (scenario) => {
+      const vaultRoot = await mkdtemp(path.join(tmpdir(), "mailbox-overlap-runtime-"));
+      const sourceRoot = await mkdtemp(path.join(tmpdir(), "mailbox-overlap-source-"));
+      const events: string[] = [];
+      const fetchRequests: HostedMailboxFetchRequest[] = [];
+      const restoreStarted = createDeferred<void>();
+      const releaseRestore = createDeferred<void>();
+      const fetchStarted = createDeferred<void>();
+      const firstFetchFinished = createDeferred<void>();
+      const importedSequences: string[] = [];
+      const staged = new Error("Synthetic stop after ordinary conversation staging.");
+      const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+      try {
+        await initializeVault({ createdAt: TEST_NOW, vaultRoot: sourceRoot });
+        const state = createEmptyHostedMailboxImportState();
+        state.watermarks = { conversation: "3", system: "2" };
+        await writeMailboxImportStateFile(sourceRoot, state);
+        const snapshot = await createVaultSnapshotBundle({ vaultRoot: sourceRoot });
+        const mailboxItems = [createMailboxItem({ id: "mailbox_overlap_new", laneSeq: "4" })];
+        const baseMailboxPort = createMailboxPort({ events, fetchRequests, items: mailboxItems });
+        let calls = 0;
+        const platform = createPlatform({
+          artifactBytesByHash: new Map([[snapshot.hash, snapshot.bytes]]),
+          mailboxPort: {
+            ...baseMailboxPort,
+            async fetch(request, context) {
+              calls += 1;
+              fetchStarted.resolve();
+              if ((scenario === "fetch failure" || scenario === "covered wake fetch failure") && calls === 1) {
+                throw new Error("Synthetic transient fetch failure.");
+              }
+              const response = await baseMailboxPort.fetch(request, context);
+              firstFetchFinished.resolve();
+              return response;
+            },
+          },
+          workspacePort: createWorkspacePort({
+            checkpointRequests: [], events,
+            workspace: createWorkspaceState({
+              snapshotRef: snapshot.snapshotRef,
+              redactedStatus: scenario === "missing hints" ? null : {
+                hostedMailboxConversationImportedSeq: scenario === "cursor mismatch" ? "1" : "3",
+                hostedMailboxSystemImportedSeq: "2",
+              },
+            }),
+          }),
+        });
+        const snapshotPort = platform.workspaceSnapshotPort!;
+        const restore = snapshotPort.restoreWorkspaceSnapshot.bind(snapshotPort);
+        snapshotPort.restoreWorkspaceSnapshot = async (input) => {
+          restoreStarted.resolve();
+          await releaseRestore.promise;
+          await restore(input);
+        };
+        let callsAtStaging = 0;
+        const run = runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput(), {
+          vaultRoot, platform, runtimeWakeSignal,
+          async createCheckpointSnapshot() {
+            throw new Error("Staging proof must stop before checkpointing.");
+          },
+          async importItem(item) {
+            importedSequences.push(item.item.laneSeq);
+            callsAtStaging = calls;
+            const assistantInputId = await stagePendingLinqAssistantInputForMailboxItem({
+              item: item.item, vaultRoot,
+            });
+            if (scenario === "newer conversation wake" && item.item.laneSeq === "4") {
+              return { assistantInputId, status: "imported" };
+            }
+            throw staged;
+          },
+        });
+        const rejected = expect(run).rejects.toBe(staged);
+        await restoreStarted.promise;
+        if (scenario === "missing hints") {
+          expect(calls).toBe(0);
+        } else {
+          await fetchStarted.promise;
+          expect(calls).toBe(1);
+        }
+        if (scenario === "newer conversation wake") {
+          await firstFetchFinished.promise;
+          mailboxItems.push(createMailboxItem({ id: "mailbox_overlap_later", laneSeq: "5" }));
+        }
+        if (scenario === "pending wake") runtimeWakeSignal.notify();
+        if (scenario.includes("wake") && scenario !== "pending wake") {
+          runtimeWakeSignal.notify({ mailboxWakeHighWater: {
+            conversation: scenario === "newer conversation wake" ? "5" : "4",
+            system: scenario === "newer system wake" ? "3" : "2",
+          } });
+          if (scenario === "mixed unknown wake") {
+            runtimeWakeSignal.notify();
+            runtimeWakeSignal.notify({ mailboxWakeHighWater: { conversation: "4", system: "2" } });
+          }
+        }
+        releaseRestore.resolve();
+        await rejected;
+        expect(importedSequences).toEqual(scenario === "newer conversation wake" ? ["4", "5"] : ["4"]);
+        expect(callsAtStaging).toBe(
+          scenario === "match" || scenario === "covered wake" || scenario === "missing hints" ? 1 : 2,
+        );
+        expect(fetchRequests.at(-1)?.lanes).toContainEqual({
+          lane: "conversation", importedSeq: "3",
+        });
+      } finally {
+        releaseRestore.resolve();
+        await removeTempRoot(vaultRoot);
+        await removeTempRoot(sourceRoot);
+      }
+    },
+  );
+
   test.each(["flat", "nested"] as const)("restores %s fixture vault roots while removing stale files", async (layout) => {
     const tempRoot = await mkdtemp(path.join(tmpdir(), "workspace-fixture-layout-"));
     const sourceVaultRoot = path.join(tempRoot, "source");
@@ -1091,7 +1265,7 @@ describe("hosted workspace runtime entrypoint", () => {
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_foreground_shutdown_handoff_second",
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "8",
             userId: TEST_USER_ID,
             workspaceVersion: secondWorkspace.version,
@@ -1504,7 +1678,7 @@ describe("hosted workspace runtime entrypoint", () => {
               events,
               workspace: createWorkspaceState({
                 redactedStatus: {
-                  hostedMailboxConversationImportedSeq: "0",
+                  hostedMailboxConversationImportedSeq: "3",
                   hostedMailboxSystemImportedSeq: "0",
                 },
                 snapshotRef: createSnapshotFixtureRef({
@@ -1618,11 +1792,12 @@ describe("hosted workspace runtime entrypoint", () => {
       );
 
       assert.deepEqual(imported, ["4"]);
-      assert.equal(fetchRequests.length, 1);
+      assert.equal(fetchRequests.length, 2);
       assert.equal(readConversationImportedSeq(fetchRequests[0]), "3");
       assert.equal((await readHostedMailboxImportState({ vaultRoot })).watermarks.conversation, "4");
       assert.deepEqual(events, [
         "workspace.read",
+        "mailbox.fetch",
         "mailbox.fetch",
         "snapshot:4",
         "workspace.checkpoint",
@@ -1712,11 +1887,12 @@ describe("hosted workspace runtime entrypoint", () => {
       );
 
       assert.deepEqual(imported, ["4"]);
-      assert.equal(fetchRequests.length, 1);
+      assert.equal(fetchRequests.length, 2);
       assert.equal(readConversationImportedSeq(fetchRequests[0]), "3");
       assert.equal((await readHostedMailboxImportState({ vaultRoot })).watermarks.conversation, "4");
       assert.deepEqual(events, [
         "workspace.read",
+        "mailbox.fetch",
         "snapshot.restore",
         "mailbox.fetch",
         "snapshot:4",

@@ -1,3 +1,4 @@
+import type { ConversationPollTool } from "@murphai/hosted-execution/conversation-polls";
 import type {
   HostedClinicalRecordsConnectLinkRequest,
   HostedClinicalRecordsConnectLinkResponse,
@@ -24,6 +25,8 @@ import type {
   HostedMailboxFetchResponse,
   HostedMailboxPayloadFetchRequest,
   HostedMailboxPayloadFetchResponse,
+  HostedRuntimeLatencyTraceBatchRequest,
+  HostedRuntimeLatencyTraceBatchResponse,
   HostedRuntimeLatencyTraceRequest,
   HostedRuntimeLatencyTraceResponse,
   HostedRuntimeLogRequest,
@@ -53,6 +56,7 @@ import type {
 import type {
   AssistantUsageRecord,
 } from "@murphai/hosted-execution/assistant-usage";
+import type { AssistantChannelDependencies } from "@murphai/assistant-engine/assistant-runtime";
 import type {
   HostedRuntimeAssistantPersonalizationToolAuthority,
   HostedRuntimeAssistantPersonalizationToolRequest,
@@ -68,6 +72,7 @@ import type {
 import type { MemberActionOutcomeV1 } from "@murphai/contracts";
 import type {
   HostedBrowserVaultReplicaRef,
+  HostedExecutionAssistantNotificationRoute,
   HostedExecutionExternalThreadRouteAuthority,
   HostedExecutionResolvedLinqDeliveryRoute,
 } from "@murphai/hosted-execution/contracts";
@@ -492,6 +497,9 @@ export interface HostedRuntimeLinqDeleteMessagesRequest {
 }
 
 type HostedRuntimeEffectsPortBase = {
+  resolveMemberNotificationRoute?(
+    context?: { signal?: AbortSignal | null },
+  ): Promise<HostedExecutionAssistantNotificationRoute | null>;
   deletePreparedAssistantDelivery?(
     input: Pick<HostedAssistantDeliverySideEffect, "effectId" | "fingerprint">,
   ): Promise<void>;
@@ -728,6 +736,9 @@ export interface HostedRuntimePhysicalNotePort {
 }
 
 export interface HostedRuntimeMailboxPort {
+  admitVoiceInput?(
+    request: import("@murphai/hosted-execution").HostedVoiceInputRequest,
+  ): Promise<{ mailboxItemId: string }>;
   fetch(
     request: HostedMailboxFetchRequest,
     context?: { signal?: AbortSignal | null },
@@ -815,6 +826,8 @@ export interface HostedRuntimeWorkspaceSnapshotPort {
     durableRoot: string;
     ref: HostedWorkspaceSnapshotV2Ref;
     signal?: AbortSignal | null;
+    /** Later checkpoint readers obtain fresh authorization instead of launch preparation. */
+    usePreparedRestore?: boolean;
   }): Promise<HostedRuntimeWorkspaceSnapshotRestoreTimingDetails | void>;
   startSnapshotSession(input: {
     expectedWorkspaceVersion: string;
@@ -835,6 +848,7 @@ export interface HostedRuntimeLogPort {
 }
 
 export interface HostedRuntimeLatencyTracePort {
+  recordBatch?(request: HostedRuntimeLatencyTraceBatchRequest): Promise<HostedRuntimeLatencyTraceBatchResponse>;
   record(request: HostedRuntimeLatencyTraceRequest): Promise<HostedRuntimeLatencyTraceResponse>;
 }
 
@@ -854,6 +868,7 @@ export interface HostedRuntimeVaultSharePort {
   listActiveProjectionScopes(input?: {
     projectionMode?: HostedVaultShareProjectionMode;
     signal?: AbortSignal | null;
+    sourceWorkspaceVersion?: string;
   }): Promise<HostedVaultShareActiveProjectionKindsResponse>;
   deliver(
     request: HostedVaultShareDeliverRequest,
@@ -885,6 +900,7 @@ export interface HostedRuntimePlatform {
   providerFetch?: typeof fetch | null;
   publicInternetFetch?: typeof fetch | null;
   issueExportPort?: HostedRuntimeIssueExportPort | null;
+  pollToolPort?: ConversationPollTool | null;
   imessageContactToolPort?: HostedRuntimeIMessageContactToolPort | null;
   latencyTracePort?: HostedRuntimeLatencyTracePort | null;
   labsToolPort?: HostedRuntimeLabsToolPort | null;
@@ -900,6 +916,8 @@ export interface HostedRuntimePlatform {
   runtimeLivenessPort?: RuntimeLivenessPort | null;
   runtimeLivenessRequired?: boolean | null;
   usageRecordPort?: HostedRuntimeUsageRecordPort | null;
+  /** Ephemeral, invocation-bound speech; never an independently retried effect. */
+  voicePort?: { speak: NonNullable<AssistantChannelDependencies["sendVoice"]> } | null;
   vaultSharePort?: HostedRuntimeVaultSharePort | null;
   workspacePort?: HostedRuntimeWorkspacePort | null;
   workspaceSnapshotPort?: HostedRuntimeWorkspaceSnapshotPort | null;

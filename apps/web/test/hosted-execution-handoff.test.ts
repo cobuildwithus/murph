@@ -470,9 +470,11 @@ describe("deleteHostedRunnerUserDataBestEffort", () => {
       createBrowserVaultExportSession: vi.fn(),
       createBrowserVaultSession: vi.fn(),
       createEnvironmentRealtimeCall: vi.fn(),
+      controlVoice: vi.fn(),
       deleteEnvironmentVoice: vi.fn(),
       deleteMealPhoto: vi.fn(),
       deleteUserData,
+      purgeRuntimeResource: vi.fn(),
       enqueueDeviceWebhook: vi.fn(),
       ensureRuntimeProcessing: vi.fn(),
       getRunnerStatus: vi.fn(),
@@ -506,8 +508,10 @@ describe("deleteHostedRunnerUserDataBestEffort", () => {
       createBrowserVaultExportSession: vi.fn(),
       createBrowserVaultSession: vi.fn(),
       createEnvironmentRealtimeCall: vi.fn(),
+      controlVoice: vi.fn(),
       deleteEnvironmentVoice: vi.fn(),
       deleteMealPhoto: vi.fn(),
+      purgeRuntimeResource: vi.fn(),
       deleteUserData: vi.fn().mockResolvedValue({
         deletedAt: "2026-04-29T00:00:00.000Z",
         durableObject: {
@@ -541,45 +545,55 @@ describe("deleteHostedRunnerUserDataBestEffort", () => {
     });
   });
 
-  it("logs runner deletion failures with a stable code and redacted message payload", async () => {
-    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
-    const deleteUserData = vi.fn().mockRejectedValue(Object.assign(
-      new Error("delete failed upstream"),
-      { name: "CloudflareDeletionError" },
-    ));
-    vi.mocked(readHostedExecutionControlClientIfConfigured).mockReturnValue({
-      createBrowserVaultExportSession: vi.fn(),
-      createBrowserVaultSession: vi.fn(),
-      createEnvironmentRealtimeCall: vi.fn(),
-      deleteEnvironmentVoice: vi.fn(),
-      deleteMealPhoto: vi.fn(),
-      deleteUserData,
-      enqueueDeviceWebhook: vi.fn(),
-      ensureRuntimeProcessing: vi.fn(),
-      getRunnerStatus: vi.fn(),
-      reconcileRuntimeHealthDataConsent: vi.fn(),
-      sendTelegramUsageLimitNotice: vi.fn(),
-      stageEnvironmentVoice: vi.fn(),
-      stageMealPhoto: vi.fn(),
-      verifyInferenceConnection: vi.fn(),
-    } as ReturnType<typeof readHostedExecutionControlClientIfConfigured>);
+  it.each(["TimeoutError", "AbortError", "CloudflareDeletionError"])(
+    "reports %s with its retry result and appropriate log severity",
+    async (errorName) => {
+      const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+      const consoleInfo = vi.spyOn(console, "info").mockImplementation(() => undefined);
+      const deleteUserData = vi.fn().mockRejectedValue(Object.assign(
+        new Error("delete failed upstream"),
+        { name: errorName },
+      ));
+      vi.mocked(readHostedExecutionControlClientIfConfigured).mockReturnValue({
+        createBrowserVaultExportSession: vi.fn(),
+        createBrowserVaultSession: vi.fn(),
+        createEnvironmentRealtimeCall: vi.fn(),
+      controlVoice: vi.fn(),
+        deleteEnvironmentVoice: vi.fn(),
+        deleteMealPhoto: vi.fn(),
+        deleteUserData,
+        purgeRuntimeResource: vi.fn(),
+        enqueueDeviceWebhook: vi.fn(),
+        ensureRuntimeProcessing: vi.fn(),
+        getRunnerStatus: vi.fn(),
+        reconcileRuntimeHealthDataConsent: vi.fn(),
+        sendTelegramUsageLimitNotice: vi.fn(),
+        stageEnvironmentVoice: vi.fn(),
+        stageMealPhoto: vi.fn(),
+        verifyInferenceConnection: vi.fn(),
+      } as ReturnType<typeof readHostedExecutionControlClientIfConfigured>);
 
-    await expect(deleteHostedRunnerUserDataBestEffort({
-      context: "account-deletion",
-      userId: "user-123",
-    })).resolves.toMatchObject({
-      configured: true,
-      deleted: false,
-      errorCode: "CloudflareDeletionError",
-    });
+      await expect(deleteHostedRunnerUserDataBestEffort({
+        context: "account-deletion",
+        userId: "user-123",
+      })).resolves.toMatchObject({
+        configured: true,
+        deleted: false,
+        errorCode: errorName,
+      });
 
-    expect(consoleError).toHaveBeenCalledWith(
-      "Hosted runner user-data deletion failed.",
-      expect.objectContaining({
-        contextPresent: true,
-        errorCode: "CloudflareDeletionError",
-        errorMessage: "delete failed upstream",
-      }),
-    );
-  });
+      const timedOut = errorName === "TimeoutError";
+      expect(timedOut ? consoleInfo : consoleError).toHaveBeenCalledWith(
+        timedOut
+          ? "Hosted runner user-data cleanup pending after deadline."
+          : "Hosted runner user-data deletion failed.",
+        expect.objectContaining({
+          contextPresent: true,
+          errorCode: errorName,
+          errorMessage: "delete failed upstream",
+        }),
+      );
+      expect(timedOut ? consoleError : consoleInfo).not.toHaveBeenCalled();
+    },
+  );
 });

@@ -23,12 +23,10 @@ vi.mock("../scripts/deploy-artifacts.js", async () => ({
 const imageMocks = vi.hoisted(() => ({ prepareHostedContainerDeployImage: vi.fn() }));
 vi.mock("../scripts/prepare-container-deploy-image.ts", () => imageMocks);
 const releaseMocks = vi.hoisted(() => ({
-  prepareSmallRunnerNamespaceBootstrap: vi.fn(),
   stageHostedRunnerRelease: vi.fn(), readWorkerVersion: vi.fn(), assertDrained: vi.fn(), retireApplication: vi.fn(), assertCapacity: vi.fn(), runSmokeHostedDeploy: vi.fn(), admitApplication: vi.fn(), assertApplicationReady: vi.fn(),
 }));
 vi.mock("../scripts/stage-runner-release.ts", () => ({
   stageHostedRunnerRelease: releaseMocks.stageHostedRunnerRelease,
-  prepareSmallRunnerNamespaceBootstrap: releaseMocks.prepareSmallRunnerNamespaceBootstrap,
 }));
 vi.mock("../scripts/runner-release-provider.ts", () => ({ createRunnerReleaseProvider: () => releaseMocks }));
 vi.mock("../scripts/smoke-hosted-deploy.shared.ts", () => ({ runSmokeHostedDeploy: releaseMocks.runSmokeHostedDeploy }));
@@ -60,8 +58,7 @@ vi.mock("../scripts/container-release-receipt.js", () => ({
 import { runDeployWorkerVersionCli } from "../scripts/deploy-worker-version.cli.js";
 
 describe("runDeployWorkerVersionCli", () => {
-  it.each(["old-reader", "old-audience", "unavailable", "denied", "malformed", "unknown-version"])("rejects %s before bootstrap, image work, or native mutation", async shape => {
-    releaseMocks.prepareSmallRunnerNamespaceBootstrap.mockResolvedValue("synthetic-bootstrap.jsonc");
+  it.each(["old-reader", "old-audience", "unavailable", "denied", "malformed", "unknown-version"])("rejects %s before image work or native mutation", async shape => {
     await useRealWebAdmission(shape);
     await expect(syntheticDeployment()).rejects.toThrow("Hosted Web protocol admission failed");
     expect(imageMocks.prepareHostedContainerDeployImage).not.toHaveBeenCalled();
@@ -91,17 +88,16 @@ describe("runDeployWorkerVersionCli", () => {
     expect(releaseMocks.admitApplication).not.toHaveBeenCalled();
   });
 
-  it.each(["bootstrap", "retirement", "smoke-application", "compatibility", "serving", "small", "promotion"])("rechecks Web immediately before %s", async boundary => {
+  it.each(["retirement", "smoke-application", "compatibility", "serving", "promotion"])("rechecks Web immediately before %s", async boundary => {
     const trace: string[] = [];
     const serving = { name: renderedContainers[0]!.applicationName, className: "RunnerContainer", applicationId: "synthetic-serving", namespaceId: "synthetic-namespace", specification: {} };
     releaseMocks.stageHostedRunnerRelease.mockImplementation(async ({ configPath }) => ({
       configPath, promotionConfigPath: `${configPath}.promote`, activeApplicationName: serving.name, workerOnly: false,
-      applications: boundary === "serving" ? [serving] : boundary === "small" ? [{ ...serving, name: "synthetic-small", className: "SmallRunnerContainer" }]
+      applications: boundary === "serving" ? [serving]
         : boundary === "smoke-application" ? [{ ...serving, name: "synthetic-smoke", className: "DeploySmokeRunnerContainer" }] : [],
       retirements: boundary === "retirement" ? [{ name: "synthetic-retired", applicationId: "synthetic-retired", namespaceId: "synthetic-retired" }] : [],
     }));
-    if (boundary === "bootstrap") releaseMocks.prepareSmallRunnerNamespaceBootstrap.mockResolvedValue("synthetic-bootstrap.jsonc");
-    const failAt = ["serving", "small", "promotion"].includes(boundary) ? 3 : 2;
+    const failAt = ["serving", "promotion"].includes(boundary) ? 3 : 2;
     await useRealWebAdmission(check => check === failAt ? "old-reader" : "current", () => trace.push("web"));
     wranglerMocks.runWranglerJson.mockImplementation(async () => {
       trace.push("identity");
@@ -116,7 +112,6 @@ describe("runDeployWorkerVersionCli", () => {
     expect(trace.filter(event => event === "activation")).toHaveLength(failAt === 3 ? 1 : 0);
     expect(releaseMocks.admitApplication).not.toHaveBeenCalled();
     expect(releaseMocks.retireApplication).not.toHaveBeenCalled();
-    if (boundary === "bootstrap") expect(wranglerMocks.runWranglerLoggedCaptured).not.toHaveBeenCalled();
   });
 
   it("does not reuse admission after a previously successful deployment", async () => {
@@ -126,64 +121,6 @@ describe("runDeployWorkerVersionCli", () => {
     await useRealWebAdmission("old-reader");
     await expect(syntheticDeployment()).rejects.toThrow("runtime_log_event:runner.processing_finished");
     expect(wranglerMocks.runWranglerLogged.mock.calls).toHaveLength(activations);
-  });
-
-  it("publishes the retained namespace bootstrap before staging and stops if its receipts change", async () => {
-    const trace: string[] = [];
-    releaseMocks.prepareSmallRunnerNamespaceBootstrap.mockResolvedValue("/tmp/bootstrap.jsonc");
-    wranglerMocks.runWranglerLoggedCaptured.mockImplementation(async args => {
-      trace.push(args[0]);
-      expect(args).toContain("--containers-rollout=none");
-      return { stdout: "deploy", stderr: "" };
-    });
-    receiptMocks.buildContainerReleaseEntries.mockImplementation(() => {
-      trace.push("check retained apps");
-      throw new Error("retained native application changed");
-    });
-    await expect(syntheticDeployment()).rejects.toThrow("retained native application changed");
-    expect(trace).toEqual(["deploy", "check retained apps"]);
-    expect(imageMocks.prepareHostedContainerDeployImage).not.toHaveBeenCalled();
-    expect(releaseMocks.admitApplication).not.toHaveBeenCalled();
-  });
-
-  it("activates compatibility before the small rollout and never enables routing after failed convergence", async () => {
-    const trace: string[] = [];
-    const small = { name: "hosted-worker-smallrunnercontainer", className: "SmallRunnerContainer",
-      applicationId: null, namespaceId: "small-namespace", specification: {} };
-    releaseMocks.stageHostedRunnerRelease.mockImplementation(async ({ configPath }) => ({
-      configPath, promotionConfigPath: `${configPath}.promote`, activeApplicationName: "serving",
-      workerOnly: false, applications: [small], retirements: [],
-    }));
-    wranglerMocks.runWranglerLogged.mockImplementation(async args => { if (args[0] === "versions") trace.push("activate"); });
-    releaseMocks.admitApplication.mockImplementation(async () => { trace.push("small rollout"); return "created"; });
-    releaseMocks.assertApplicationReady.mockRejectedValue(new Error("small image not distributed"));
-    await expect(syntheticDeployment()).rejects.toThrow("small image not distributed");
-    expect(trace).toEqual(["activate", "small rollout"]);
-    expect(wranglerMocks.runWranglerLoggedCaptured).toHaveBeenCalledOnce();
-    expect(releaseMocks.admitApplication).toHaveBeenCalledWith({ ...small, rolloutStepPercentage: 100 });
-    expect(releaseMocks.runSmokeHostedDeploy).not.toHaveBeenCalled();
-  });
-  it.each([true, false])("checks the desired existing small capacity before admission (available=%s)", async available => {
-    const trace: string[] = [];
-    const small = { name: "hosted-worker-smallrunnercontainer", className: "SmallRunnerContainer",
-      applicationId: "small-app", namespaceId: "small-namespace", specification: { max_instances: 10 } };
-    releaseMocks.stageHostedRunnerRelease.mockImplementation(async ({ configPath }) => ({
-      configPath, promotionConfigPath: `${configPath}.promote`, activeApplicationName: "serving",
-      workerOnly: false, applications: [small], retirements: [],
-    }));
-    releaseMocks.assertCapacity.mockImplementation(async () => {
-      trace.push("quota");
-      if (!available) throw new Error("small capacity exceeds account budget");
-    });
-    releaseMocks.admitApplication.mockImplementation(async () => { trace.push("small rollout"); return "modified"; });
-    releaseMocks.assertApplicationReady.mockRejectedValue(new Error("synthetic stop after admission"));
-    await expect(syntheticDeployment()).rejects.toThrow(available
-      ? "synthetic stop after admission" : "small capacity exceeds account budget");
-    expect(releaseMocks.assertCapacity).toHaveBeenCalledExactlyOnceWith({
-      applicationId: small.applicationId, specification: small.specification,
-    });
-    expect(trace).toEqual(available ? ["quota", "small rollout"] : ["quota"]);
-    if (!available) expect(releaseMocks.admitApplication).not.toHaveBeenCalled();
   });
 
   it("retires drained capacity, proves quota, activates compatibility, then rolls the serving image", async () => {
@@ -226,9 +163,8 @@ describe("runDeployWorkerVersionCli", () => {
   });
 
   beforeEach(() => {
+    fileMocks.readFile.mockReset().mockResolvedValue("{}");
     webProtocolMocks.admit.mockReset().mockResolvedValue(undefined);
-    releaseMocks.prepareSmallRunnerNamespaceBootstrap.mockReset();
-    releaseMocks.prepareSmallRunnerNamespaceBootstrap.mockResolvedValue(null);
     releaseMocks.stageHostedRunnerRelease.mockReset();
     releaseMocks.stageHostedRunnerRelease.mockImplementation(async ({ configPath }) => ({
       retirements: [], configPath, promotionConfigPath: `${configPath}.promote`,
@@ -548,7 +484,6 @@ describe("runDeployWorkerVersionCli", () => {
     });
     receiptMocks.readCloudflareContainerApplicationIdentities.mockResolvedValueOnce(before);
 
-
     await runDeployWorkerVersionCli(
       ["--config", "./.deploy/wrangler.generated.jsonc"],
       {
@@ -783,10 +718,10 @@ const releasedContainers = [
   },
 ] as const;
 
-async function syntheticDeployment(containerRolloutMode: "gradual" | "immediate" | "worker-only" = "immediate") {
+async function syntheticDeployment(containerRolloutMode: "gradual" | "immediate" | "worker-only" = "immediate", extraEnv: Record<string, string> = {}) {
   return runDeployWorkerVersionCli([], {
     deployRoot: "/tmp/repo/apps/cloudflare", log: false,
-    env: { CF_WORKER_NAME: "hosted-worker", CF_BUNDLES_BUCKET: "hosted-bundles", CLOUDFLARE_ACCOUNT_ID: "fixture", CLOUDFLARE_API_TOKEN: "fixture" },
+    env: { CF_WORKER_NAME: "hosted-worker", CF_BUNDLES_BUCKET: "hosted-bundles", CLOUDFLARE_ACCOUNT_ID: "fixture", CLOUDFLARE_API_TOKEN: "fixture", ...extraEnv },
     runHostedWorkerDeployment: async ({ dependencies }) => {
       await dependencies.deployDirect({ configPath: "/tmp/config.jsonc", containerRolloutMode, deploymentMessage: "synthetic", includeSecrets: false, secretsFilePath: "/tmp/secrets.json", versionTag: "synthetic", workerName: "hosted-worker" });
       return createDeploymentResult();

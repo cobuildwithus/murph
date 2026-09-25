@@ -26,7 +26,7 @@ docker run --rm --platform linux/amd64 --network none \
   --mount "type=bind,src=$PWD/scripts/container-resource-probe.mjs,dst=/probe.mjs,readonly" \
   -e MURPH_QUERY_BENCH_EVENTS=8000 \
   --entrypoint node \
-  ghcr.io/cobuildwithus/murph-cloudflare-runner-base:node24.14.1-codex0.153.4 \
+  ghcr.io/cobuildwithus/murph-cloudflare-runner-base:node24.14.1-codex0.156.1-live1 \
   --expose-gc --import /probe.mjs /bench/query-projection.mjs
 ```
 
@@ -87,7 +87,7 @@ docker run --rm --platform linux/amd64 --network none \
   --mount "type=bind,src=$PWD/scripts/container-resource-probe.mjs,dst=/probe.mjs,readonly" \
   -e MURPH_AUTOMATION_BENCH_COUNT=2000 \
   --entrypoint node \
-  ghcr.io/cobuildwithus/murph-cloudflare-runner-base:node24.14.1-codex0.153.4 \
+  ghcr.io/cobuildwithus/murph-cloudflare-runner-base:node24.14.1-codex0.156.1-live1 \
   --import /probe.mjs /bench/automation.mjs
 ```
 

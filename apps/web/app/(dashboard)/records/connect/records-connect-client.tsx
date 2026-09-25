@@ -1,12 +1,8 @@
 "use client";
 
 import {
-  ArrowRightIcon,
-  Building2Icon,
   LockKeyholeIcon,
-  MapPinIcon,
   RefreshCwIcon,
-  SearchIcon,
 } from "lucide-react";
 import {
   useCallback,
@@ -23,11 +19,8 @@ import {
 } from "@/src/components/hosted-onboarding/client-api";
 import { useAuth } from "@/src/components/hosted-onboarding/auth-dialog-provider";
 import { reloadCurrentHostedAuthDocument } from "@/src/components/hosted-onboarding/hosted-auth-navigation";
-import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
 import { Button, buttonVariants } from "@/src/components/ui/button";
-import { Input } from "@/src/components/ui/input";
 import { Skeleton } from "@/src/components/ui/skeleton";
-import { Spinner } from "@/src/components/ui/spinner";
 import {
   clearClinicalRecordsConnectIntentFromBrowser,
   stageClinicalRecordsConnectIntentInBrowser,
@@ -38,10 +31,11 @@ import {
   parseClinicalProviderSearchResponse,
   parseClinicalRecordConnectIntentResponse,
   parseClinicalRecordConnectStartResponse,
-  type ClinicalProviderFacilityContract,
   type ClinicalProviderSearchResultContract,
 } from "@/src/lib/clinical-records/client-contracts";
 import { cn } from "@/src/lib/utils";
+
+import { ProviderSearchView } from "./provider-search-view";
 
 const PROVIDER_SEARCH_PATH = "/api/clinical-records/providers/search";
 const CONNECT_INTENT_PATH = "/api/clinical-records/connect-intents";
@@ -197,7 +191,10 @@ export function ProviderSearch({
   const [startingProviderId, setStartingProviderId] = useState<string | null>(null);
   const [startError, setStartError] = useState<string | null>(null);
   const [intentUnavailable, setIntentUnavailable] = useState(false);
-  const resultsHeadingRef = useRef<HTMLHeadingElement>(null);
+  const [query, setQuery] = useState("");
+  const [keepUpdated, setKeepUpdated] = useState(false);
+  const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const searchAbortRef = useRef<AbortController | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const searchInFlightRef = useRef(false);
   const startInFlightRef = useRef(false);
@@ -221,6 +218,8 @@ export function ProviderSearch({
         return;
       }
       operationGenerationRef.current += 1;
+      if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+      searchAbortRef.current?.abort();
       searchInFlightRef.current = false;
       startInFlightRef.current = false;
       setSearchPending(false);
@@ -231,10 +230,31 @@ export function ProviderSearch({
     }
 
     window.addEventListener("pageshow", restoreAfterHistoryNavigation);
-    return () => window.removeEventListener("pageshow", restoreAfterHistoryNavigation);
+    return () => {
+      window.removeEventListener("pageshow", restoreAfterHistoryNavigation);
+      operationGenerationRef.current += 1;
+      if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+      searchAbortRef.current?.abort();
+    };
   }, []);
 
+  function changeQuery(value: string, composing = false) {
+    if (startInFlightRef.current || selectedProviderId) return;
+    operationGenerationRef.current += 1;
+    if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+    searchAbortRef.current?.abort();
+    searchInFlightRef.current = false;
+    setQuery(value);
+    setSearchError(null);
+    setHasSearched(false);
+    setProviders([]);
+    const shouldSearch = value.trim().length >= 2 && !composing;
+    setSearchPending(shouldSearch);
+    if (shouldSearch) searchTimerRef.current = setTimeout(() => { void searchProviders(); }, 300);
+  }
+
   async function searchProviders() {
+    if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
     const normalizedQuery = searchInputRef.current?.value.trim() ?? "";
     if (!normalizedQuery) {
       if (searchInputRef.current) {
@@ -248,6 +268,9 @@ export function ProviderSearch({
     }
 
     searchInFlightRef.current = true;
+    searchAbortRef.current?.abort();
+    const searchAbort = new AbortController();
+    searchAbortRef.current = searchAbort;
     const operationGeneration = operationGenerationRef.current + 1;
     operationGenerationRef.current = operationGeneration;
     setSearchPending(true);
@@ -258,6 +281,7 @@ export function ProviderSearch({
       const response = await requestHostedOnboardingJson<unknown>({
         method: "POST",
         payload: { query: normalizedQuery },
+        signal: searchAbort.signal,
         url: PROVIDER_SEARCH_PATH,
       });
       const parsed = parseClinicalProviderSearchResponse(response);
@@ -266,7 +290,6 @@ export function ProviderSearch({
       }
       setProviders(parsed.providers);
       setHasSearched(true);
-      requestAnimationFrame(() => resultsHeadingRef.current?.focus());
     } catch {
       if (operationGenerationRef.current !== operationGeneration) {
         return;
@@ -312,6 +335,7 @@ export function ProviderSearch({
         onSuccessfulResponseHeaders: markStartCommitted,
         payload: {
           claim: intentClaim,
+          keepUpdated,
           providerDirectoryEntryId: provider.id,
         },
         url: CLINICAL_RECORD_CONNECT_START_PATH,
@@ -363,177 +387,23 @@ export function ProviderSearch({
   }
 
   return (
-    <section aria-labelledby="provider-search-title" className="min-w-0 space-y-7">
-      <div>
-        <h2 id="provider-search-title" className="mt-1 font-serif text-2xl font-medium tracking-tight text-foreground">
-          Where do you get care?
-        </h2>
-        <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
-          Search by hospital, clinic, or city.
-        </p>
-      </div>
-
-      <form
-        role="search"
-        className="space-y-2.5"
-        onSubmit={(event) => {
-          event.preventDefault();
-          void searchProviders();
-        }}
-      >
-        <label htmlFor="clinical-provider-search" className="font-mono text-[10px] uppercase tracking-[0.11em] text-foreground">
-          Hospital or clinic
-        </label>
-        <div className="flex flex-col gap-3 sm:flex-row">
-          <div className="relative min-w-0 flex-1">
-            <SearchIcon
-              aria-hidden="true"
-              className="pointer-events-none absolute left-4 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
-            />
-            <Input
-              id="clinical-provider-search"
-              autoComplete="off"
-              className="pl-11"
-              inputSize="lg"
-              maxLength={120}
-              name="provider-search"
-              placeholder="Hospital name, New York, NY, or 10001"
-              readOnly={searchPending || Boolean(startingProviderId)}
-              ref={attachSearchInput}
-              required
-            />
-          </div>
-          <Button
-            aria-busy={searchPending}
-            className="w-full sm:w-auto"
-            disabled={searchPending || Boolean(startingProviderId)}
-            size="lg"
-            type="submit"
-          >
-            {searchPending ? <Spinner /> : <SearchIcon aria-hidden="true" />}
-            {searchPending ? "Searching" : "Search"}
-          </Button>
-        </div>
-      </form>
-
-      {searchError ? (
-        <Alert variant="destructive">
-          <AlertTitle>Search unavailable</AlertTitle>
-          <AlertDescription>{searchError}</AlertDescription>
-        </Alert>
-      ) : null}
-
-      {startError ? (
-        <Alert variant="destructive">
-          <AlertTitle>Could not start the connection</AlertTitle>
-          <AlertDescription>
-            {startError}
-            <a href="/records/connect?launch=clinical-records" onClick={() => clearClinicalRecordsConnectIntentFromBrowser()} className="underline underline-offset-4">Start a new connection</a>
-          </AlertDescription>
-        </Alert>
-      ) : null}
-
-      {hasSearched ? (
-        <div
-          aria-busy={searchPending}
-          className={cn("space-y-3 transition-opacity", searchPending && "opacity-60")}
-        >
-          <div>
-            <h3
-              ref={resultsHeadingRef}
-              tabIndex={-1}
-              className="font-serif text-xl font-medium tracking-tight text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            >
-              Matching places
-            </h3>
-            <p aria-live="polite" className="mt-1 font-mono text-[10px] uppercase tracking-[0.1em] text-muted-foreground">
-              {providers.length === 0
-                ? "No matches"
-                : `${providers.length} ${providers.length === 1 ? "match" : "matches"}.`}
-            </p>
-          </div>
-
-          {providers.length > 0 ? (
-            <ul className="divide-y divide-border overflow-hidden rounded-xl border border-border bg-card">
-              {providers.map((provider) => (
-                <ProviderResult
-                  key={provider.id}
-                  disabled={searchPending || Boolean(startingProviderId) || Boolean(selectedProviderId && selectedProviderId !== provider.id)}
-                  pending={startingProviderId === provider.id}
-                  provider={provider}
-                  onSelect={() => void startConnection(provider)}
-                />
-              ))}
-            </ul>
-          ) : (
-            <div className="flex gap-4 border-y border-border py-6">
-              <SearchIcon aria-hidden="true" className="mt-0.5 size-5 shrink-0 text-primary" />
-              <div>
-                <p className="text-sm font-medium text-foreground">This portal may not be supported</p>
-                <p className="mt-1 text-sm leading-6 text-muted-foreground">
-                  Murph does not support every patient portal yet. Check the hospital or clinic name and city, or try another place where you get care.
-                </p>
-              </div>
-            </div>
-          )}
-        </div>
-      ) : null}
-    </section>
-  );
-}
-
-function ProviderResult({
-  disabled,
-  onSelect,
-  pending,
-  provider,
-}: {
-  disabled: boolean;
-  onSelect: () => void;
-  pending: boolean;
-  provider: ClinicalProviderSearchResultContract;
-}) {
-  const facilities = formatFacilities(provider.facilities);
-
-  return (
-    <li className="flex flex-col gap-5 p-5 sm:flex-row sm:items-center sm:justify-between sm:p-6">
-      <div className="min-w-0 space-y-3">
-        <div className="flex items-start gap-3">
-          <span className="mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
-            <Building2Icon aria-hidden="true" className="size-4" />
-          </span>
-          <div className="min-w-0">
-            <p className="font-serif text-lg font-medium leading-6 tracking-tight text-foreground text-pretty">{provider.brandName}</p>
-            <p className="mt-1 font-mono text-[10px] uppercase tracking-[0.1em] text-muted-foreground">
-              Patient portal
-            </p>
-          </div>
-        </div>
-        {facilities.length > 0 ? (
-          <ul className="space-y-1.5 pl-12 text-sm text-muted-foreground">
-            {facilities.map((facility) => (
-              <li key={facility} className="flex items-start gap-1.5">
-                <MapPinIcon aria-hidden="true" className="mt-0.5 size-3.5 shrink-0" />
-                <span className="text-pretty">{facility}</span>
-              </li>
-            ))}
-          </ul>
-        ) : null}
-      </div>
-      <Button
-        aria-busy={pending}
-        aria-label={`Continue to ${provider.brandName} patient portal`}
-        className="w-full sm:w-auto"
-        disabled={disabled}
-        onClick={onSelect}
-        size="lg"
-        type="button"
-      >
-        {pending ? <Spinner /> : null}
-        {pending ? "Opening portal" : "Continue to portal"}
-        {!pending ? <ArrowRightIcon aria-hidden="true" data-icon="inline-end" /> : null}
-      </Button>
-    </li>
+    <ProviderSearchView
+      keepUpdated={keepUpdated}
+      onKeepUpdatedChange={setKeepUpdated}
+      query={query}
+      providers={providers}
+      hasSearched={hasSearched}
+      searchPending={searchPending}
+      searchError={searchError}
+      startError={startError}
+      startingProviderId={startingProviderId}
+      selectedProviderId={selectedProviderId}
+      inputRef={attachSearchInput}
+      onQueryChange={changeQuery}
+      onSearch={() => { void searchProviders(); }}
+      onSelect={(provider) => { void startConnection(provider); }}
+      onRestart={clearClinicalRecordsConnectIntentFromBrowser}
+    />
   );
 }
 
@@ -624,27 +494,6 @@ function UnavailableIntentState() {
       </a>
     </section>
   );
-}
-
-function formatFacilities(
-  facilities: readonly ClinicalProviderFacilityContract[],
-): string[] {
-  const labels = new Set<string>();
-  for (const facility of facilities) {
-    const location = [facility.city, facility.state, facility.postalCode]
-      .filter((part): part is string => Boolean(part))
-      .join(", ");
-    const label = [facility.name, location]
-      .filter((part): part is string => Boolean(part))
-      .join(" · ");
-    if (label) {
-      labels.add(label);
-    }
-    if (labels.size === 3) {
-      break;
-    }
-  }
-  return [...labels];
 }
 
 function isConsentRequiredError(error: unknown): boolean {

@@ -2,7 +2,7 @@ import { createHash, timingSafeEqual } from "node:crypto";
 
 import type { PrismaClient } from "@prisma/client";
 
-import { deleteHostedAccountData } from "../hosted-privacy/account-data-service";
+import { deleteHostedLinqProductionCanaryAccountData } from "../hosted-privacy/account-data-service";
 import { normalizeNullableString } from "../primitives";
 import { hostedOnboardingError } from "./errors";
 import { lookupHostedMemberIdentityByPhoneNumber } from "./hosted-member-identity-store";
@@ -48,8 +48,7 @@ export async function resetHostedLinqProductionCanary(input: {
     projection: "core",
   });
   if (identity) {
-    await deleteHostedAccountData({
-      exitFeedback: null,
+    await deleteHostedLinqProductionCanaryAccountData({
       memberId: identity.core.id,
       prisma: input.prisma,
       request: input.request,

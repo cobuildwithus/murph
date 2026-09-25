@@ -42,6 +42,26 @@ beforeEach(() => {
 })
 
 describe('fresh automation model routing', () => {
+  it.each(['gpt-6-sol', 'gpt-6-luna'])(
+    'keeps a fresh Venice route executable with a saved %s preference',
+    async (model) => {
+      assistantStore.resolveAssistantSession.mockRejectedValueOnce({
+        code: 'ASSISTANT_SESSION_NOT_FOUND',
+      })
+      const preference = { model }
+      const route = await resolveAssistantTurnRouteForMessage(
+        createAutomationInput(preference),
+        null,
+        requireTarget('gpt-5.6-sol', 'low', VENICE_CODEX_MODEL_PROVIDER_ID),
+      )
+      expect(route.providerOptions).toMatchObject({
+        model: 'gpt-5.6-sol',
+        modelProvider: VENICE_CODEX_MODEL_PROVIDER_ID,
+      })
+      expect(preference).toEqual({ model })
+    },
+  )
+
   it('filters a model-only preference against a custom-inference boundary target', async () => {
     assistantStore.resolveAssistantSession.mockRejectedValueOnce({
       code: 'ASSISTANT_SESSION_NOT_FOUND',

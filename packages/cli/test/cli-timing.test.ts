@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { randomInt } from 'node:crypto'
 import { createSocket } from 'node:dgram'
 import { once } from 'node:events'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { Cli, Errors, z } from 'incur'
@@ -371,4 +371,68 @@ test('real batch exit rewrites do not multiply failures; mixed stages, stop and 
   assert.equal(JSON.parse(nested.result.stdout).failed, 1)
   assert.equal(nested.timing.batchContainers, 1)
   assert.deepEqual(nested.timing.commands, [], 'Unsupported nested batch is rejected before opening a child invocation.')
+})
+
+
+test('real research scout-batch rejects before egress and preserves output/exit with loopback diagnostics on or off', async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'research-timing-PRIVATE_PATH-'))
+  roots.push(directory)
+  vi.stubEnv('HOME', directory)
+  // Freeze only output-envelope wall durations, not the monotonic timing owner.
+  vi.spyOn(performance, 'now').mockReturnValue(0)
+  const fetchImpl = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
+    throw new Error('PRIVATE_UNEXPECTED_PROVIDER_REQUEST')
+  })
+  const file = path.join(directory, 'PRIVATE_ARGUMENT.json')
+  const valid = JSON.stringify({ lanes: [{ label: 'sleep', profile: { topics: ['sleep'] } }] })
+  const argv = ['research', 'scout-batch', '--vault', directory, '--input', `@${file}`,
+    '--since', '2026-04-18', '--until', '2026-06-17', '--format', 'json']
+  delete process.env.MURPH_CLI_TIMING_ENDPOINT
+  const fixtures = [
+    { payload: '{"PRIVATE_PAYLOAD":', code: 'invalid_payload' },
+    { payload: '{}', code: 'research_scout_invalid_batch_payload' },
+    { payload: '{"lanes":[],"PRIVATE_PAYLOAD":"PRIVATE_VALUE"}', code: 'research_scout_invalid_batch_payload' },
+    { payload: valid, code: 'research_scout_invalid_window', since: '2026-06-18' },
+    { payload: valid, code: 'research_exa_token_missing', token: '' },
+  ]
+  for (const fixture of fixtures) {
+    vi.stubEnv('EXA_API_KEY', fixture.token ?? 'PRIVATE_TOKEN')
+    await writeFile(file, fixture.payload)
+    const args = [...argv]
+    if (fixture.since) args[args.indexOf('--since') + 1] = fixture.since
+    const baseline = await invoke(args)
+    const captured = await collect(() => invoke(args))
+    assert.deepEqual(captured.result, baseline)
+    assert.equal(captured.result.thrown, null)
+    assert.deepEqual(captured.result.exits, [1])
+    assert.equal(JSON.parse(captured.result.stdout).code, fixture.code)
+    assert.equal(JSON.parse(captured.result.stdout).stage, undefined)
+    assert.equal(fetchImpl.mock.calls.length, 0)
+    assert.equal(captured.timing.reportCount, 1)
+    assert.equal(captured.timing.commands.length, 1)
+    assert.equal(captured.timing.commands[0]!.command, 'research scout-batch')
+    assert.equal(captured.timing.commands[0]!.outcome, 'error')
+    assert.equal(captured.timing.commands[0]!.calls, 1)
+    assert.deepEqual(captured.timing.commands[0]!.failures, [{ code: fixture.code, stage: 'unknown', count: 1 }])
+    assert.equal(captured.timing.droppedCalls, 0)
+    assert.equal(captured.timing.commands[0]!.droppedFailures, undefined)
+    assert.equal(captured.wire.includes('PRIVATE_'), false)
+  }
+  // Nearby valid input uses the real client; only the external provider is fake.
+  vi.stubEnv('EXA_API_KEY', 'PRIVATE_TOKEN')
+  await writeFile(file, valid)
+  const payload = { results: [{ title: 'Synthetic paper', url: 'https://example.test/paper' }],
+    output: { content: { candidates: [{ resultIndex: 0 }] } }, extraProviderField: 'PRIVATE_PROVIDER_PAYLOAD' }
+  fetchImpl.mockImplementation(async () => new Response(JSON.stringify(payload)))
+  const baseline = await invoke(argv)
+  const succeeded = await collect(() => invoke(argv))
+  assert.deepEqual(succeeded.result, baseline)
+  assert.equal(succeeded.result.thrown, null)
+  assert.deepEqual(succeeded.result.exits, [])
+  assert.deepEqual(JSON.parse(succeeded.result.stdout).lanes, [{ label: 'sleep', response: payload }])
+  assert.equal(fetchImpl.mock.calls.length, 2, 'Exactly one fake request per successful invocation.')
+  assert.equal(succeeded.timing.commands[0]!.outcome, 'ok')
+  assert.equal(succeeded.timing.commands[0]!.calls, 1)
+  assert.equal(succeeded.timing.commands[0]!.failures, undefined)
+  assert.equal(succeeded.wire.includes('PRIVATE_'), false)
 })
