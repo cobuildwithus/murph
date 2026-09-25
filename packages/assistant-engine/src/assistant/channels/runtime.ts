@@ -867,7 +867,7 @@ export async function sendLinqMessage(
 
   const message = responseMedia.some((item) => item.kind === 'vault_file')
     ? ''
-    : appendImageAlternativeText(input.message, responseMedia)
+    : input.message
   assertLinqMessagePartsWithinLimits({
     message,
     operation: participantFromPhoneNumber ? 'create_chat' : 'send_message',
