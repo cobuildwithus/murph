@@ -54,3 +54,5 @@ Updated: 2026-09-24
 - Parent candidate review: current authorized labels remain presentation-only; route, schedule, consent, canonical mutation, and delivery owners are unchanged.
 - No repository-actionable Frog entry: the remaining blocker is machine-local authentication.
 - PR remains draft until the requested live scenario passes and required exact-head checks are green.
+
+- Draft PR: https://github.com/cobuildwithus/murph/pull/3697; live authentication remains the completion blocker.
