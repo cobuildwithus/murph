@@ -653,6 +653,39 @@ test("resolveJunctionOrigin accepts Junction attribution aliases", () => {
   assert.equal(flatOrigin.sourceInstanceId?.includes("raw-withings-app"), false);
 });
 
+test("Junction origin preserves precedence and rejects malformed nested aliases", () => {
+  const opaqueId = "source-aaaaaaaaaaaaaaaaaaaaaaaa";
+  for (const source of [null, [], ["oura"], "oura", 17]) {
+    const origin = resolveJunctionOrigin({
+      source,
+      "source.provider": "garmin",
+      "source.device_id": "ignored-literal-key",
+      timeZoneOffsetMinutes: null,
+    }, {
+      sourceProviderSlug: "polar",
+      sourceInstanceId: opaqueId,
+      timeZoneOffsetMinutes: 120,
+    });
+    assert.equal(origin.sourceProviderSlug, "polar");
+    assert.equal(origin.sourceInstanceId, opaqueId);
+    assert.equal(origin.timeZoneOffsetMinutes, null);
+  }
+
+  const origin = resolveJunctionOrigin({
+    sourceProviderSlug: "oura",
+    source: { provider: "garmin", device_id: "unused-device" },
+    sourceInstanceId: opaqueId,
+    sourceAppId: "unused-app",
+    timestamp_semantics: "offset",
+    origin_confidence: "high",
+  }, { sourceProviderSlug: "polar", sourceInstanceId: "source-bbbbbbbbbbbbbbbbbbbbbbbb" });
+  assert.equal(origin.sourceProviderSlug, "oura");
+  assert.equal(origin.sourceInstanceId, opaqueId);
+  assert.equal(origin.timestampSemantics, "offset");
+  assert.equal(origin.originConfidence, "high");
+  assert.deepEqual(resolveJunctionOrigin(undefined), resolveJunctionOrigin({}));
+});
+
 test("Junction snapshot adapter preserves aggregator identity and upstream source provenance", async () => {
   const payload = await prepareDeviceProviderSnapshotImport({
     provider: "junction",

@@ -42,6 +42,7 @@ import {
 } from "@murphai/importers/device-providers/junction";
 import {
   normalizeJunctionSourceProviderSlug,
+  readJunctionSourceProviderSlug,
   resolveJunctionOrigin,
 } from "@murphai/importers/device-providers/junction-origin";
 import {
@@ -9146,7 +9147,7 @@ function isJunctionImportRecordAdmitted(
 
   const fallback = readJunctionSourceReference(record, sourceReferences);
   const sourceProviderSlug = canonicalizeJunctionProviderSlug(
-    resolveJunctionOrigin(record, fallback).sourceProviderSlug,
+    readJunctionSourceProviderSlug(record, fallback),
   );
   if (sourceProviderSlug) {
     if (!isJunctionSourceAdmittedForImport(

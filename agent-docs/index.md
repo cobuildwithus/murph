@@ -732,6 +732,11 @@ are tracked in [`2026-09-24-natural-onboarding-canary`](exec-plans/completed/202
 Native turn cancellation and voice continuity proof:
 [`2026-09-24-voice-turn-lifecycle.md`](exec-plans/completed/2026-09-24-voice-turn-lifecycle.md).
 
+Junction origin parsing allocation reduction and synthetic equivalence evidence:
+[`origin parsing cost`](exec-plans/completed/2026-09-24-junction-origin-cost.md).
+
+Junction admission reuses the provider-only reader with unchanged source fences:
+[`admission parsing cost`](exec-plans/completed/2026-09-24-junction-admission-cost.md).
 Personal Patterns bounded capacity recovery: [`capacity recovery`](exec-plans/completed/2026-09-24-personal-patterns-capacity.md).
 
 Signup-wide native contact-card sharing and daily attempt suppression are owned by
