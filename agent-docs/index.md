@@ -3,6 +3,10 @@ in [the import-speed plan](exec-plans/completed/2026-09-24-garmin-import-speed.m
 
 # Murph Agent Docs Index
 
+[CLI read validation telemetry](exec-plans/completed/2026-09-25-cli-read-validation-telemetry.md)
+records the locally verified implementation; [PR #3707](https://github.com/cobuildwithus/murph/pull/3707)
+owns delivery status. The contract remains in `docs/hosted-runtime-log-database.md`.
+
 Runtime ownership response timing is tracked in
 [the response plan](exec-plans/completed/2026-09-23-runtime-owner-response.md);
 its durable contract remains in the hosted Postgres runtime reference.

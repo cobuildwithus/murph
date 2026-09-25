@@ -582,6 +582,8 @@ test.skipIf(!memoryFailureCompatibilityBase)("actual older memory-code reader ma
 test("validation selection admits only exact schema-owned fields and one standard issue", () => {
   const scopes = [
     ["automation list", ["limit", "status"]],
+    ["event payload-schema", ["kind", "for"]],
+    ["knowledge show", ["slug"]],
     ["food search-labels", ["query", "limit"]],
     ["knowledge upsert", ["body", "slug", "title", "pageType", "status", "clearLibraryLinks", "relatedSlug", "librarySlug", "sourcePath"]],
     ["knowledge append-section", ["slug", "heading", "body", "title", "position", "sourcePath"]],
@@ -689,17 +691,28 @@ test("original validation capture is first-observation-only and retains neither 
   assert.equal(report.commands[0]!.failures, undefined);
 });
 
-test("automation list preserves original errors and round-trips only finite validation detail", async () => {
-  for (const [field, code] of [["limit", "too_big"], ["status", "invalid_value"]] as const) {
-    const validation = { field, code, missing: false };
+const readValidationCases = [
+  ["knowledge show", "slug", "invalid_type", true],
+  ["knowledge show", "slug", "invalid_format", false],
+  ["event payload-schema", "kind", "invalid_value", true],
+  ["event payload-schema", "kind", "invalid_value", false],
+  ["event payload-schema", "for", "invalid_value", false],
+] as const;
+
+test("allowlisted commands preserve original errors and round-trip only finite validation detail", async () => {
+  for (const [command, field, code, missing] of [
+    ["automation list", "limit", "too_big", false], ["automation list", "status", "invalid_value", false],
+    ...readValidationCases,
+  ] as const) for (const property of ["publicIssues", "fieldErrors"] as const) {
+    const validation = { field, code, missing };
     const original = Object.assign(new Error("PRIVATE_SENTINEL"), {
-      name: "Incur.ValidationError", publicIssues: [
+      name: "Incur.ValidationError", fieldErrors: [{ path: "limit", code: "custom" }], [property]: [
         { path: "vault", code: "invalid_type", missing: true },
-        { path: field, code, missing: false, value: "PRIVATE_SENTINEL", message: "PRIVATE_SENTINEL" },
-      ], fieldErrors: [{ path: "limit", code: "custom" }], cause: { code: "PRIVATE_SENTINEL" },
+        { path: field, code, missing, value: "PRIVATE_SENTINEL", message: "PRIVATE_SENTINEL" },
+      ], cause: { code: "PRIVATE_SENTINEL" },
     });
     let report!: CliTiming;
-    await assert.rejects(withCliTiming(() => timeCliDispatch("automation list", async () => { throw original; }),
+    await assert.rejects(withCliTiming(() => timeCliDispatch(command, async () => { throw original; }),
       (value) => { report = value; }), (caught) => caught === original);
     assert.equal(original.message, "PRIVATE_SENTINEL");
     assert.equal(report.reportCount, 1);
@@ -713,6 +726,17 @@ test("automation list preserves original errors and round-trips only finite vali
     const legacy = structuredClone(report);
     delete legacy.commands[0]!.failures![0]!.validation;
     assert.deepEqual(normalizeCliTiming(legacy), legacy);
+    assert.equal(normalizeCliTiming({ ...report, commands: [{ ...report.commands[0], outcome: "ok" }] })?.commands[0]!.failures, undefined);
+    for (const otherCode of ["invalid_payload", "knowledge_page_not_found", "unknown"] as const) {
+      const other = Object.assign(new Error("PRIVATE_SENTINEL"), original, { code: otherCode });
+      let otherReport!: CliTiming;
+      await assert.rejects(withCliTiming(() => timeCliDispatch(command, async () => { throw other; }),
+        (value) => { otherReport = value; }), (caught) => caught === other);
+      assert.deepEqual(otherReport.commands[0]!.failures, [{ code: otherCode, stage: "unknown", count: 1 }]);
+      assert.deepEqual(normalizeCliTiming({ ...legacy, commands: [{ ...legacy.commands[0],
+        failures: [{ code: otherCode, stage: "unknown", count: 1, validation }] }] })?.commands[0]!.failures,
+        otherReport.commands[0]!.failures);
+    }
     for (const invalid of [{ ...validation, field: "vault" }, { ...validation, field: `${field}.0` },
       { ...validation, code: "PRIVATE_SENTINEL" }, { ...validation, missing: "false" }]) {
       assert.deepEqual(normalizeCliTiming({ ...report, commands: [{ ...report.commands[0],
@@ -721,27 +745,37 @@ test("automation list preserves original errors and round-trips only finite vali
   }
 });
 
-test("automation validation omits other fields, commands and malformed evidence on every projection", () => {
-  const good = { path: "status", code: "invalid_value", missing: false };
-  for (const path of ["vault", "requestId", "sourcePath", "text", "supportSeriesId", "cursor", "compact",
-    "status.0", "status[0]", ["status"], "Status", " status", "status ", "statusPRIVATE_SENTINEL", "PRIVATE_SENTINEL"]) {
-    for (const property of ["publicIssues", "fieldErrors", "validation"] as const) {
-      const detail = property === "validation" ? { field: path, code: good.code, missing: false }
-        : [{ ...good, path, value: "PRIVATE_SENTINEL" }];
-      assert.deepEqual(cliTimingValidationFailure("automation list", "VALIDATION_ERROR", { [property]: detail }, property), {});
+test("command validation omits other fields, commands and malformed evidence on every projection", () => {
+  for (const [command, field, otherFields] of [
+    ["automation list", "status", ["sourcePath", "text", "supportSeriesId", "cursor", "compact"]],
+    ["knowledge show", "slug", ["kind", "for", "body", "sourcePath"]],
+    ["event payload-schema", "kind", ["slug", "body", "sourcePath"]],
+    ["event payload-schema", "for", ["slug", "body", "sourcePath"]],
+  ] as const) {
+    const good = { path: field, code: "invalid_value", missing: false };
+    const invalid = [
+      ...["vault", "requestId", ...otherFields, `${field}.0`, `${field}[0]`, [field], field.toUpperCase(),
+        ` ${field}`, `${field} `, `${field}PRIVATE_SENTINEL`, "PRIVATE_SENTINEL"].map((path) => ({ ...good, path })),
+      ...[null, "false", 0, {}].map((missing) => ({ ...good, missing })),
+      ...["INVALID_VALUE", "invalid_value ", "invalid_value_PRIVATE_SENTINEL"].map((code) => ({ ...good, code })),
+    ];
+    for (const issue of invalid) for (const property of ["publicIssues", "fieldErrors", "validation"] as const) {
+      const detail = property === "validation" ? { field: issue.path, code: issue.code, missing: issue.missing }
+        : [{ ...issue, value: "PRIVATE_SENTINEL", message: "PRIVATE_SENTINEL" }];
+      assert.deepEqual(cliTimingValidationFailure(command, "VALIDATION_ERROR", { [property]: detail }, property), {});
     }
+    for (const other of ["other", "automation show", "automation set-status", "event list", "knowledge list",
+      `${command} PRIVATE_SENTINEL`, command.toUpperCase()]) {
+      assert.deepEqual(cliTimingValidationFailure(other, "VALIDATION_ERROR", { publicIssues: [good] }, "publicIssues"), {});
+    }
+    for (const publicIssues of [undefined, null, {}, [],
+      Array(CLI_TIMING_MAX_VALIDATION_ISSUES).fill({ ...good, path: "PRIVATE_SENTINEL" }).concat(good)]) {
+      assert.deepEqual(cliTimingValidationFailure(command, "VALIDATION_ERROR", { publicIssues }, "publicIssues"), {});
+    }
+    assert.deepEqual(cliTimingValidationFailure(command, "VALIDATION_ERROR", {
+      publicIssues: [{ path: field, code: "invalid_value", received: "undefined" }],
+    }, "publicIssues"), { validation: { field, code: "invalid_value" } });
   }
-  for (const command of ["automation show", "automation set-status", "automation list PRIVATE_SENTINEL", "Automation list"]) {
-    assert.deepEqual(cliTimingValidationFailure(command, "VALIDATION_ERROR", { publicIssues: [good] }, "publicIssues"), {});
-  }
-  for (const publicIssues of [undefined, null, {}, [], [{ ...good, missing: "false" }],
-    [{ ...good, code: "invalid_value_PRIVATE_SENTINEL" }],
-    Array(CLI_TIMING_MAX_VALIDATION_ISSUES).fill({ ...good, path: "PRIVATE_SENTINEL" }).concat(good)]) {
-    assert.deepEqual(cliTimingValidationFailure("automation list", "VALIDATION_ERROR", { publicIssues }, "publicIssues"), {});
-  }
-  assert.deepEqual(cliTimingValidationFailure("automation list", "VALIDATION_ERROR", {
-    publicIssues: [{ path: "status", code: "invalid_value", received: "undefined" }],
-  }, "publicIssues"), { validation: { field: "status", code: "invalid_value" } });
 });
 
 // Load the actual pre-extension reader, not a copied telemetry parser.
@@ -768,6 +802,43 @@ test.skipIf(!automationValidationCompatibilityBase)("actual older automation rea
     assert.deepEqual(old.normalizeCliTiming(report), legacy);
     assert.deepEqual(normalizeCliTiming(legacy), legacy);
     assert.deepEqual(old.normalizeCliTiming(sample("automation list")), sample("automation list"));
+  }
+});
+
+const readValidationCompatibilityBase = process.env.MURPH_CLI_READ_VALIDATION_COMPAT_BASE;
+test.skipIf(!readValidationCompatibilityBase)("actual older read-validation consumer drops detail but preserves the envelope and counts", async () => {
+  assert.match(readValidationCompatibilityBase ?? "", /^[a-f0-9]{40}$/u);
+  const source = execFileSync("git", ["show", `${readValidationCompatibilityBase}:packages/runtime-state/src/cli-timing.ts`],
+    { encoding: "utf8", maxBuffer: 1_000_000 });
+  const old: { normalizeCliTiming: typeof normalizeCliTiming; cliTimingValidationFailure: typeof cliTimingValidationFailure } = await import(
+    `data:text/javascript;base64,${Buffer.from(stripTypeScriptTypes(source)).toString("base64")}`,
+  );
+  for (const [command, field, code, missing] of readValidationCases) {
+    const validation = { field, code, missing };
+    for (const property of ["publicIssues", "fieldErrors"] as const) {
+      const source = { [property]: [{ path: field, code, missing }] };
+      assert.deepEqual(old.cliTimingValidationFailure(command, "VALIDATION_ERROR", source, property), {});
+      assert.deepEqual(cliTimingValidationFailure(command, "VALIDATION_ERROR", source, property), { validation });
+    }
+    const report = sample(command);
+    report.commands[0]!.outcome = "error";
+    report.commands[0]!.calls = 3;
+    report.commands[0]!.failures = [
+      { code: "VALIDATION_ERROR", stage: "validation", count: 1, validation },
+      { code: "VALIDATION_ERROR", stage: "validation", count: 1 },
+    ];
+    report.commands[0]!.droppedFailures = 1;
+    const legacy = structuredClone(report);
+    legacy.commands[0]!.failures = [{ code: "VALIDATION_ERROR", stage: "validation", count: 2 }];
+    assert.deepEqual(normalizeCliTiming(report), report);
+    assert.deepEqual(old.normalizeCliTiming(report), legacy);
+    assert.deepEqual(normalizeCliTiming(legacy), legacy);
+    delete legacy.commands[0]!.failures;
+    delete legacy.commands[0]!.droppedFailures;
+    assert.deepEqual(old.normalizeCliTiming(legacy), legacy);
+    assert.deepEqual(normalizeCliTiming(legacy), legacy);
+    assert.deepEqual(old.normalizeCliTiming(sample(command)), sample(command));
+    assert.deepEqual(normalizeCliTiming(sample(command)), sample(command));
   }
 });
 

@@ -1479,6 +1479,8 @@ static field names are admitted:
 
 - `automation list`: limit, status (only these two options from `packages/cli/src/commands/automation.ts`).
 - `food search-labels`: query, limit.
+- `knowledge show`: slug (required positional argument in `packages/cli/src/commands/knowledge.ts`).
+- `event payload-schema`: kind, for (required public kind and optional literal `import-jsonl` surface in `packages/cli/src/commands/event.ts`).
 - `knowledge upsert`: body, slug, title, pageType, status, clearLibraryLinks,
   relatedSlug, librarySlug, sourcePath.
 - `knowledge append-section`: slug, heading, body, title, position, sourcePath.
@@ -1585,6 +1587,28 @@ list with no provider calls or filesystem changes, plus byte-identical output
 and exits with timing disabled/enabled. No prompt, schema or dynamic-tool change
 is implied by these synthetic probes.
 
+The `knowledge show` and `event payload-schema` field extension uses that same
+consumer-first Web/reader, then runner/CLI-producer rollout. Run the history-backed
+reader test with
+`MURPH_CLI_READ_VALIDATION_COMPAT_BASE=85d536703736f3553105e01120f5560a25b732e4`.
+It checks old-reader omission/coalescing with unchanged envelopes, counts and
+drops, and new-reader acceptance of old writers with or without failure detail.
+Verify deployed Web/reader source versions and runner bundle/source versions,
+including warm processes, before interpreting natural-traffic coverage. Mixed
+versions and a rollback to the old reader can lose only this optional detail;
+old producers cannot emit it. No coordinated pause, backfill or schema bump is
+needed. Rollback does not change command behavior or legacy accounting.
+
+The native timing parity fixture covers missing/malformed slug, missing/invalid
+kind and invalid `for`, both default/explicit valid schema requests, a valid
+knowledge read and an ordinary missing-page rejection. It requires identical
+output/exits with timing off/on, zero provider calls and unchanged filesystem
+contents. These synthetic cases prove the observation seam, not the cause of a
+retained singleton. Cause remains ambiguous until natural failed traffic carries
+this detail; null/absent fields are not healthy outcomes. Do not trigger production
+failures to validate rollout. This diagnostics-only change needs no live-model
+journey and changes no prompt, command schema, recovery, retry or provider behavior.
+
 ### Bounded failure-frequency inspection and decision threshold
 
 Run on the **primary usage database** after compatible consumers and producers
@@ -1650,22 +1674,24 @@ actual old-reader skew, usage-body fitting and Web persisted normalization. Thes
 are synthetic local tests; no real-model journey or production destination is
 needed for this extension's unchanged output contract.
 
-#### Automation-list validation inspection (including singletons)
+#### Command-specific validation inspection (including singletons)
 
-For `automation list / VALIDATION_ERROR / validation`, **any newly attributed
-event warrants inspection, including one event in one turn**; the two-turn
+For `automation list`, `knowledge show` and `event payload-schema` with
+`VALIDATION_ERROR / validation`, **any newly attributed event warrants inspection,
+including one event in one turn**; the two-turn
 implementation-investigation threshold above does not gate this inspection.
 Attribution is not an automatic behavior or prompt change. Reproduce the exact
 attributed path synthetically and establish its cause before proposing one.
 This extension does not classify connected-app result-size failures, missing
-knowledge reads, other food/knowledge/meal errors, generic shell exits or unknown
-event/automation outcomes.
+knowledge pages, generic shell exits, profile `other`, exercise-card failures or
+turn-level provider loss. None can be equated with these input rejections.
 
 After consumer/producer convergence, run this read-only query on the primary
 usage database for a fixed natural-traffic window. Bind `:window_start_utc` and
 `:window_end_utc` to UTC timestamps (use consecutive 12-hour windows for a
-comparison). It returns only bounded metadata, keeps absent validation visible,
-and uses turn IDs only internally to avoid summing repeated profile snapshots.
+comparison). It returns only finite command/field/code/missing groups, keeps absent
+validation visible, and uses turn IDs only internally to avoid summing repeated
+profile snapshots.
 A 10,000-row cap hit requires a narrower window; counts are observed lower bounds,
 not complete attempt totals. Check missing reports and drop counters separately.
 
@@ -1683,32 +1709,39 @@ WITH rows AS MATERIALIZED (
   FROM rows
   CROSS JOIN LATERAL jsonb_array_elements(t -> 'commands') c
   WHERE t ->> 'schema' = 'murph.cli-timing.v1'
-    AND c ->> 'command' = 'automation list'
+    AND c ->> 'command' IN ('automation list', 'knowledge show', 'event payload-schema')
     AND c ->> 'outcome' = 'error'
 ), per_turn AS (
-  SELECT turn_id, f.field, f.issue_code, f.missing,
+  SELECT turn_id, c ->> 'command' AS command, f.field, f.issue_code, f.missing,
          max(f.observations) AS observations
   FROM commands
   CROSS JOIN LATERAL (
-    SELECT e -> 'validation' ->> 'field' AS field,
-           e -> 'validation' ->> 'code' AS issue_code,
-           e -> 'validation' ->> 'missing' AS missing,
+    SELECT CASE
+             WHEN c ->> 'command' = 'automation list' AND e -> 'validation' ->> 'field' IN ('limit', 'status')
+               OR c ->> 'command' = 'knowledge show' AND e -> 'validation' ->> 'field' = 'slug'
+               OR c ->> 'command' = 'event payload-schema' AND e -> 'validation' ->> 'field' IN ('kind', 'for')
+             THEN e -> 'validation' ->> 'field' END AS field,
+           CASE WHEN e -> 'validation' ->> 'code' IN (
+             'invalid_type', 'too_big', 'too_small', 'invalid_format', 'not_multiple_of',
+             'unrecognized_keys', 'invalid_union', 'invalid_key', 'invalid_element', 'invalid_value', 'custom'
+           ) THEN e -> 'validation' ->> 'code' END AS issue_code,
+           CASE WHEN jsonb_typeof(e -> 'validation' -> 'missing') = 'boolean'
+             THEN e -> 'validation' ->> 'missing' END AS missing,
            sum((e ->> 'count')::numeric) AS observations
     FROM jsonb_array_elements(c -> 'failures') e
     WHERE e ->> 'code' = 'VALIDATION_ERROR'
       AND e ->> 'stage' = 'validation'
-    GROUP BY e -> 'validation' ->> 'field', e -> 'validation' ->> 'code',
-             e -> 'validation' ->> 'missing'
+    GROUP BY 1, 2, 3
   ) f
-  GROUP BY turn_id, f.field, f.issue_code, f.missing
+  GROUP BY turn_id, c ->> 'command', f.field, f.issue_code, f.missing
 )
-SELECT field, issue_code, missing, count(*) AS independent_turns,
+SELECT command, field, issue_code, missing, count(*) AS independent_turns,
        sum(observations) AS observed_failures_lower_bound,
-       (field IN ('limit', 'status')) IS TRUE AS inspect,
+       (field IS NOT NULL AND issue_code IS NOT NULL) AS inspect,
        (SELECT count(*) = 10000 FROM rows) AS input_row_cap_hit
 FROM per_turn
-GROUP BY field, issue_code, missing
-ORDER BY independent_turns DESC, field, issue_code, missing
+GROUP BY command, field, issue_code, missing
+ORDER BY independent_turns DESC, command, field, issue_code, missing
 LIMIT 50;
 ```
 
