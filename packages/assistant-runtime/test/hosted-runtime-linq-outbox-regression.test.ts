@@ -4,6 +4,8 @@ import path from "node:path";
 
 import { afterEach, expect, it, vi } from "vitest";
 
+import { buildHostedLinqLinkDelayNotice } from "../src/hosted-runtime/linq-link-delay-notice.ts";
+
 import {
   createAssistantOutboxIntent,
   deliverAssistantOutboxReaction,
@@ -1831,7 +1833,7 @@ it.each([
       : part.value === "Your calendar is ready" ? "primary" : "notice";
     sends.push({ key: body.message.idempotency_key, kind });
     if (kind === "notice") {
-      expect(part.value).toBe("The link is taking longer to send. I'll keep trying.");
+      expect(part.value).toBe(buildHostedLinqLinkDelayNotice(intent.intentId));
       expect(await readAssistantOutboxIntent(fixture.vaultRoot, intent.intentId))
         .toMatchObject({ status: "retryable", nextAttemptAt: expect.any(String) });
     }

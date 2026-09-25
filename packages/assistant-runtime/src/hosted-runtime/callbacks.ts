@@ -140,6 +140,7 @@ import {
   resolveHostedAssistantLinqReactionDeliveryContextFromCandidatesForRequest,
   type HostedAssistantLinqDeliveryContext,
 } from "./linq-delivery-context.ts";
+import { buildHostedLinqLinkDelayNotice } from "./linq-link-delay-notice.ts";
 import {
   requireHostedProviderFetch,
   requireHostedProviderFetchDependencies,
@@ -3346,7 +3347,7 @@ async function maybeSendHostedLinqLinkDelayNotice(input:
       signal: input.signal,
     })({
       idempotencyKey: `assistant-link-delay:${intent.intentId}`,
-      message: "The link is taking longer to send. I'll keep trying.",
+      message: buildHostedLinqLinkDelayNotice(intent.intentId),
       target: delivery.target,
       targetKind: delivery.targetKind,
     });
