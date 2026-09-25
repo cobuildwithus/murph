@@ -1,6 +1,6 @@
 # Classify Linq preparation retries without changing delivery
 
-Status: active
+Status: completed
 Created: 2026-09-25
 Updated: 2026-09-25
 
@@ -61,4 +61,18 @@ Next's deferred callbacks deferred and type malformed fixture values as unknown.
 - Changelog and product journeys are not applicable: internal additive log
   metadata only; no prompt, tool, reply, or rendered UI changes.
 
-Final external review, required CI, and canonical deployment remain pending.
+## Final review and handoff
+
+PR #3706 contains the telemetry-only candidate. Final ReviewGPT round 1 passed
+on `e47d0cfa04a3a25e984a562408035cb62f059b18`, with the requested model and
+exact response identity verified. There are no accepted or unresolved findings.
+The parent confirmed the full production patch remains the reviewed projection
+and four log-field additions; the closeout changes only this plan and its index.
+
+The implementation is complete. Required CI must pass on the final authored head
+before the telemetry-only merge. Canonical Git-managed Web deployment admission
+and read-only natural-traffic observation remain separate release gates. No
+functional correction, schema, configuration, provider action, or replay is
+authorized by this plan. If no natural retry occurs, retain the bounded query for
+the next sweep rather than generating production events.
+Completed: 2026-09-25
