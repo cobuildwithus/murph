@@ -18,7 +18,8 @@ const childFile = fileURLToPath(new URL('./fixtures/cli-timing-child.ts', import
 const tsx = import.meta.resolve('tsx')
 const key = '0123456789abcdef0123456789abcdef'
 const sentinels = ['SYNTHETIC_SECRET_TOKEN', 'SYNTHETIC_HEALTH_HISTORY', 'SYNTHETIC_PRIVATE_PATH',
-  'SYNTHETIC_MEMORY_VALUE', 'mem_synthetic_missing', 'bank/memory.md', 'synthetic-invalid']
+  'SYNTHETIC_MEMORY_VALUE', 'mem_synthetic_missing', 'bank/memory.md', 'synthetic-invalid',
+  'SYNTHETIC_INVALID_SLUG!', 'synthetic-page', 'SYNTHETIC_KNOWLEDGE_VALUE']
 
 async function tree(directory: string): Promise<unknown> {
   const names = (await readdir(directory, { withFileTypes: true })).sort((a, b) => a.name.localeCompare(b.name))
@@ -115,6 +116,25 @@ const cases: Case[] = [
   { name: 'knowledge append missing heading', argv: ['knowledge', 'append-section', 'synthetic-page', '--body', 'SYNTHETIC_HEALTH_HISTORY'],
     command: 'knowledge append-section', code: 'VALIDATION_ERROR', field: 'heading',
     validation: { field: 'heading', code: 'invalid_type', missing: true } },
+  { name: 'knowledge show missing slug', argv: ['knowledge', 'show'],
+    command: 'knowledge show', code: 'VALIDATION_ERROR', field: 'slug',
+    validation: { field: 'slug', code: 'invalid_type', missing: true } },
+  { name: 'knowledge show invalid slug', argv: ['knowledge', 'show', 'SYNTHETIC_INVALID_SLUG!'],
+    command: 'knowledge show', code: 'VALIDATION_ERROR', field: 'slug',
+    validation: { field: 'slug', code: 'invalid_format', missing: false } },
+  { name: 'event schema missing kind', argv: ['event', 'payload-schema'],
+    command: 'event payload-schema', code: 'VALIDATION_ERROR', field: 'kind',
+    validation: { field: 'kind', code: 'invalid_value', missing: true } },
+  { name: 'event schema invalid kind', argv: ['event', 'payload-schema', '--kind', 'synthetic-invalid'],
+    command: 'event payload-schema', code: 'VALIDATION_ERROR', field: 'kind',
+    validation: { field: 'kind', code: 'invalid_value', missing: false } },
+  { name: 'event schema invalid for', argv: ['event', 'payload-schema', '--kind', 'note', '--for', 'synthetic-invalid'],
+    command: 'event payload-schema', code: 'VALIDATION_ERROR', field: 'for',
+    validation: { field: 'for', code: 'invalid_value', missing: false } },
+  { name: 'event schema default for', argv: ['event', 'payload-schema', '--kind', 'note'],
+    command: 'event payload-schema' },
+  { name: 'event schema explicit for', argv: ['event', 'payload-schema', '--kind', 'note', '--for', 'import-jsonl'],
+    command: 'event payload-schema' },
   { name: 'automation invalid limit', argv: ['automation', 'list', '--limit', '201'],
     command: 'automation list', code: 'VALIDATION_ERROR', field: 'limit',
     validation: { field: 'limit', code: 'too_big', missing: false } },
@@ -136,7 +156,7 @@ for (const sample of cases) test(`real subprocess: ${sample.name}`, async () => 
     if (sample.code) {
       assert.equal(output.code, sample.code)
       assert.equal(typeof output.message, 'string')
-      if (sample.command === 'automation list') assert.equal(output.stage, 'validation')
+      if (sample.validation) assert.equal(output.stage, 'validation')
       if (sample.field) {
         assert.ok(output.fieldErrors.some((error: { path: string }) =>
           error.path === sample.field))
@@ -148,6 +168,12 @@ for (const sample of cases) test(`real subprocess: ${sample.name}`, async () => 
       } else {
         assert.equal(output.message, 'No public exercise catalog item matched "synthetic-no-such-exercise".')
       }
+    } else if (sample.command === 'event payload-schema') {
+      assert.equal(output.schemaVersion, 'murph.payload-schema.v1')
+      assert.equal(output.command, 'event import-jsonl')
+      assert.equal(output.lineSchemaName, 'event-import-jsonl-row-note')
+      assert.equal(output.mediaType, 'application/jsonl')
+      assert.equal(output.schema.type, 'object')
     } else if (sample.command === 'automation list') {
       assert.deepEqual(output, { vault: path.join(directory, 'vault'),
         filters: { status: null, text: null, supportSeriesId: null, cursor: null, limit: 1 },
@@ -168,6 +194,41 @@ for (const sample of cases) test(`real subprocess: ${sample.name}`, async () => 
     assert.deepEqual(commands[0]!.failures, sample.code
       ? [{ code: sample.code, stage: sample.field ? 'validation' : 'unknown', count: 1,
           ...(sample.validation ? { validation: sample.validation } : {}) }] : undefined)
+  })
+}, 90_000)
+
+for (const exists of [false, true]) test(`real knowledge read: ${exists ? 'valid' : 'missing page'}`, async () => {
+  await isolated(async (directory, invoke) => {
+    const vault = path.join(directory, 'vault')
+    const markdown = '---\nslug: synthetic-page\ntitle: Synthetic page\n---\n\n# Synthetic page\n\nSYNTHETIC_KNOWLEDGE_VALUE\n'
+    if (exists) {
+      const pagePath = path.join(vault, 'derived/knowledge/pages/synthetic-page.md')
+      await mkdir(path.dirname(pagePath), { recursive: true })
+      await writeFile(pagePath, markdown)
+    }
+    const argv = ['knowledge', 'show', 'synthetic-page', '--vault', vault, '--format', 'json']
+    const off = await invoke(argv, 0, false)
+    const on = await invoke(argv)
+    assert.deepEqual({ ...on, timing: null }, off, 'telemetry cannot change output, exits, errors or hints')
+    assert.equal(on.code, exists ? 0 : 1)
+    const output = JSON.parse(on.stdout)
+    if (exists) {
+      assert.equal(output.page.slug, 'synthetic-page')
+      assert.equal(output.page.markdown, markdown)
+    } else {
+      assert.equal(output.code, 'knowledge_page_not_found')
+      assert.equal(output.stage, 'read')
+      assert.equal(output.retryable, false)
+      assert.equal(output.message, 'No derived knowledge page exists for slug "synthetic-page".')
+    }
+    assert.equal(on.timing!.reportCount, 1)
+    assert.equal(on.timing!.commands.length, 1)
+    const command = on.timing!.commands[0]!
+    assert.equal(command.command, 'knowledge show')
+    assert.equal(command.outcome, exists ? 'ok' : 'error')
+    assert.equal(command.calls, 1)
+    assert.deepEqual(command.failures, exists ? undefined
+      : [{ code: 'knowledge_page_not_found', stage: 'read', count: 1 }])
   })
 }, 90_000)
 

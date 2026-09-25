@@ -58,6 +58,8 @@ export function cliTimingFailureStage(value: unknown): CliFailureTiming["stage"]
 // coercion, array-index admission or prefix matching belongs in telemetry.
 const validationFields = [
   ["automation list", ["limit", "status"]],
+  ["event payload-schema", ["kind", "for"]],
+  ["knowledge show", ["slug"]],
   ["food search-labels", ["query", "limit"]],
   ["knowledge upsert", ["body", "slug", "title", "pageType", "status", "clearLibraryLinks",
     "relatedSlug", "librarySlug", "sourcePath"]],
