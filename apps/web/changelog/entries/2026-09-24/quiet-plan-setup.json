@@ -1,0 +1,20 @@
+{
+  "publishedOn": "2026-09-24",
+  "order": 100,
+  "item": {
+    "id": "quiet-plan-setup",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Save a plan without adding reminders",
+    "summary": "Murph can save an accepted walking or habit plan around a cue like before lunch, without asking for an exact clock time when reminders are off.",
+    "details": "The saved plan stays linked to your goal. Choosing quiet support keeps reminders off, and you can ask to change or pause the plan.",
+    "relevanceTags": [
+      "goals",
+      "habits",
+      "reminders"
+    ],
+    "sourcePullRequests": [
+      3700
+    ]
+  }
+}

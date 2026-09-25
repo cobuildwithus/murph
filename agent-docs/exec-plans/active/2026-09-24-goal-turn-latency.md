@@ -81,5 +81,13 @@ canary threshold, or production credential changes.
   pre-existing proof gap, not passing reminder-persistence evidence.
 - A narrower support-proposal journey exposed a missing shared exercise reference
   in its synthetic fixture. Add the shipped asset and track the repair in Frog.
-- Pending final live functional proof, changelog, candidate commit/PR review,
-  exact-head CI, deployment, and protected production canary.
+- Final local Luna quiet-plan proof passes: no proposal writes; exactly one custom
+  Goal and one linked active habit regimen after acceptance; no reminders and no
+  redundant post-save shows. Proposal 31.7 seconds and acceptance 15.6 seconds on
+  a busy local host. Empty public discovery still repeated once; no guarantee of
+  every inference step or hosted latency is claimed.
+- The narrower reminder-proposal proof passes after the fixture asset repair,
+  with a support offer and zero unaccepted writes or runtime issues.
+- Candidate committed and draft PR #3700 opened. Release note added for quiet-plan
+  setup, without promising a response-time threshold.
+- Pending exact-head review/CI, deployment, and protected production canary.
