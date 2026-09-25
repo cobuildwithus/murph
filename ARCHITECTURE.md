@@ -306,8 +306,12 @@ and recurring habits are preserved, including on retries. Source opt-outs still
 apply, and uncertain context does not authorize a mutation.
 Scheduled outdoor reminders independently resolve current member location and
 canonical travel, including recent segments after arrival leaves the upcoming
-projection. Plans remain conditional evidence. No separate reconciliation store,
-location store, or scheduler is introduced.
+projection. Plans remain conditional evidence. Lodging destinations require
+explicit source geography; property names and scenic amenities cannot establish a city. Capture
+reads the exact confirmation when a snippet is insufficient, preserves confirmed
+bookings with unknown destinations, and repairs unsupported imported geography
+through the same revision-checked event owner while preserving member corrections.
+No separate reconciliation store, location store, or scheduler is introduced.
 Each canonical Journal plan note owns end time, planned/tentative/canceled state, verification
 time, category, and optional connected account; existing event fields own start,
 timezone, title, source identity, revision, and detailed logistics. Typed note

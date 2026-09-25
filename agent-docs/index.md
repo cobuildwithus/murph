@@ -780,5 +780,8 @@ Signup-wide native contact-card sharing and daily attempt suppression are owned 
 `operations/imessage-deliverability.md`; implementation and receipt-order proof
 are tracked in `exec-plans/completed/2026-09-24-signup-contact-card.md`.
 
+Lodging destination evidence and focused assistant proof are tracked in
+[`lodging destination evidence`](exec-plans/completed/2026-09-25-lodging-location-evidence.md).
+
 Health-purpose connected-plan follow-ups and legacy suppression are tracked in
 [`health-purpose check-ins`](exec-plans/completed/2026-09-25-health-purpose-checkins.md).
