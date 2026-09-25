@@ -2,7 +2,6 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { createServer as createNetServer } from "node:net";
 import { expect } from "vitest";
 import {
-  listMurphDynamicToolNames,
   resolveMurphDynamicTools,
 } from "@murphai/assistant-engine/assistant-codex";
 import {
@@ -21,11 +20,6 @@ const temporalDevUiPortOffset = 1_000;
 const minTemporalDevFrontendPort = 10_000;
 const maxTemporalDevFrontendPort = 65_535 - temporalDevUiPortOffset;
 const maxTemporalDevPortReservationAttempts = 1_000;
-const hostedGroupFamilyToolNames = new Set(
-  resolveMurphDynamicTools({ groupAvailable: true })
-    .filter((tool) => tool.name.startsWith("group_"))
-    .map((tool) => `${tool.namespace}.${tool.name}`),
-);
 const defaultHostedRunnerEnvProfiles = [
   "assistant",
 ] as const;
@@ -262,154 +256,36 @@ export function expectAdvertisedMurphDynamicTools(
   const lastResponsesRequest = [...requests]
     .reverse()
     .find((request) => request.url === "/v1/responses");
-  const expectedToolNames = listMurphDynamicToolNames()
-    .filter((name) => {
-      if (
-        options.analyzeVideoAvailable !== true
-        && name === "murph.analyze_video"
-      ) {
-        return false;
-      }
-
-      if (
-        options.calendarLinkAvailable !== true
-        && name === "murph.create_calendar_link"
-      ) {
-        return false;
-      }
-
-      if (
-        options.computerToolsAvailable !== true
-        && name.startsWith("murph.computer_")
-      ) {
-        return false;
-      }
-
-      if (
-        options.connectedAppsAvailable !== true
-        && name.startsWith("murph.connected_apps_")
-      ) {
-        return false;
-      }
-
-      if (
-        options.messageTargetingAvailable !== true
-        && (
-          name === "murph.react_to_message"
-          || name === "murph.select_reply_target"
-        )
-      ) {
-        return false;
-      }
-
-      if (
-        options.groupAvailable !== true
-        && hostedGroupFamilyToolNames.has(name)
-      ) {
-        return false;
-      }
-
-      if (
-        options.groupRoomModelAvailable !== true
-        && name === "murph.group_room_model"
-      ) {
-        return false;
-      }
-
-      if (
-        options.imessageContactAvailable !== true
-        && name === "murph.imessage_contact"
-      ) {
-        return false;
-      }
-
-      if (
-        options.physicalNoteRecoveryAvailable !== true
-        && name === "murph.resolve_physical_note"
-      ) {
-        return false;
-      }
-
-      if (
-        options.physicalNotesAvailable !== true
-        && name === "murph.send_physical_note"
-      ) {
-        return false;
-      }
-
-      if (
-        options.progressUpdatesAvailable === false
-        && name === "murph.send_progress_update"
-      ) {
-        return false;
-      }
-
-      if (
-        options.responseCardAvailable !== true
-        && name === "murph.attach_response_card"
-      ) {
-        return false;
-      }
-
-      if (
-        options.exerciseRoutineResponseCardAvailable !== true
-        && name === "murph.attach_exercise_routine_card"
-      ) {
-        return false;
-      }
-
-      if (
-        options.telegramRichContentResponseCardAvailable !== true
-        && name === "murph.attach_telegram_rich_content"
-      ) {
-        return false;
-      }
-
-      if (
-        options.pendingVaultFilesAvailable !== true
-        && name === "murph.pending_vault_files"
-      ) {
-        return false;
-      }
-
-      if (
-        options.vaultFileSendAvailable !== true
-        && name === "murph.send_vault_file"
-      ) {
-        return false;
-      }
-
-      if (
-        options.phoneCallsAvailable !== true
-        && name === "murph.create_phone_call"
-      ) {
-        return false;
-      }
-
-      if (
-        options.askGrokAvailable !== true
-        && name === "murph.ask_grok"
-      ) {
-        return false;
-      }
-
-      return true;
-    })
-    .map((name) => name.replace(/^murph\./u, ""))
-    .sort();
+  const expectedTools = resolveMurphDynamicTools({
+    ...options,
+    assistantStyleSettingsAvailable: true,
+    assistantConfigurationAvailable: true,
+    automationAvailable: true,
+    deviceAvailable: true,
+    clinicalRecordsConnectLinkAvailable: true,
+    familyPlanAvailable: true,
+    labsAvailable: true,
+    planUsageAvailable: true,
+    pollsAvailable: true,
+    subscriptionAvailable: true,
+    personalizationAvailable: true,
+    productFeedbackAvailable: true,
+    voiceMemoGenerationAvailable: true,
+    phoneCallStatusAvailable: true,
+    phoneCallStopAvailable: true,
+    conversationAttachmentsAvailable: true,
+    responseCardsAvailable: options.responseCardAvailable,
+    exerciseRoutineResponseCardsAvailable: options.exerciseRoutineResponseCardAvailable,
+    telegramRichContentResponseCardsAvailable: options.telegramRichContentResponseCardAvailable,
+  });
   expect(lastResponsesRequest).toBeDefined();
   const advertisement = readMurphDynamicToolAdvertisement(
     lastResponsesRequest!.body,
   );
-  const expectedAdvertisedToolNames = advertisement.codeMode
-    ? expectedToolNames.filter((name) =>
-        name !== "automation"
-        && name !== "attach_response_card"
-        && name !== "attach_exercise_routine_card"
-        && name !== "attach_telegram_rich_content"
-        && !hostedGroupFamilyToolNames.has(`murph.${name}`)
-      )
-    : expectedToolNames;
+  const expectedAdvertisedToolNames = expectedTools
+    .filter((tool) => !advertisement.codeMode || !("deferLoading" in tool && tool.deferLoading))
+    .map((tool) => tool.name)
+    .sort();
   expect(advertisement.toolNames.sort()).toEqual(expectedAdvertisedToolNames);
   if (advertisement.codeMode) {
     expect(advertisement.deferredDiscoveryAvailable).toBe(true);
