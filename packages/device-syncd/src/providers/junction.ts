@@ -181,6 +181,7 @@ import type {
   DeviceSyncJobInput,
   DeviceSyncJobRecord,
   DeviceJobExecutor,
+  DeviceJobBatchExecutor,
   ScheduledReconcileProbeResult,
   DeviceSyncProvider,
   DeviceSyncProviderRequestCandidateAliasSource,
@@ -6622,9 +6623,10 @@ export function createJunctionDeviceSyncProvider(
       createScheduledJobs,
       probeScheduledReconcile,
       executeJob,
+      batch: createJunctionDailyResourceBatchExecutor(executeJob),
       createPassExecutor(): DeviceJobExecutor {
         const passInventories = new Map<string, readonly JunctionProviderConnection[]>();
-        return {
+        const pass: DeviceJobExecutor = {
           async executeJob(context, job) {
             if (
               (job.kind !== "resource" && job.kind !== "reconcile")
@@ -6640,7 +6642,50 @@ export function createJunctionDeviceSyncProvider(
             }
           },
         };
+        pass.batch = createJunctionDailyResourceBatchExecutor(pass.executeJob);
+        return pass;
       },
+    },
+  };
+}
+
+const JUNCTION_DAILY_RESOURCE_BATCH_FIELDS = new Set([
+  "eventType", "objectId", "occurredAt", "resource", "resourceCategory",
+  "sourceProviderSlug", "windowStart", "windowEnd",
+]);
+
+function createJunctionDailyResourceBatchExecutor(
+  execute: DeviceJobExecutor["executeJob"],
+): DeviceJobBatchExecutor {
+  return {
+    maxJobs: 16,
+    describe(job) {
+      const resource = normalizeJunctionResourceName(job.payload.resource);
+      const start = toIsoTimestampIfValid(job.payload.windowStart);
+      const end = toIsoTimestampIfValid(job.payload.windowEnd);
+      if (
+        job.kind !== "resource"
+        || !resource || !JUNCTION_CLOSED_DAY_TIMESERIES_RESOURCES.has(resource)
+        || job.payload.resourceCategory !== "timeseries"
+        || (job.payload.eventType !== `daily.data.${resource}.created`
+          && job.payload.eventType !== `daily.data.${resource}.updated`)
+        || Object.keys(job.payload).some((key) => !JUNCTION_DAILY_RESOURCE_BATCH_FIELDS.has(key))
+        || !start || !end || start >= end
+      ) return null;
+      return {
+        key: JSON.stringify([
+          resource, canonicalizeJunctionProviderSlug(job.payload.sourceProviderSlug),
+          floorUtcDayTimestamp(start), floorUtcDayTimestamp(end),
+        ]),
+      };
+    },
+    async execute(context, jobs) {
+      const [first] = jobs;
+      if (!first) throw new TypeError("Junction daily resource batch requires a job.");
+      // Every already-claimed notification describes the same closed daily
+      // reads. The existing account lease and batch completion own retries;
+      // later arrivals remain queued. No provider result or authority is cached.
+      return execute(context, first);
     },
   };
 }

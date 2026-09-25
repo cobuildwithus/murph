@@ -531,6 +531,16 @@ inventory. Every canonical import retains its live connection-source admission
 check. The scope contains provider inventory only, never cached authorization
 or durable state.
 
+Queued daily resource notifications for steps, distance, active calories, and
+heart rate may share one provider scan when their source and complete closed
+UTC-day range match. The existing provider batch owner claims at most 16 jobs,
+counts each row against the drain budget, and retains per-job retries. Inline
+payloads, historical proof, calendar/temporal work, and extended payload fields
+remain separate. Updates arriving after the claim receive a new scan. A yield
+retains the unfinished range in the existing durable continuation; every populated
+day still checks live authority before import. This is queue batching, with no
+cached provider data or permanent suppression of later corrections.
+
 Within one full-job timeseries continuation, reuse successful inventory across
 its existing bounded daily units. Empty units share one final source-lifecycle
 fence check before returning progress; populated units still check live authority
