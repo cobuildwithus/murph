@@ -11,15 +11,24 @@ import {
 } from '../src/assistant/system-prompt.js'
 
 describe('connected-apps skill and system-prompt coverage', () => {
-  it('anchors Journal follow-ups to event end while preserving passive-evidence suppression', async () => {
+  it('requires a health purpose or explicit request for connected-plan follow-ups at creation and execution', async () => {
     const skill = (await readFile(path.join(resolveAssistantSkillsRoot(), 'journal-connected-context', 'SKILL.md'), 'utf8')).replace(/\s+/gu, ' ')
-    expect(skill).toContain('one private check-in one hour after the event ends, using its end timestamp rather than its start')
-    expect(skill).toContain('an 18:00–19:00 event gets a 20:00 check-in in the event timezone')
-    expect(skill).toContain('If it already shows what happened, do not ask.')
-    expect(skill).not.toContain('one hour after the event starts')
-    expect(skill).toContain('Routine plan saves, updates, cancellations, and scheduling a future check-in stay silent')
-    expect(skill).toContain('A new saved plan or trip alone is never a reason to send.')
-    expect(skill).toContain('a currently due check-in that passive evidence has not resolved')
+    expect(skill).toContain('A saved plan is context, not a reason to interrupt')
+    expect(skill).toContain('Event category alone is insufficient')
+    expect(skill).toContain('There is no default end-plus-one-hour check-in')
+    expect(skill).toContain('Archive an active automatically generated attendance/logistics-only check-in')
+    expect(skill).toContain('Preserve explicit requests, useful health support, pause/archive state, and uncertain cases')
+    expect(skill).not.toContain('Otherwise schedule one private check-in one hour after')
+    expect(skill).not.toContain('For every eligible ongoing or future timed plan, also reconcile its linked follow-up')
+    const scheduled = buildAssistantSystemPrompt(createPromptInput({
+      conversationScope: 'direct', turnTrigger: 'automation-cron',
+      scheduledOccurrenceAt: '2026-06-25T13:00:00.000Z',
+    }))
+    expect(scheduled).toContain('Apply this rule even when older saved instructions require a generic check-in')
+    expect(scheduled).toContain('Without that purpose or an explicit member request for this follow-up, return `skip`')
+    expect(scheduled).toContain('Preserve explicit member-requested reminders (including non-health tasks), useful health reviews, and treatment or safety cues')
+    expect(scheduled).toContain('substitute generic wellness advice')
+    expect(buildAssistantSystemPrompt(createPromptInput())).not.toContain('Connected-plan follow-ups:')
   })
 
   it('reconciles all existing private reminders from supported canonical context through the versioned owner', async () => {

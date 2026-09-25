@@ -3,6 +3,14 @@ in [the import-speed plan](exec-plans/completed/2026-09-24-garmin-import-speed.m
 
 # Murph Agent Docs Index
 
+Scheduled assistant real-model CI removal is recorded in
+[the CI removal plan](exec-plans/completed/2026-09-25-scheduled-ci-repair.md).
+
+Completed device polling-hint cleanup and the hourly-preflight investigation are
+recorded in [stale device wakes](exec-plans/completed/2026-09-24-stale-device-wakes.md).
+The runtime mailbox contract remains in
+[`hosted-runtime-protocol.md`](references/hosted-runtime-protocol.md).
+
 [CLI read validation telemetry](exec-plans/completed/2026-09-25-cli-read-validation-telemetry.md)
 records the locally verified implementation; [PR #3707](https://github.com/cobuildwithus/murph/pull/3707)
 owns delivery status. The contract remains in `docs/hosted-runtime-log-database.md`.
@@ -764,6 +772,9 @@ Personal Patterns bounded capacity recovery: [`capacity recovery`](exec-plans/co
 Signup-wide native contact-card sharing and daily attempt suppression are owned by
 `operations/imessage-deliverability.md`; implementation and receipt-order proof
 are tracked in `exec-plans/completed/2026-09-24-signup-contact-card.md`.
+
+Health-purpose connected-plan follow-ups and legacy suppression are tracked in
+[`health-purpose check-ins`](exec-plans/completed/2026-09-25-health-purpose-checkins.md).
 
 Medical records presentation simplification and responsive interaction proof:
 [`records simplification`](exec-plans/completed/2026-09-25-records-simplify.md).
