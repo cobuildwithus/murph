@@ -1,0 +1,17 @@
+{
+  "publishedOn": "2026-09-24",
+  "order": 100,
+  "item": {
+    "id": "garmin-history-less-repeat-work",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Less repeat work during Garmin imports",
+    "summary": "Garmin history imports combine overlapping requests for steps, distance, active calories, and breathing rate to avoid fetching the same days repeatedly.",
+    "details": "Imports keep their full date coverage and can resume after an interruption. Completion time still depends on the amount of history and provider response time.",
+    "relevanceTags": [
+      "garmin",
+      "devices"
+    ],
+    "sourcePullRequests": []
+  }
+}

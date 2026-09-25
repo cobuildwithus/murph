@@ -6044,6 +6044,134 @@ describe("hosted device-sync runtime", () => {
     assert.equal(pendingIndexes.size, 0);
   });
 
+  test.each(["completed", "cold-restored", "yielded", "preexisting", "failed", "disjoint", "long-union", "new-arrival"] as const)(
+    "overlapping Garmin fetch windows preserve every payload owner: %s",
+    async (scenario) => {
+      const workspace = await createHostedRuntimeWorkspace("hosted-garmin-coalescing-");
+      const restoredWorkspace = await createHostedRuntimeWorkspace("hosted-garmin-restored-");
+      await mkdir(workspace.vaultRoot, { recursive: true });
+      await mkdir(restoredWorkspace.vaultRoot, { recursive: true });
+      const executions: DeviceSyncJobRecord[] = [];
+      const provider = createFakeProvider({
+        provider: "junction",
+        jobExecutor: { async executeJob(_context, job) {
+          if (scenario === "failed") throw deviceSyncError({
+            code: "synthetic_terminal_failure", message: "Synthetic terminal failure", retryable: false,
+          });
+          if (scenario === "yielded" && executions.length === 0) {
+            executions.push({ ...job, payload: { ...job.payload, windowEnd: day(10) } });
+            return { scheduledJobs: [{
+              kind: job.kind, dedupeKey: job.dedupeKey ?? undefined,
+              payload: { ...job.payload, windowStart: day(10) },
+            }] };
+          }
+          executions.push(job);
+          return {};
+        } },
+      });
+      const service = createDeviceSyncServiceForVault(workspace.vaultRoot, [provider]);
+      const restoredService = createDeviceSyncServiceForVault(restoredWorkspace.vaultRoot, [provider]);
+      const connectionId = "hosted_garmin_coalescing";
+      const snapshot = buildRuntimeSnapshot({ connectionId, provider: "junction", externalAccountId: "synthetic-garmin" });
+      const day = (offset: number) => new Date(Date.UTC(2026, 0, 1 + offset)).toISOString();
+      const stride = scenario === "disjoint" ? 35 : scenario === "long-union" ? 90 : 3;
+      const duration = scenario === "long-union" ? 300 : 30;
+      const resources = Array.from({ length: 5 }, (_, index) => ({
+        count: 1,
+        dirtyPayloadId: `dsp_garmin_window_${index}`,
+        jobKind: "resource" as const,
+        payload: {
+          eventType: "daily.data.steps.created",
+          objectId: `synthetic_event_${index}`,
+          occurredAt: day(50),
+          resource: "steps",
+          resourceCategory: "timeseries",
+          sourceProviderSlug: "garmin",
+          windowStart: day(index * stride),
+          windowEnd: day(duration + index * stride),
+        },
+        resource: "steps",
+        resourceCategory: "timeseries",
+        sourceProviderSlug: "garmin",
+        windowStart: day(index * stride),
+        windowEnd: day(duration + index * stride),
+      }));
+      let visibleResources = scenario === "preexisting" ? resources.slice(0, 1) : resources;
+      const port: HostedRuntimeDeviceSyncPort = {
+        ...createSnapshotOnlyDeviceSyncPort(snapshot),
+        async fetchDirtyStates() {
+          return { hasMore: false, items: [buildDirtyState({
+            connectionId, provider: "junction", dirtyRevision: "5", dirtyResources: visibleResources,
+          })], nextWakeAt: null, userId: "member_123" };
+        },
+      };
+      const wake = buildDirtyDeviceSyncWake(connectionId, day(50), "junction");
+      try {
+        let state = await syncHostedDeviceSyncControlPlaneState({
+          deviceSyncPort: port, secret: DEVICE_SYNC_SECRET, service, wake,
+        });
+        let activeService = service;
+        if (scenario === "preexisting") {
+          visibleResources = resources;
+          state = await syncHostedDeviceSyncControlPlaneState({
+            deviceSyncPort: port, secret: DEVICE_SYNC_SECRET, service, wake,
+          });
+        }
+        if (scenario === "new-arrival") {
+          visibleResources = [...resources, { ...resources[0]!, dirtyPayloadId: "dsp_garmin_fresh" }];
+          state = await syncHostedDeviceSyncControlPlaneState({
+            deviceSyncPort: port, secret: DEVICE_SYNC_SECRET, service, wake,
+          });
+        }
+        if (scenario === "yielded") {
+          const accountId = state.hostedToLocalAccountIds.get(connectionId);
+          assert.ok(accountId);
+          assert.equal(await service.drainWorker(1, accountId), 1);
+        }
+        if (scenario === "cold-restored" || scenario === "yielded") {
+          visibleResources = [...resources].reverse();
+          const recovery = resolveHostedDeviceSyncWakeRecovery({ service, state, wake });
+          assert.ok(recovery);
+          state = await syncHostedDeviceSyncControlPlaneState({
+            deviceSyncPort: port, secret: DEVICE_SYNC_SECRET, service: restoredService, wake: recovery.wake,
+          });
+          activeService = restoredService;
+        }
+        const accountId = state.hostedToLocalAccountIds.get(connectionId);
+        assert.ok(accountId);
+        const jobs = readJobsForAccount(activeService, accountId);
+        const separate = ["preexisting", "disjoint", "long-union"].includes(scenario);
+        assert.equal(jobs.length, separate ? 5 : scenario === "new-arrival" ? 2 : 1);
+        if (scenario === "yielded") assert.equal(JSON.parse(jobs[0]!.payloadJson).windowStart, day(10));
+        assert.equal(state.pendingDirtyPayloadJobs.length, visibleResources.length);
+        assert.equal(new Set(state.pendingDirtyPayloadJobs.map((job) => job.jobId)).size,
+          scenario === "new-arrival" ? 1 : jobs.length);
+        promoteHostedCompletedDirtyPayloadAcks({ service: activeService, state });
+        assert.equal(state.pendingDirtyPayloadJobs.length, visibleResources.length);
+        assert.equal(await activeService.drainWorker(100, accountId), jobs.length);
+        const fetchedDays = executions.reduce((total, job) => total
+          + (Date.parse(String(job.payload.windowEnd)) - Date.parse(String(job.payload.windowStart)))
+            / 86_400_000, 0);
+        // Five overlapping 30-day windows retain all 42 unique days, with 3.57x less work.
+        const expectedDays = scenario === "failed" ? 0 : separate ? duration * 5 : scenario === "new-arrival" ? 84 : 42;
+        assert.equal(fetchedDays, expectedDays);
+        if (scenario !== "failed") assert.ok(executions.some((job) => job.payload.windowStart === day(0)));
+        if (scenario === "completed" || scenario === "cold-restored") {
+          assert.equal(executions[0]?.payload.windowEnd, day(42));
+        }
+        promoteHostedCompletedDirtyPayloadAcks({ service: activeService, state });
+        assert.equal(state.pendingDirtyPayloadJobs.length, 0);
+        assert.deepEqual(new Set(state.pendingDirtyAcks[0]?.processedDirtyPayloadIds),
+          new Set(visibleResources.map((resource) => resource.dirtyPayloadId)));
+      } finally {
+        closeHostedRuntimeDeviceSyncService(service);
+        closeHostedRuntimeDeviceSyncService(restoredService);
+        await workspace.cleanup();
+        await restoredWorkspace.cleanup();
+      }
+    },
+  );
+
   test.each([0, 150])("a cold-restored full dirty page relinks every retained job with %i follow-ups", async (followUpCount) => {
     const firstWorkspace = await createHostedRuntimeWorkspace(
       "hosted-device-sync-runtime-dirty-relink-first-",

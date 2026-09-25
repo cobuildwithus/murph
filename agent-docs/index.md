@@ -1,3 +1,6 @@
+Garmin history import coalescing and synthetic fetch-work evidence are recorded
+in [the import-speed plan](exec-plans/completed/2026-09-24-garmin-import-speed.md).
+
 # Murph Agent Docs Index
 
 Runtime ownership response timing is tracked in
