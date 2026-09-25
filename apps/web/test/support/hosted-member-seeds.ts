@@ -686,7 +686,6 @@ export async function seedHostedFamilySponsoredLinqMember(
           data: {
             billingRef: {
               create: {
-                billedSeatCount: 2,
                 currentBillingPhase: "paid",
                 currentBillingPlanCode: "launch_family_monthly",
                 currentPeriodEnd,
@@ -696,6 +695,9 @@ export async function seedHostedFamilySponsoredLinqMember(
             billingStatus: "active",
             displayName: "Hosted local family fixture",
             id: input.groupId,
+            planCapacities: {
+              create: { billedQuantity: 2, planCode: "pulse" },
+            },
             memberships: {
               create: [
                 {
