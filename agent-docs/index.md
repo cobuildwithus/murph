@@ -772,3 +772,7 @@ tracked in [`warm typing latency`](exec-plans/completed/2026-09-25-warm-typing-l
 Actual message-processing latency reductions in checkpoint wake discovery and
 snapshot cleanup bookkeeping are tracked in
 [`message processing latency`](exec-plans/completed/2026-09-25-message-processing-latency.md).
+
+Request-local Worker entry and Web callback latency attribution is owned by
+`apps/cloudflare/README.md`; the focused implementation record is
+[`runtime latency attribution`](exec-plans/completed/2026-09-25-runtime-latency-attribution.md).

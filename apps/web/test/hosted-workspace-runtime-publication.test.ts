@@ -18,7 +18,7 @@ vi.mock("@/src/lib/hosted-workspace/store", () => ({
 }));
 
 import { checkpointHostedRuntimeWorkspace } from "@/src/lib/hosted-workspace/runtime-publication";
-import { recordPrismaOperationTiming } from "@/src/lib/prisma-operation-timing";
+import { recordPrismaOperationTiming, startPrismaPoolAcquisitionTiming } from "@/src/lib/prisma-operation-timing";
 
 describe("slow workspace checkpoint diagnostics", () => {
   const input = {
@@ -49,8 +49,12 @@ describe("slow workspace checkpoint diagnostics", () => {
 
   it("separates acquisition, database operations, callback, and commit without logging inputs", async () => {
     const log = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    vi.spyOn(performance, "now").mockImplementation(() => now);
     mocks.checkpoint.mockImplementation(async () => {
-      now += 1_500;
+      const acquired = startPrismaPoolAcquisitionTiming({ idleConnections: 0, totalConnections: 1, waitingRequests: 0 });
+      now += 50;
+      acquired?.();
+      now += 1_450;
       recordPrismaOperationTiming("HostedWorkspace.updateMany", 1_450);
       return result;
     });
@@ -62,6 +66,9 @@ describe("slow workspace checkpoint diagnostics", () => {
       transactionAcquireMs: 200,
       transactionCallbackMs: 1_500,
       transactionFinishMs: 100,
+      poolAcquisitionCount: 1,
+      poolAcquireMs: [50],
+      poolBeforeAcquire: [{ idleConnections: 0, totalConnections: 1, waitingRequests: 0 }],
       dbOperationCount: 1,
       dbTotalMs: 1_450,
       "db00.HostedWorkspace.updateMany": 1_450,
@@ -71,8 +78,18 @@ describe("slow workspace checkpoint diagnostics", () => {
 
   it("leaves fast checkpoints quiet", async () => {
     const log = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    mocks.transaction.mockImplementationOnce(async (callback: (tx: object) => Promise<unknown>) => {
+      now += 100;
+      return callback({});
+    });
     await expect(checkpointHostedRuntimeWorkspace(input)).resolves.toBe(result);
     expect(log).not.toHaveBeenCalled();
+  });
+
+  it("reports sub-second checkpoint stalls at the callback timing threshold", async () => {
+    const log = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    await expect(checkpointHostedRuntimeWorkspace(input)).resolves.toBe(result);
+    expect(log).toHaveBeenCalledWith("Hosted workspace slow checkpoint database timing.", expect.objectContaining({ totalMs: 300 }));
   });
 
   it("preserves a failed checkpoint even if diagnostic output fails", async () => {

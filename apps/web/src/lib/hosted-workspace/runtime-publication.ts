@@ -7,7 +7,7 @@ import type { PrismaClient } from "@prisma/client";
 import { requireHostedRuntimeCallbackTx } from "../hosted-execution/runtime-owner";
 import { requireRuntimeResourcesPublishableTx, recordRuntimeOrphansTx, snapshotOrphanCandidates, replicaOrphanCandidate } from "../hosted-execution/runtime-orphans";
 import { getPrisma } from "../prisma";
-import { runWithPrismaOperationTimings, type PrismaOperationTiming } from "../prisma-operation-timing";
+import { runWithPrismaOperationTimings, type PrismaOperationTiming, type PrismaPoolAcquisitionTiming } from "../prisma-operation-timing";
 import { buildHostedWebhookDbTimingLogDetails } from "../hosted-onboarding/webhook-db-timing";
 import {
   checkpointHostedWorkspaceTx,
@@ -23,6 +23,7 @@ export async function checkpointHostedRuntimeWorkspace(
   input: Omit<Parameters<typeof checkpointHostedWorkspaceTx>[0], "tx"> & RuntimePublication,
 ) {
   const operations: PrismaOperationTiming[] = [];
+  const poolAcquisitions: PrismaPoolAcquisitionTiming[] = [];
   const startedAtMs = Date.now();
   let callbackStartedAtMs: number | null = null;
   let callbackFinishedAtMs: number | null = null;
@@ -70,12 +71,13 @@ export async function checkpointHostedRuntimeWorkspace(
           callbackFinishedAtMs = Date.now();
         }
       }),
+      poolAcquisitions,
     );
     completed = true;
     return result;
   } finally {
     const finishedAtMs = Date.now();
-    if (finishedAtMs - startedAtMs >= 1_000) {
+    if (finishedAtMs - startedAtMs >= 250) {
       try {
         console.info("Hosted workspace slow checkpoint database timing.", {
           completed,
@@ -88,6 +90,10 @@ export async function checkpointHostedRuntimeWorkspace(
             ? null
             : finishedAtMs - callbackFinishedAtMs,
           ...buildHostedWebhookDbTimingLogDetails(operations),
+          poolAcquisitionCount: poolAcquisitions.length,
+          poolAcquireMs: poolAcquisitions.slice(0, 24).map(sample => Math.round(sample.ms)),
+          poolBeforeAcquire: poolAcquisitions.slice(0, 24).map(({ idleConnections, totalConnections, waitingRequests }) =>
+            ({ idleConnections, totalConnections, waitingRequests })),
         });
       } catch {
         // Diagnostic output must not change checkpoint success or failure.

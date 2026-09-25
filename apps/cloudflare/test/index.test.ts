@@ -28,6 +28,7 @@ import {
 import { readHostedExecutionEnvironment } from "../src/env.ts";
 import hostedLocalTestWorker from "../src/hosted-local-test-index.ts";
 import worker from "../src/index.ts";
+import { createWorkerFetchHandler } from "../src/worker/fetch-handler.ts";
 import { hostedLocalTestInternalRoutes } from "../src/worker/hosted-local-test-routes.ts";
 import { workerInternalRoutes } from "../src/worker/internal-routes.ts";
 import { workerPublicRoutes } from "../src/worker/public-routes.ts";
@@ -3704,6 +3705,37 @@ describe("cloudflare worker routes", () => {
       expect(serializedInfoLogs).toContain("web-ingress-attempt-test");
       expect(serializedInfoLogs).toContain("runtime_processing_accepted");
       expect(serializedInfoLogs).toContain("runtime-attempt-test");
+      const completion = infoLog.mock.calls.map(([payload]) => JSON.parse(String(payload)))
+        .find((entry) => entry.details?.reason === "runtime-ensure-processing-direct-completed");
+      expect(completion.details).toMatchObject({
+        workerFetchStartedAtEpochMs: expect.any(Number),
+        workerFetchIsFirstRequest: expect.any(Boolean),
+        runtimeControlAuthStartedAtEpochMs: orchestration!.runtimeControlAuthStartedAtEpochMs,
+        runtimeControlAuthFinishedAtEpochMs: orchestration!.runtimeControlAuthFinishedAtEpochMs,
+        cloudflareRouteReceivedAtEpochMs: orchestration!.cloudflareRouteReceivedAtEpochMs,
+      });
+      expect(completion.details.workerFetchStartedAtEpochMs)
+        .toBeLessThanOrEqual(completion.details.runtimeControlAuthStartedAtEpochMs);
+    });
+
+    it("captures fetch entry before routing and marks only the first request in this handler", async () => {
+      const now = vi.spyOn(Date, "now").mockReturnValue(1_000);
+      const handler = createWorkerFetchHandler({
+        publicRoutes: [],
+        internalRoutes: [{
+          name: "synthetic-timing", methods: ["GET"], match: () => ({}),
+          handle: (context) => Response.json({
+            started: context.fetchStartedAtEpochMs,
+            first: context.fetchIsFirstRequest,
+          }),
+        }],
+      });
+      const env = createWorkerEnv(createUserRunnerStub());
+      const first = await handler(new Request("https://example.test/timing"), env);
+      await expect(first.json()).resolves.toEqual({ started: 1_000, first: true });
+      now.mockReturnValue(2_000);
+      const second = await handler(new Request("https://example.test/timing"), env);
+      await expect(second.json()).resolves.toEqual({ started: 2_000, first: false });
     });
 
     it("returns and logs web-plane OIDC ensure-processing failures", async () => {
