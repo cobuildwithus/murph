@@ -10118,7 +10118,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
       expect(correction.finalMessage).toMatch(/first[ -]name/iu)
       expect(correction.finalMessage).not.toMatch(/would you|shall I|couldn.t|unable|not saved|expectedUpdatedAt|schema/iu)
       expect(correction.runtimeIssueInputs).toEqual([])
-      expect(await listAutomations({ vaultRoot: workingDirectory })).toHaveLength(1)
+      expect((await listAutomations({ vaultRoot: workingDirectory })).items).toHaveLength(1)
       const saved = await showAutomation({ vaultRoot: workingDirectory, automationId: original.automationId })
       expect(saved).toMatchObject({ route: original.route, schedule: original.schedule, status: 'active', continuityPolicy: 'fresh' })
       expect(saved?.instructions).not.toBe(original.instructions)

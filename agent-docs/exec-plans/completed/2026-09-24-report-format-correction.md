@@ -1,6 +1,6 @@
 # Persist recurring report corrections
 
-Status: active
+Status: completed
 Created: 2026-09-24
 Updated: 2026-09-24
 
@@ -50,10 +50,12 @@ Updated: 2026-09-24
 - Focused Assistant Engine slice: 27 tests passed; changelog production-render slice: 10 passed.
 - Assistant Engine typecheck passed. Complexity guard passed with existing unchanged routing hotspots (28 and 25).
 - Complete first provider input captured at base and head for private and group fixtures; exact target-model tokenizer unavailable, so token counts are not claimed.
-- Real Codex journey attempted with GPT-6 Sol and local subscription: failed before any provider action. A separate minimal native command also failed authentication/token refresh. Awaiting refreshed local authentication; UX verdict Hold.
+- Real Codex journey passed with GPT-6 Sol and local subscription using an explicitly selected authenticated home: exactly one inspect and one canonical patch, followed by two independent fresh reports. First-name formatting, reordered same-row values, duplicate-name disambiguation, and initial-only preservation all passed. Reviewed all synthetic replies; UX verdict Ready.
+- The runner clears inherited home selection unless explicitly configured. Earlier default-home authentication failures did not indicate that the selected authenticated profile was unusable. The live run also caught and corrected a fixture assertion to read the canonical list response items.
 - Parent candidate review: current authorized labels remain presentation-only; route, schedule, consent, canonical mutation, and delivery owners are unchanged.
-- No repository-actionable Frog entry: the remaining blocker is machine-local authentication.
-- PR remains draft until the requested live scenario passes and required exact-head checks are green.
+- No repository-actionable Frog entry: explicit local profile selection resolved the authentication setup issue.
+- Local proof and parent review are complete; required CI will run on the final pushed candidate and its outcome will be recorded in PR evidence.
 
-- Draft PR: https://github.com/cobuildwithus/murph/pull/3697; live authentication remains the completion blocker.
+- PR: https://github.com/cobuildwithus/murph/pull/3697. No production deployment or mutation performed.
 - Reconciled the newer base while preserving both docs-index additions; scheduled fixture advertises only its actual read-only tool port.
+Completed: 2026-09-24
