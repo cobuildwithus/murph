@@ -47,8 +47,7 @@ For `habit_plan`, `training_plan`, or other repeated action, load `behavior-foll
 
 ## Resolve the public goal
 
-Extract the person's requested outcome in plain language, omitting the
-greeting and "help me" wrapper. Then run:
+Extract the requested goal, not background context (desk work is not a request to sit less). Omit greetings. Run:
 
 ```text
 vault-cli commons goal list --query "<outcome>" --format json
@@ -150,6 +149,8 @@ For explicitly quiet support, end: `Want me to save this plan without reminders?
 Do not silently omit support; the person can edit or decline it. A clear yes authorizes only the package just described.
 Acceptance such as "yes, let's start tomorrow" authorizes saving that plan with the accepted start date; do not ask again
 or treat declining reminders as declining the plan. Other replies do not authorize writes.
+For quiet plans, shift relative first-week/review windows with that start; do not reconfirm solely for date arithmetic.
+Keep fixed-date and reminder consent gates.
 
 ## Persist the accepted plan
 
@@ -179,8 +180,7 @@ or canonical owners after a failed or ambiguous write.
 
 For an accepted non-experiment `habit_plan`, `training_plan`, or other Murph-designed non-clinical
 repeated-action plan, use exactly one linked `kind=habit` regimen as the durable behavior-loop owner.
-Domain owners may add workout formats, sessions, trackers, or care records when needed, but those records
-do not replace this plan owner. Before creating or changing it, run the all-status inventory and detail-read
+Before creating or changing it, run the all-status inventory and detail-read
 each plausible match; match on `kind=habit` plus `relatedGoalIds` containing the saved Goal id:
 ```text
 vault-cli regimen list --limit 200 --format json

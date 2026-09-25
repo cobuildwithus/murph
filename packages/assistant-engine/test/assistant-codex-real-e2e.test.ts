@@ -399,16 +399,17 @@ describeRealCodex('real natural goal canary journey', () => {
         const before = await fixture.commandCount()
         const startedAt = performance.now()
         const result = await fixture.message(promptFor(stage))
-        const commands = expandRecordedVaultCommands((await readFile(path.join(fixture.root, 'commands.jsonl'), 'utf8'))
+        const invocations = (await readFile(path.join(fixture.root, 'commands.jsonl'), 'utf8'))
           .split('\n').filter(Boolean).slice(before).map((line) => {
             const args: unknown = JSON.parse(line)
             if (!Array.isArray(args) || !args.every((arg) => typeof arg === 'string')) {
               throw new Error('Expected synthetic CLI argument list.')
             }
             return args.join(' ')
-          }))
+          })
+        const commands = expandRecordedVaultCommands(invocations)
         process.stdout.write(`[natural-goal-latency] ${JSON.stringify({
-          stage, elapsedMs: Math.round(performance.now() - startedAt),
+          stage, elapsedMs: Math.round(performance.now() - startedAt), cliInvocations: invocations.length,
           commands: commands.map((command) => command.split(' ').slice(0, command.startsWith('commons ') ? 3 : 2).join(' ')),
         })}\n`)
         return { result, commands }

@@ -106,3 +106,50 @@ canary threshold, or production credential changes.
   failed-send and recurrence assertions. Update both samples to 61 seconds;
   preserve the alert threshold and production canary budget.
 - Production Web promotion and the protected canary remain pending.
+
+- PR #3703 merged after CI passed, repairing the alert fixture. Web admission
+  will run normally on that successor commit.
+- The next protected canary on the deployed runtime passed proposal at 14.8s
+  but failed acceptance at 30.2s. Acceptance used three successful command
+  actions totaling about 2.9s; the remaining time is primarily model execution.
+- Use the existing CLI batch to execute the already-authorized Goal save and
+  subsequent regimen inventory together. Preserve their order and inspect both
+  results before the dependent regimen write; preserve partial-failure recovery.
+  This changes no CLI API or canonical state ownership.
+
+- A synthetic Friday replay exposed a separate acceptance failure: the model
+  treated shifting a quiet plan to the next weekday as requiring a second yes
+  to make the relative first-week review date explicit. Anchor relative quiet
+  plan/review windows to the accepted start. Preserve fixed-date and reminder
+  consent gates; do not repeat permission solely for relative date arithmetic.
+
+- Reject the experimental batching guidance: a concrete command example caused
+  a synthetic proposal-turn write before acceptance. It is not shipping. Keep
+  the relative quiet-date correction scoped to the existing acceptance boundary.
+
+- Web admission and full private integration now pass for PR #3703; both
+  production Web aliases resolve to its admitted revision.
+- The date-only replay preserved proposal consent and persisted the accepted
+  start, but incorrectly attached a related public sitting template. Clarify
+  that background desk work is not the requested goal. Keep the custom-lineage
+  assertion; do not approve the failing replay.
+
+## Follow-up Product UX
+
+- Outcome: save an accepted quiet plan with its requested start and goal.
+- Reaches: relative first-week/review shifts and background context during public
+  discovery. Fixed-date commitments, reminders, and exact public matches retain
+  their existing consent and lineage gates.
+- Proof: focused exact-resolution/date policy checks and real Luna natural-plan
+  journey, then exact-head CI and the unchanged production canary. Status: Ready for local UX;
+  production latency proof remains pending.
+
+- Follow-up candidate: eight focused goal-skill checks and assistant-engine
+  typecheck pass; complexity guard passes with no authored JS/TS source changes.
+  The default local subscription failed before provider action with routing 401;
+  the established authenticated test profile completed the focused Luna replay.
+  It made no proposal writes, saved exactly one custom Goal and one linked habit
+  regimen after acceptance, and created no automation. Native acceptance took
+  about 13.7 seconds; its reply correctly placed the start on Monday and the
+  relative review on the following Friday without another consent question.
+  This is local behavior evidence, not a passing deployed canary.

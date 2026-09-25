@@ -105,6 +105,7 @@ describe('assistant goal setup skill', () => {
     expect(raw).toContain(
       'vault-cli commons goal show <key-or-slug> --format json',
     )
+    expect(compact).toContain('Extract the requested goal, not background context (desk work is not a request to sit less).')
     expect(compact).toContain('one unique exact title, `goalPhrase`, or alias after normalizing')
     expect(compact).toContain(
       'completely read every registered owner named by `goal.workflow.ownerSkillIds` before preview or write',
@@ -236,7 +237,7 @@ describe('assistant goal setup skill', () => {
       'use exactly one linked `kind=habit` regimen as the durable behavior-loop owner',
     )
     expect(compact).toContain(
-      'Domain owners may add workout formats, sessions, trackers, or care records when needed, but those records do not replace this plan owner.',
+      'Domain records may hold workout or session detail but do not replace that linked regimen.',
     )
     expect(compact).toContain(
       'match on `kind=habit` plus `relatedGoalIds` containing the saved Goal id',
@@ -289,6 +290,8 @@ describe('assistant goal setup skill', () => {
     expect(compact).toContain('Existing regimens still require complete support inventory and quiet reconciliation.')
     expect(compact).toContain('For explicitly quiet support, end: `Want me to save this plan without reminders?`')
     expect(compact).toContain('Acceptance such as "yes, let\'s start tomorrow" authorizes saving that plan with the accepted start date; do not ask again or treat declining reminders as declining the plan.')
+    expect(compact).toContain('For quiet plans, shift relative first-week/review windows with that start; do not reconfirm solely for date arithmetic.')
+    expect(compact).toContain('Keep fixed-date and reminder consent gates.')
     expect(compact).not.toContain('read the Goal back before its operational owner')
     expect(compact).not.toContain('read every created or updated owner back before claiming the package is complete')
   })
