@@ -9,7 +9,7 @@
     "summary": "Choose Sol, Luna, or Astra in Settings without sorting through model versions.",
     "details": "Older models no longer appear as choices. Existing saved preferences stay in place until you change them.",
     "relevanceTags": ["settings"],
-    "sourcePullRequests": [],
+    "sourcePullRequests": [3718],
     "tryIt": {"label": "Choose your model", "href": "/settings"}
   }
 }
