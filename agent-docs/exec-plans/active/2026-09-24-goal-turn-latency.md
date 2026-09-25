@@ -95,3 +95,14 @@ canary threshold, or production credential changes.
   follow-through reference and refresh the three changed prompt fingerprints.
   The focused seven-file regression run passes all 170 tests.
 - Pending exact-head CI, deployment, and protected production canary.
+
+## Deployment follow-up
+
+- PR #3700 merged after exact-head CI passed. Protected runtime deployment passed
+  all predeployment checks and verified live fleet convergence.
+- Web admission was blocked by an independent alert-monitor fixture: the merged
+  60-second alert threshold no longer classifies its two 31-second samples as
+  anomalous. The real cron therefore returns healthy instead of exercising the
+  failed-send and recurrence assertions. Update both samples to 61 seconds;
+  preserve the alert threshold and production canary budget.
+- Production Web promotion and the protected canary remain pending.
