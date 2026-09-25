@@ -20,6 +20,10 @@ import {
 
 import type { HostedLocalFullStackScenario } from "./hosted-local-full-stack-scenario.js";
 
+type GarminCanaryScenario = {
+  harness: Pick<HostedLocalFullStackScenario["harness"], "requestJson">;
+};
+
 export interface GarminStepExpectation {
   date: string;
   value: number;
@@ -71,7 +75,7 @@ export function hasCanonicalGarminSteps(
 
 export async function assertEmptyGarminCanaryWorkspace(input: {
   memberId: string;
-  scenario: HostedLocalFullStackScenario;
+  scenario: GarminCanaryScenario;
 }): Promise<void> {
   const signal = AbortSignal.timeout(30_000);
   try {
@@ -91,14 +95,14 @@ export async function assertEmptyGarminCanaryWorkspace(input: {
 }
 
 export async function waitForLiveGarminCanonicalData(input: {
-  client: JunctionClient;
+  client: Pick<JunctionClient, "resolveUser" | "listSummary">;
   clientUserId: string;
   memberId: string;
   notBefore: number;
-  scenario: HostedLocalFullStackScenario;
+  scenario: GarminCanaryScenario;
   signal: AbortSignal;
   timeoutMs: number;
-}): Promise<void> {
+}): Promise<"matched" | "no_provider_data"> {
   const deadline = Date.now() + input.timeoutMs;
   const signal = AbortSignal.any([input.signal, AbortSignal.timeout(input.timeoutMs)]);
   const closedDay = new Date();
@@ -117,7 +121,7 @@ export async function waitForLiveGarminCanonicalData(input: {
       if (Date.now() >= nextProviderRead) {
         providerUserId ??= (await input.client.resolveUser(input.clientUserId, { signal }))?.userId ?? null;
         if (!providerUserId) throw new Error("MURPH_E2E_GARMIN_PROVIDER_USER_MISSING");
-        expected = readGarminStepExpectations(await input.client.listSummary({
+        const records = await input.client.listSummary({
           collectionWorkLimit: { maxAttemptsPerPage: 1, maxPages: 3, requestTimeoutMs: 8_000 },
           maxRecords: 100,
           resource: "activity",
@@ -126,8 +130,14 @@ export async function waitForLiveGarminCanonicalData(input: {
           userId: providerUserId,
           windowEnd: window.to,
           windowStart: window.from,
-        }), window);
-        observedProviderData ||= expected.length > 0;
+        });
+        signal.throwIfAborted();
+        // A successful empty provider response is an explicit limited outcome,
+        // never evidence that canonical ingestion succeeded. Malformed/nonempty
+        // data and provider failures must still fail the proof.
+        if (records.length === 0 && !observedProviderData) return "no_provider_data";
+        expected = readGarminStepExpectations(records, window);
+        observedProviderData ||= records.length > 0;
         nextProviderRead = Date.now() + 15_000;
       }
       const status = parseHostedRunnerStatusResponse(await input.scenario.harness.requestJson<unknown>(
@@ -137,7 +147,7 @@ export async function waitForLiveGarminCanonicalData(input: {
       const ref = status.workspace?.browserVaultReplicaRef;
       if (expected.length > 0 && ref && Date.parse(ref.generatedAt) >= input.notBefore) {
         const replica = await readCanaryBrowserVaultReplica({ ...input, ref, signal });
-        if (hasCanonicalGarminSteps(replica, expected)) return;
+        if (hasCanonicalGarminSteps(replica, expected)) return "matched";
       }
       await delay(3_000, undefined, { signal });
     }
@@ -154,7 +164,7 @@ export async function waitForLiveGarminCanonicalData(input: {
 async function readCanaryBrowserVaultReplica(input: {
   memberId: string;
   ref: HostedBrowserVaultReplicaRef;
-  scenario: HostedLocalFullStackScenario;
+  scenario: GarminCanaryScenario;
   signal: AbortSignal;
 }): Promise<unknown> {
   const { privateKeyJwk, publicKeyJwk } = await generateHostedUserRecipientKeyPair();

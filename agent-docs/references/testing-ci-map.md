@@ -1832,9 +1832,10 @@ keep the one-second presentation-only deadline and late-result rejection.
 - Auth, OTP, legal/HealthKit consent, provider-token, and native-run stages may emit only privacy-safe structured stage names/statuses. Do not upload screenshots, video, raw xcresult bundles, traces, response bodies, or log tails. The production-canary controllers prove the current production alias without passing a Vercel protection secret to the private dispatch. They publish no commit status and are not protected-branch requirements.
 - The ordinary device-connect smoke remains hermetic. The protected live Garmin
   canary now dispatches to the private hosted-runtime executor and requires a
-  fresh, digest-bound completed job after real provider summary data matches
-  canonical query output and cleanup succeeds. Connection-only local mode
-  remains available; it cannot emit the canonical-data receipt. The public
+  fresh, digest-bound completed job after connection, a data outcome, and cleanup.
+  Nonempty provider data must match canonical query output; a successful empty
+  provider read emits `no_provider_data` and explicitly does not prove ingestion.
+  Connection-only local mode remains available; it cannot emit the data receipt. The public
   workflow holds no provider credentials or private source. See
   `agent-docs/operations/live-provider-canaries.md` for provisioning and rollout.
 

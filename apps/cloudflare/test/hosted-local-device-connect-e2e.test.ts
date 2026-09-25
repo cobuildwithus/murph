@@ -725,13 +725,14 @@ async function runLiveJunctionWearableProof(
     );
   }
 
+  let dataOutcome: "matched" | "no_provider_data" | null = null;
   const connectedNotBefore = Date.now();
   const result = await runJunctionWearableBrowser({
     config,
     ...(config.canonicalData ? {
       onConnected: async (signal: AbortSignal) => {
         const provider = await import(junctionProviderModuleSpecifier) as JunctionProviderModule;
-        await waitForLiveGarminCanonicalData({
+        dataOutcome = await waitForLiveGarminCanonicalData({
           client: new JunctionClient({ apiKey: config.apiKey, environment: "sandbox", region: config.region }),
           clientUserId: provider.buildJunctionClientUserId(config.clientUserIdSecret, memberId),
           memberId,
@@ -752,9 +753,9 @@ async function runLiveJunctionWearableProof(
   if (config.canonicalData && config.canonicalDataReceiptPath) {
     try {
       await writeFile(config.canonicalDataReceiptPath, JSON.stringify({
-        contractVersion: 1,
+        contractVersion: 2,
         source: "garmin",
-        canonicalDataMatched: true,
+        dataOutcome,
       }) + "\n", { flag: "wx", mode: 0o600 });
     } catch {
       throw new Error("MURPH_E2E_GARMIN_DATA_RECEIPT_WRITE_FAILED");
