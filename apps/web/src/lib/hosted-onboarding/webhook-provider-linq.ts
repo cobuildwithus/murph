@@ -722,7 +722,7 @@ async function lockPreparedHostedLinqDirectMemberTx(input: {
     select "id"
     from "hosted_member"
     where "id" = ${memberId}
-    for update skip locked
+    for no key update skip locked
   `;
   if (lockedRows.length !== 1) {
     throw hostedLinqDirectMailboxPreparationRequired("member");

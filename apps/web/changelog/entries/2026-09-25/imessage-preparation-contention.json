@@ -1,0 +1,17 @@
+{
+  "publishedOn": "2026-09-25",
+  "order": 100,
+  "item": {
+    "id": "imessage-preparation-contention",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Fewer delays accepting iMessages",
+    "summary": "Murph avoids one cause of unnecessary retry delays when a private iMessage arrives during other account activity.",
+    "details": "Account and conversation checks still apply before a message is accepted.",
+    "relevanceTags": [
+      "messaging",
+      "reliability"
+    ],
+    "sourcePullRequests": []
+  }
+}
