@@ -395,17 +395,39 @@ describeRealCodex('real natural goal canary journey', () => {
         if (!prompt) throw new Error(`Missing canary stage: ${stage}`)
         return prompt
       }
-      const preview = await fixture.message(promptFor('goal-proposal'))
+      const timedMessage = async (stage: string) => {
+        const before = await fixture.commandCount()
+        const startedAt = performance.now()
+        const result = await fixture.message(promptFor(stage))
+        const commands = expandRecordedVaultCommands((await readFile(path.join(fixture.root, 'commands.jsonl'), 'utf8'))
+          .split('\n').filter(Boolean).slice(before).map((line) => {
+            const args: unknown = JSON.parse(line)
+            if (!Array.isArray(args) || !args.every((arg) => typeof arg === 'string')) {
+              throw new Error('Expected synthetic CLI argument list.')
+            }
+            return args.join(' ')
+          }))
+        process.stdout.write(`[natural-goal-latency] ${JSON.stringify({
+          stage, elapsedMs: Math.round(performance.now() - startedAt),
+          commands: commands.map((command) => command.split(' ').slice(0, command.startsWith('commons ') ? 3 : 2).join(' ')),
+        })}\n`)
+        return { result, commands }
+      }
+      const { result: preview } = await timedMessage('goal-proposal')
       expect(preview.response).toMatch(/walk/iu)
       expect(preview.response).toMatch(/lunch/iu)
       expect(preview.response).toMatch(/twenty|20/iu)
       expect(await listGoals(fixture.vault)).toHaveLength(0)
       expect((await readVaultRawTolerant(fixture.vault)).regimens).toHaveLength(0)
 
-      const accepted = await fixture.message(promptFor('accept-goal'))
+      const { result: accepted, commands } = await timedMessage('accept-goal')
+      expect(commands.filter((command) => /^goal save /u.test(command) && !isRecordedVaultHelpCommand(command))).toHaveLength(1)
+      expect(commands.filter((command) => /^regimen save /u.test(command) && !isRecordedVaultHelpCommand(command))).toHaveLength(1)
+      expect(commands.filter((command) => /^(goal show|regimen show|automation )/u.test(command) && !isRecordedVaultHelpCommand(command))).toEqual([])
       const vault = await readVaultRawTolerant(fixture.vault)
       expect(vault.goals).toHaveLength(1)
       expect(vault.goals[0]?.attributes.status).toBe('active')
+      expect(vault.goals[0]?.attributes.commonsGoalRef).toBeUndefined()
       expect(vault.regimens).toHaveLength(1)
       const regimen = regimenFrontmatterSchema.parse(vault.regimens[0]?.attributes)
       expect(regimen).toMatchObject({
@@ -41291,6 +41313,7 @@ describeRealCodex('real Codex proactive plan follow-through e2e', () => {
         await Promise.all([
           ...(['daily-activity', 'behavior-followthrough', 'self-management-experiments', 'experiment-onboarding', 'goal-setup'] as const)
             .map((slug) => materializeAssistantSkill({ skillsRoot, slug })),
+          materializeAssistantSkillAsset({ skillsRoot, relativePath: 'shared/exercise-catalog-runtime.md' }),
           materializeRealWorkoutVaultCli({ binDirectory, commandLogPath, vaultRoot: workingDirectory }),
         ])
         const before = await readVaultRawTolerant(workingDirectory)
