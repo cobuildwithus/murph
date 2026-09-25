@@ -7,8 +7,7 @@ description: Use when someone asks Murph to start, resume, pause, or change a co
 
 ## Outcome
 
-Turn an explicit outcome request into the smallest useful plan Murph can support
-over time. The private vault remains authoritative for personal state.
+Build a useful supported plan. The private vault owns personal state.
 
 This is one orchestration skill, not a second planning system. Do not create a
 skill, prompt, tracker, schema, or plan type per public goal.
@@ -26,15 +25,15 @@ context, not an action request. Use this skill only if the person also asks
 Murph to plan, start, resume, pause, or change it. Answer a knowledge-only
 question directly through the domain owner without manufacturing a Goal.
 
+On acceptance, go to **Persist the accepted plan**: one Goal, then one habit regimen linked to its returned id. A regimen alone is incomplete.
+Do not repeat Commons discovery, domain-skill reads, or grounding reads unless relevant facts changed or their results are unavailable.
+Keep ownership and template freshness checks. Empty search results still count as completed discovery.
+
 ## Pre-question gate
 
-Before the first setup question, finish in order: public list and exact show; all-status Goal inventory; complete owner and `behavior-followthrough` reads for repeated action; compact memory and required canonical reads. Ask only after each applicable read succeeds or is explicitly unavailable.
+Before the first setup question, finish all applicable reads: public list and exact show; all-status Goal inventory; complete owner and `behavior-followthrough` reads for repeated action; compact memory and required canonical reads. Batch independent CLI reads with `vault-cli batch --compact --format json`; inspect results before dependent work. Ask only after each applicable read succeeds or is explicitly unavailable.
 
 ## Ownership
-
-This skill owns exact public-template resolution, equivalent-Goal detection,
-the minimum setup conversation, proposal and acceptance, and Goal lifecycle
-coordination.
 
 - The outcome's registered domain skill owns health reasoning, safety, plan construction, progress signals, and adjustment rules.
 - `behavior-followthrough` owns repeated-behavior design, reminder choices, missed-action repair, and support fading.
@@ -48,21 +47,18 @@ For `habit_plan`, `training_plan`, or other repeated action, load `behavior-foll
 
 ## Resolve the public goal
 
-Extract the person's requested outcome in plain language, omitting the
-greeting and "help me" wrapper. Then run:
+Extract the requested goal, not background context (desk work is not a request to sit less). Omit greetings. Run:
 
 ```text
 vault-cli commons goal list --query "<outcome>" --format json
 ```
 
-Resolve only one unique exact title, `goalPhrase`, or alias match after
-case-folding and normalizing whitespace and punctuation. Do not choose a fuzzy,
-related, parent, featured, or first-ranked result as exact. If multiple exact
-matches remain, ask which one they mean. If none matches or Commons is
-unavailable, continue with a custom private Goal when the outcome itself is
-clear; do not claim it came from a public guide. If `total` exceeds the
-returned list length, use the supported larger `--limit` before concluding
-that no exact match exists.
+Resolve one unique exact title, `goalPhrase`, or alias after normalizing case,
+whitespace, and punctuation. A fuzzy, related, parent, featured, or first-ranked
+result is not exact. Multiple exact matches require clarification. With no exact
+match or unavailable Commons, use a custom private Goal for the clear outcome;
+do not search for a substitute outcome or claim public lineage. If `total`
+exceeds returned length, increase `--limit` before concluding no exact match.
 
 For one exact match, read its current compact typed record:
 
@@ -148,14 +144,17 @@ Give one clear default the person can edit:
    date and clock time, or use accepted quiet support
 5. the main adjustment or stop rule
 
-Keep it concise and end exactly: `Want me to save this plan and set up those
-reminders and review?` Do not silently omit support; the person can edit or
-decline it. A clear yes authorizes only the package just described. Other
-replies do not.
+Keep it concise. For offered reminders and review, end: `Want me to save this plan and set up those reminders and review?`
+For explicitly quiet support, end: `Want me to save this plan without reminders?`
+Do not silently omit support; the person can edit or decline it. A clear yes authorizes only the package just described.
+Acceptance such as "yes, let's start tomorrow" authorizes saving that plan with the accepted start date; do not ask again
+or treat declining reminders as declining the plan. Other replies do not authorize writes.
+For quiet plans, shift relative first-week/review windows with that start; do not reconfirm solely for date arithmetic.
+Keep fixed-date and reminder consent gates.
 
 ## Persist the accepted plan
 
-Immediately before a template-backed write, show the same public goal again.
+Custom plan: no Commons lookup on acceptance. Template-backed plan: show the same public goal immediately before writing.
 Run that show alone. Await and inspect its tuple before any write; never batch
 the freshness read with a mutation.
 Compare its revision tuple with the tuple used for the accepted preview. If
@@ -170,16 +169,18 @@ workflow.
 Save one Goal. A new or changed public-template plan includes its accepted preview lineage; creation alone uses exact `goal.goalPhrase` as title:
 
 ```text
-vault-cli goal save "<title>" --status active --horizon <horizon> --domain <domain> --commons-goal-key <key> --commons-page-revision-id <page-revision-id> --commons-workflow-revision-id <workflow-spec-revision-id> --format json
+vault-cli goal save "<title>" --status active --commons-goal-key <key> --commons-page-revision-id <page-revision-id> --commons-workflow-revision-id <workflow-spec-revision-id> --format json
 ```
 
 An existing plan change adds `--id <goal-id>` to the same Commons flags and omits title unless rename was accepted.
-Status-only preserves stored lineage/title. Custom creation omits Commons flags. Add only needed fields; read the Goal back before its operational owner.
+Status-only preserves stored lineage/title. Custom creation omits Commons flags.
+Use successful save receipts (returned ids and saved fields) for dependent work.
+Do not issue a post-save show solely to verify a successful write. Read missing details needed for the next action,
+or canonical owners after a failed or ambiguous write.
 
 For an accepted non-experiment `habit_plan`, `training_plan`, or other Murph-designed non-clinical
 repeated-action plan, use exactly one linked `kind=habit` regimen as the durable behavior-loop owner.
-Domain owners may add workout formats, sessions, trackers, or care records when needed, but those records
-do not replace this plan owner. Before creating or changing it, run the all-status inventory and detail-read
+Before creating or changing it, run the all-status inventory and detail-read
 each plausible match; match on `kind=habit` plus `relatedGoalIds` containing the saved Goal id:
 ```text
 vault-cli regimen list --limit 200 --format json
@@ -188,22 +189,29 @@ vault-cli regimen show <plausible-regimen-id> --format json
 With zero exact linked regimens create one; with one, reuse it even when paused; with more than one, write nothing
 until ownership is resolved. Because this list has no cursor, any exactly-200 result fails closed. Save its note with
 the person's reason in their own words, constraints and prior attempts, baseline, target and date, progression, standard/
-tiny/fallback versions, action window, accepted support/privacy boundary, review point, and off-ramp; then read
-the regimen back. If the Goal, regimen, and support already exactly match the accepted package, make no mutation.
+tiny/fallback versions, action window, accepted support/privacy boundary, review point, and off-ramp:
+```text
+vault-cli regimen save "<title>" --kind habit --status active --related-goal-id <goal-id> --schedule "<action window>" --note "<accepted plan>" --format json
+```
+Keep `--schedule` to timing only (at most 160 characters); put the plan in `--note` (at most 4000 characters).
+For an existing regimen add `--id <regimen-id>`. Inspect the saved `entity` in the receipt.
+If the Goal, regimen, and support already exactly match the accepted package, make no mutation.
+For quiet support with regimen receipt `created: true`, skip support inventory and effects for that new id.
+Existing regimens still require complete support inventory and quiet reconciliation.
 Before any repeated support effect, run `vault-cli automation list --support-series-id habit:<regimen-id> --compact --limit 200`, follow each returned `nextCursor` with `--cursor` until null, and fail closed if inventory is incomplete.
-On a hosted turn use `murph.automation` `save`/`patch` and `reconcile`; after owner readback, do not reply until accepted support succeeds or report the exact failed remainder.
+On a hosted turn use `murph.automation` `save`/`patch` and `reconcile`; after successful owner saves, do not reply until accepted support succeeds or report the exact failed remainder.
 Before support, verify every one-shot is future, the review follows the final reminder, and any `activeUntil` is strictly after its scheduled time; otherwise omit it.
 Every support save or patch passes `contextReferences` for exactly the current Goal and linked regimen: `[{"entityKind":"goal","entityId":"<goal-id>"},{"entityKind":"regimen","entityId":"<regimen-id>"}]`.
 Reconcile only after save or patch results, with every desired returned id;
 accepted non-quiet support never uses empty `desiredAutomationIds`.
 Inspect and patch exact existing members, create only missing accepted support, then reconcile the series to the
 exact desired automation ids; quiet support reconciles existing members to empty, while an already empty series needs no effect. Use the current automation authority only for
-the cadence accepted, and read every created or updated owner back before claiming the package is complete.
+the cadence accepted. Confirm completion from successful save receipts and support results.
 
 If one accepted write succeeds and a later one fails, do not retry blindly or
 create a fallback copy. Read back the canonical owners, say what did and did
 not finish, and offer the smallest recovery. Confirm the next action and review
-point only from successful readback.
+point only from the accepted plan and successful save receipts or canonical reads.
 
 ## Experiments are optional
 
@@ -217,6 +225,5 @@ or disguise routine follow-through as experimentation.
 
 ## Finish
 
-Leave the person with a plan, one question that unlocks it, or a safer route.
 After acceptance, give the next action, support, review point, and an easy
 pause, edit, or stop path.

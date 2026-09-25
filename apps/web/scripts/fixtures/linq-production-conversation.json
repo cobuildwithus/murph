@@ -16,7 +16,7 @@
     "stage": "goal-proposal"
   },
   {
-    "prompt": "Yes, that sounds good. Let’s start tomorrow.",
+    "prompt": "Yes, that sounds good. Let’s start on the next weekday.",
     "stage": "accept-goal"
   }
 ]

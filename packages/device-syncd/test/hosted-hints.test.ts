@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 
 import { test } from "vitest";
 
-import { shapeHostedDeviceSyncJobHintPayload } from "../src/hosted-hints.ts";
+import { describeHostedDeviceSyncCoalescibleFetch, shapeHostedDeviceSyncJobHintPayload } from "../src/hosted-hints.ts";
 
 test("hosted job hint payload shaping keeps only the provider-specific job-definition fields", () => {
   assert.deepEqual(
@@ -225,4 +225,55 @@ test("hosted job hint payload shaping covers Strava job hints and deauthorizatio
     }),
     {},
   );
+});
+
+const garminFetchPayload = {
+  eventType: "daily.data.steps.created",
+  objectId: "synthetic-event",
+  occurredAt: "2026-04-03T12:00:00.000Z",
+  resource: "steps",
+  resourceCategory: "timeseries",
+  sourceProviderSlug: "garmin",
+  windowStart: "2026-03-01T00:00:00.000Z",
+  windowEnd: "2026-04-01T00:00:00.000Z",
+};
+
+test.each(["steps", "distance", "calories_active", "respiratory_rate"])(
+  "plain Garmin %s fetches can coalesce without losing webhook data",
+  (resource) => {
+    for (const prefix of ["daily", "historical"]) {
+      for (const action of ["created", "updated"]) {
+        const result = describeHostedDeviceSyncCoalescibleFetch("junction", {
+          kind: "resource", payload: { ...garminFetchPayload, resource, eventType: `${prefix}.data.${resource}.${action}` },
+        });
+        assert.ok(result);
+        assert.equal(result.start, Date.parse(garminFetchPayload.windowStart));
+        assert.equal(result.end, Date.parse(garminFetchPayload.windowEnd));
+      }
+    }
+  },
+);
+
+test.each([
+  { webhookDataJson: "{}" }, { historicalBackfill: true }, { calendarRefreshDay: "2026-03-01" },
+  { sourceProviderSlug: "oura" }, { resource: "sleep", resourceCategory: "summary" },
+  { resource: "glucose" }, { eventType: "daily.data.steps.deleted" },
+  { eventType: "provider.connection.updated" }, { eventType: "daily.data.distance.created" },
+  { unknownFutureAuthority: true }, { timeseriesCursor: "2026-03-01" },
+  { windowStart: "invalid" }, { windowEnd: "invalid" }, { windowStart: 123 },
+  { windowEnd: "2026-03-01T00:00:00.000Z" }, { windowStart: "2024-01-01T00:00:00.000Z" },
+])("Garmin coalescing retains incompatible payloads separately: %j", (patch) => {
+  assert.equal(describeHostedDeviceSyncCoalescibleFetch("junction", {
+    kind: "resource", payload: { ...garminFetchPayload, ...patch },
+  }), null);
+});
+
+test("coalescing does not apply to other providers or job kinds", () => {
+  assert.equal(describeHostedDeviceSyncCoalescibleFetch("oura", {
+    kind: "resource", payload: garminFetchPayload,
+  }), null);
+  assert.equal(describeHostedDeviceSyncCoalescibleFetch("junction", {
+    kind: "backfill", payload: garminFetchPayload,
+  }), null);
+  assert.equal(describeHostedDeviceSyncCoalescibleFetch("junction", { kind: "resource" }), null);
 });

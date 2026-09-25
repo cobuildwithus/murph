@@ -1,9 +1,16 @@
+Garmin history import coalescing and synthetic fetch-work evidence are recorded
+in [the import-speed plan](exec-plans/completed/2026-09-24-garmin-import-speed.md).
+
 # Murph Agent Docs Index
 
 Completed device polling-hint cleanup and the hourly-preflight investigation are
 recorded in [stale device wakes](exec-plans/completed/2026-09-24-stale-device-wakes.md).
 The runtime mailbox contract remains in
 [`hosted-runtime-protocol.md`](references/hosted-runtime-protocol.md).
+
+[CLI read validation telemetry](exec-plans/completed/2026-09-25-cli-read-validation-telemetry.md)
+records the locally verified implementation; [PR #3707](https://github.com/cobuildwithus/murph/pull/3707)
+owns delivery status. The contract remains in `docs/hosted-runtime-log-database.md`.
 
 Runtime ownership response timing is tracked in
 [the response plan](exec-plans/completed/2026-09-23-runtime-owner-response.md);
@@ -31,6 +38,12 @@ Plain contact-name presentation and PR preparation are tracked in
 [report label follow-up](exec-plans/completed/2026-09-22-group-report-labels-pr.md).
 The [email batch follow-up](exec-plans/completed/2026-09-22-group-report-email-batches.md)
 preserves one naming snapshot across sparse shared-data reads.
+
+Recurring report correction persistence and synthetic verification are tracked in
+[`report format correction`](exec-plans/completed/2026-09-24-report-format-correction.md).
+
+General correction scope and canonical-owner verification are tracked in
+[`durable correction scope`](exec-plans/completed/2026-09-24-durable-correction-scope.md).
 
 Automation database load, daily scheduling, and Flex retry work:
 [`2026-09-21-automation-query-load.md`](exec-plans/completed/2026-09-21-automation-query-load.md).
@@ -160,11 +173,20 @@ Empty-source startup batching and Postgres processing summaries are owned by
 owned by `agent-docs/references/hosted-runtime-protocol.md`. Implementation proof:
 [`2026-09-17-runtime-latency-followup.md`](exec-plans/completed/2026-09-17-runtime-latency-followup.md).
 
+Follow-through setup lives in `packages/assistant-engine/skills/behavior-followthrough/SKILL.md`;
+its conditional delivery, reconciliation, and repair rules live in
+`packages/assistant-engine/skills/behavior-followthrough/references/support-runtime.md`.
+Goal-setup latency investigation and focused verification are recorded in
+[`2026-09-24-goal-turn-latency.md`](exec-plans/active/2026-09-24-goal-turn-latency.md).
+
 Runtime authority lock/read consolidation is recorded in
 [`2026-09-20-runtime-latency-delete-work.md`](exec-plans/active/2026-09-20-runtime-latency-delete-work.md).
 
 Bounded runtime cleanup cadence and shared-owner safety proof are recorded in
 [`2026-09-18-orphan-cleanup-throughput.md`](exec-plans/completed/2026-09-18-orphan-cleanup-throughput.md).
+
+Direct Linq preparation-reason telemetry and retry-preservation proof are recorded in
+[`2026-09-25-linq-preparation-reason-telemetry.md`](exec-plans/completed/2026-09-25-linq-preparation-reason-telemetry.md).
 
 Runtime admission policy and single-request provider backend selection are owned
 by `agent-docs/references/hosted-postgres-runtime.md` and `agent-docs/SECURITY.md`.
@@ -387,7 +409,7 @@ is recorded in [`2026-09-18-ios-canary-deployment-continuity.md`](exec-plans/com
 | `docs/hosted-contact-privacy-rotation.md` | Hosted blind-index keyring seam and future rotation constraints. | Hosted contact-privacy rotation seam | Medium | 2026-07-16 |
 | `docs/hosted-linq-db-home-lines-migration.md` | Database-backed Linq home-line assignment, provider inventory freshness, and bounded Serializable snapshot recovery. | Hosted Linq line ownership and rollout | High | 2026-09-11 |
 | `docs/hosted-account-data-deletion-export.md` | Hosted account data export and deletion workflow, store coverage, security checks, retention limits, and the authenticated canary diagnostic-retention exception. | Hosted account privacy workflow | High | 2026-05-13 |
-| `docs/hosted-runtime-log-database.md` | HTTP request cache diagnostics and synthetic native Codex HTTP/WebSocket cache replay; OpenAI 30-second stream-idle policy and local proof limits; dedicated hosted runtime-log Postgres ownership, bounded container V8 CPU attribution with process counters and event-loop delay, bounded reply-skip reason codes, whole-pass device import no-op counts, temporary outbound crypto pending-join diagnostics, deletion fence, canary reset diagnostic retention through post-promotion contract cleanup, retention, web-control preflight rejection attribution, shared-CLI usage-profile timing contract (phases, transport bounds, assembled-bundle owner parity, coverage, and consumer-first rollout), foreground-wake summaries with fingerprinted correlation and caller/transport attribution, migration preflight, and rollback floor. | Hosted runtime observability storage and usage-profile diagnostics | High | 2026-09-11 |
+| `docs/hosted-runtime-log-database.md` | HTTP request cache diagnostics and synthetic native Codex HTTP/WebSocket cache replay; OpenAI 30-second stream-idle policy and local proof limits; dedicated hosted runtime-log Postgres ownership, bounded container V8 CPU attribution with process counters and event-loop delay, bounded reply-skip reason codes, whole-pass device import no-op counts, temporary outbound crypto pending-join diagnostics, deletion fence, canary reset diagnostic retention through post-promotion contract cleanup, retention, web-control preflight rejection attribution, external-route response validation in structured logs, shared-CLI usage-profile timing contract (phases, transport bounds, assembled-bundle owner parity, coverage, and consumer-first rollout), foreground-wake summaries with fingerprinted correlation and caller/transport attribution, migration preflight, and rollback floor. | Hosted runtime observability storage and usage-profile diagnostics | High | 2026-09-12 |
 | `docs/legal-consent-implementation.md` | Hosted legal consent document registry, event/grant storage, API routes, and gate helpers. | Hosted legal consent workflow | High | 2026-05-13 |
 | `docs/incident-response.md` | Canonical incident.io-backed runbook for declaring, coordinating, communicating, resolving, and learning from Murph production incidents. | Incident coordination and public status policy | High | 2026-08-05 |
 | `docs/health-data-incident-runbook.md` | Engineering runbook for suspected health-data incidents, consent bypasses, vendor incidents, and tracking disclosures. | Health-data incident response | High | 2026-08-05 |

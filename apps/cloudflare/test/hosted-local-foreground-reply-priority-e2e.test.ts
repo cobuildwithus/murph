@@ -968,7 +968,7 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
   it("pages one operator incident through the real cron, database, and Resend boundary", async () => {
     const anomalousTrace = await setLatestHostedLinqReplyLatencyForTest({
       environment: requireScenario().runtimeEnv,
-      latencyMs: 31_000,
+      latencyMs: 61_000,
       userId: retentionProbe.userId,
     });
 
@@ -1074,7 +1074,7 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
 
     await setLatestHostedLinqReplyLatencyForTest({
       environment: requireScenario().runtimeEnv,
-      latencyMs: 31_000,
+      latencyMs: 61_000,
       userId: retentionProbe.userId,
     });
     await expect(ageHostedRuntimeLatencyAlertForTest({

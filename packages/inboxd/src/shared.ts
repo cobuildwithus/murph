@@ -178,13 +178,6 @@ export function buildFtsQuery(text: string): string {
   return tokens.map((token) => `"${token.replace(/"/g, "\"\"")}"*`).join(" AND ");
 }
 
-export function mapObjectEntries(
-  value: object,
-  mapEntry: (key: string, entry: unknown) => [string, unknown],
-): Record<string, unknown> {
-  return Object.fromEntries(Object.entries(value).map(([key, entry]) => mapEntry(key, entry)));
-}
-
 export function buildSnippet(...sources: Array<string | null | undefined>): string {
   for (const source of sources) {
     const value = normalizeTextValue(source);

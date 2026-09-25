@@ -8,6 +8,31 @@ import {
 } from '../src/assistant/system-prompt.js'
 
 describe('group shared metric presentation prompt', () => {
+  it('allows requested name formatting without changing row attribution', () => {
+    const prompt = buildHostedGroupSharedPrompt()
+    expect(prompt).toContain('Apply requested presentation changes consistently using only evidence in each current row')
+    expect(prompt).toContain('Transform a supplied label only when its meaning is unambiguous')
+    expect(prompt).toContain('When a requested format would collapse distinct source labels into identical output labels')
+    expect(prompt).toContain('keep enough of each original label to distinguish its row even if that prevents the exact requested format')
+    expect(prompt).toContain('Never expand an initial or borrow a name from another row or conversation')
+  })
+
+  it.each([
+    { channel: 'email', available: true },
+    { channel: 'linq', available: false },
+  ])('does not instruct an unavailable route to persist corrections: $channel/$available', ({ channel, available }) => {
+    const prompt = buildAssistantSystemPrompt({
+      assistantCliContract: null, assistantHostedAutomationAvailable: available,
+      channel, cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+      conversationScope: 'group', hostedRuntime: true, onboardingGuidance: false,
+      modelBehaviorProfile: 'gpt5-agentic', currentLocalDate: '2030-02-12', currentTimeZone: 'UTC',
+    })
+    expect(prompt).toContain('never creates new permission or overrides consent, audience, or tool restrictions')
+    expect(prompt).toContain(channel === 'email'
+      ? 'Group-email replies cannot create, edit, import, pause, reactivate, or reroute automations'
+      : 'Scheduled automation changes are unavailable in this turn')
+  })
+
   it('qualifies short and tentative sleep in the assembled group prompt', () => {
     const prompt = buildHostedGroupSharedPrompt()
     expect(prompt).toContain('`sleepType=short_sleep` identifies a short session, not a confirmed nap or complete night')

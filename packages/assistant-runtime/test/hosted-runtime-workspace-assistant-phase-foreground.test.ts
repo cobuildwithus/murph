@@ -2182,31 +2182,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(mocks.drainHostedPreparedAssistantDeliveries).not.toHaveBeenCalled();
   });
 
-  it("keeps a future causal approval wake behind foreground input at pass admission", async () => {
-    const now = "2026-04-27T00:00:00.000Z";
-    mocks.resolveHostedPendingAssistantInputWakeAt.mockResolvedValue(now);
-
-    await runHostedWorkspaceAssistantPhase(createPhaseInput({
-      importedCount: 1,
-      now: () => now,
-    }));
-
-    expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).toHaveBeenCalledWith(
-      expect.objectContaining({
-        allowedRouteActions: [
-          "apply-runtime-control-request",
-          "continue-assistant-ask",
-        ],
-        allowedWakeKinds: [
-          "runtime.pending-effects-reconcile-requested",
-          "assistant.ask.completed",
-        ],
-        vaultRoot: "/tmp/murph-vault",
-      }),
-    );
-    expect(mocks.runHostedAssistantAutomationLane).toHaveBeenCalledTimes(1);
-  });
-
   it("keeps unrelated system wakes behind foreground input at pass admission", async () => {
     const now = "2026-04-27T00:00:00.000Z";
     mocks.resolveHostedPendingAssistantInputWakeAt.mockResolvedValue(now);

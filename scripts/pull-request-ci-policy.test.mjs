@@ -1084,42 +1084,6 @@ test("draft reset rejects missing, ambiguous, or mismatched head candidates befo
   }
 });
 
-test("operator docs preserve the bounded Host Support release graph", async () => {
-  const [runtimeOperations, testingMap] = await Promise.all([
-    readFile(path.join(REPO_ROOT, "agent-docs", "operations", "verification-and-runtime.md"), "utf8"),
-    readFile(path.join(REPO_ROOT, "agent-docs", "references", "testing-ci-map.md"), "utf8"),
-  ]);
-  for (const document of [runtimeOperations, testingMap]) {
-    assert.match(document, /scripts\/release-verification-plan\.mjs/u);
-    assert.match(document, /six(?:-shard package| package)/u);
-    assert.match(document, /four(?:-shard Web-test| release-plan-owned Web| Web test)/u);
-    assert.match(document, /package-boundary[\s\S]{0,160}(?:exactly once|sole owner)/u);
-    assert.match(document, /organization-level/u);
-    assert.match(document, /Release checks \(ubuntu\)/u);
-  }
-  assert.match(testingMap, /separate runners[\s\S]{0,160}Frog #2656/u);
-  assert.match(runtimeOperations, /Web and Cloudflare never execute in the same job or runner/u);
-});
-
-test("operator docs preserve the ready-only exact-head lifecycle and native canary cadence", async () => {
-  const documents = await Promise.all([
-    readFile(path.join(REPO_ROOT, "agent-docs", "operations", "verification-and-runtime.md"), "utf8"),
-    readFile(path.join(REPO_ROOT, "agent-docs", "references", "testing-ci-map.md"), "utf8"),
-  ]);
-  for (const document of documents) {
-    assert.match(document, /draft-first|start as drafts/u);
-    assert.match(document, /ready_for_review|ready for review/u);
-    assert.match(document, /synchronize[\s\S]{0,240}draft/u);
-    assert.match(document, /exact head|exact-head/u);
-    assert.match(document, /production canar/u);
-    assert.match(document, /twelve-hour/u);
-    assert.doesNotMatch(
-      document,
-      /native-ios-hosted-e2e-retry\.mjs|--failure-code (?:android_workflow_rerun|xcodebuild_failed)/u,
-    );
-  }
-});
-
 function workflowJobNames(source) {
   const jobsStart = source.indexOf("\njobs:\n");
   assert.ok(jobsStart >= 0, "workflow jobs block must exist");

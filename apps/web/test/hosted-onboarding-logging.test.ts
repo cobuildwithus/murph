@@ -11,7 +11,9 @@ vi.mock("@/src/lib/hosted-onboarding/stripe-alert-email", () => ({
     stripeAlertMocks.scheduleHostedStripeOperationFailureAlert,
 }));
 
+import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import {
+  deriveHostedLinqDirectMailboxPreparationReason,
   deriveHostedOnboardingTimingErrorName,
   finishHostedOnboardingTiming,
   logHostedOnboardingDiagnostic,
@@ -67,6 +69,98 @@ describe("hosted onboarding timing logging", () => {
     expect(deriveHostedOnboardingTimingErrorName(new TypeError("boom"))).toBe("TypeError");
     expect(deriveHostedOnboardingTimingErrorName("boom")).toBe("StringError");
     expect(deriveHostedOnboardingTimingErrorName({})).toBe("UnknownError");
+  });
+
+  it.each([
+    "control-root", "home-chat-owner", "ingress-root", "member", "routing", "thread-route",
+  ])("projects only the direct mailbox reason %s", (reason) => {
+    const consoleInfo = vi.spyOn(console, "info").mockImplementation(() => {});
+    const error = hostedOnboardingError({
+      code: "HOSTED_THREAD_ROUTE_PREPARATION_REQUIRED",
+      details: {
+        preparationTarget: "direct_linq_mailbox",
+        reason,
+        get privatePayload() { throw new Error("must not read private details"); },
+      },
+      httpStatus: 503,
+      message: "synthetic-private-message",
+    });
+    Object.defineProperty(error, "cause", {
+      get() { throw new Error("must not inspect causes"); },
+    });
+
+    expect(deriveHostedLinqDirectMailboxPreparationReason(error)).toBe(reason);
+    finishHostedOnboardingTiming(startHostedOnboardingTiming("test"), "failed", {
+      directLinqMailboxPreparationReason: deriveHostedLinqDirectMailboxPreparationReason(error),
+    });
+    expect(consoleInfo).toHaveBeenCalledExactlyOnceWith("Hosted onboarding timing.", {
+      directLinqMailboxPreparationReason: reason,
+      elapsedMs: expect.any(Number),
+      outcome: "failed",
+      step: "test",
+    });
+  });
+
+  it("omits unrelated errors and private or malformed reason decoys", () => {
+    const consoleInfo = vi.spyOn(console, "info").mockImplementation(() => {});
+    const input = {
+      code: "HOSTED_THREAD_ROUTE_PREPARATION_REQUIRED",
+      details: { preparationTarget: "direct_linq_mailbox", reason: "member" },
+      httpStatus: 503,
+      message: "synthetic-private-message",
+    };
+    const invalidReasons: unknown[] = [
+      undefined, null, 1, true, "", "unknown", "member ",
+      "synthetic-private-member", "user@example.test", "https://example.test/private",
+      ["member"], { reason: "member" }, { toString: () => "member" },
+    ];
+    const errors: unknown[] = [
+      null,
+      input.message,
+      { ...input, name: "HostedOnboardingError" },
+      Object.assign(new Error(input.message), input, { name: "HostedOnboardingError" }),
+      new Error(input.message, { cause: hostedOnboardingError(input) }),
+      hostedOnboardingError({ ...input, details: undefined }),
+      hostedOnboardingError({ ...input, details: {} }),
+      hostedOnboardingError({
+        ...input,
+        details: {
+          ...input.details,
+          get reason() { throw new Error("synthetic-private-reason"); },
+        },
+      }),
+      hostedOnboardingError({
+        ...input,
+        details: {
+          ...input.details,
+          get preparationTarget() { throw new Error("synthetic-private-target"); },
+        },
+      }),
+      hostedOnboardingError({ ...input, code: "HOSTED_THREAD_CONTAINER_PREPARATION_REQUIRED" }),
+      ...[undefined, null, "pending_group_setup_payload", "direct_linq_mailbox ", ["direct_linq_mailbox"]]
+        .map((preparationTarget) => hostedOnboardingError({
+          ...input, details: { ...input.details, preparationTarget },
+        })),
+      ...invalidReasons.map((reason) => hostedOnboardingError({
+        ...input, details: { ...input.details, reason },
+      })),
+    ];
+
+    for (const error of errors) {
+      expect(deriveHostedLinqDirectMailboxPreparationReason(error)).toBeUndefined();
+      logHostedOnboardingDiagnostic("test", {
+        directLinqMailboxPreparationReason: deriveHostedLinqDirectMailboxPreparationReason(error),
+      });
+      finishHostedOnboardingTiming(startHostedOnboardingTiming("test"), "failed", {
+        directLinqMailboxPreparationReason: deriveHostedLinqDirectMailboxPreparationReason(error),
+      });
+    }
+    expect(consoleInfo).toHaveBeenCalledTimes(errors.length * 2);
+    for (const [message, details] of consoleInfo.mock.calls) {
+      expect(details).toEqual(message === "Hosted onboarding timing."
+        ? { elapsedMs: expect.any(Number), outcome: "failed", step: "test" }
+        : { diagnostic: "test" });
+    }
   });
 
   it("emits sanitized searchable diagnostic payloads", () => {
