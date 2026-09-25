@@ -9,6 +9,6 @@
     "summary": "Reduced background bookkeeping while Murph prepares a reply.",
     "details": "Independent checks run together, and repeated checkpoint work is skipped while preserving your saved progress.",
     "relevanceTags": ["messaging", "reliability"],
-    "sourcePullRequests": []
+    "sourcePullRequests": [3723]
   }
 }
