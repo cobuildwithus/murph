@@ -79,6 +79,7 @@ function buildPreparedDomainRootCandidate(input: {
 
 const mocks = vi.hoisted(() => {
   const state = {
+    after: vi.fn(),
     getPrisma: vi.fn(),
     deriveHostedOnboardingTimingErrorName: vi.fn(() => "Error"),
     claimHostedLinqDeliveryProviderDispatchTx: vi.fn(),
@@ -264,6 +265,12 @@ function expectHostedLinqReadReceiptSent(chatId = "chat_123"): void {
     signal: undefined,
   });
 }
+
+vi.mock("next/server", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("next/server")>();
+  // Keep deferred latency writes outside the route's transaction-count proof.
+  return { ...actual, after: mocks.after };
+});
 
 vi.mock("@/src/lib/hosted-mailbox/store", async () => {
   const actual = await vi.importActual<typeof import("@/src/lib/hosted-mailbox/store")>(
@@ -4706,12 +4713,21 @@ describe("handleHostedOnboardingLinqWebhook", () => {
 
   it.each([
     {
+      activeRootKeyIds: ["root-control-active", "root-control-active"],
+      expectedAppendCount: 1,
+      expectedAttemptCount: 1,
+      expectedRootLockCount: 2,
+      label: "keeps a prepared direct route successful without retry telemetry",
+      succeeds: true,
+    },
+    {
       activeRootKeyIds: [
         "root-control-stale",
         "root-control-active",
         "root-control-active",
       ],
       expectedAppendCount: 1,
+      expectedAttemptCount: 2,
       expectedRootLockCount: 3,
       label: "re-prepares once when the direct control root changes under lock",
       succeeds: true,
@@ -4722,6 +4738,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         "root-control-stale-2",
       ],
       expectedAppendCount: 0,
+      expectedAttemptCount: 2,
       expectedRootLockCount: 2,
       label: "fails closed after repeated direct control-root drift",
       succeeds: false,
@@ -4729,6 +4746,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
   ])("$label", async ({
     activeRootKeyIds,
     expectedAppendCount,
+    expectedAttemptCount,
     expectedRootLockCount,
     succeeds,
   }) => {
@@ -4783,38 +4801,98 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       callback: (transaction: typeof prisma) => Promise<unknown>,
     ) => callback(prisma));
 
-    const outcome = handleHostedOnboardingLinqWebhook({
-      prisma,
-      rawBody: buildHostedLinqWebhookBody({
-        eventId: succeeds
-          ? "evt_direct_control_root_retry"
-          : "evt_direct_control_root_drift",
-      }),
-      signature: null,
-      timestamp: null,
-    });
-    if (succeeds) {
-      await expect(outcome).resolves.toMatchObject({
-        ignored: false,
-        ok: true,
-        reason: "wake-appended-active-member",
-      });
-    } else {
-      await expect(outcome).rejects.toMatchObject({
-        code: "HOSTED_THREAD_ROUTE_PREPARATION_REQUIRED",
-        details: {
-          preparationTarget: "direct_linq_mailbox",
-          reason: "control-root",
-        },
-        retryable: true,
-      });
-    }
+    // Keep the real planner, retry owner, service, route and log serializers composed.
+    const logging = await import("@/src/lib/hosted-onboarding/logging");
+    const actualLogging = await vi.importActual<typeof logging>(
+      "@/src/lib/hosted-onboarding/logging",
+    );
+    const errorName = vi.spyOn(logging, "deriveHostedOnboardingTimingErrorName")
+      .mockImplementation(actualLogging.deriveHostedOnboardingTimingErrorName);
+    const finishTiming = vi.spyOn(logging, "finishHostedOnboardingTiming")
+      .mockImplementation(actualLogging.finishHostedOnboardingTiming);
+    const diagnostic = vi.spyOn(logging, "logHostedOnboardingDiagnostic")
+      .mockImplementation(actualLogging.logHostedOnboardingDiagnostic);
+    const consoleInfo = vi.spyOn(console, "info").mockImplementation(() => {});
+    mocks.getPrisma.mockReturnValue(prisma);
 
-    expect(prisma.$transaction).toHaveBeenCalledTimes(2);
-    expect(mocks.lockAndReadActiveHostedDomainRootKeyIdTx)
-      .toHaveBeenCalledTimes(expectedRootLockCount);
-    expect(mocks.appendHostedMailboxEnvelopeTx)
-      .toHaveBeenCalledTimes(expectedAppendCount);
+    try {
+      const { POST } = await import("../app/api/hosted-onboarding/linq/webhook/route");
+      const response = await POST(new Request(
+        "https://example.test/api/hosted-onboarding/linq/webhook",
+        { method: "POST", body: buildHostedLinqWebhookBody() },
+      ));
+      expect(response.status).toBe(succeeds ? 202 : 503);
+      expect(response.headers.get("Cache-Control")).toBe("no-store");
+      const planner = vi.mocked(planHostedOnboardingLinqWebhook);
+      expect(planner).toHaveBeenCalledTimes(expectedAttemptCount);
+      if (succeeds) {
+        await expect(response.json()).resolves.toEqual({
+          ignored: false,
+          ok: true,
+          reason: "wake-appended-active-member",
+        });
+        expect(errorName).not.toHaveBeenCalled();
+      } else {
+        const result = planner.mock.results.at(-1);
+        if (result?.type !== "return") {
+          throw new Error("Expected the real planner's rejected promise.");
+        }
+        const terminalError = await result.value.catch((error: unknown) => error);
+        expect(errorName).toHaveBeenCalledTimes(3);
+        for (const [error] of errorName.mock.calls) {
+          expect(error).toBe(terminalError);
+        }
+        await expect(response.json()).resolves.toEqual({
+          error: {
+            code: "HOSTED_THREAD_ROUTE_PREPARATION_REQUIRED",
+            details: { preparationTarget: "direct_linq_mailbox", reason: "control-root" },
+            message: "Hosted Linq direct mailbox preparation is stale.",
+            retryable: true,
+          },
+        });
+      }
+
+      const retryDiagnostic = "hosted-onboarding.webhook.thread-routing-preparation-retry";
+      const retries = consoleInfo.mock.calls.filter(([, details]) =>
+        details?.diagnostic === retryDiagnostic,
+      );
+      expect(retries).toEqual(expectedAttemptCount === 1 ? [] : [[
+        `Hosted onboarding diagnostic: ${retryDiagnostic}.`,
+        {
+          code: "HOSTED_THREAD_ROUTE_PREPARATION_REQUIRED",
+          diagnostic: retryDiagnostic,
+          directLinqMailboxPreparationReason: "control-root",
+        },
+      ]]);
+      const failedTimings = consoleInfo.mock.calls.filter(([message, details]) =>
+        message === "Hosted onboarding timing." && details.outcome === "failed",
+      ).map(([, details]) => details);
+      expect(failedTimings).toEqual(succeeds ? [] : [
+        "hosted-onboarding.webhook.linq.plan",
+        "hosted-onboarding.webhook.linq",
+        "hosted-onboarding.route.linq-webhook",
+      ].map((step) => expect.objectContaining({
+        directLinqMailboxPreparationReason: "control-root",
+        errorName: "HostedOnboardingError",
+        outcome: "failed",
+        step,
+      })));
+      for (const [message, details] of consoleInfo.mock.calls) {
+        if (message === "Hosted onboarding timing." && details.outcome !== "failed") {
+          expect(details).not.toHaveProperty("directLinqMailboxPreparationReason");
+        }
+      }
+      expect(prisma.$transaction).toHaveBeenCalledTimes(expectedAttemptCount);
+      expect(mocks.lockAndReadActiveHostedDomainRootKeyIdTx)
+        .toHaveBeenCalledTimes(expectedRootLockCount);
+      expect(mocks.appendHostedMailboxEnvelopeTx)
+        .toHaveBeenCalledTimes(expectedAppendCount);
+    } finally {
+      errorName.mockRestore();
+      finishTiming.mockRestore();
+      diagnostic.mockRestore();
+      consoleInfo.mockRestore();
+    }
   });
 
   it.each([

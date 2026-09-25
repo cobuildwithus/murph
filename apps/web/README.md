@@ -1412,6 +1412,19 @@ or an ephemeral preview deployment URL as a long-lived provider callback or
 webhook base. Web build validation and the browser start boundary reject a
 hostname mismatch before provider authorization begins.
 
+### Direct Linq preparation diagnostics
+
+The existing `hosted-onboarding.webhook.thread-routing-preparation-retry`
+diagnostic and failed Linq planning, service, and route timing records include
+`directLinqMailboxPreparationReason` only for a typed
+`HOSTED_THREAD_ROUTE_PREPARATION_REQUIRED` error targeting
+`direct_linq_mailbox`. Its closed vocabulary is `control-root`,
+`home-chat-owner`, `ingress-root`, `member`, `routing`, or `thread-route`.
+Unknown, malformed, unrelated, and unreadable metadata omits the field; error
+messages, causes, and other details are never projected. The field distinguishes
+the existing preparation checks without adding events, I/O, retries, or state.
+Provider redelivery success alone does not identify the original stale fact.
+
 ### Workspace read timing
 
 `GET /api/internal/hosted-workspace` records content-free
