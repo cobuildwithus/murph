@@ -5,9 +5,9 @@
     "id": "recurring-report-corrections",
     "kind": "improvement",
     "priority": 2,
-    "title": "Report corrections carry forward",
-    "summary": "Changes you request for future recurring reports are saved before Murph confirms them.",
-    "details": "Report formatting can change without changing its schedule or destination. Requested name styles keep each person tied to their own shared results and preserve distinctions when names overlap.",
+    "title": "Lasting corrections carry forward",
+    "summary": "Corrections meant for future behavior are saved in the right place before Murph confirms them.",
+    "details": "Changes scoped to one task stay with that task; broader reply preferences use your settings. One-off edits leave saved preferences unchanged.",
     "relevanceTags": [
       "reminders",
       "group-chat"

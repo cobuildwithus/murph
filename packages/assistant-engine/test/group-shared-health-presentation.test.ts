@@ -10,25 +10,11 @@ import {
 describe('group shared metric presentation prompt', () => {
   it('allows requested name formatting without changing row attribution', () => {
     const prompt = buildHostedGroupSharedPrompt()
-    expect(prompt).toContain('Apply an explicitly requested name format consistently within each current row')
-    expect(prompt).toContain('only when the first name is unambiguous')
-    expect(prompt).toContain('Preserve disambiguation when shortening would collide')
+    expect(prompt).toContain('Apply requested presentation changes consistently using only evidence in each current row')
+    expect(prompt).toContain('Transform a supplied label only when its meaning is unambiguous')
+    expect(prompt).toContain('When a requested format would collapse distinct source labels into identical output labels')
+    expect(prompt).toContain('keep enough of each original label to distinguish its row even if that prevents the exact requested format')
     expect(prompt).toContain('Never expand an initial or borrow a name from another row or conversation')
-  })
-
-  it.each(['direct', 'group'] as const)('persists future-output corrections through the available automation owner: %s', (scope) => {
-    const prompt = buildAssistantSystemPrompt({
-      assistantCliContract: null, assistantHostedAutomationAvailable: true,
-      channel: 'linq', cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
-      conversationScope: scope, hostedRuntime: true, onboardingGuidance: false,
-      modelBehaviorProfile: 'gpt5-agentic', currentLocalDate: '2030-02-12', currentTimeZone: 'UTC',
-    })
-    expect(prompt).toContain('A correction intended for future recurring output is an automation edit')
-    expect(prompt).toContain('save the correction in its instructions before confirming future behavior')
-    expect(prompt).toContain('A chat acknowledgement or preserved conversation is not a saved recipe')
-    expect(prompt).toContain('A one-off revision changes only the current reply')
-    expect(prompt).toContain('If the write fails, do not claim the future change is saved')
-    expect(prompt).toContain('pass its current `updatedAt` as `expectedUpdatedAt`')
   })
 
   it.each([
@@ -41,7 +27,7 @@ describe('group shared metric presentation prompt', () => {
       conversationScope: 'group', hostedRuntime: true, onboardingGuidance: false,
       modelBehaviorProfile: 'gpt5-agentic', currentLocalDate: '2030-02-12', currentTimeZone: 'UTC',
     })
-    expect(prompt).not.toContain('A correction intended for future recurring output is an automation edit')
+    expect(prompt).toContain('never creates new permission or overrides consent, audience, or tool restrictions')
     expect(prompt).toContain(channel === 'email'
       ? 'Group-email replies cannot create, edit, import, pause, reactivate, or reroute automations'
       : 'Scheduled automation changes are unavailable in this turn')

@@ -10113,11 +10113,12 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
           'Current group message: Please make the names first-name-only throughout these recaps from now on.',
         ].join('\n'),
       })
+      process.stdout.write('[durable-correction-save-live] ' + JSON.stringify({ requests, reply: correction.finalMessage }) + '\n')
+      expect(correction.runtimeIssueInputs, JSON.stringify({ requests, reply: correction.finalMessage })).toEqual([])
       expect(requests.map((request) => request.action)).toEqual(['inspect', 'patch'])
       expect(readDynamicToolAttempts(correction.jsonEvents).filter((attempt) => attempt.tool === MURPH_AUTOMATION_TOOL.name)).toHaveLength(2)
       expect(correction.finalMessage).toMatch(/first[ -]name/iu)
       expect(correction.finalMessage).not.toMatch(/would you|shall I|couldn.t|unable|not saved|expectedUpdatedAt|schema/iu)
-      expect(correction.runtimeIssueInputs).toEqual([])
       expect((await listAutomations({ vaultRoot: workingDirectory })).items).toHaveLength(1)
       const saved = await showAutomation({ vaultRoot: workingDirectory, automationId: original.automationId })
       expect(saved).toMatchObject({ route: original.route, schedule: original.schedule, status: 'active', continuityPolicy: 'fresh' })
@@ -10156,6 +10157,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
           // No correction transcript, names, or resumed session: only the saved recipe.
           prompt: job.prompt,
         })
+        process.stdout.write('[durable-correction-report-live] ' + JSON.stringify({ collision, reads: reads.slice(readCount), reply: report.finalMessage }) + '\n')
         expect(report.sessionId).not.toBe(correction.sessionId)
         expect(reads).toHaveLength(readCount + 1)
         expect(reads.at(-1)?.projectionScopes).toEqual([{ projectionKind: 'steps-days.v0' }])
@@ -26509,7 +26511,7 @@ describeRealCodex('real Codex appointment check-in recovery e2e', () => {
 })
 
 describeRealCodex('real Codex personalization schema e2e', () => {
-  it('saves sentence-case preference through the concrete personalization update schema', async () => {
+  it.each(['future', 'one-off'] as const)('routes a reply-style correction to its intended scope (%s)', async (scope) => {
     const config = await resolveRealCodexE2eConfig()
     const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-personalization-schema-e2e-'))
     const requests: unknown[] = []
@@ -26549,20 +26551,27 @@ describeRealCodex('real Codex personalization schema e2e', () => {
         },
         model: config.model, modelProvider: config.modelProvider,
         progressDelivery: { async send(text) { progressUpdates.push(text); return { kind: 'sent', source: 'model' } } },
-        prompt: '[message_ref: ain_11111111111111111111111111111111] Please save sentence case as my preference for future replies. Keep my personality and voice the same.',
+        prompt: scope === 'future'
+          ? '[message_ref: ain_11111111111111111111111111111111] The lowercase replies are hard to read. Use sentence case from now on. Keep everything else about your style the same.'
+          : '[message_ref: ain_11111111111111111111111111111111] Rewrite just this sentence in sentence case: "ready for a walk." This is only for this reply; keep my saved settings unchanged.',
         reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
       })
       const updates = requests.filter((request) => readRecord(request)?.action === 'update')
-      expect(updates, JSON.stringify({ reply: result.finalMessage, actions: readCapabilityRoutingActions(result.jsonEvents) })).toEqual([{ action: 'update', tone: 'formal' }])
+      expect(updates, JSON.stringify({ reply: result.finalMessage, actions: readCapabilityRoutingActions(result.jsonEvents) })).toEqual(scope === 'future' ? [{ action: 'update', tone: 'formal' }] : [])
       expect(requests.length).toBeLessThanOrEqual(2)
       const attempts = readDynamicToolAttempts(result.jsonEvents).filter((attempt) => attempt.tool === MURPH_PERSONALIZATION_TOOL.name)
       expect(attempts).toHaveLength(requests.length)
       expect(result.runtimeIssueInputs).toEqual([])
       expect(progressUpdates).toEqual([])
       const reply = result.finalMessage.trim()
-      expect(reply).toMatch(/sentence case|capitali[sz]|capital letters/iu)
+      if (scope === 'future') expect(reply).toMatch(/sentence case|capitali[sz]|capital letters/iu)
+      else {
+        expect(requests).toEqual([])
+        expect(reply).toContain('Ready for a walk.')
+        expect(reply).not.toMatch(/saved|updated|from now on/iu)
+      }
       expect(reply).not.toMatch(/schema|mainPersona|couldn.t|unable|failed/iu)
-      process.stdout.write('[personalization-schema-live] ' + JSON.stringify({ requests, progressUpdates, reply }) + '\n')
+      process.stdout.write('[personalization-schema-live] ' + JSON.stringify({ scope, requests, progressUpdates, reply }) + '\n')
     } finally {
       await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
     }

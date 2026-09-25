@@ -2636,6 +2636,7 @@ application code.
 - The public homepage never opens a browser-vault session, creates browser unwrap material, or receives, decrypts, parses, or retains replica payload bytes. For an authenticated member it may only register an after-response, best-effort server preparation; the scheduler must lazily load the preparation worker from inside that callback so anonymous and pre-response route initialization do not evaluate the mailbox or Temporal graph. The worker reuses browser-vault member authority and replica-ref freshness metadata, then appends the existing durable refresh mailbox work and signals Temporal when the ref is missing or stale. The persistent dashboard provider remains the sole browser payload owner.
 - Any inbox-to-canonical promotion idempotency must be stored in or derivable from canonical vault evidence, not `.runtime/` alone.
 - General assistant/session state belongs under `vault/.runtime/operations/assistant/**`, including local transcript files, per-turn decision receipts, replay-safe outbound intent journals, pending anonymized assistant-runtime issue records, bounded local diagnostics/runtime event logs, diagnostics snapshot counters and recent warnings, persisted assistant status snapshots, and runtime automation execution state plus run history. Hosted assistant provider usage, including the requested and served model reported by Codex App Server, is recorded directly through the hosted runtime platform into the web-owned usage ledger instead of becoming assistant runtime state. Durable user-facing memory belongs canonically in `bank/memory.md`, typed preferences such as workout unit defaults and desired wearable providers belong canonically in `bank/preferences.json`, and durable scheduled prompt configuration belongs canonically in `bank/automations/*.md`; capture-scoped rebuildable audit artifacts stay under `derived/inbox/**`, while durable compiled knowledge dossiers live under `derived/knowledge/**`.
+- Corrections intended to change future behavior update the existing canonical owner consumed by that behavior before confirmation. Shared assistant guidance distinguishes one-off revisions, task-scoped changes, and broader preferences; conversation history or a note in another surface cannot substitute for that owner. It preserves unrelated state and saves reusable intent without copying incidental example facts. Existing consent, audience, tool availability, and failure rules remain authoritative.
 - Assistant tone, voice, and personality values remain canonical in the active runtime's `bank/preferences.json`: a person vault configures that private Murph, while a synthetic thread-container vault configures the room Murph. Nullable `HostedMember` assistant-style columns are the authenticated web mutation projection; only person-member rows feed personal Settings. Web emits strict sparse `member.preferences.updated` deltas, and the hosted system mailbox applies every delta in mailbox order; preference events are never latest-wins snapshots, and an older retry blocks newer deltas so sibling settings cannot be lost. The scheduled preference-handoff backstop selects active people and active synthetic rooms through the same owner-or-current-participant access derivation before its bounded limit, then rechecks canonical runtime access before signaling.
 - Hosted core-assistant provider intent is a separate Web-owned nullable
   `HostedMember.assistantProviderPreference`. OpenAI is derived when it is null
@@ -4358,13 +4359,10 @@ preserves the shared records and uses a deterministic group-scoped participant
 pseudonym derived from opaque runtime/membership IDs, never contact identifiers
 or roster position. Duplicate names receive a participant disambiguator.
 These labels are presentation only, carry no sender/effect authority, and are
-neither cached nor persisted. Explicit report name-style preferences may format
-only each current row’s own unambiguous label; shortening preserves
-disambiguation and never expands initials or imports identity from conversation. Corrections intended for future
-recurring output belong in the existing automation instructions through an
-inspected versioned patch before confirmation; one-off revisions stay local.
-The existing displayName wire field carries them so old runtime consumers
-remain compatible.
+neither cached nor persisted. Requested presentation changes use only each
+current row’s own evidence, preserve participant distinctions and unknowns,
+and never expand initials or import identity from conversation. The existing
+displayName wire field carries them so old runtime consumers remain compatible.
 Multi-batch email aggregation retains the first complete host naming snapshot;
 presentation differences across metric batches do not invalidate a report.
 Member/participant identities, current-turn handles, grants, and recipient

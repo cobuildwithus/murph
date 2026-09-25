@@ -738,3 +738,6 @@ Recurring report correction persistence and synthetic verification are tracked i
 Signup-wide native contact-card sharing and daily attempt suppression are owned by
 `operations/imessage-deliverability.md`; implementation and receipt-order proof
 are tracked in `exec-plans/completed/2026-09-24-signup-contact-card.md`.
+
+General correction scope and canonical-owner verification are tracked in
+[`durable correction scope`](exec-plans/completed/2026-09-24-durable-correction-scope.md).
