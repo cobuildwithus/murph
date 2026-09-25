@@ -4358,8 +4358,13 @@ preserves the shared records and uses a deterministic group-scoped participant
 pseudonym derived from opaque runtime/membership IDs, never contact identifiers
 or roster position. Duplicate names receive a participant disambiguator.
 These labels are presentation only, carry no sender/effect authority, and are
-neither cached nor persisted. The existing displayName wire field carries them
-so old runtime consumers remain compatible.
+neither cached nor persisted. Explicit report name-style preferences may format
+only each current row’s own unambiguous label; shortening preserves
+disambiguation and never expands initials or imports identity from conversation. Corrections intended for future
+recurring output belong in the existing automation instructions through an
+inspected versioned patch before confirmation; one-off revisions stay local.
+The existing displayName wire field carries them so old runtime consumers
+remain compatible.
 Multi-batch email aggregation retains the first complete host naming snapshot;
 presentation differences across metric batches do not invalidate a report.
 Member/participant identities, current-turn handles, grants, and recipient

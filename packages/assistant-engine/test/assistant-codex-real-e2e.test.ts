@@ -10034,6 +10034,155 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
     720_000,
   )
 
+  it('persists a recurring report format correction before a fresh scheduled report', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-report-format-e2e-'))
+    const requests: AssistantHostedAutomationToolRequest[] = []
+    const reads: AssistantHostedGroupSharedReadRequest[] = []
+    try {
+      await initializeVault({ vaultRoot: workingDirectory, timezone: 'UTC' })
+      const original = (await upsertAutomation({
+        vaultRoot: workingDirectory, title: 'Weekly walking recap', status: 'active',
+        continuityPolicy: 'fresh', now: new Date('2030-02-10T10:00:00.000Z'),
+        schedule: { kind: 'cron', expression: '0 10 * * 2', timeZone: 'UTC' },
+        route: { channel: 'linq', deliveryTarget: 'synthetic-walking-room', identityId: null,
+          participantId: null, threadId: 'synthetic-walking-room', threadIsDirect: false },
+        instructions: 'Send the weekly walking recap. Read shared steps-days.v0 for the previous day. Report every available participant in one text message, one row per person, using the displayName from that same current row. Keep missing values unknown.',
+      })).record
+      let inspectedVersion: string | null = null
+      const automationTool: NonNullable<CodexAppServerTurnInput['hostedToolContext']>['automationTool'] = {
+        async request(request) {
+          requests.push(request)
+          if (request.action !== 'inspect' && request.action !== 'patch') throw new Error('Only the existing report may be edited.')
+          expect(request.lookup).toBe(original.automationId)
+          const before = await showAutomation({ vaultRoot: workingDirectory, automationId: request.lookup })
+          if (!before) throw new Error('Expected the saved report.')
+          if (request.action === 'inspect') inspectedVersion = before.updatedAt
+          else {
+            expect(request.expectedUpdatedAt).toBe(inspectedVersion)
+            expect(Object.keys(request).sort()).toEqual(['action', 'expectedUpdatedAt', 'instructions', 'lookup'])
+            expect(request.instructions).toMatch(/first[ -]name/iu)
+            expect(request.instructions).not.toMatch(/Juniper|Marlowe|Iris/iu)
+            await patchAutomation({
+              vaultRoot: workingDirectory, lookup: request.lookup, expectedUpdatedAt: request.expectedUpdatedAt,
+              instructions: request.instructions, now: new Date('2030-02-12T10:05:00.000Z'),
+            })
+            inspectedVersion = null
+          }
+          const record = await showAutomation({ vaultRoot: workingDirectory, automationId: request.lookup })
+          if (!record) throw new Error('Expected canonical readback.')
+          return {
+            action: request.action, automationId: record.automationId, lookupId: record.automationId,
+            created: false, routeBinding: 'preserved', title: record.title, instructions: record.instructions,
+            schedule: record.schedule, status: record.status, updatedAt: record.updatedAt,
+            effectiveTimeZone: 'UTC', occurrenceProjection: { status: 'resolved', nextOccurrenceAt: '2030-02-19T10:00:00.000Z' },
+          }
+        },
+      }
+      const codexCommand = normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? 'codex'
+      const catalog = await writeHostedOpenAiMixedModeModelCatalogJson({ codexCommand, directory: workingDirectory })
+      const common = {
+        approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand, codexHome: config.codexHome, groupConversation: true,
+        env: { ...config.env, [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: catalog },
+        model: config.model, modelProvider: config.modelProvider,
+        reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
+      } as const
+      const systemOptions = {
+        assistantCliContract: null, assistantHostedAutomationAvailable: true,
+        assistantHostedGroupToolSurface: 'shared_read', assistantProgressUpdatesAvailable: false,
+        channel: 'linq', cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+        conversationScope: 'group', hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic',
+        onboardingGuidance: false, currentTimeZone: 'UTC',
+      } as const
+      const hostedContext = {
+        computerToolsAvailable: false, currentHostedDeliveryContext: () => null,
+        currentHostedMailboxItemIds: () => [], vaultFileSendAvailable: false,
+        sendVaultFile: async () => { throw new Error('No file send in this text-report journey.') },
+      }
+      const correction = await executeRealCodexAppServerTurn({
+        ...common, dynamicTools: [MURPH_AUTOMATION_TOOL],
+        developerInstructions: buildAssistantSystemPrompt({ ...systemOptions,
+          currentLocalDate: '2030-02-12', currentInstant: '2030-02-12T10:05:00.000Z',
+          ordinaryInboundTurn: true, turnTrigger: 'automation-auto-reply',
+        }),
+        hostedToolContext: { ...hostedContext, automationTool },
+        prompt: [
+          `The earlier delivered weekly walking recap belongs to automation ${original.automationId}.`,
+          'Earlier recap labels: Juniper Bell, Marlowe T., Iris.',
+          'Current group message: Please make the names first-name-only throughout these recaps from now on.',
+        ].join('\n'),
+      })
+      expect(requests.map((request) => request.action)).toEqual(['inspect', 'patch'])
+      expect(readDynamicToolAttempts(correction.jsonEvents).filter((attempt) => attempt.tool === MURPH_AUTOMATION_TOOL.name)).toHaveLength(2)
+      expect(correction.finalMessage).toMatch(/first[ -]name/iu)
+      expect(correction.finalMessage).not.toMatch(/would you|shall I|couldn.t|unable|not saved|expectedUpdatedAt|schema/iu)
+      expect(correction.runtimeIssueInputs).toEqual([])
+      expect(await listAutomations({ vaultRoot: workingDirectory })).toHaveLength(1)
+      const saved = await showAutomation({ vaultRoot: workingDirectory, automationId: original.automationId })
+      expect(saved).toMatchObject({ route: original.route, schedule: original.schedule, status: 'active', continuityPolicy: 'fresh' })
+      expect(saved?.instructions).not.toBe(original.instructions)
+      const job = await getAssistantCronJob(workingDirectory, original.automationId)
+      expect(job?.prompt).toBe(saved?.instructions)
+      if (!job) throw new Error('Expected the canonical scheduled job.')
+      const reports: string[] = []
+      for (const collision of [false, true]) {
+        // Reordered current rows and changed labels must win over earlier output.
+        const names = collision ? ['Juniper Bell', 'Juniper Vale', 'I.'] : ['Iris', 'Marlowe T.', 'Juniper Bell']
+        const readCount = reads.length
+        const report = await executeRealCodexAppServerTurn({
+          ...common, dynamicTools: [MURPH_GROUP_SHARED_READ_TOOL],
+          developerInstructions: buildAssistantSystemPrompt({ ...systemOptions,
+            currentLocalDate: '2030-02-19', currentInstant: '2030-02-19T10:00:00.000Z',
+            turnTrigger: 'automation-cron', scheduledOccurrenceAt: '2030-02-19T10:00:00.000Z',
+          }),
+          hostedToolContext: { ...hostedContext, groupSharedReader: { async request(request) {
+            reads.push(request)
+            return {
+              status: 'ok', requestedProjectionScopeKeys: ['steps-days.v0'],
+              members: names.map((displayName, index) => ({
+                displayName, participantId: `participant_format_${index}`, memberId: `member_format_${index}`,
+                currentTurnHandles: [], projections: [{
+                  projectionScope: { projectionKind: 'steps-days.v0' }, projectionScopeKey: 'steps-days.v0',
+                  grantStatus: 'granted', dataStatus: 'available', records: [{
+                    recordKey: '2030-02-18', occurredAt: '2030-02-18T00:00:00.000Z',
+                    data: { date: '2030-02-18', metricKey: 'steps', value: (index + 3) * 1000, unit: 'count' },
+                  }],
+                }],
+              })),
+            } satisfies AssistantHostedGroupSharedReadResponse
+          } } },
+          // No correction transcript, names, or resumed session: only the saved recipe.
+          prompt: job.prompt,
+        })
+        expect(report.sessionId).not.toBe(correction.sessionId)
+        expect(reads).toHaveLength(readCount + 1)
+        expect(reads.at(-1)?.projectionScopes).toEqual([{ projectionKind: 'steps-days.v0' }])
+        expect(report.runtimeIssueInputs).toEqual([])
+        const decision = parseAssistantNotificationDecision(report.finalMessage)
+        expect(decision.kind).toBe('send_message')
+        if (decision.kind !== 'send_message') throw new Error('Expected the scheduled text report.')
+        reports.push(decision.text)
+        const expected = collision
+          ? [/Juniper\s+(?:Bell|B\.)/u, /Juniper\s+(?:Vale|V\.)/u, /\bI\./u]
+          : [/\bIris\b/u, /\bMarlowe\b/u, /\bJuniper\b/u]
+        for (const [index, label] of expected.entries()) {
+          const line = decision.text.split('\n').find((entry) => label.test(entry))
+          expect(line).toMatch(new RegExp(`${index + 3},?000`, 'u'))
+        }
+        if (collision) expect(decision.text).not.toMatch(/Iris/iu)
+        else expect(decision.text).not.toMatch(/Marlowe T\.|Juniper Bell/iu)
+        expect(decision.text).not.toMatch(/participant_format_|member_format_|phone|email|confirm.*name/iu)
+      }
+      process.stdout.write('[report-format-correction-live] ' + JSON.stringify({
+        model: config.model, actions: requests.map((request) => request.action),
+        correction: correction.finalMessage, reports,
+      }) + '\n')
+    } finally {
+      await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+    }
+  }, 720_000)
+
   it('labels every scheduled shared row using host names and stable participant fallbacks', async () => {
     const config = await resolveRealCodexE2eConfig()
     const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-group-report-labels-e2e-'))

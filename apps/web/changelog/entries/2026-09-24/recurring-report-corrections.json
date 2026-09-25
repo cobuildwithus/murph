@@ -1,0 +1,17 @@
+{
+  "publishedOn": "2026-09-24",
+  "order": 100,
+  "item": {
+    "id": "recurring-report-corrections",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Report corrections carry forward",
+    "summary": "Changes you request for future recurring reports are saved before Murph confirms them.",
+    "details": "Report formatting can change without changing its schedule or destination. Requested name styles keep each person tied to their own shared results and preserve distinctions when names overlap.",
+    "relevanceTags": [
+      "reminders",
+      "group-chat"
+    ],
+    "sourcePullRequests": []
+  }
+}

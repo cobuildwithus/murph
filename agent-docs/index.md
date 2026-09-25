@@ -731,3 +731,6 @@ are tracked in [`2026-09-24-natural-onboarding-canary`](exec-plans/completed/202
 
 Native turn cancellation and voice continuity proof:
 [`2026-09-24-voice-turn-lifecycle.md`](exec-plans/completed/2026-09-24-voice-turn-lifecycle.md).
+
+Recurring report correction persistence and synthetic verification are tracked in
+[`report format correction`](exec-plans/active/2026-09-24-report-format-correction.md).
