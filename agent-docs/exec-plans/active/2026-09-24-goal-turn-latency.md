@@ -240,3 +240,32 @@ canary threshold, or production credential changes.
   against a synthetic API. Full verification, exact-head CI, and required
   preliminary/final ReviewGPT gates remain pending. Production reply and full
   completion latency proof remain pending until runtime deployment succeeds.
+
+
+## Protected rollout and review default
+
+- The private queue correction landed independently in Murph Cloud PR #169.
+  Reused that merged owner implementation and removed the duplicate candidate
+  from this task's final private diff. Its focused queue/workflow checks, full
+  verification, exact-head CI, and final review passed.
+- Protected runtime run 36176217626 succeeded on public source
+  `949aba7b3029ee1d4a603777ea4b4a03c2a6c14b`, which includes PRs #3710 and #3712.
+  Both queues were verified unchanged at 14-day retention, avoiding the failing
+  redundant provider mutation. Candidate smoke, hosted execution smoke, and
+  live fleet convergence passed. This does not explain Cloudflare's internal
+  HTTP 500; it removes an unnecessary request from the deployment path.
+- Web admission 36175172299 passed, and both production Web aliases resolved to
+  the same source. Protected canary 36179296277 was dispatched for that exact
+  deployment; its unchanged 20-second first-reply and canonical 0/0/1 Goal checks
+  are running. Full completion latency remains a separate pending measurement.
+- At the user's request, private PR #170 now defaults hosted ReviewGPT to
+  `gpt-6-pro`, matching public Murph. Only the existing model default and assertion
+  changed. Seven focused tests, shell syntax, typecheck, and exact-head full CI
+  passed. Final review on `184fac155397` passed with no findings in 7m39s;
+  recovered thread evidence passes the installed duration and timed-UNKNOWN
+  model-confirmation validators. The preliminary review passed in 4m22s; the
+  user explicitly accepted that completed review and waived only its timer for
+  this PR. No permanent review policy changed. PR #170 merged as `5a00bd1a`.
+- Runtime-log read-only diagnostics currently fail during connection establishment
+  with SSL SYSCALL EOF. No production row contents or credentials were retrieved;
+  use the workflow result and retry bounded diagnostics when available.
