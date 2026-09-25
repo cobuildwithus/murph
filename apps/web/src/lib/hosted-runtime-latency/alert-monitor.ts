@@ -23,7 +23,7 @@ import {
 import { normalizeNullableString } from "../primitives";
 import { getPrisma } from "../prisma";
 
-export const HOSTED_RUNTIME_REPLY_LATENCY_ALERT_THRESHOLD_MS = 30_000;
+export const HOSTED_RUNTIME_REPLY_LATENCY_ALERT_THRESHOLD_MS = 60_000;
 export const HOSTED_RUNTIME_LATENCY_ALERT_MINIMUM_INTERVAL_MS =
   HOSTED_OPERATIONAL_ALERT_MINIMUM_INTERVAL_MS;
 
@@ -666,10 +666,10 @@ function buildHostedRuntimeLatencyAlertMessage(input: {
 }): string {
   const evidence = [
     input.health.recentSlowInitialResponseCount > 0
-      ? `${input.health.recentSlowInitialResponseCount} completed ${pluralizeReply(input.health.recentSlowInitialResponseCount)} with no progress or final response within 30 seconds`
+      ? `${input.health.recentSlowInitialResponseCount} completed ${pluralizeReply(input.health.recentSlowInitialResponseCount)} with no progress or final response within ${input.health.thresholdMs / 1_000} seconds`
       : null,
     input.health.unresolvedReplyCount > 0
-      ? `${input.health.unresolvedReplyCount} unresolved ${pluralizeTurn(input.health.unresolvedReplyCount)} with no visible response or durable acknowledgement after 30 seconds`
+      ? `${input.health.unresolvedReplyCount} unresolved ${pluralizeTurn(input.health.unresolvedReplyCount)} with no visible response or durable acknowledgement after ${input.health.thresholdMs / 1_000} seconds`
       : null,
     input.health.scanTruncated
       ? "the bounded latency scan was truncated"
