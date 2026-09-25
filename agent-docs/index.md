@@ -3,6 +3,9 @@ in [the import-speed plan](exec-plans/completed/2026-09-24-garmin-import-speed.m
 
 # Murph Agent Docs Index
 
+Scheduled assistant real-model CI removal is recorded in
+[the CI removal plan](exec-plans/completed/2026-09-25-scheduled-ci-repair.md).
+
 Completed device polling-hint cleanup and the hourly-preflight investigation are
 recorded in [stale device wakes](exec-plans/completed/2026-09-24-stale-device-wakes.md).
 The runtime mailbox contract remains in
