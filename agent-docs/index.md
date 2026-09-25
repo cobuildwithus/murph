@@ -734,3 +734,6 @@ Native turn cancellation and voice continuity proof:
 
 Junction origin parsing allocation reduction and synthetic equivalence evidence:
 [`origin parsing cost`](exec-plans/completed/2026-09-24-junction-origin-cost.md).
+
+Junction admission reuses the provider-only reader with unchanged source fences:
+[`admission parsing cost`](exec-plans/completed/2026-09-24-junction-admission-cost.md).
