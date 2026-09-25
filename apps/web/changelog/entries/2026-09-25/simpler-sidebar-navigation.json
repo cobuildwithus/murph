@@ -9,7 +9,7 @@
     "summary": "Voice no longer appears in the sidebar navigation.",
     "details": "The desktop sidebar and mobile menu now show the same shorter list of destinations.",
     "relevanceTags": ["navigation"],
-    "sourcePullRequests": [],
+    "sourcePullRequests": [3726],
     "tryIt": { "label": "Open Murph", "href": "/home" }
   }
 }
