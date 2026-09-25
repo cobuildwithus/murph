@@ -1,0 +1,19 @@
+{
+  "publishedOn": "2026-09-18",
+  "order": 100,
+  "item": {
+    "id": "imessage-card-app-installation",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Get Murph from an iMessage card",
+    "summary": "Murph cards now include the App Store installation option for people who do not have the app.",
+    "details": "Install Murph, then return to Messages to open the card with the app.",
+    "relevanceTags": [
+      "imessage",
+      "cards"
+    ],
+    "sourcePullRequests": [
+      3584
+    ]
+  }
+}

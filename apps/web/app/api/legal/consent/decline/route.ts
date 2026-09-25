@@ -11,7 +11,7 @@ export const POST = withJsonError(async (request: Request) => {
   assertHostedOnboardingMutationOrigin(request);
   const auth = await requireHostedAppSessionFromRequest(request);
 
-  const [, clearCookie] = await Promise.all([
+  const [, clearCookies] = await Promise.all([
     recordHostedLaunchConsentDecline({
       memberId: auth.member.id,
       prisma: getPrisma(),
@@ -24,6 +24,6 @@ export const POST = withJsonError(async (request: Request) => {
     }),
   ]);
   const response = jsonOk({ ok: true });
-  response.headers.append("Set-Cookie", clearCookie);
+  for (const cookie of clearCookies) response.headers.append("Set-Cookie", cookie);
   return response;
 });

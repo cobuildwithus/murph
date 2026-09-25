@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-09",
+  "order": 100,
+  "item": {
+    "id": "homepage-feature-headings",
+    "kind": "improvement",
+    "priority": 1,
+    "title": "A shorter homepage tour",
+    "summary": "The group and personal feature sections now pair their headings directly with examples.",
+    "details": "Larger featured demos, open layouts, and consistent heading-first order on phones give the tour more variety without extra supporting paragraphs.",
+    "relevanceTags": ["website"],
+    "sourcePullRequests": [3113]
+  }
+}

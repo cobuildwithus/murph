@@ -149,9 +149,10 @@ describe("legal consent routes", () => {
       "launch.health-data",
     ]);
     mocks.recordHostedLaunchRequiredConsent.mockResolvedValue(currentStatus);
-    mocks.revokeHostedAppSessionFromRequest.mockResolvedValue(
+    mocks.revokeHostedAppSessionFromRequest.mockResolvedValue([
       "murph-session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0",
-    );
+      "murph-auth-session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0",
+    ]);
     mocks.grantHostedOptionalFeatureConsent.mockResolvedValue(currentStatus);
     mocks.revokeHostedConsentScope.mockResolvedValue(currentStatus);
     mocks.withdrawHostedHealthDataConsent.mockResolvedValue(currentStatus);
@@ -472,9 +473,10 @@ describe("legal consent routes", () => {
     const response = await consentDeclineRoute.POST(request);
 
     expect(response.status).toBe(200);
-    expect(response.headers.get("Set-Cookie")).toBe(
+    expect(response.headers.getSetCookie()).toEqual([
       "murph-session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0",
-    );
+      "murph-auth-session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0",
+    ]);
     expect(mocks.recordHostedLaunchConsentDecline).toHaveBeenCalledWith({
       memberId: "member_123",
       prisma: mocks.prismaClient,
@@ -502,9 +504,10 @@ describe("legal consent routes", () => {
     const response = await consentDeclineRoute.POST(request);
 
     expect(response.status).toBe(200);
-    expect(response.headers.get("Set-Cookie")).toBe(
+    expect(response.headers.getSetCookie()).toEqual([
       "murph-session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0",
-    );
+      "murph-auth-session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0",
+    ]);
     expect(mocks.revokeHostedAppSessionFromRequest).toHaveBeenCalledWith({
       reason: "consent_declined",
       request,

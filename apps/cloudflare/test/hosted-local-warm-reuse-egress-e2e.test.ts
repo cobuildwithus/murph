@@ -35,8 +35,7 @@ describe("hosted local resident-container egress e2e", () => {
     egress = await startHostedLocalLinqEgressScenario({
       additionalEnv: {
         HOSTED_VENICE_ENABLED: "1",
-        HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: "30000",
-        HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "300000",
+        HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "30000",
         VENICE_API_KEY: "stub-local-venice-key",
       },
       persistDirPrefix: "murph-hosted-local-warm-reuse-egress-",

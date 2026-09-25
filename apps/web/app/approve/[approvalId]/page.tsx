@@ -16,7 +16,6 @@ import {
   ACTION_APPROVAL_RECORDED_DESCRIPTION,
   ActionApprovalScreen,
 } from "@/src/components/sensitive-actions/action-approval-screen";
-import { HostedPrivyBoundary } from "@/src/components/hosted-onboarding/hosted-privy-boundary";
 import { resolveHostedMurphContactOptions } from "@/src/components/murph/hosted-murph-contact-action";
 import { MurphContactLink } from "@/src/components/murph/murph-contact-link";
 import { buttonVariants } from "@/src/components/ui/button";
@@ -98,11 +97,7 @@ export default async function ActionApprovalPage({
   }
 
   if (!isTerminalActionApproval(approval)) {
-    return (
-      <HostedPrivyBoundary>
-        <ActionApprovalCard approval={approval} />
-      </HostedPrivyBoundary>
-    );
+    return <ActionApprovalCard approval={approval} />;
   }
 
   return <ActionApprovalTerminalState approval={approval} />;

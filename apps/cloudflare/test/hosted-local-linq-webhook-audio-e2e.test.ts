@@ -170,7 +170,7 @@ async function startLinqScenario(): Promise<void> {
   scenario = await startHostedLocalFullStackScenario({
     additionalEnv: {
       FFMPEG_COMMAND: "/app/test-parser-toolchain/ffmpeg",
-      HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: "1",
+      HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "1000",
       HOSTED_LOCAL_E2E_PARSER_TOOLCHAIN: "1",
       HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS:
         buildLinqRecipientPhoneNumber(`member_local_linq_webhook_voice_${runId}_1`),

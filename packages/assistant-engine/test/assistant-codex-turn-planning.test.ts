@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { buildCodexThreadStartParams } from '../src/assistant-codex/app-server-requests.ts'
 import { MURPH_CODEX_BASE_INSTRUCTIONS } from '../src/assistant/codex-base-instructions.ts'
+import { buildUpcomingContextPrompt } from '../src/assistant/upcoming-context.ts'
 import { fingerprintThreadDeclarations } from './support/codex-contract-fingerprint-oracle.ts'
 
 import type { InboxServices } from '@murphai/inbox-services'
@@ -79,6 +80,7 @@ vi.mock('../src/assistant/service.js', () => ({
   sendAssistantMessage: planningMocks.sendAssistantMessage,
 }))
 
+
 vi.mock('../src/assistant/context-snapshot.js', () => ({
   readAssistantContextSnapshotPrompt:
     planningMocks.readAssistantContextSnapshotPrompt,
@@ -126,7 +128,6 @@ import {
   resolveMurphDynamicTools,
 } from '../src/assistant-codex/dynamic-tools.js'
 import {
-  MURPH_AUTOMATION_RUNTIME_INPUT_SCHEMA,
   MURPH_AUTOMATION_TOOL,
 } from '../src/assistant-codex/dynamic-tools/automation.js'
 import {
@@ -188,6 +189,30 @@ import {
 } from '@murphai/operator-config/assistant-cli-contracts'
 import type { CodexThreadIdentity } from '../src/assistant/codex-thread-route.js'
 
+// Minimal synthetic prior advertisement with types factored outside action branches.
+const priorFactoredAutomationSchema = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    action: { enum: ['inspect', 'patch'] },
+    lookup: { type: 'string' },
+    expectedUpdatedAt: { type: 'string' },
+  },
+  required: ['action'],
+  oneOf: [
+    {
+      properties: { action: { const: 'inspect' }, lookup: {} },
+      required: ['action', 'lookup'],
+      additionalProperties: false,
+    },
+    {
+      properties: { action: { const: 'patch' }, lookup: {}, expectedUpdatedAt: {} },
+      required: ['action', 'lookup', 'expectedUpdatedAt'],
+      additionalProperties: false,
+    },
+  ],
+}
+
 afterEach(() => {
   planningMocks.readAssistantCliSurfaceBootstrapContext.mockReset()
   planningMocks.readAssistantContextSnapshotPrompt.mockReset()
@@ -220,15 +245,13 @@ describe('assistant Codex turn planning', () => {
     const session = createSession()
     const directAudience = {
       channel: 'telegram' as const,
-      effectiveThreadIsDirect: true,
-      threadId: 'thread-characterization-direct',
       threadIsDirect: true,
+      threadId: 'thread-characterization-direct',
     }
     const groupAudience = {
       channel: 'linq' as const,
-      effectiveThreadIsDirect: false,
-      threadId: 'thread-characterization-group',
       threadIsDirect: false,
+      threadId: 'thread-characterization-group',
     }
     const scheduledOccurrenceAt = '2026-08-30T09:00:00.000-04:00'
     const plans = {
@@ -330,9 +353,8 @@ describe('assistant Codex turn planning', () => {
         session,
         sharedPlan: createSharedPlan({}, {
           channel: 'email',
-          effectiveThreadIsDirect: true,
-          threadId: 'thread-characterization-email',
           threadIsDirect: true,
+          threadId: 'thread-characterization-email',
         }),
       }),
     }
@@ -398,11 +420,11 @@ describe('assistant Codex turn planning', () => {
       Object.entries(plans).map(([name, plan]) => [name, digestPlan(plan)]),
     )).toMatchInlineSnapshot(`
       {
-        "direct": "757568d3540567e1636768d073f456bdf2a41cde31565d7e31a6e3c061a31cf1",
-        "group": "054070d3529e0550288c4393ac6bc943e8179587bc4977b2dbfc6e03d40c2918",
-        "maintenance": "4c439dbf05ccb6d2cd7540b1ef7f94c99e898afd9b9658abefa860a8b421ca55",
+        "direct": "83176011fb04b08e9681640957a46d8cb16f488ae2f8c2360fb23aff406b7927",
+        "group": "762ab748f4e50ef1663e81c104504225897b91d2fcf30f3a86577ed142abe52a",
+        "maintenance": "ac022f98be034bc9bbcfd987fb422a0546cfa1899d4c99b97167d7d22527547e",
         "outputOnly": "a83a04afea06e5290de36b14a0fee5d18970077a8294dde129b2e2dfa99116b4",
-        "scheduledEmail": "a0115a2444bc2e56bc1c413fc02af91731685cf17a2a2a767432416a80bfbe06",
+        "scheduledEmail": "4f1ed96d883f3340b876d44e0e0fcbb624be029d792cbd0cc8f59a746655058f",
       }
     `)
   })
@@ -457,11 +479,13 @@ describe('assistant Codex turn planning', () => {
     expect(planningMocks.readAssistantContextSnapshotPrompt)
       .toHaveBeenCalledTimes(1)
     expect(directPlan.systemPrompt).toContain('VALUE_FREE_DEGRADED_SNAPSHOT')
+    expect(directPlan.systemPrompt).toContain('Follow relevant saved answer formats; offer at most one optional follow-up.')
+    expect(directPlan.systemPrompt).not.toContain('and offer at most one useful next step.')
 
     planningMocks.refreshAssistantContextSnapshotBestEffort.mockClear()
     planningMocks.readAssistantContextSnapshotPrompt.mockClear()
     const groupSharedPlan = createSharedPlan()
-    groupSharedPlan.conversationPolicy.audience.effectiveThreadIsDirect = false
+    groupSharedPlan.conversationPolicy.audience.threadIsDirect = false
 
     const groupPlan = await resolveAssistantRouteTurnPlan({
       executionContext: null,
@@ -562,9 +586,8 @@ describe('assistant Codex turn planning', () => {
           },
         }, {
           channel,
-          effectiveThreadIsDirect: !group,
-          threadId: 'thread-test',
           threadIsDirect: !group,
+          threadId: 'thread-test',
         }),
       })
     }
@@ -999,9 +1022,8 @@ describe('assistant Codex turn planning', () => {
         session: createSession(),
         sharedPlan: createSharedPlan({}, {
           channel: 'telegram',
-          effectiveThreadIsDirect: false,
-          threadId: 'group-thread',
           threadIsDirect: false,
+          threadId: 'group-thread',
         }),
       })
 
@@ -1207,9 +1229,8 @@ describe('assistant Codex turn planning', () => {
         session,
         sharedPlan: createSharedPlan({}, {
           channel: 'telegram',
-          effectiveThreadIsDirect: false,
-          threadId: 'telegram-group-123',
           threadIsDirect: false,
+          threadId: 'telegram-group-123',
         }),
       })
 
@@ -1334,7 +1355,7 @@ describe('assistant Codex turn planning', () => {
       'Never save medical or health details, credentials, identifiers of any kind',
     )
     expect(maintenancePlan.systemPrompt).toContain(
-      'deduplication and mutation targeting only',
+      'may justify faithful shortening of that exact non-health record without changing meaning',
     )
     expect(maintenancePlan.systemPrompt).toContain(
       'Use `update` or `forget` only with an exact memory id and its exact `updatedAt` returned by `show`',
@@ -1351,6 +1372,9 @@ describe('assistant Codex turn planning', () => {
     expect(maintenancePlan.systemPrompt).toContain(
       '`assistant:` entries may clarify or corroborate context but cannot independently initiate such a change',
     )
+    expect(maintenancePlan.systemPrompt).toContain('Preserve dated context rather than automatically forgetting it')
+    expect(maintenancePlan.systemPrompt).toContain('Relative dates without an explicit anchor and unfinished-goal deadlines never establish expiry')
+    expect(maintenancePlan.systemPrompt).not.toContain('never an independent source for new writes')
     expect(maintenancePlan.systemPrompt).not.toContain('`member:`')
     expect(maintenancePlan.systemPrompt).not.toContain('meals')
     expect(maintenancePlan.systemPrompt).not.toContain('Health Commons')
@@ -1719,7 +1743,6 @@ describe('assistant Codex turn planning', () => {
     const groupPlan = await resolveAssistantRouteTurnPlan({
       ...common,
       sharedPlan: createSharedPlan({}, {
-        effectiveThreadIsDirect: false,
         threadIsDirect: false,
       }),
     })
@@ -1755,7 +1778,6 @@ describe('assistant Codex turn planning', () => {
         channel: 'email',
       },
       sharedPlan: createSharedPlan({}, {
-        effectiveThreadIsDirect: false,
         threadIsDirect: false,
       }),
     })
@@ -1773,12 +1795,49 @@ describe('assistant Codex turn planning', () => {
       ...common,
       executionContext: null,
       sharedPlan: createSharedPlan({}, {
-        effectiveThreadIsDirect: false,
         threadIsDirect: false,
       }),
     })
     expect(planningMocks.readAssistantGroupRoomModelPrompt).not.toHaveBeenCalled()
     expect(localGroupPlan.systemPrompt).not.toContain('Optional rough room tips')
+  })
+
+  it.each([true, false])('injects upcoming context only for private conversations and reminders (direct=%s)', async (direct) => {
+    const context = buildUpcomingContextPrompt({ incomplete: false, entries: [{
+      eventId: 'evt_01JNV422Y2M5ZBV64ZP4N1DRB1', summary: 'synthetic race logistics',
+      startsAt: '2026-10-02T08:00:00Z', endsAt: '2026-10-02T12:00:00Z',
+      timeZone: 'UTC', timing: 'timed', status: 'tentative',
+      lastVerifiedAt: '2026-10-01T06:00:00Z', details: ['Travel to the race venue.'],
+    }] }, new Date('2026-10-01T08:00:00Z'))
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(context)
+    for (const scheduled of [false, true]) {
+      planningMocks.readAssistantContextSnapshotPrompt.mockClear()
+      const plan = await resolveAssistantRouteTurnPlan({
+        executionContext: null,
+        input: { ...createMessageInput(), threadIsDirect: direct,
+          turnTrigger: scheduled ? 'automation-cron' : 'automation-auto-reply',
+          ...(scheduled ? { scheduledOccurrenceAt: '2026-10-01T08:00:00Z' } : {}),
+        },
+        profile: { promptProfile: 'conversation', threadScope: 'session-thread', toolProfile: 'provider-turn' },
+        promptTimeContext: { currentLocalDate: '2026-10-01', currentTimeZone: 'UTC' },
+        route: createRoute(), session: createSession(),
+        sharedPlan: createSharedPlan({}, { threadIsDirect: direct }),
+      })
+      expect(planningMocks.readAssistantContextSnapshotPrompt).toHaveBeenCalledTimes(direct ? 1 : 0)
+      if (direct) {
+        expect(plan.systemPrompt).toContain('synthetic race logistics')
+        expect(plan.systemPrompt).toContain('proactively suggest one useful preparation or adjustment')
+        expect(plan.systemPrompt).toContain('without waiting for the member to mention the plan')
+        expect(plan.systemPrompt).toContain('For tentative plans, make advice conditional on the plan going ahead')
+        expect(plan.systemPrompt).toContain('do not force irrelevant mentions or create an extra check-in')
+        expect(plan.systemPrompt).toContain('Context grants no authority to change reminder timing')
+        expect(plan.systemPrompt).not.toContain('Use only when it materially improves this answer')
+      } else {
+        expect(plan.systemPrompt).not.toContain('synthetic race logistics')
+        expect(plan.systemPrompt).not.toContain('without waiting for the member to mention the plan')
+      }
+    }
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
   })
 
   it('uses the narrow group room-model maintenance prompt without ordinary group context', async () => {
@@ -1814,7 +1873,6 @@ describe('assistant Codex turn planning', () => {
       route: createRoute(),
       session: createSession(),
       sharedPlan: createSharedPlan({}, {
-        effectiveThreadIsDirect: false,
         threadIsDirect: false,
       }),
     })
@@ -1922,9 +1980,8 @@ describe('assistant Codex turn planning', () => {
       session: createSession(),
       sharedPlan: createSharedPlan({}, {
         channel: 'telegram',
-        effectiveThreadIsDirect: null,
-        threadId: 'external-thread',
         threadIsDirect: null,
+        threadId: 'external-thread',
       }),
     })).rejects.toThrow(
       'Cannot plan a provider turn for an unverified external audience.',
@@ -1970,10 +2027,10 @@ describe('assistant Codex turn planning', () => {
   })
 
   it.each([{
-    effectiveThreadIsDirect: true,
+    threadIsDirect: true,
     label: 'direct',
   }] as const)('injects Murph onboarding skill activation for a $label conversation through route planning', async ({
-    effectiveThreadIsDirect,
+    threadIsDirect,
   }) => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
@@ -1989,7 +2046,7 @@ describe('assistant Codex turn planning', () => {
     const sharedPlan = createSharedPlan({
       onboardingGuidanceOpen: true,
     })
-    sharedPlan.conversationPolicy.audience.effectiveThreadIsDirect = effectiveThreadIsDirect
+    sharedPlan.conversationPolicy.audience.threadIsDirect = threadIsDirect
 
     const plan = await resolveAssistantRouteTurnPlan({
       executionContext: null,
@@ -2068,7 +2125,7 @@ describe('assistant Codex turn planning', () => {
     const sharedPlan = createSharedPlan({
       onboardingGuidanceOpen: true,
     })
-    sharedPlan.conversationPolicy.audience.effectiveThreadIsDirect = false
+    sharedPlan.conversationPolicy.audience.threadIsDirect = false
 
     const plan = await resolveAssistantRouteTurnPlan({
       executionContext: null,
@@ -2274,9 +2331,8 @@ describe('assistant Codex turn planning', () => {
     const session = createSession()
     const privateTelegramAudience = {
       channel: 'telegram',
-      effectiveThreadIsDirect: true,
-      threadId: 'thread-test',
       threadIsDirect: true,
+      threadId: 'thread-test',
     } as const
 
     try {
@@ -2373,9 +2429,8 @@ describe('assistant Codex turn planning', () => {
         },
         plan: createSharedPlan({}, {
           channel: 'telegram',
-          effectiveThreadIsDirect: false,
-          threadId: 'thread-test',
           threadIsDirect: false,
+          threadId: 'thread-test',
         }),
         resolvedSession: groupSession,
         route,
@@ -2411,9 +2466,8 @@ describe('assistant Codex turn planning', () => {
         },
         plan: createSharedPlan({}, {
           channel: 'telegram',
-          effectiveThreadIsDirect: null,
-          threadId: 'thread-test',
           threadIsDirect: null,
+          threadId: 'thread-test',
         }),
         resolvedSession: unknownExternalSession,
         route,
@@ -2429,7 +2483,7 @@ describe('assistant Codex turn planning', () => {
       )
       expect(
         unknownExternalExecutionPlan.sharedPlan.conversationPolicy.audience
-          .effectiveThreadIsDirect,
+          .threadIsDirect,
       ).toBeNull()
       const localSession = createSession()
       const localExecutionPlan = await buildCodexTurnExecutionPlan({
@@ -2576,10 +2630,9 @@ describe('assistant Codex turn planning', () => {
       const sharedPlan = createSharedPlan({}, {
         actorId: null,
         channel: 'linq',
-        effectiveThreadIsDirect: false,
+        threadIsDirect: false,
         identityId: 'identity-generated-avatar-group',
         threadId: groupThreadId,
-        threadIsDirect: false,
       })
       const hostedToolContext: AssistantHostedToolContext = {
         ...createHostedToolContext(),
@@ -2944,9 +2997,8 @@ describe('assistant Codex turn planning', () => {
       }
       const sharedPlan = createSharedPlan({}, {
         channel: 'linq',
-        effectiveThreadIsDirect: threadIsDirect,
-        threadId,
         threadIsDirect,
+        threadId,
       })
       const common = {
         executionContext: {
@@ -3157,9 +3209,8 @@ describe('assistant Codex turn planning', () => {
       },
       sharedPlan: createSharedPlan({}, {
         channel: 'linq',
-        effectiveThreadIsDirect: true,
-        threadId: 'linq-private-routine-card',
         threadIsDirect: true,
+        threadId: 'linq-private-routine-card',
       }),
     })
     expect(linqPrivateTools.map((tool) => tool.name)).not.toContain(
@@ -3198,9 +3249,8 @@ describe('assistant Codex turn planning', () => {
     }
     const linqGroupPlan = createSharedPlan({}, {
       channel: 'linq',
-      effectiveThreadIsDirect: false,
-      threadId: 'linq-group-challenge-card',
       threadIsDirect: false,
+      threadId: 'linq-group-challenge-card',
     })
     const linqGroupInput = {
       ...createMessageInput(),
@@ -3268,9 +3318,8 @@ describe('assistant Codex turn planning', () => {
 
     const telegramGroupPlan = createSharedPlan({}, {
       channel: 'telegram',
-      effectiveThreadIsDirect: false,
-      threadId: 'telegram-group-challenge-card',
       threadIsDirect: false,
+      threadId: 'telegram-group-challenge-card',
     })
     const telegramGroupOptions = {
       executionContext: hostedExecutionContext,
@@ -3359,9 +3408,8 @@ describe('assistant Codex turn planning', () => {
         },
         sharedPlan: createSharedPlan({}, {
           channel: input.channel,
-          effectiveThreadIsDirect: input.threadIsDirect,
-          threadId: `${input.channel}-thread`,
           threadIsDirect: input.threadIsDirect,
+          threadId: `${input.channel}-thread`,
         }),
       })
       return {
@@ -3502,9 +3550,8 @@ describe('assistant Codex turn planning', () => {
       session: createSession(),
       sharedPlan: createSharedPlan({}, {
         channel: 'linq',
-        effectiveThreadIsDirect: true,
-        threadId: 'linq-direct-thread',
         threadIsDirect: true,
+        threadId: 'linq-direct-thread',
       }),
     })
 
@@ -3562,7 +3609,6 @@ describe('assistant Codex turn planning', () => {
         toolProfile: 'provider-turn',
       },
       sharedPlan: createSharedPlan({}, {
-        effectiveThreadIsDirect: false,
         threadIsDirect: false,
       }),
     })
@@ -3715,9 +3761,8 @@ describe('assistant Codex turn planning', () => {
         session: createSession(),
         sharedPlan: createSharedPlan({}, {
           channel,
-          effectiveThreadIsDirect: threadIsDirect,
-          threadId: 'thread-calendar-link',
           threadIsDirect,
+          threadId: 'thread-calendar-link',
         }),
       })
       return plan.dynamicTools.map((tool) => tool.name)
@@ -3787,9 +3832,8 @@ describe('assistant Codex turn planning', () => {
         }, conversationScope === 'group'
           ? {
               channel: 'telegram',
-              effectiveThreadIsDirect: false,
-              threadId: 'group-analyze-video',
               threadIsDirect: false,
+              threadId: 'group-analyze-video',
             }
           : {}),
       })
@@ -4232,7 +4276,6 @@ describe('assistant Codex turn planning', () => {
         route: createRoute(),
         session: createSession(),
         sharedPlan: createSharedPlan({}, {
-          effectiveThreadIsDirect: false,
           threadIsDirect: false,
         }),
       })
@@ -4428,9 +4471,8 @@ describe('assistant Codex turn planning', () => {
       session: createSession(),
       sharedPlan: createSharedPlan({}, {
         channel: 'linq',
-        effectiveThreadIsDirect: false,
-        threadId: 'group-thread',
         threadIsDirect: false,
+        threadId: 'group-thread',
       }),
     }
     const plan = await resolveAssistantRouteTurnPlan({
@@ -4605,9 +4647,8 @@ describe('assistant Codex turn planning', () => {
         ? createPrivateSharedPlan()
         : createSharedPlan({}, {
             channel,
-            effectiveThreadIsDirect: false,
-            threadId: 'telegram-group-thread',
             threadIsDirect: false,
+            threadId: 'telegram-group-thread',
           })
 
       const plan = await resolveAssistantRouteTurnPlan({
@@ -4762,9 +4803,8 @@ describe('assistant Codex turn planning', () => {
     })
     const sharedPlan = createSharedPlan({}, {
       channel: 'linq',
-      effectiveThreadIsDirect: false,
-      threadId: 'group-notification-thread',
       threadIsDirect: false,
+      threadId: 'group-notification-thread',
     })
     const common = {
       input: {
@@ -4875,9 +4915,8 @@ describe('assistant Codex turn planning', () => {
       session: createSession(),
       sharedPlan: createSharedPlan({}, {
         channel: 'email',
-        effectiveThreadIsDirect: false,
-        threadId: 'group-email-thread',
         threadIsDirect: false,
+        threadId: 'group-email-thread',
       }),
     })
 
@@ -4966,9 +5005,8 @@ describe('assistant Codex turn planning', () => {
       session: createSession(),
       sharedPlan: createSharedPlan({}, {
         channel: 'telegram',
-        effectiveThreadIsDirect: false,
-        threadId: 'telegram-group-thread',
         threadIsDirect: false,
+        threadId: 'telegram-group-thread',
       }),
     })
 
@@ -5042,11 +5080,10 @@ describe('assistant Codex turn planning', () => {
         session: createSession(),
         sharedPlan: createSharedPlan({}, {
           channel: 'linq',
-          effectiveThreadIsDirect: threadIsDirect,
+          threadIsDirect,
           threadId: threadIsDirect
             ? 'linq-direct-thread'
             : 'linq-group-thread',
-          threadIsDirect,
         }),
       })
 
@@ -5120,9 +5157,8 @@ describe('assistant Codex turn planning', () => {
       session: createSession(),
       sharedPlan: createSharedPlan({}, {
         channel: 'linq',
-        effectiveThreadIsDirect: false,
-        threadId: 'linq-group-thread',
         threadIsDirect: false,
+        threadId: 'linq-group-thread',
       }),
     })
 
@@ -5184,9 +5220,8 @@ describe('assistant Codex turn planning', () => {
         onboardingGuidanceOpen: true,
       }, {
         channel: 'telegram',
-        effectiveThreadIsDirect: null,
-        threadId: 'external-thread',
         threadIsDirect: null,
+        threadId: 'external-thread',
       }),
     })).rejects.toThrow('Cannot plan a provider turn for an unverified external audience.')
     expect(planningMocks.readAssistantCliSurfaceBootstrapContext).not.toHaveBeenCalled()
@@ -5240,10 +5275,9 @@ describe('assistant Codex turn planning', () => {
         sharedPlan: createSharedPlan({}, {
           actorId: 'PRIVATE_ACTOR_ID',
           channel: 'telegram',
-          effectiveThreadIsDirect: null,
+          threadIsDirect: null,
           identityId: 'PRIVATE_IDENTITY_ID',
           threadId: 'external-thread',
-          threadIsDirect: null,
         }),
       })).rejects.toThrow('Cannot plan a provider turn for an unverified external audience.')
       expect(planningMocks.readAssistantCliSurfaceBootstrapContext).not.toHaveBeenCalled()
@@ -5613,7 +5647,7 @@ describe('assistant Codex turn planning', () => {
     expect(plan.assistantContractFingerprint).not.toBe(oldToolContractFingerprint)
   })
 
-  it('replays bounded history once when the automation descriptor compacts, then resumes', async () => {
+  it('replays bounded history once when the factored automation descriptor is replaced, then resumes', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(
       'bootstrap contract',
     )
@@ -5681,7 +5715,7 @@ describe('assistant Codex turn planning', () => {
         tool.name === MURPH_AUTOMATION_TOOL.name
           ? {
               ...tool,
-              inputSchema: MURPH_AUTOMATION_RUNTIME_INPUT_SCHEMA,
+              inputSchema: priorFactoredAutomationSchema,
             }
           : tool)
       const oldContractFingerprint = buildAssistantCodexContractFingerprint({
@@ -5693,7 +5727,7 @@ describe('assistant Codex turn planning', () => {
         resumeState: {
           assistantContractFingerprint: oldContractFingerprint,
           routeFingerprint,
-          threadId: 'thread-full-automation-schema',
+          threadId: 'thread-factored-automation-schema',
         },
         turnCount: 1,
       })
@@ -5731,14 +5765,14 @@ describe('assistant Codex turn planning', () => {
           assistantContractFingerprint:
             transitionPlan.assistantContractFingerprint,
           codexRolloutRelativePath: null,
-          codexThreadId: 'thread-compact-automation-schema',
+          codexThreadId: 'thread-canonical-automation-schema',
           routeFingerprint,
           session: transitionSession,
           vault,
         })
       const resumedPlan = await buildPlan(transitionedSession)
       expect(resumedPlan.resume?.codexThreadId)
-        .toBe('thread-compact-automation-schema')
+        .toBe('thread-canonical-automation-schema')
       expect(resumedPlan.conversationHistoryMessages).toBeUndefined()
       expect(resumedPlan.assistantContractFingerprint)
         .toBe(transitionPlan.assistantContractFingerprint)
@@ -5817,7 +5851,7 @@ describe('assistant Codex turn planning', () => {
         tool.name === MURPH_AUTOMATION_TOOL.name
           ? {
               ...tool,
-              inputSchema: MURPH_AUTOMATION_RUNTIME_INPUT_SCHEMA,
+              inputSchema: priorFactoredAutomationSchema,
             }
           : tool)
       const oldContractFingerprint = buildAssistantCodexContractFingerprint({
@@ -5829,7 +5863,7 @@ describe('assistant Codex turn planning', () => {
         resumeState: {
           assistantContractFingerprint: oldContractFingerprint,
           routeFingerprint,
-          threadId: 'thread-expired-full-automation-schema',
+          threadId: 'thread-expired-factored-automation-schema',
         },
         turnCount: 1,
       })
@@ -5851,14 +5885,14 @@ describe('assistant Codex turn planning', () => {
           assistantContractFingerprint:
             transitionPlan.assistantContractFingerprint,
           codexRolloutRelativePath: null,
-          codexThreadId: 'thread-expired-compact-automation-schema',
+          codexThreadId: 'thread-expired-canonical-automation-schema',
           routeFingerprint,
           session: transitionSession,
           vault,
         })
       const resumedPlan = await buildPlan(transitionedSession)
       expect(resumedPlan.resume?.codexThreadId)
-        .toBe('thread-expired-compact-automation-schema')
+        .toBe('thread-expired-canonical-automation-schema')
       expect(resumedPlan.conversationHistoryMessages).toBeUndefined()
       expect(resumedPlan.assistantContractFingerprint)
         .toBe(transitionPlan.assistantContractFingerprint)
@@ -8247,12 +8281,11 @@ function createSharedPlan(
         bindingDelivery: null,
         channel: null,
         deliveryPolicy: 'not-requested',
-        effectiveThreadIsDirect: null,
+        threadIsDirect: null,
         explicitTarget: null,
         identityId: null,
         replyToMessageId: null,
         threadId: null,
-        threadIsDirect: null,
         ...audienceOverrides,
       },
       operatorAuthority: 'direct-operator',

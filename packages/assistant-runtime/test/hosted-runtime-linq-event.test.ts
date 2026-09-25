@@ -701,6 +701,53 @@ describe("createHostedLinqAttachmentDownloadDriver", () => {
     }, undefined)).resolves.toEqual(Uint8Array.from([13, 14, 15]));
   });
 
+  it("downloads from an explicit local CDN after canonical Linq metadata lookup", async () => {
+    const cdnBaseUrl = "http://host.docker.internal:4011/attachment-downloads";
+    const downloadUrl = `${cdnBaseUrl}/att_pdf_fixture.pdf`;
+    const bridgeUrl = "http://172.17.0.1:4011/attachment-downloads/att_pdf_fixture.pdf";
+    const env = {
+      LINQ_API_BASE_URL: "https://api.linqapp.com/api/partner/v3",
+      LINQ_API_TOKEN: "synthetic-linq-token",
+      LINQ_ATTACHMENT_CDN_BASE_URL: cdnBaseUrl,
+    };
+    expect(normalizeHostedLinqAttachmentUrl(bridgeUrl, env)).toBeNull();
+    expect(normalizeHostedLinqAttachmentUrl(downloadUrl, {
+      ...env,
+      LINQ_ATTACHMENT_CDN_BASE_URL: "http://172.17.0.1:4011/attachment-downloads",
+    })).toBeNull();
+    expect(normalizeHostedLinqAttachmentUrl(downloadUrl, env)).toBe(downloadUrl);
+    const boundaries: string[] = [];
+    const bytes = Uint8Array.from([13, 14, 15]);
+    const driver = createHostedLinqAttachmentDownloadDriver({
+      env,
+      platform: {
+        providerFetch: async (input, init) => {
+          boundaries.push("metadata");
+          expect(String(input)).toBe(`${env.LINQ_API_BASE_URL}/attachments/att_pdf_fixture`);
+          expect(new Headers(init?.headers).get("authorization")).toBe(
+            "Bearer synthetic-linq-token",
+          );
+          return Response.json({ download_url: downloadUrl });
+        },
+        publicInternetFetch: async (input, init) => {
+          boundaries.push("bytes");
+          expect(String(input)).toBe(downloadUrl);
+          expect(new Headers(init?.headers).has("authorization")).toBe(false);
+          return new Response(bytes);
+        },
+      },
+    });
+    assert.ok(driver?.downloadPart);
+
+    await expect(driver.downloadPart({
+      attachmentId: "att_pdf_fixture",
+      mimeType: "application/pdf",
+      type: "media",
+      url: bridgeUrl,
+    })).resolves.toEqual(bytes);
+    expect(boundaries).toEqual(["metadata", "bytes"]);
+  });
+
   it("falls back to the original direct-download error when metadata returns an untrusted local url", async () => {
     process.env.LINQ_API_BASE_URL = "http://host.docker.internal:4011";
     process.env.LINQ_API_TOKEN = "linq-token";

@@ -120,7 +120,7 @@ describe("database health store", () => {
     expect(store.readLatestConnectionErrorCounterBaseline()).toEqual(
       connectionErrorCounterBaseline,
     );
-    expect(store.readLatestMonitoringEvidence()).toEqual({
+    expect(store.readRecentMonitoringEvidence(1)[0]).toEqual({
       availability: "incomplete",
       connectionErrorEvidence: {
         missingPortAttempts: { "5432": 0, "6432": 0 },
@@ -184,7 +184,7 @@ describe("database health store", () => {
 
     const store = new DatabaseHealthStore(sql);
 
-    expect(store.readLatestMonitoringEvidence()).toEqual({
+    expect(store.readRecentMonitoringEvidence(1)[0]).toEqual({
       availability: "incomplete",
       connectionErrorEvidence: null,
       missingMetrics: [],
@@ -418,7 +418,7 @@ describe("database health store", () => {
       JSON.stringify(value),
     );
 
-    expect(() => store.readLatestMonitoringEvidence()).toThrow(
+    expect(() => store.readRecentMonitoringEvidence(1)[0]).toThrow(
       /database monitoring/u,
     );
   });

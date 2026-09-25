@@ -40,7 +40,8 @@ import type { HostedOnboardingReadClient } from "./shared";
  *   an active current participant through `readActiveHostedMemberAccess`.
  *
  * Owners cannot themselves be containers, so the derivation depth is at most
- * two and a single query loads everything the owner branch needs.
+ * two. Boolean gates select only the matching member ID; callers that need
+ * access state load the related rows.
  * Every runtime, webhook, page, and egress gate must use this module; the
  * paid-billing predicate in `entitlement.ts` is for surfaces that genuinely
  * mean "this member's own subscription".
@@ -100,7 +101,7 @@ const hostedRuntimeAiPersonAccessSelect = Prisma.validator<Prisma.HostedMemberSe
   },
 });
 
-const hostedRuntimeAiMemberAccessSelect = Prisma.validator<Prisma.HostedMemberSelect>()({
+export const hostedRuntimeAiMemberAccessSelect = Prisma.validator<Prisma.HostedMemberSelect>()({
   ...hostedRuntimeAiPersonAccessSelect,
   threadContainer: {
     select: {
@@ -151,6 +152,10 @@ export type HostedMemberAccessState = HostedMemberPersonAccessState & {
 
 type HostedRuntimeAiPersonAccessState = Prisma.HostedMemberGetPayload<{
   select: typeof hostedRuntimeAiPersonAccessSelect;
+}>;
+
+export type HostedRuntimeAiMemberAccessState = Prisma.HostedMemberGetPayload<{
+  select: typeof hostedRuntimeAiMemberAccessSelect;
 }>;
 
 export type HostedRuntimeAiAccessDecision =
@@ -305,18 +310,46 @@ export async function readActiveHostedMemberAccess(input: {
   now?: Date;
   prisma?: HostedOnboardingReadClient;
 }): Promise<boolean> {
-  return await readActiveHostedMemberAccessState(input) !== null;
+  const prisma = input.prisma ?? getPrisma();
+  // Keep boolean gates in one SQL statement instead of hydrating the member,
+  // memberships, groups, container and owner through separate relation reads.
+  const member = await prisma.hostedMember.findUnique({
+    select: { id: true },
+    where: {
+      id: input.memberId,
+      suspendedAt: null,
+      OR: [
+        activeHostedMemberAccessWhere(),
+        {
+          threadContainer: {
+            is: {
+              participants: {
+                some: {
+                  ...activeHostedThreadContainerParticipantWhere({
+                    now: input.now ?? new Date(),
+                  }),
+                  participant: activeHostedMemberAccessWhere(),
+                },
+              },
+            },
+          },
+        },
+      ],
+    },
+  });
+  return member !== null;
 }
 
 export async function readActiveHostedMemberAccessState(input: {
   memberId: string;
+  memberState?: (HostedMemberAccessState & { assistantProviderPreference: string | null }) | null;
   now?: Date;
   prisma?: HostedOnboardingReadClient;
 }): Promise<(HostedMemberAccessState & {
   assistantProviderPreference: string | null;
 }) | null> {
   const prisma = input.prisma ?? getPrisma();
-  const member = await prisma.hostedMember.findUnique({
+  const member = input.memberState !== undefined ? input.memberState : await prisma.hostedMember.findUnique({
     select: {
       ...hostedMemberAccessSelect,
       assistantProviderPreference: true,
@@ -454,6 +487,7 @@ export async function readActiveHostedFamilySponsorship(input: {
  */
 export async function readHostedRuntimeAiAccessDecision(input: {
   memberId: string;
+  memberState?: HostedRuntimeAiMemberAccessState;
   /**
    * Per-delivery discriminator so repeated notices to the same member rotate
    * copy variants instead of repeating one sentence verbatim. Omit to keep the
@@ -465,7 +499,7 @@ export async function readHostedRuntimeAiAccessDecision(input: {
 }): Promise<HostedRuntimeAiAccessDecision> {
   const prisma = input.prisma ?? getPrisma();
   const now = input.now ?? new Date();
-  const member = await prisma.hostedMember.findUnique({
+  const member = input.memberState !== undefined ? input.memberState : await prisma.hostedMember.findUnique({
     select: hostedRuntimeAiMemberAccessSelect,
     where: {
       id: input.memberId,

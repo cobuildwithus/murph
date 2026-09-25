@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-11",
+  "order": 100,
+  "item": {
+    "id": "text-contact-refresh-recovery",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "More reliable text contact refreshes",
+    "summary": "Murph more reliably keeps its available texting numbers up to date when background updates overlap.",
+    "details": "Temporary update conflicts get brief automatic retries. Unavailable or revoked numbers still stay out of contact suggestions.",
+    "relevanceTags": ["messages"],
+    "sourcePullRequests": [3304]
+  }
+}

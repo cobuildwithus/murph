@@ -15,7 +15,6 @@ import {
   useGoalHandoff,
 } from "@/src/components/goals/goal-handoff";
 import { Input } from "@/src/components/ui/input";
-import { HOSTED_APP_HOME_PATH } from "@/src/lib/hosted-onboarding/app-routes";
 import type { MurphContactOption } from "@/src/lib/murph-contact-routing";
 import { cn } from "@/src/lib/utils";
 
@@ -97,7 +96,6 @@ export function GoalComposer({
   autoFocusOnView = false,
   className,
   inputRef,
-  memberHref = HOSTED_APP_HOME_PATH,
   onEngage,
   onQueryChange,
   placeholders,
@@ -107,7 +105,6 @@ export function GoalComposer({
   autoFocusOnView?: boolean;
   className?: string;
   inputRef?: React.RefObject<HTMLInputElement | null>;
-  memberHref?: string;
   /** Fires when the visitor focuses or hovers the field: a good time to prepare search data. */
   onEngage?: () => void;
   onQueryChange: (query: string) => void;
@@ -296,10 +293,9 @@ export function GoalComposer({
           )}
           data-goal-composer-ready={sendReady ? true : undefined}
           data-goal-composer-send
-          guideHref={memberHref}
+          errorClassName="absolute left-0 top-full text-xs"
           handoff={handoff}
           labels={{
-            guide: "Open Murph",
             message: prompt ? `Text Murph: ${prompt}` : "Text Murph about a goal",
             signup: prompt
               ? `Get started with Murph: ${prompt}`

@@ -13,7 +13,7 @@ import {
   redactSensitiveText,
   removeVaultDirectoryIfExists,
 } from "../shared.js";
-import { parseAttachment } from "./parse-attachment.js";
+import { parseAttachment, type ParseAttachmentResult } from "./parse-attachment.js";
 import { resolveAttachmentArtifact } from "./resolve-attachment-artifact.js";
 import { writeParserResult } from "../publish/writer.js";
 
@@ -70,22 +70,39 @@ export async function runAttachmentParseWorker(input: RunAttachmentParseWorkerIn
 
 const STALE_PARSE_ATTEMPT = Symbol("stale-parse-attempt");
 
-async function runAttachmentParseJobAttempt(
+/** A claimed attempt. Always complete it before closing its runtime, even on caller cancellation. */
+export interface PreparedAttachmentParseJob {
+  /** Settles after external preparation, including scratch cleanup; never rejects. */
+  readonly ready: Promise<void>;
+  /** Publish/finalize through the original attempt fence, once, in caller order. */
+  complete(): Promise<RunAttachmentParseJobResult | null>;
+}
+
+type AttachmentParsePreparation =
+  | { status: "prepared"; parsed: ParseAttachmentResult; transcriptOnly: boolean }
+  | { status: "failed"; error: unknown };
+
+/** Claim synchronously; overlap only artifact reading/parsing, not publication or finalization. */
+export function prepareAttachmentParseJobOnce(
   input: RunAttachmentParseWorkerInput,
-): Promise<RunAttachmentParseJobResult | typeof STALE_PARSE_ATTEMPT | null> {
-  if (input.signal?.aborted) {
-    return null;
-  }
+): PreparedAttachmentParseJob | null {
+  const attempt = prepareAttachmentParseJobAttempt(input);
+  if (!attempt) return null;
+  return {
+    ready: attempt.ready,
+    async complete() {
+      const result = await attempt.complete();
+      return result === STALE_PARSE_ATTEMPT ? null : result;
+    },
+  };
+}
 
+function prepareAttachmentParseJobAttempt(input: RunAttachmentParseWorkerInput) {
+  if (input.signal?.aborted) return null;
   const job = input.runtime.claimNextAttachmentParseJob(input.jobFilters);
-  if (!job) {
-    return null;
-  }
+  if (!job) return null;
 
-  let publishedAttemptDirectoryPath: string | null = null;
-  let keepPublishedAttempt = false;
-
-  try {
+  const preparation: Promise<AttachmentParsePreparation> = (async () => {
     const artifact = await resolveAttachmentArtifact({
       vaultRoot: input.vaultRoot,
       runtime: input.runtime,
@@ -99,6 +116,37 @@ async function runAttachmentParseJobAttempt(
       ffmpeg: input.ffmpeg,
       signal: input.signal,
     });
+    return { status: "prepared" as const, parsed, transcriptOnly: isTranscriptOnlyArtifact(artifact.kind) };
+  })().catch((error: unknown) => ({ status: "failed" as const, error }));
+  let completion: ReturnType<typeof completeAttachmentParseJobAttempt> | null = null;
+  return {
+    ready: preparation.then(() => undefined),
+    complete() {
+      // Memoize before awaiting: retries/cleanup cannot publish or bill a second attempt.
+      completion ??= completeAttachmentParseJobAttempt(input, job, preparation);
+      return completion;
+    },
+  };
+}
+
+async function runAttachmentParseJobAttempt(
+  input: RunAttachmentParseWorkerInput,
+): Promise<RunAttachmentParseJobResult | typeof STALE_PARSE_ATTEMPT | null> {
+  return await (prepareAttachmentParseJobAttempt(input)?.complete() ?? null);
+}
+
+async function completeAttachmentParseJobAttempt(
+  input: RunAttachmentParseWorkerInput,
+  job: AttachmentParseJobRecord,
+  preparation: Promise<AttachmentParsePreparation>,
+): Promise<RunAttachmentParseJobResult | typeof STALE_PARSE_ATTEMPT | null> {
+  let publishedAttemptDirectoryPath: string | null = null;
+  let keepPublishedAttempt = false;
+
+  try {
+    const prepared = await preparation;
+    if (prepared.status === "failed") throw prepared.error;
+    const { parsed, transcriptOnly } = prepared;
     if (input.signal?.aborted) {
       input.runtime.requeueAttachmentParseJobs({
         attachmentId: job.attachmentId,
@@ -121,7 +169,6 @@ async function runAttachmentParseJobAttempt(
       });
       return null;
     }
-    const transcriptOnly = isTranscriptOnlyArtifact(artifact.kind);
     const completedJob = input.runtime.completeAttachmentParseJob({
       attempt: job.attempts,
       jobId: job.jobId,

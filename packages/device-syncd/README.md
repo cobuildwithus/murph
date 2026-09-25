@@ -2,6 +2,15 @@
 
 Workspace-private local device sync runtime for Murph.
 
+Junction `blood_oxygen` resource jobs that fail complete-day normalization and
+`electrocardiogram_voltage` jobs that fail recording binding stay queued for a
+30-minute recheck even after their initial attempt allowance. Existing data and
+the failed resource/window remain intact; corrected provider responses use the
+same import owner. This does not revive already terminal jobs, weaken source
+binding, or bypass disconnect and lease fences. Other failure classes retain
+their existing retry behavior. See `agent-docs/RELIABILITY.md` for the finite
+normalization categories, ECG collection counts, and hosted progress diagnostics.
+
 Contributing a new wearable provider? Start with `docs/device-provider-contribution-kit.md` in the repo root, then use the scaffolds listed in `docs/templates/README.md`.
 
 Murph's CLI can install, start, reuse, and stop this daemon for the selected vault through `murph device daemon ...`, so most operators should treat it as a built-in local service rather than a separately managed sidecar.
@@ -28,6 +37,11 @@ What it does:
 - may execute compatible already-durable jobs as bounded provider-owned batches while keeping job rows granular for retry, ack, and idempotency
 - treats `DEVICE_SYNC_WORKER_BATCH_SIZE` as a durable job-row budget per tick; one provider batch may complete multiple rows, and each row counts against that budget
 - imports provider snapshots through `@murphai/importers`
+
+Hosted source hydration preserves control-plane source keys even when a cold
+restore creates a new local account id. Local-only accounts retain deterministic
+source-key creation; established local source identities and lifecycle fences
+remain stable during warm hydration.
 
 Canonical imports keep member-authored event revisions live while advancing
 the connected-source baseline beneath them. Unrelated facts in the same
@@ -109,8 +123,8 @@ Current providers:
   attributed workouts per one-day window, then reads Junction's dedicated
   per-workout stream endpoint serially and caps each stream at 100,000 points.
   The exact production assembly has
-  48 production timeseries resources: 6 wide and 42 one-day resources, including
-  41 ordinary one-day resources plus `workout_stream`. A full-job continuation owns one resource
+  48 production timeseries resources: 7 wide and 41 one-day resources, including
+  40 ordinary one-day resources plus `workout_stream`. A full-job continuation owns one resource
   and one closed UTC day. An ordinary collection permits at most three sequential
   pages with one attempt and an eight-second timeout per page, limiting provider
   wait to 24 seconds. A page-heavy hourly/session feature retries as one complete
@@ -150,6 +164,16 @@ Current providers:
   the committed `queued`/`dead` transition and remaining bounded attempt budget,
   while a typed origin distinguishes them from canonical-apply and checkpoint-side
   diagnostics.
+- Hosted dirty admission coalesces overlapping plain Garmin notification fetches
+  for steps, distance, active calories, and respiratory rate within one bounded
+  dirty page. Only matching resource and event types share a range, capped at
+  366 days. Inline data, backfill/cursor payloads, and unknown fields stay separate.
+  Every original payload retains its acknowledgement owner; group identities
+  include all original payload IDs so fresh notifications cannot join older
+  fetched work. Existing original jobs prevent coalescing their group, and
+  retained shared continuations keep their narrowed window on cold restore.
+  Changing a page's membership can conservatively repeat a fetch; it never
+  treats overlap alone as proof that new notifications were imported.
 - Successful Junction resource/webhook jobs preserve the full-sync completion
   watermark. They still complete and clear their own failures, while only a
   terminal reconcile or backfill whose window ends at the current closed-day
@@ -161,13 +185,26 @@ Current providers:
   `temporal-*` facet set through existing authoritative event sets, so a
   successful empty or insufficient replacement retracts stale derived facts;
   failed or yielded work grants no authority.
-- The temporal horizon is clamped to 1–14 authoritative vault-local days. The
-  newest eligible day imports inline, while older resource/day coordinates use
-  the existing durable queue in newest-first order. Queued or running work
-  deduplicates across restarts, while succeeded rows remain history rather than
-  suppressing a later scheduled pull whose source roster or provider data may
-  have widened. At the failure/yield ceiling, 28 temporal rows plus one ordinary
-  reconcile follow-up remain serialized by the existing per-account fence.
+- The temporal horizon is clamped to 1–14 authoritative vault-local days. All
+  complete-day work uses the existing durable resource/day queue, newest first.
+  A hashed `junctionTemporalSweepV1` metadata marker records the scheduled scope:
+  newest eligible day, timezone, resources, horizon, and stable source roster and
+  capabilities. Matching hourly reconciles skip the broad sweep; a new day or
+  changed scope schedules it again. The marker and children commit atomically in
+  local SQLite. Hosted recovery checkpoints the marker with exact retained jobs
+  before publishing it to Web; SQLite itself is excluded from hosted snapshots.
+  The marker never proves an import completed. Ordinary reconciliation keeps its cadence.
+- Oxygen/stress data-event jobs also queue intersecting local days within that
+  rolling horizon, plus days still awaiting closure and the 24-hour arrival lag.
+  Future children become available only after the lag. Bursts share the existing
+  day key; the account fence ensures an event arriving during a fetch executes
+  afterward and can recreate its completed day job. Daily repair covers missing
+  events and late corrections. No source-authority check is cached or removed.
+- Queued/running children retain existing retries across restarts. Succeeded or
+  dead rows can be recreated; a daily sweep has at most 28 temporal children plus
+  one ordinary continuation. Targeted events add at most the configured horizon
+  plus three not-yet-eligible local days for one resource. All jobs stay serialized
+  by the existing account fence, with unchanged complete-source-day validation.
 - Temporal children never advance generic account completion. That watermark is
   account activity state rather than complete floor coverage, so every scheduled
   reconcile still refetches configured ordinary resources. Collection remains
@@ -252,6 +289,15 @@ the next import. Overlap, an external ledger write, or an import failure forces
 a full rescan. The session is neither persisted nor shared across drains, and
 the worker still checks the foreground-yield fence before each job.
 
+The job's abort signal also reaches snapshot normalization and canonical import
+preparation. Large identity scans yield to the event loop at bounded row
+intervals so foreground polling can interrupt them. Cancellation before
+publication releases the canonical lock, discards the session cache, and
+requeues the existing job without consuming its retry budget. Once canonical
+publication starts it finishes atomically and reports committed progress, even
+if the signal aborts during the write. This does not make synchronous
+normalization, archive validation, or every preparation segment interruptible.
+
 Privacy-safe job timing separates Junction inventory requests, Junction
 resource requests, normalization, event-identity indexing, canonical writes,
 and remaining provider time. `device-sync.pass_finished` reports only bounded
@@ -261,6 +307,11 @@ Historical resource jobs also report their last upstream readiness classificatio
 provider execution reports the proposed follow-up count and earliest delay from
 the attempt's start; these fields do not imply imported data or committed jobs.
 The durable-progress and canonical-progress fields retain that distinction.
+Provider-proven forward continuation coverage is separately credited only after
+its owned job completion and successor commit. Junction's strict suffix of an
+unchanged finite resource window qualifies even when provider dates are empty;
+unchanged retries and generic queue completion do not. Hosted runtime uses this
+in-process evidence for its existing checkpointed system-progress generation.
 The diagnostic stream never includes account or job ids, cursors, provider records, health values,
 credentials, or filesystem paths.
 
@@ -275,7 +326,11 @@ and `weight`—always starts with an explicit 180-day window independent of both
 the generic timeseries window and `summaryBackfillDays`. The existing
 source-scoped sparse-history jobs fetch policy-sized one-day chunks, serialize
 per account, and record terminal coverage in compact
-connection metadata; they do not add another queue or lifecycle. Blood pressure
+connection metadata; they do not add another queue or lifecycle. Confirmed-empty
+date-query history windows share a job up to the existing sixteen-unit budget.
+Every provider day is still fetched, and foreground yield is checked before each
+fetch. The first populated date retains its original import window and ends that
+job's segment; a continuation resumes after the completed prefix. Blood pressure
 keeps exact per-reading completion, and note history keeps complete-fetch
 semantics. All extended timeseries completion shares one fixed-width,
 source-by-resource matrix in an existing blood-pressure or note metadata slot.
@@ -485,3 +540,46 @@ discard that reuse. Historical attempts and calendar repair load their own
 inventory. Every canonical import retains its live connection-source admission
 check. The scope contains provider inventory only, never cached authorization
 or durable state.
+
+Queued daily resource notifications for steps, distance, active calories, and
+heart rate may share one provider scan when their source and complete closed
+UTC-day range match. The existing provider batch owner claims at most 16 jobs,
+counts each row against the drain budget, and retains per-job retries. Inline
+payloads, historical proof, calendar/temporal work, and extended payload fields
+remain separate. Updates arriving after the claim receive a new scan. A yield
+retains the unfinished range in the existing durable continuation; every populated
+day still checks live authority before import. This is queue batching, with no
+cached provider data or permanent suppression of later corrections.
+
+Within one full-job timeseries continuation, reuse successful inventory across
+its existing bounded daily units. Empty units share one final source-lifecycle
+fence check before returning progress; populated units still check live authority
+before each canonical import. Return, yield, or failure discards this local scope.
+Daily coverage, retry windows, and foreground yield points remain unchanged.
+
+Schedule-time extended history, including weight, keeps one active identity per
+source lifecycle and coverage generation across day boundaries. Source-first
+exact history retains its window identity. Empty weight retry roots at their
+full-history boundary converge to the schedule-time key during queue admission,
+including cold restores. A valid version-one empty unresolved-identity set is
+empty evidence; nonempty, malformed, or unknown encoded evidence cannot converge.
+Queued roots retain the union of accepted windows;
+running or partial scans, unresolved evidence, and older generations retain their
+existing owners. Weight reads use bounded 30-day chunks, preserving pagination
+and source lifecycle checks. A pending upstream
+weight pull still permits bounded reads and canonical import of available exact
+records; it prevents coverage certification and retains a daily continuation.
+A scan that began while the pull was pending carries that observation through
+its continuations and never certifies coverage; its daily continuation restarts
+from the history start and re-reads readiness there.
+Daily aggregate history continues to wait for provider readiness before its
+scan. Hosted future history can share the checkpoint-fenced reconcile proof's
+bounded deferral; content changes, dirty work, and proof expiry still admit the
+ordinary runtime path.
+
+Hosted passes with admitted dirty work, including retained reconciliation owners
+that absorb webhook hints, can pull a Junction full reconcile
+forward by up to thirty minutes while already awake. The ordinary account-scoped
+scheduler queues the same durable full jobs; partial imports never substitute for
+a complete content proof. Empty hints, other providers, foreground yields, and
+more distant cadences do not trigger this optimization.

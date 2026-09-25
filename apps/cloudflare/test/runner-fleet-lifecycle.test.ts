@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { describe, it, vi } from "vitest";
+import { beforeEach, describe, it, vi } from "vitest";
 import { RunnerContainer, destroyHostedExecutionContainer } from "../src/runner-container.js";
 import { StandbyRunnerContainer } from "../src/standby-runner-container.js";
 import { RunnerSlotBindingStore } from "../src/runner-slot-binding.js";
@@ -9,14 +9,20 @@ import {
   createHostedRunnerContainerNamespaceRouter, hostedRunnerSlotBindingMatchesTarget,
   isHostedRunnerSlotName, isHostedStandbySlotName, readHostedRunnerSlotReleaseId,
   resolveHostedRunnerReleaseId, resolveHostedStandbyCoordinatorName,
-  type HostedRunnerSlotLifecycle, type HostedStandbySlotBinding,
 } from "../src/standby-runner-contract.js";
-import { RunnerStateStore, RunnerContainerReservationLostError } from "../src/user-runner/runner-state-store.js";
+
 import type { DurableObjectStateLike } from "../src/user-runner/types.js";
 import { HOSTED_RUNTIME_ARCHITECTURE_VERSION } from "../src/hosted-runtime-architecture.js";
-import { RuntimeProcessingController, type RuntimeProcessingInput } from "../src/user-runner/runtime-processing-controller.js";
-import type { HostedExecutionEnvironment } from "../src/env.js";
+
 import { createTestSqlStorage } from "./sql-storage.js";
+import { commandHostedRuntimeOwner } from "../src/runtime-owner-client.ts";
+import type { HostedRuntimeOwnerSnapshot } from "@murphai/hosted-execution/runtime-owner";
+
+vi.mock("../src/runtime-owner-client.ts", () => ({ commandHostedRuntimeOwner: vi.fn() }));
+beforeEach(() => {
+  vi.mocked(commandHostedRuntimeOwner).mockReset();
+  vi.mocked(commandHostedRuntimeOwner).mockResolvedValue({ cutover: "postgres", status: "observed", owner: null });
+});
 
 // Isolate logging, egress and job transport; lifecycle, binding, SQL, identity
 // validation, startup and retirement below are the actual production owners.
@@ -67,15 +73,19 @@ function runnerHarness(input: {
   legacy?: boolean; slotName?: string; running?: boolean; status?: string;
   health?: Record<string, unknown>; environment?: Record<string, unknown>;
   destroy?: () => Promise<void>; fetchHealth?: () => Promise<void>;
+  durable?: ReturnType<typeof durableState>;
 } = {}) {
   const slotName = input.slotName ?? (input.legacy ? LEGACY_SLOT : GLOBAL_SLOT);
-  const { state, sql } = durableState();
+  const { state, sql } = input.durable ?? durableState();
   let running = input.running ?? false;
   let status = input.status ?? (running ? "running" : "stopped");
-  const calls = { start: 0, destroy: 0, fetch: 0, preflight: 0, renew: 0 };
+  const calls = { start: 0, destroy: 0, fetch: 0, renew: 0 };
   const ContainerClass = input.legacy ? StandbyRunnerContainer : RunnerContainer;
   const container = new ContainerClass({
-    ...state, id: { name: slotName }, container: { get running() { return running; } },
+    ...state, id: { name: slotName }, container: {
+      get running() { return running; },
+      getTcpPort() { return { fetch: (url: string) => container.containerFetch(url) }; },
+    },
   }, {
     CF_VERSION_METADATA: { id: RELEASE },
     HOSTED_EXECUTION_RUNNER_BUNDLE_FINGERPRINT: "bundle-test",
@@ -89,15 +99,10 @@ function runnerHarness(input: {
     renewActivityTimeout() { calls.renew++; },
     async containerFetch(url: string) {
       calls.fetch++;
-      if (url.endsWith("/internal/deploy-codex-shell-smoke")) {
-        calls.preflight++;
-        return Response.json({ ok: true });
-      }
       assert.ok(url.endsWith("/health"), `Unexpected container fetch: ${url}`);
       await input.fetchHealth?.();
       return Response.json({
-        ok: true, activeJobCount: 0, codexShellPreflightStatus: "ready",
-        codexShellPreflightCompletedAtEpochMs: Date.now(),
+        ok: true, activeJobCount: 0,
         cloudflareRegion: input.legacy ? "ENAM" : "WNAM",
         heavyRuntimeHydrationStatus: "ready", heavyRuntimeHydrationCompletedAtEpochMs: Date.now(),
         hostedRuntimeArchitectureVersion: HOSTED_RUNTIME_ARCHITECTURE_VERSION,
@@ -181,7 +186,7 @@ describe("unified runner identity and binding", () => {
     const { container, calls, sql } = runnerHarness();
     const input = claimInput();
     await container.bindStandbySlot(input);
-    assert.deepEqual(calls, { start: 0, destroy: 0, fetch: 0, preflight: 0, renew: 0 });
+    assert.deepEqual(calls, { start: 0, destroy: 0, fetch: 0, renew: 0 });
     assert.deepEqual(await container.bindStandbySlot(input), { bound: true, ...input });
     for (const conflict of [
       { userId: "member-b" }, { claimId: createHostedStandbyClaimId() },
@@ -208,13 +213,13 @@ describe("unified runner identity and binding", () => {
     await container.bindStandbySlot(claimInput());
     await container.ensureReadyForProcessing({ userId: MEMBER, timeoutMs: 1_000 });
     assert.equal(calls.start, 1);
-    assert.equal(calls.preflight, 0);
   });
 
-  it("prepares global pristine inventory without geographic gating or member ownership", async () => {
-    const { container, calls } = runnerHarness();
+  it("prepares global pristine inventory through ordinary health without waiting for hydration", async () => {
+    const { container, calls } = runnerHarness({ health: { heavyRuntimeHydrationStatus: "pending" } });
     await container.prepareStandbySlot({ releaseId: RELEASE, region: HOSTED_RUNNER_REGION, slotName: GLOBAL_SLOT, timeoutMs: 1_000 });
     assert.equal(calls.start, 1);
+    assert.equal(calls.fetch, 2);
     assert.deepEqual(await container.readStandbySlotBinding(), {
       claimId: null, releaseId: RELEASE, region: HOSTED_RUNNER_REGION,
       slotName: GLOBAL_SLOT, state: "unbound", userId: null,
@@ -230,7 +235,6 @@ describe("unified runner identity and binding", () => {
     pristine: { workspaceInvocationAcceptedCount: 1 },
     active: { activeJobCount: 1 },
     poisoned: { poisoned: true },
-    hydration: { heavyRuntimeHydrationStatus: "pending" },
   })) it(`still rejects invalid global inventory ${label} proof`, async () => {
     const { container } = runnerHarness({ health });
     await assert.rejects(container.prepareStandbySlot({ releaseId: RELEASE, region: HOSTED_RUNNER_REGION, slotName: GLOBAL_SLOT, timeoutMs: 50 }));
@@ -249,6 +253,80 @@ describe("unified runner identity and binding", () => {
     await prepare;
     await bind;
     assert.equal((await container.readStandbySlotBinding()).state, "bound");
+  });
+});
+
+
+describe("bound runner idle cleanup respects canonical runtime ownership", () => {
+  function owner(phase: HostedRuntimeOwnerSnapshot["phase"], runnerContainerName = GLOBAL_SLOT): HostedRuntimeOwnerSnapshot {
+    return {
+      userId: MEMBER, attemptId: "attempt-starting", generation: "1", phase,
+      processingMode: "default", allocationId: "synthetic-allocation", runnerContainerName,
+      workspaceVersion: null, customInferenceEnvelope: null, platformAiUsageAllowed: false,
+      startedAt: new Date().toISOString(), acceptedAt: null, completedAt: null,
+      failureCount: 0, lastErrorCode: null,
+    };
+  }
+
+  it.each([false, true])("preserves admitted startup between readiness and launch (reactivated=%s)", async (reactivated) => {
+    const initial = runnerHarness({ running: true });
+    await initial.container.prepareStandbySlot({ releaseId: RELEASE, region: HOSTED_RUNNER_REGION, slotName: GLOBAL_SLOT, timeoutMs: 1_000 });
+    await initial.container.bindStandbySlot(claimInput());
+    await initial.container.ensureReadyForProcessing({ userId: MEMBER, timeoutMs: 1_000 });
+    vi.mocked(commandHostedRuntimeOwner).mockResolvedValue({ cutover: "postgres", status: "observed", owner: owner("starting") });
+    const { container, calls } = reactivated ? runnerHarness({ running: true, durable: initial }) : initial;
+    await container.onActivityExpired();
+    assert.equal(calls.destroy, 0);
+    assert.equal((await container.readStandbySlotBinding()).state, "bound");
+    assert.equal((await container.listSchedules("onActivityExpired")).length, 1);
+    await container.ensureReadyForProcessing({ userId: MEMBER, timeoutMs: 1_000 });
+    assert.equal(calls.start, 0);
+    vi.mocked(commandHostedRuntimeOwner).mockResolvedValue({ cutover: "postgres", status: "observed", owner: owner("idle") });
+    await container.onActivityExpired();
+    assert.equal(calls.destroy, 1);
+    assert.equal((await container.readStandbySlotBinding()).state, "retired");
+  });
+
+  it.each(["active", "retiring"] as const)("preserves an exact %s owner without local work", async (phase) => {
+    const { container, calls } = runnerHarness({ running: true });
+    await container.bindStandbySlot(claimInput());
+    vi.mocked(commandHostedRuntimeOwner).mockResolvedValue({ cutover: "postgres", status: "observed", owner: owner(phase) });
+    await container.onActivityExpired();
+    assert.equal(calls.destroy, 0);
+  });
+
+  it("does not block arriving readiness on an idle owner read or apply its stale cleanup", async () => {
+    const { container, calls } = runnerHarness({ running: true });
+    await container.bindStandbySlot(claimInput());
+    const entered = deferred<void>();
+    const response = deferred<Awaited<ReturnType<typeof commandHostedRuntimeOwner>>>();
+    vi.mocked(commandHostedRuntimeOwner).mockImplementationOnce(() => { entered.resolve(); return response.promise; });
+    const expiry = container.onActivityExpired();
+    await entered.promise;
+    // Must finish while the control read is still unresolved.
+    await container.ensureReadyForProcessing({ userId: MEMBER, timeoutMs: 1_000 });
+    response.resolve({ cutover: "postgres", status: "observed", owner: owner("idle") });
+    await expiry;
+    assert.equal(calls.destroy, 0);
+    assert.equal(calls.start, 0);
+  });
+
+  it("does not let a different target retain an obsolete shell", async () => {
+    const { container, calls } = runnerHarness({ running: true });
+    await container.bindStandbySlot(claimInput());
+    vi.mocked(commandHostedRuntimeOwner).mockResolvedValue({ cutover: "postgres", status: "observed", owner: owner("starting", createHostedRunnerSlotName(RELEASE)) });
+    await container.onActivityExpired();
+    assert.equal(calls.destroy, 1);
+  });
+
+  it.each(["unavailable", "legacy", "draining"] as const)("keeps the scheduled retry when ownership is %s", async (outcome) => {
+    const { container, calls } = runnerHarness({ running: true });
+    await container.bindStandbySlot(claimInput());
+    if (outcome === "unavailable") vi.mocked(commandHostedRuntimeOwner).mockRejectedValue(new Error("synthetic control timeout"));
+    else vi.mocked(commandHostedRuntimeOwner).mockResolvedValue({ cutover: outcome, status: "observed", owner: null });
+    await container.onActivityExpired();
+    assert.equal(calls.destroy, 0);
+    assert.equal((await container.listSchedules("onActivityExpired")).length, 1);
   });
 });
 
@@ -412,468 +490,5 @@ describe("native warm retention and terminal retirement", () => {
     await assert.rejects(legacy.container.bindStandbySlot(claimInput(GLOBAL_SLOT)), /namespace/u);
     const noLegacy = createHostedRunnerContainerNamespaceRouter({ exactUser: { getByName: () => main.container }, standby: null });
     assert.throws(() => noLegacy?.getByName(LEGACY_SLOT), /unavailable/u);
-  });
-});
-
-describe("opaque pending targets and write-fence admission", () => {
-  for (const slotName of [GLOBAL_SLOT, LEGACY_SLOT]) {
-    for (const clear of ["completion", "transport", "replacement", "user-control"] as const) {
-      it(`preserves ${slotName.split("--")[0]} target across ${clear} fence clearing`, async () => {
-        const { state } = durableState();
-        const store = new RunnerStateStore(state);
-        assert.equal(await store.reserveRunnerContainerStopTarget({ runnerContainerName: slotName, userId: MEMBER }), true);
-        const token = await store.beginWriteFence({ runnerContainerName: slotName, userId: MEMBER });
-        const finishedAt = new Date().toISOString();
-        if (clear === "completion") await store.clearWriteFenceAfterCompletion({ token, finishedAt });
-        if (clear === "transport") await store.clearWriteFenceAfterTransportFailure({ token, finishedAt, error: new Error("transport") });
-        if (clear === "replacement") await store.clearWriteFenceForReplacement({ attemptId: token.attemptId, generation: token.generation, userId: MEMBER, finishedAt, error: new Error("stopped") });
-        if (clear === "user-control") await store.clearWriteFenceForUserControl(MEMBER);
-        const recovered = await new RunnerStateStore(state).readState();
-        assert.equal(recovered.writeFence, null);
-        assert.equal(recovered.pendingRunnerContainerName, slotName);
-        assert.equal(await store.reserveRunnerContainerStopTarget({ runnerContainerName: createHostedRunnerSlotName(RELEASE), userId: MEMBER }), false);
-      });
-    }
-  }
-  it("rejects stale admission after an exact reservation was cleared or replaced", async () => {
-    const { state } = durableState();
-    const store = new RunnerStateStore(state);
-    await store.reserveRunnerContainerStopTarget({ runnerContainerName: GLOBAL_SLOT, userId: MEMBER });
-    await store.clearStoppedRunnerContainerForUserControl({ runnerContainerName: GLOBAL_SLOT, userId: MEMBER });
-    await assert.rejects(store.beginWriteFence({ runnerContainerName: GLOBAL_SLOT, userId: MEMBER }), RunnerContainerReservationLostError);
-    const next = createHostedRunnerSlotName(RELEASE);
-    await store.reserveRunnerContainerStopTarget({ runnerContainerName: next, userId: MEMBER });
-    await assert.rejects(store.beginWriteFence({ runnerContainerName: GLOBAL_SLOT, userId: MEMBER }), RunnerContainerReservationLostError);
-    assert.equal((await store.beginWriteFence({ runnerContainerName: next, userId: MEMBER })).runnerContainerName, next);
-  });
-});
-
-function controllerEnvironment(): HostedExecutionEnvironment {
-  return {
-    allowedRunnerSecretKeys: null, hostedCryptoAuthoritySignKeyVersion: "test",
-    hostedCryptoAuthoritySignPublicKeyPem: "test", hostedCryptoAuthorityVerifyKeyringJson: null,
-    hostedCryptoCloudflareAutomationKeyId: "test", hostedCryptoCloudflareAutomationPrivateJwk: "{}",
-    hostedCryptoCloudflareAutomationPrivateKeyringJson: null, hostedCryptoEnv: "test",
-    hostedWebBaseUrl: "https://example.test", idleCheckpointDelayMs: 180_000,
-    maxEventAttempts: 3, retryDelayMs: 30_000, runnerCommitTimeoutMs: 45_000,
-    runnerReadyTimeoutMs: 20_000, runnerIdleTtlMs: 300_000,
-    runnerLifecycleReevaluationMs: 300_000, webControlTimeoutMs: 30_000,
-    hostedCrypto: {
-      HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM: "test", HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID: "test",
-      HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: "{}", HOSTED_CRYPTO_ENV: "test",
-    },
-    vercelOidcValidation: {
-      audience: "test", environment: "development", issuer: "https://example.test",
-      jwksUrl: "https://example.test/keys", projectName: "test", subject: "test", teamSlug: "test",
-    },
-    webCallbackSigning: { keyId: "test", privateKeyJwkJson: "{}" },
-  };
-}
-
-type BindInput = Parameters<HostedRunnerSlotLifecycle["bindStandbySlot"]>[0];
-type BindResult = Awaited<ReturnType<HostedRunnerSlotLifecycle["bindStandbySlot"]>>;
-function allocationHarness(options: {
-  mode?: "allocate" | "off" | "shadow"; local?: boolean; pooled?: boolean; failPreparation?: boolean;
-  environment?: Record<string, unknown>;
-  bind?: (input: BindInput, original: () => Promise<BindResult>) => Promise<BindResult>;
-  read?: (input: BindInput | null, original: () => Promise<HostedStandbySlotBinding>) => Promise<HostedStandbySlotBinding>;
-} = {}) {
-  const { state } = durableState();
-  const store = new RunnerStateStore(state);
-  const slots = new Map<string, ReturnType<typeof runnerHarness>>();
-  const calls = { claim: 0, bind: 0, legacy: 0, prepare: 0, invoke: 0 };
-  const names: unknown[][] = [];
-  const claims: unknown[] = [];
-  const coordinatorCalls: unknown[][] = [];
-  const invocations: { attemptId: string; runnerContainerName: string }[] = [];
-  const version = options.local ? {} : { CF_VERSION_METADATA: { id: RELEASE } };
-  const namespace = createHostedRunnerContainerNamespaceRouter({
-    exactUser: {
-      getByName(name) {
-        names.push([name]);
-        let harness = slots.get(name);
-        if (!harness) {
-          harness = runnerHarness({ slotName: name, environment: options.local ? { CF_VERSION_METADATA: undefined } : {} });
-          slots.set(name, harness);
-          const originalBind = harness.container.bindStandbySlot.bind(harness.container);
-          const originalRead = harness.container.readStandbySlotBinding.bind(harness.container);
-          let lastBind: BindInput | null = null;
-          Object.assign(harness.container, {
-            async bindStandbySlot(input: BindInput) {
-              calls.bind++;
-              lastBind = input;
-              const record = await store.readState();
-              assert.equal(record.pendingRunnerContainerName, name, "bind must follow the exact durable reservation");
-              assert.equal(record.writeFence, null, "no execution authority exists before binding");
-              return options.bind ? options.bind(input, () => originalBind(input)) : originalBind(input);
-            },
-            async readStandbySlotBinding() {
-              return options.read ? options.read(lastBind, originalRead) : originalRead();
-            },
-          });
-        }
-        return harness.container;
-      },
-    },
-    standby: { getByName() { calls.legacy++; throw new Error("Fresh allocation reached legacy namespace"); } },
-  });
-  const controller = new RuntimeProcessingController({
-    env: controllerEnvironment(), stateStore: store, runnerContainerNamespace: namespace,
-    runnerRuntimeEnvSource: { ...version, ...options.environment, HOSTED_EXECUTION_STANDBY_MODE: options.mode ?? "allocate" },
-    invocationService: {
-      prepareForFreshStart({ input }) {
-        return async (token) => {
-          calls.prepare++;
-          if (options.failPreparation) throw new Error("simulated workspace preparation failure");
-          assert.ok(token.runnerContainerName);
-          const binding = await slots.get(token.runnerContainerName)!.container.readStandbySlotBinding();
-          assert.equal(binding.state, "bound");
-          assert.equal(binding.userId, input.userId);
-          return {
-            input, token, runnerContainerName: token.runnerContainerName,
-            workspaceCheckpointedAt: null, workspaceVersion: "0",
-            job: {
-              kind: "workspace-invocation",
-              request: {
-                attemptId: token.attemptId, idleCheckpointDelayMs: 54_000,
-                leaseGeneration: token.generation, userId: input.userId,
-                workspace: null, workspaceVersion: token.workspaceVersion ?? "0",
-              },
-            },
-          };
-        };
-      },
-      async invokePreparedWithFence({ prepared }) {
-        calls.invoke++;
-        invocations.push({ attemptId: prepared.token.attemptId, runnerContainerName: prepared.runnerContainerName });
-        return { nextWakeAt: null, status: "idle" };
-      },
-    },
-    standbyCoordinatorNamespace: {
-      getByName(...args) {
-        coordinatorCalls.push(args);
-        return {
-          async claimReadyStandby(input) {
-            calls.claim++; claims.push(input);
-            return options.pooled
-              ? { outcome: "claimed" as const, slotName: GLOBAL_SLOT }
-              : { outcome: "no_ready_slot" as const };
-          },
-          async ensureReadyStandby() { return { accepted: true }; },
-        };
-      },
-    },
-  });
-  return {
-    controller, store, slots, calls, names, claims, coordinatorCalls, invocations,
-    async resolve(input: Partial<RuntimeProcessingInput> = {}, timeoutMs = 1_000) {
-      await store.bindUser(MEMBER);
-      return controller["resolveFreshRunnerContainer"]({
-        commandBudget: { deadlineAtMs: Date.now() + timeoutMs },
-        initialRecord: await store.readState(),
-        input: { orchestrationAttemptId: "background", userId: MEMBER, ...input },
-        timings: { runnerTargetReconcileElapsedMs: 0, standbyClaimElapsedMs: 0, runnerTargetBindElapsedMs: 0 },
-      });
-    },
-  };
-}
-
-const trustedForeground = {
-  orchestration: { triggeredByWebDirect: true },
-  orchestrationAttemptId: "web-ingress-11111111-1111-4111-8111-111111111111",
-};
-
-describe("fleet allocation policy and ambiguous-outcome recovery", () => {
-  for (const mode of ["off", "shadow", "allocate"] as const) {
-    it(`cold-allocates background work in the main namespace in ${mode} mode`, async () => {
-      const h = allocationHarness({ mode, pooled: true });
-      const result = await h.resolve({ processingMode: "system_mailbox", conversationWorkPending: true });
-      assert.equal(result.kind, "ready");
-      if (result.kind !== "ready") throw new Error("expected fresh allocation");
-      assert.ok(isHostedRunnerSlotName(result.runnerContainerName));
-      assert.equal(h.calls.claim, 0);
-      assert.equal(h.calls.legacy, 0);
-      assert.equal(h.calls.bind, 1);
-      const binding = await h.slots.get(result.runnerContainerName)!.container.readStandbySlotBinding();
-      assert.equal(binding.state, "bound");
-      assert.equal(binding.userId, MEMBER);
-      assert.equal(binding.region, HOSTED_RUNNER_REGION);
-    });
-    it(`never creates a member-named shell from a ${mode} prewarm hint`, async () => {
-      const h = allocationHarness({ mode });
-      await h.controller.beginShellPrewarmForUser(MEMBER);
-      assert.deepEqual(h.names, []);
-      assert.equal(h.calls.bind, 0);
-    });
-  }
-
-  it("uses opaque local release identities when metadata is absent", async () => {
-    const h = allocationHarness({ local: true });
-    const result = await h.resolve(trustedForeground);
-    assert.equal(result.kind, "ready");
-    if (result.kind !== "ready") throw new Error("expected local allocation");
-    assert.equal(readHostedRunnerSlotReleaseId(result.runnerContainerName), "local");
-    assert.equal(h.calls.claim, 0);
-  });
-
-  for (const [label, input, claims] of [
-    ["trusted Web-direct", trustedForeground, 1],
-    ["authenticated conversation", { conversationWorkPending: true }, 1],
-    ["background default", {}, 0],
-    ["untrusted direct flag", { orchestration: { triggeredByWebDirect: true } }, 0],
-    ["direct-shaped id alone", { orchestrationAttemptId: trustedForeground.orchestrationAttemptId }, 0],
-    ["non-default foreground", { ...trustedForeground, processingMode: "inbox_media_retention" }, 0],
-  ] as const) it(`claims pristine inventory only for eligible ${label} work`, async () => {
-    const h = allocationHarness({ pooled: true });
-    const result = await h.resolve(input);
-    assert.equal(result.kind, "ready");
-    assert.equal(h.calls.claim, claims);
-    assert.equal(h.calls.legacy, 0);
-    if (claims) {
-      assert.deepEqual(h.coordinatorCalls, [["standby-coordinator--v-release_1--r-global"]]);
-      assert.equal(Object.hasOwn(h.claims[0]!, "userId"), false);
-    }
-  });
-
-  it("runs the public start path through reservation, binding and readiness before workspace failure", async () => {
-    const h = allocationHarness({ mode: "off", failPreparation: true });
-    const result = await h.controller.ensureForUser({ orchestrationAttemptId: "background", userId: MEMBER });
-    assert.equal(result.kind, "retry_later");
-    assert.equal(h.calls.bind, 1);
-    assert.equal(h.calls.prepare, 1);
-    assert.equal(h.calls.invoke, 0);
-    const record = await h.store.readState();
-    assert.equal(record.writeFence, null);
-    assert.ok(isHostedRunnerSlotName(record.pendingRunnerContainerName));
-  });
-
-  for (const [label, options, request, expectedClaims] of [
-    ["off foreground", { mode: "off" }, trustedForeground, 0],
-    ["shadow foreground", { mode: "shadow" }, trustedForeground, 0],
-    ["background", { mode: "allocate", pooled: true }, { processingMode: "system_mailbox" }, 0],
-    ["pooled foreground", { mode: "allocate", pooled: true }, trustedForeground, 1],
-  ] as const) it(`starts ${label} work and reuses its bound warm target through the same public path`, async () => {
-    const h = allocationHarness(options);
-    const first = await h.controller.ensureForUser({
-      ...request, userId: MEMBER,
-      orchestrationAttemptId: "orchestrationAttemptId" in request ? request.orchestrationAttemptId : "first",
-    });
-    assert.equal(first.kind, "runtime_processing_accepted");
-    const token = await h.store.readWriteFenceToken();
-    assert.ok(token?.runnerContainerName);
-    assert.ok(isHostedRunnerSlotName(token.runnerContainerName));
-    assert.equal(h.calls.claim, expectedClaims);
-    assert.equal(h.calls.bind, 1);
-    assert.equal(h.calls.prepare, 1);
-    assert.equal(h.calls.invoke, 1);
-    assert.deepEqual(h.invocations, [{ attemptId: token.attemptId, runnerContainerName: token.runnerContainerName }]);
-    const target = h.slots.get(token.runnerContainerName)!;
-    assert.equal(target.calls.start, 1);
-    await h.store.clearWriteFenceAfterCompletion({ token, finishedAt: new Date().toISOString() });
-    const second = await h.controller.ensureForUser({
-      orchestrationAttemptId: "second", userId: MEMBER, processingMode: "system_mailbox",
-    });
-    assert.equal(second.kind, "runtime_processing_accepted");
-    const retainedToken = await h.store.readWriteFenceToken();
-    assert.equal(retainedToken?.runnerContainerName, token.runnerContainerName);
-    assert.notEqual(retainedToken?.attemptId, token.attemptId);
-    assert.equal(h.calls.claim, expectedClaims);
-    assert.equal(h.calls.bind, 1);
-    assert.equal(h.calls.prepare, 2);
-    assert.equal(h.calls.invoke, 2);
-    assert.deepEqual(h.invocations[1], { attemptId: retainedToken?.attemptId, runnerContainerName: token.runnerContainerName });
-    assert.equal(h.calls.legacy, 0);
-    assert.equal(h.slots.size, 1);
-    assert.equal(target.calls.start, 1);
-    assert.equal(target.calls.destroy, 0);
-  });
-
-  for (const mode of ["off", "shadow", "allocate"] as const) {
-    it(`preserves a warm previous reservation and write fence through promotion in ${mode} mode`, async () => {
-      const h = allocationHarness({ mode, environment: PROMOTED });
-      const prior = runnerHarness({ running: true, environment: PROMOTED, health: { runnerBundle: { bundleFingerprint: PREVIOUS.bundleFingerprint, sourceFingerprint: PREVIOUS.sourceFingerprint } } });
-      const bindingStore = new RunnerSlotBindingStore(prior.sql);
-      const claim = claimInput();
-      bindingStore.initialize(claim);
-      bindingStore.bind(claim);
-      h.slots.set(GLOBAL_SLOT, prior);
-      await h.store.bindUser(MEMBER);
-      await h.store.reserveRunnerContainerStopTarget({ runnerContainerName: GLOBAL_SLOT, userId: MEMBER });
-      const result = await h.controller.ensureForUser({ userId: MEMBER, orchestrationAttemptId: "after-promotion", conversationWorkPending: true });
-      assert.equal(result.kind, "runtime_processing_accepted");
-      const token = await h.store.readWriteFenceToken();
-      assert.equal(token?.runnerContainerName, GLOBAL_SLOT);
-      assert.equal(h.calls.invoke, 1);
-      assert.equal(h.calls.claim, 0);
-      assert.equal(h.calls.bind, 0);
-      assert.equal(prior.calls.start, 0);
-      assert.equal(prior.calls.destroy, 0);
-    });
-  }
-
-  it("pins a pending retirement until the exact native destroy finishes", async () => {
-    const h = allocationHarness({ mode: "off" });
-    const selected = await h.resolve();
-    assert.equal(selected.kind, "ready");
-    if (selected.kind !== "ready") throw new Error("expected allocation");
-    const pending = selected.runnerContainerName;
-    const slot = h.slots.get(pending)!;
-    slot.setNative(true);
-    const gate = deferred<void>();
-    Object.assign(slot.container, { async destroy() { await gate.promise; slot.setNative(false); } });
-    const retirement = slot.container.retireStandbySlot({ target: { slotName: pending, userId: MEMBER } });
-    assert.equal((await slot.container.readStandbySlotBinding()).state, "retiring");
-    assert.equal((await h.resolve({}, 20)).kind, "retry");
-    assert.equal((await h.store.readState()).pendingRunnerContainerName, pending);
-    assert.equal(h.calls.bind, 1);
-    gate.resolve();
-    await retirement;
-    const replacement = await h.resolve();
-    assert.equal(replacement.kind, "ready");
-    if (replacement.kind !== "ready") throw new Error("expected replacement");
-    assert.notEqual(replacement.runnerContainerName, pending);
-    assert.equal((await slot.container.readStandbySlotBinding()).state, "retired");
-  });
-
-  it("pins unavailable native-warm evidence without starting or reallocating", async () => {
-    const h = allocationHarness({ mode: "off" });
-    const first = await h.resolve();
-    assert.equal(first.kind, "ready");
-    if (first.kind !== "ready") throw new Error("expected allocation");
-    const slot = h.slots.get(first.runnerContainerName)!;
-    slot.setNative(true);
-    Object.assign(slot.container, { async getState() { throw new Error("native provider unavailable"); } });
-    assert.equal((await h.resolve()).kind, "retry");
-    assert.equal((await h.store.readState()).pendingRunnerContainerName, first.runnerContainerName);
-    assert.equal(h.calls.bind, 1);
-    assert.equal(slot.calls.start, 0);
-    assert.equal(slot.calls.destroy, 0);
-  });
-
-  for (const [label, altered] of [
-    ["foreign member", { userId: "member-b" }],
-    ["foreign claim", { claimId: "standby-claim-22222222-2222-4222-8222-222222222222" }],
-    ["wrong release", { releaseId: "release_2" }],
-    ["wrong region", { region: HOSTED_STANDBY_REGION }],
-    ["wrong slot", { slotName: `runner--v-${RELEASE}--${"3".repeat(32)}` }],
-    ["retiring", { state: "retiring" }],
-  ] as const) it(`pins the target after rejected bind with ${label} recovery evidence`, async () => {
-    const h = allocationHarness({
-      mode: "off",
-      async bind() { throw new Error("lost bind result"); },
-      async read(input) {
-        assert.ok(input);
-        return { ...input, state: "bound", ...altered };
-      },
-    });
-    assert.equal((await h.resolve()).kind, "retry");
-    const pending = (await h.store.readState()).pendingRunnerContainerName;
-    assert.ok(isHostedRunnerSlotName(pending));
-    assert.equal(h.slots.size, 1);
-    assert.equal(h.calls.bind, 1);
-    assert.equal(h.slots.get(pending!)!.calls.start, 0);
-    assert.equal(h.slots.get(pending!)!.calls.destroy, 0);
-  });
-
-  it("recovers an exact bound response for the allocating request without demanding prior warmth", async () => {
-    const h = allocationHarness({ mode: "off", async bind(_input, original) { await original(); throw new Error("lost response"); } });
-    const result = await h.resolve();
-    assert.equal(result.kind, "ready");
-    assert.equal(h.calls.bind, 1);
-    assert.equal(h.slots.size, 1);
-  });
-
-  it("pins unavailable binding evidence and reconciles the same target before replacement", async () => {
-    let fail = true;
-    const h = allocationHarness({
-      mode: "off", async bind(_input, original) { if (fail) throw new Error("unavailable"); return original(); },
-      async read(_input, original) { if (fail) throw new Error("unavailable"); return original(); },
-    });
-    assert.equal((await h.resolve()).kind, "retry");
-    const pending = (await h.store.readState()).pendingRunnerContainerName;
-    assert.ok(pending);
-    fail = false;
-    const replacement = await h.resolve();
-    assert.equal(replacement.kind, "ready");
-    if (replacement.kind !== "ready") throw new Error("expected replacement");
-    assert.notEqual(replacement.runnerContainerName, pending);
-    assert.equal((await h.slots.get(pending)!.container.readStandbySlotBinding()).state, "retired");
-  });
-
-  it("clears an unbound rejected allocation after retirement without a second binding RPC", async () => {
-    let reads = 0;
-    const h = allocationHarness({
-      mode: "off",
-      async bind(input) {
-        const slot = h.slots.get(input.slotName)!;
-        new RunnerSlotBindingStore(slot.sql).initialize(input);
-        throw new Error("Bind rejected before member assignment");
-      },
-      async read(_input, original) {
-        reads++;
-        if (reads > 1) throw new Error("Redundant retirement readback");
-        return original();
-      },
-    });
-    assert.equal((await h.resolve()).kind, "retry");
-    assert.equal(reads, 1);
-    assert.equal((await h.store.readState()).pendingRunnerContainerName, null);
-    assert.equal(h.slots.size, 1);
-    const slot = [...h.slots.values()][0]!;
-    assert.equal(new RunnerSlotBindingStore(slot.sql).read().state, "retired");
-  });
-
-  it("requires exact terminal identity before clearing rejected-bind recovery", async () => {
-    let wrongTarget = true;
-    const h = allocationHarness({
-      mode: "off", async bind() { throw new Error("lost response"); },
-      async read(input) {
-        assert.ok(input);
-        return { ...input, state: "retired", claimId: null, userId: null,
-          slotName: wrongTarget ? GLOBAL_SLOT : input.slotName };
-      },
-    });
-    assert.equal((await h.resolve()).kind, "retry");
-    const pending = (await h.store.readState()).pendingRunnerContainerName;
-    assert.ok(pending);
-    assert.notEqual(pending, GLOBAL_SLOT);
-    wrongTarget = false;
-    // Retry through the actual pending owner, not another bind. The owner
-    // initializes the missing identity, retires it, and only then cold-allocates.
-    assert.equal((await h.resolve()).kind, "retry");
-    assert.equal((await h.store.readState()).pendingRunnerContainerName, null);
-  });
-
-  it("never treats a timed-out cold bind as warm on the next request", async () => {
-    const gate = deferred<void>();
-    let first = true;
-    const h = allocationHarness({ mode: "off", async bind(_input, original) {
-      if (first) { first = false; await original(); await gate.promise; }
-      return original();
-    } });
-    assert.equal((await h.resolve({}, 20)).kind, "retry");
-    const pending = (await h.store.readState()).pendingRunnerContainerName;
-    assert.ok(pending);
-    gate.resolve();
-    const result = await h.resolve();
-    assert.equal(result.kind, "ready");
-    if (result.kind !== "ready") throw new Error("expected replacement");
-    assert.notEqual(result.runnerContainerName, pending);
-    assert.equal((await h.slots.get(pending)!.container.readStandbySlotBinding()).state, "retired");
-    assert.equal(h.slots.get(pending)!.calls.start, 0);
-  });
-
-  it("background work retains an already-owned warm target without fresh inventory", async () => {
-    const h = allocationHarness({ pooled: true });
-    const first = await h.resolve(trustedForeground);
-    assert.equal(first.kind, "ready");
-    h.slots.get(GLOBAL_SLOT)!.setNative(true);
-    const result = await h.resolve({ processingMode: "system_mailbox" });
-    assert.equal(result.kind, "ready");
-    if (result.kind !== "ready") throw new Error("expected retention");
-    assert.equal(result.runnerContainerName, GLOBAL_SLOT);
-    assert.equal(result.standbyAllocationOutcome, "retained");
-    assert.equal(h.calls.claim, 1);
-    assert.equal(h.calls.bind, 1);
   });
 });

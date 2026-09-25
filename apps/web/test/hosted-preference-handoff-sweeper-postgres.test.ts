@@ -170,19 +170,16 @@ describe.skipIf(!runPostgresProof)(
       });
       await client.clinicalRecordConnection.createMany({
         data: members.map((member, index) => ({
-          clientId: "clinical-client",
           connectedAt: new Date(now.getTime() - 20 * DAY_MS),
           displayName: "Test Clinical Provider",
           fhirBaseHash: createId(`fhir_base_hash_${index}`),
           fhirBaseUrlEncrypted: "encrypted-fhir-base",
-          grantedScopesJson: ["patient/*.read"],
           id: member.connectionId,
           memberId: member.memberId,
           providerDirectoryEntryId: createId(`provider_directory_${index}`),
           requestedScopesJson: ["patient/*.read"],
           retrievalGeneration: 1,
           sourceSystem: "test",
-          tokenEndpoint: "https://clinical.example.test/token",
         })),
       });
       await client.clinicalRecordRetrievalRun.createMany({
@@ -192,7 +189,6 @@ describe.skipIf(!runPostgresProof)(
           grantedScopesJson: ["patient/*.read"],
           id: member.runId,
           memberId: member.memberId,
-          resourceTypesJson: ["Patient"],
         })),
       });
       const mailboxItems = members.map((member, index) =>

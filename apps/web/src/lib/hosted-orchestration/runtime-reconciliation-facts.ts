@@ -34,7 +34,6 @@ import {
 } from "../hosted-mailbox/ai-usage-gate";
 import {
   decodeHostedMailboxStoredPayload,
-  hasHostedMailboxAutomationEngagementSince,
   readHostedMailboxConsumedSeqByLane,
   readHostedMailboxFirstLiveSystemItemAfterSeq,
   readHostedMailboxLatestPendingConversationItem,
@@ -49,19 +48,6 @@ import {
 import { projectHostedAiUsageLimitNoticeForDelivery } from "../hosted-execution/usage-limit-notice-message";
 import { readActiveHostedMemberAccess } from "../hosted-onboarding/member-access";
 import {
-  hasHostedMemberEstablishedLinqHomeRoute,
-} from "../hosted-onboarding/hosted-member-routing-store";
-import {
-  HOSTED_AUTOMATION_ENGAGEMENT_WINDOW_DAYS,
-  hasHostedLinqInboundWithinDays,
-} from "../hosted-onboarding/linq-daily-state";
-import type {
-  HostedOnboardingReadClient,
-} from "../hosted-onboarding/shared";
-import {
-  hasHostedMemberEstablishedLinqThreadRoute,
-} from "../hosted-routing/thread-route-store";
-import {
   readHostedWorkspace,
   type HostedWorkspaceRecord,
 } from "../hosted-workspace/store";
@@ -73,6 +59,7 @@ import {
   resolveHostedRuntimeAiUsageGate,
   type HostedRuntimeUsageGateCheck,
 } from "./runtime-usage-decision";
+import type { HostedRuntimeUsageGateObservation } from "../hosted-runtime-log/usage-gate";
 import {
   readSelectedHostedInferenceConnectionOverride,
 } from "../hosted-inference/connection-store";
@@ -95,8 +82,6 @@ export type HostedRuntimeReconciliationFactsStage =
 
 const HOSTED_RUNTIME_RECONCILIATION_FACTS_LOG_SCHEMA =
   "murph.hosted-runtime.reconciliation-facts.v1";
-const HOSTED_RUNTIME_RECONCILIATION_ENGAGEMENT_PAUSE_RETRY_MS =
-  24 * 60 * 60 * 1000;
 
 export async function readHostedRuntimeOwnerReleaseActionable(input: {
   now?: Date | string;
@@ -147,6 +132,7 @@ export async function readHostedRuntimeReconciliationFacts(
     decisionSource?: HostedRuntimeReconciliationDecisionSource;
     now?: Date | string;
     usageGateMode?: HostedRuntimeReconciliationUsageGateMode;
+    onUsageGateDecision?: (observation: HostedRuntimeUsageGateObservation) => void;
   },
   reportStage?: (stage: HostedRuntimeReconciliationFactsStage) => void,
 ): Promise<HostedRuntimeReconciliationFacts> {
@@ -178,6 +164,7 @@ export async function readHostedRuntimeReconciliationFacts(
         : null,
     });
     emitHostedRuntimeReconciliationFacts({
+      now,
       facts,
       request: input,
       usageGateRequired: false,
@@ -200,6 +187,7 @@ export async function readHostedRuntimeReconciliationFacts(
       workspace: projectedWorkspace,
     });
     emitHostedRuntimeReconciliationFacts({
+      now,
       facts,
       request: input,
       usageGateRequired: false,
@@ -239,6 +227,7 @@ export async function readHostedRuntimeReconciliationFacts(
       workspace: null,
     });
     emitHostedRuntimeReconciliationFacts({
+      now,
       facts,
       request: input,
       usageGateRequired: false,
@@ -266,47 +255,6 @@ export async function readHostedRuntimeReconciliationFacts(
     mailboxLag,
   });
 
-  if (
-    hostedRuntimeReconciliationNeedsAutomationEngagement({
-      freshConversationMailboxLag,
-      now,
-      workspace: workspaceWithSystemMailboxFrontier,
-    })
-    && await hasHostedMemberEstablishedLinqRoute({
-      memberId: input.userId,
-      prisma,
-    })
-    && !(await hasHostedLinqInboundWithinDays({
-      memberId: input.userId,
-      now,
-      prisma,
-    }))
-    && !(await hasHostedMailboxAutomationEngagementSince({
-      prisma,
-      since: new Date(
-        now.getTime()
-          - HOSTED_AUTOMATION_ENGAGEMENT_WINDOW_DAYS * 24 * 60 * 60 * 1000,
-      ),
-      userId: input.userId,
-    }))
-  ) {
-    const facts = buildHostedRuntimeBlockedFacts({
-      mailboxLag,
-      reason: "automation_engagement_paused",
-      retryAt: new Date(
-        now.getTime() + HOSTED_RUNTIME_RECONCILIATION_ENGAGEMENT_PAUSE_RETRY_MS,
-      ).toISOString(),
-      workspace: workspaceWithSystemMailboxFrontier,
-    });
-    emitHostedRuntimeReconciliationFacts({
-      facts,
-      request: input,
-      usageGateRequired: false,
-      usageGateStatus: "not_required",
-    });
-    return facts;
-  }
-
   reportStage?.("canonical_usage");
   const usageGateRequired = hostedRuntimeReconciliationNeedsAiUsageGate({
     freshConversationMailboxLag,
@@ -330,6 +278,7 @@ export async function readHostedRuntimeReconciliationFacts(
         workspace: workspaceWithSystemMailboxFrontier,
       });
       emitHostedRuntimeReconciliationFacts({
+        now,
         facts,
         request: input,
         usageGateRequired: true,
@@ -382,10 +331,12 @@ export async function readHostedRuntimeReconciliationFacts(
         workspace: workspaceWithSystemMailboxFrontier,
       });
       emitHostedRuntimeReconciliationFacts({
+        now,
         facts,
         request: input,
         usageGateRequired: true,
         usageGateStatus: gate.status,
+        usageLimitExceeded: gate.decision.reason === "ai_usage_limit_exceeded",
       });
       return facts;
     }
@@ -397,6 +348,7 @@ export async function readHostedRuntimeReconciliationFacts(
       workspace: workspaceWithSystemMailboxFrontier,
     });
     emitHostedRuntimeReconciliationFacts({
+      now,
       facts,
       request: input,
       usageGateRequired: true,
@@ -412,6 +364,7 @@ export async function readHostedRuntimeReconciliationFacts(
     workspace: workspaceWithSystemMailboxFrontier,
   });
   emitHostedRuntimeReconciliationFacts({
+    now,
     facts,
     request: input,
     usageGateRequired: false,
@@ -457,30 +410,6 @@ function hostedRuntimeReconciliationNeedsAiUsageGate(input: {
 
   return isHostedRuntimeWakeDue(defaultProcessingWake.at, input.now)
     && isHostedRuntimeModelCapableWorkspaceWakeReason(defaultProcessingWake.reason);
-}
-
-function hostedRuntimeReconciliationNeedsAutomationEngagement(input: {
-  freshConversationMailboxLag: boolean;
-  now: Date;
-  workspace: HostedRuntimeReconciliationFactsWorkspace;
-}): boolean {
-  const defaultProcessingWake = readHostedRuntimeDefaultProcessingWake(
-    input.workspace,
-  );
-  return !input.freshConversationMailboxLag
-    && isHostedRuntimeWakeDue(defaultProcessingWake.at, input.now)
-    && isHostedRuntimeModelCapableWorkspaceWakeReason(defaultProcessingWake.reason);
-}
-
-async function hasHostedMemberEstablishedLinqRoute(input: {
-  memberId: string;
-  prisma: HostedOnboardingReadClient;
-}): Promise<boolean> {
-  if (await hasHostedMemberEstablishedLinqHomeRoute(input)) {
-    return true;
-  }
-
-  return await hasHostedMemberEstablishedLinqThreadRoute(input);
 }
 
 function resolveHostedRuntimeAiBlockedRetryAt(input: {
@@ -633,11 +562,9 @@ async function readHostedRuntimePendingConversationWake(input: {
 
   const payload = input.item.payloadRef
     ? await readHostedMailboxPayload({
-        dedupeKey: input.item.dedupeKey,
-        mailboxItemId: input.item.id,
+        item: input.item,
         payloadRef: input.item.payloadRef,
         prisma: input.prisma,
-        userId: input.item.userId,
       })
     : null;
   const decoded = await decodeHostedMailboxStoredPayload({
@@ -706,50 +633,73 @@ function parseHostedMailboxReconciliationSeq(
 }
 
 function emitHostedRuntimeReconciliationFacts(event: {
+  now: Date;
   facts: HostedRuntimeReconciliationFacts;
-  request: HostedRuntimeReconciliationFactsRequest & {
-    decisionSource?: HostedRuntimeReconciliationDecisionSource;
-  };
+  request: Parameters<typeof readHostedRuntimeReconciliationFacts>[0];
   usageGateRequired: boolean;
+  usageLimitExceeded?: boolean;
   usageGateStatus: HostedRuntimeReconciliationUsageGateStatus;
 }): void {
+  const { blocked, mailboxLag, workspace } = event.facts;
+  observeHostedRuntimeUsageGateDecision(event);
+  const workspaceWakeDue = [
+    workspace?.nextWakeAt,
+    workspace?.nextDefaultProcessingWakeAt,
+    workspace?.inboxMediaRetentionWakeAt,
+  ].some((at) => isHostedRuntimeWakeDue(at ?? null, event.now));
+
   console.info("Hosted runtime reconciliation facts.", {
-    blockedReason: event.facts.blocked?.reason ?? null,
+    blockedReason: blocked?.reason ?? null,
     component: "hosted.orchestration.reconciliation",
-    conversationLagPresent: hasHostedMailboxLag(event.facts.mailboxLag, "conversation"),
+    conversationLagPresent: hasHostedMailboxLag(mailboxLag, "conversation"),
     decisionSource: event.request.decisionSource ?? "workflow",
-    mailboxLagLaneCount: event.facts.mailboxLag.length,
-    retryAtPresent: event.facts.blocked?.retryAt !== null
-      && event.facts.blocked?.retryAt !== undefined,
+    mailboxLagLaneCount: mailboxLag.length,
+    retryAtPresent: typeof blocked?.retryAt === "string",
     schema: HOSTED_RUNTIME_RECONCILIATION_FACTS_LOG_SCHEMA,
-    status: event.facts.blocked
+    status: blocked
       ? "blocked"
-      : hasHostedMailboxLag(event.facts.mailboxLag)
+      : hasHostedMailboxLag(mailboxLag)
+        || workspaceWakeDue
         ? "work_pending"
         : "idle",
     usageGateRequired: event.usageGateRequired,
     usageGateStatus: event.usageGateStatus,
     userIdPresent: event.request.userId.length > 0,
     workspaceInboxMediaRetentionWakeAtPresent:
-      event.facts.workspace?.inboxMediaRetentionWakeAt !== null
-        && event.facts.workspace?.inboxMediaRetentionWakeAt !== undefined,
+      typeof workspace?.inboxMediaRetentionWakeAt === "string",
     workspaceNextWakeAtPresent:
-      event.facts.workspace?.nextWakeAt !== null
-        && event.facts.workspace?.nextWakeAt !== undefined,
+      typeof workspace?.nextWakeAt === "string",
     workspaceNextWakeReason: describeHostedRuntimeWakeReasonForLog(
-      event.facts.workspace?.nextWakeReason ?? null,
+      workspace?.nextWakeReason ?? null,
     ),
     workspaceNextDefaultProcessingWakeAtPresent:
-      event.facts.workspace?.nextDefaultProcessingWakeAt !== null
-        && event.facts.workspace?.nextDefaultProcessingWakeAt !== undefined,
+      typeof workspace?.nextDefaultProcessingWakeAt === "string",
     workspaceNextDefaultProcessingWakeReason:
       describeHostedRuntimeWakeReasonForLog(
-        event.facts.workspace?.nextDefaultProcessingWakeReason ?? null,
+        workspace?.nextDefaultProcessingWakeReason ?? null,
       ),
     workspaceSystemMailboxProgressGenerationPresent:
-      event.facts.workspace?.systemMailboxProgressGeneration !== undefined,
-    workspacePresent: event.facts.workspace !== null,
+      workspace?.systemMailboxProgressGeneration !== undefined,
+    workspacePresent: workspace !== null,
   });
+}
+
+function observeHostedRuntimeUsageGateDecision(
+  event: Parameters<typeof emitHostedRuntimeReconciliationFacts>[0],
+): void {
+  if (
+    event.request.usageGateMode !== "read_only"
+    && (event.usageGateStatus === "allowed" || event.usageGateStatus === "denied")
+  ) {
+    try {
+      event.request.onUsageGateDecision?.({
+        at: event.now.toISOString(),
+        usageLimited: event.usageLimitExceeded === true,
+      });
+    } catch {
+      console.warn("Runtime usage-gate diagnostic could not be scheduled.");
+    }
+  }
 }
 
 function describeHostedRuntimeWakeReasonForLog(reason: string | null): string | null {
@@ -883,7 +833,18 @@ async function readHostedRuntimeSystemMailboxFrontier(input: {
     return null;
   }
 
-  return classifyHostedFirstLiveSystemItemOwnership(frontier);
+  const executionClass = classifyHostedFirstLiveSystemItemOwnership(frontier);
+  if (executionClass === "model_free") return executionClass;
+  // Readiness is independent of the handled prefix. A retained assistant item
+  // must not hide consented deterministic work when assistant usage is blocked.
+  const independent = await readHostedMailboxFirstLiveSystemItemAfterSeq({
+    afterSeq: input.handledThroughSeq,
+    at: input.at,
+    modelFreeOnly: true,
+    prisma: input.prisma,
+    userId: input.userId,
+  });
+  return independent ? classifyHostedFirstLiveSystemItemOwnership(independent) : executionClass;
 }
 
 export function classifyHostedFirstLiveSystemItemOwnership(input: {

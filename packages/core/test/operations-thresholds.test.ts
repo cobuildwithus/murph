@@ -982,6 +982,68 @@ test("hosted JSONL replay rejects matching-size base content drift", async () =>
   assert.equal(await fs.readFile(targetAbsolutePath, "utf8"), "other\n");
 });
 
+test("hosted inbox replay tolerates an omitted backup and remains idempotent", async () => {
+  const vaultRoot = await makeTempDirectory("murph-core-inbox-backup-gap");
+  await initializeVault({ vaultRoot });
+  const targetRelativePath = "ledger/inbox-captures/2026/2026-04.jsonl";
+  const buildCapture = (captureId: string, text = "Synthetic attachment") => ({
+    schemaVersion: "murph.inbox-capture.v2",
+    captureId,
+    identityKey: `telegram:self:${captureId}`,
+    eventId: "evt_01JQ8PWXP5A68SQM1W0GYM41V4",
+    source: "telegram",
+    accountId: "self",
+    externalId: captureId,
+    thread: { id: "synthetic_thread", title: null, isDirect: true },
+    actor: { id: null, displayName: null, isSelf: false },
+    occurredAt: FIXED_TIME,
+    recordedAt: FIXED_TIME,
+    receivedAt: FIXED_TIME,
+    text,
+    raw: {},
+    sourceDirectory: `raw/inbox/${captureId}`,
+    rawRefs: [],
+    attachments: [],
+  });
+  const lost = `${JSON.stringify(buildCapture("cap_lost_backup"))}\n`;
+  const saved = `${JSON.stringify(buildCapture("cap_saved_backup"))}\n`;
+  const receipt = buildHostedJsonlAppendReceipt({
+    appendContent: saved,
+    baseContent: lost,
+    operationId: "op_inbox_backup_gap",
+    targetRelativePath,
+  });
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    await applyHostedCanonicalWriteReceipt({
+      vaultRoot,
+      receipt,
+      readPayload: async () => Buffer.from(saved),
+    });
+  }
+  const target = path.join(vaultRoot, targetRelativePath);
+  assert.equal(await fs.readFile(target, "utf8"), saved);
+
+  const conflicting = `${JSON.stringify(buildCapture("cap_saved_backup", "Conflicting contents"))}\n`;
+  await assert.rejects(applyHostedCanonicalWriteReceipt({
+    vaultRoot,
+    receipt: buildHostedJsonlAppendReceipt({
+      appendContent: conflicting,
+      baseContent: lost,
+      operationId: "op_inbox_backup_conflict",
+      targetRelativePath,
+    }),
+    readPayload: async () => Buffer.from(conflicting),
+  }), /conflicting content/);
+  assert.equal(await fs.readFile(target, "utf8"), saved);
+
+  await fs.writeFile(target, `${saved}${saved}`);
+  await assert.rejects(applyHostedCanonicalWriteReceipt({
+    vaultRoot,
+    receipt,
+    readPayload: async () => Buffer.from(saved),
+  }), /duplicate existing/);
+});
+
 test("hosted audit replay converges two ordered receipts after a later physical append", async () => {
   const targetRelativePath = "audit/2026/2026-04.jsonl";
   const baseContent = `${JSON.stringify(buildAuditRecord(

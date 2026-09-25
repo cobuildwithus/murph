@@ -1,13 +1,14 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 
 import {
   RecordsConnectLauncherState,
-  ProviderSearch,
 } from "@/app/(dashboard)/records/connect/records-connect-client";
 
-import { ConnectionRow } from "@/app/(dashboard)/records/records-page-client";
+import { ProviderSearchView, type ProviderSearchViewProps } from "@/app/(dashboard)/records/connect/provider-search-view";
+
+import { ConnectionRow, DisconnectDialog, RecordsPrivacyControls } from "@/app/(dashboard)/records/records-page-client";
 import type { ClinicalRecordConnectionContract } from "@/src/lib/clinical-records/client-contracts";
 
 const savedSource: ClinicalRecordConnectionContract = {
@@ -20,7 +21,8 @@ const savedSource: ClinicalRecordConnectionContract = {
   sourceSystem: "epic-fhir",
   status: "active",
   canImport: true,
-  importsRemaining: 7,
+  lastCheckedAt: "2026-09-17T12:00:00.000Z",
+  nextSyncAt: "2026-09-18T12:00:00.000Z",
   latestRun: {
     completedAt: "2026-09-04T12:05:00.000Z",
     importedCount: 3,
@@ -32,21 +34,47 @@ const savedSource: ClinicalRecordConnectionContract = {
   },
 };
 
+const searchPreview: ProviderSearchViewProps = {
+  keepUpdated: true, onKeepUpdatedChange: () => {},
+  query: "Clinic", providers: [
+    { id: "epic-320", brandName: "Cleveland Clinic", facilities: [{ city: "Cleveland", state: "OH", name: null, postalCode: null }], sourceSystem: "epic-fhir" },
+    { id: "epic-958", brandName: "Mayo Clinic", facilities: [{ city: "Rochester", state: "MN", name: null, postalCode: null }], sourceSystem: "epic-fhir" },
+    { id: "epic-example", brandName: "Example Community Clinic", facilities: [], sourceSystem: "epic-fhir" },
+  ],
+  hasSearched: true, searchPending: false, searchError: null, startError: null,
+  startingProviderId: null, selectedProviderId: null,
+  onQueryChange: () => {}, onSearch: () => {}, onSelect: () => {}, onRestart: () => {},
+};
+
 export function ClinicalRecordsConnectLauncherStudy() {
+  const [disconnectOpen, setDisconnectOpen] = useState(false);
   return (
     <div
       className="grid gap-6 xl:grid-cols-2"
       id="clinical-records"
+      ref={(node) => { node?.setAttribute("data-preview-ready", "true"); }}
       data-design-section="clinical-records-connect-launcher"
       inert
     >
       <StudyState label="Find your provider">
-        <ProviderSearch intentClaim={`cr_${"d".repeat(32)}`} onConsentRequired={() => {}} />
+        <ProviderSearchView {...searchPreview} />
+      </StudyState>
+      <StudyState label="Finding a provider">
+        <ProviderSearchView {...searchPreview} providers={[]} hasSearched={false} searchPending />
+      </StudyState>
+      <StudyState label="No matching provider">
+        <ProviderSearchView {...searchPreview} providers={[]} />
+      </StudyState>
+      <StudyState label="Search retry">
+        <ProviderSearchView {...searchPreview} providers={[]} searchError="Hospitals and clinics could not be searched right now. Try again." />
       </StudyState>
       <StudyState label="Saved lab results">
         <ul>
-          <ConnectionRow connection={savedSource} disabled={false} onDisconnect={() => {}} />
+          <ConnectionRow connection={savedSource} disabled={false} onDisconnect={() => setDisconnectOpen(true)} />
         </ul>
+      </StudyState>
+      <StudyState label="Incomplete import">
+        <ul><ConnectionRow connection={{ ...savedSource, latestRun: { ...savedSource.latestRun!, status: "partial", reviewCount: 2, skippedExistingCount: 1 } }} disabled={false} onDisconnect={() => {}} /></ul>
       </StudyState>
       <StudyState label="Partial results after access ends">
         <ul>
@@ -54,6 +82,7 @@ export function ClinicalRecordsConnectLauncherStudy() {
             connection={{
               ...savedSource,
               status: "needs_reauth",
+              nextSyncAt: null,
               latestRun: { ...savedSource.latestRun!, status: "needs_reauth", reviewCount: 2 },
             }}
             disabled={false}
@@ -87,6 +116,7 @@ export function ClinicalRecordsConnectLauncherStudy() {
           />
         </ul>
       </StudyState>
+      <StudyState label="Record privacy controls"><RecordsPrivacyControls /></StudyState>
       <StudyState label="Authenticated launcher loading">
         <RecordsConnectLauncherState state="loading" />
       </StudyState>
@@ -96,6 +126,7 @@ export function ClinicalRecordsConnectLauncherStudy() {
       <StudyState label="Launcher can be retried">
         <RecordsConnectLauncherState state="launch-failed" />
       </StudyState>
+      <DisconnectDialog connection={disconnectOpen ? savedSource : null} errorMessage={null} onConfirm={() => setDisconnectOpen(false)} onOpenChange={setDisconnectOpen} pending={false} />
     </div>
   );
 }

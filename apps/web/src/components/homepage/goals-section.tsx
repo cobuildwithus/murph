@@ -234,7 +234,6 @@ export function GoalsSection({
               <li className="min-w-0" key={goal.guideHref}>
                 <GoalHandoffAction
                   className={cn(GOAL_BROWSE_CARD_CLASS_NAME, "h-full w-full text-left")}
-                  guideHref={goal.guideHref}
                   handoff={handoff}
                   prompt={`Hey Murph, help me ${goal.phrase}`}
                 >

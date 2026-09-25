@@ -99,7 +99,7 @@ describe('post-onboarding support-gap automation', () => {
       // March 4 is EST and March 8 is EDT. vault-3 maps to the first slot.
       activeUntil: '2026-03-08T17:30:00.000Z',
       assistantTargetOverride: {
-        model: 'gpt-5.6-sol',
+        model: 'gpt-6-sol',
         reasoningEffort: 'medium',
       },
       automationId: MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID,

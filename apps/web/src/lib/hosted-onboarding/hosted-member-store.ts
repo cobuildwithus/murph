@@ -9,6 +9,7 @@ import {
   Prisma,
   type PrismaClient,
 } from "@prisma/client";
+import { lockHostedRuntimeMemberCreationTx } from "../hosted-execution/runtime-member-creation";
 import { normalizeHostedEmailReplyAliasLookupKey } from "@murphai/hosted-execution/hosted-email";
 
 import {
@@ -17,6 +18,7 @@ import {
 } from "./contact-privacy";
 import { hostedOnboardingError, isHostedOnboardingError } from "./errors";
 import { createHostedMemberReplyAliasRoute } from "./hosted-email-reply-alias";
+import { assertHostedLegacyCredentialWriterTx } from "../better-auth/legacy-writer";
 import { activeHostedMemberAccessWhere } from "./member-access";
 import {
   decryptHostedWebNullableString,
@@ -212,6 +214,7 @@ export interface HostedMemberEmailAuthorizationWriteInput {
 }
 
 export interface HostedMemberVerifiedEmailSyncInput {
+  authSource?: "better-auth";
   address: string;
   memberId: string;
   preparedControlRoot?: PreparedHostedDomainRootForWeb;
@@ -267,6 +270,7 @@ export async function createHostedMember(input: {
   prisma: Prisma.TransactionClient;
   suspendedAt?: Date | null;
 }): Promise<HostedMemberCoreState> {
+  await lockHostedRuntimeMemberCreationTx(input.prisma);
   return input.prisma.hostedMember.create({
     data: {
       ...(input.assistantModelPreference === undefined
@@ -933,6 +937,7 @@ export async function syncHostedMemberVerifiedEmailAuthorization(
   }
 
   return upsertHostedMemberVerifiedEmailAuthorizationTx({
+    authSource: input.authSource,
     memberId: input.memberId,
     preparedControlRoot: input.preparedControlRoot,
     preparedReplyAlias: input.preparedReplyAlias,
@@ -944,6 +949,7 @@ export async function syncHostedMemberVerifiedEmailAuthorization(
 
 export async function prepareHostedMemberVerifiedEmailReplyAlias(input: {
   address: string;
+  afterRemoval?: true;
   memberId: string;
   prisma: HostedOnboardingReadClient;
 }): Promise<HostedMemberVerifiedEmailReplyAliasPreparation> {
@@ -957,7 +963,7 @@ export async function prepareHostedMemberVerifiedEmailReplyAlias(input: {
     }),
     input.prisma.hostedMemberRouting.findUnique({
       where: { memberId: input.memberId },
-      select: { replyAliasGeneration: true },
+      select: { replyAliasGeneration: true, replyAliasLookupKey: true },
     }),
   ]);
   const currentGeneration = requireHostedMemberReplyAliasGeneration(
@@ -971,8 +977,9 @@ export async function prepareHostedMemberVerifiedEmailReplyAlias(input: {
     && currentAuthorization.verifiedEmailLookupKey
     && verifiedEmailLookupKeys.includes(currentAuthorization.verifiedEmailLookupKey),
   );
-  const generation = currentAuthorization?.verifiedEmailVerifiedAt
-    && !sameVerifiedAddress
+  const rotate = input.afterRemoval ? Boolean(currentRouting?.replyAliasLookupKey)
+    : Boolean(currentAuthorization?.verifiedEmailVerifiedAt && !sameVerifiedAddress);
+  const generation = rotate
     ? incrementHostedMemberReplyAliasGeneration(currentGeneration)
     : currentGeneration;
   const route = await createHostedMemberReplyAliasRoute({
@@ -1004,6 +1011,7 @@ async function upsertHostedMemberVerifiedEmailAuthorizationTx(
   });
   await lockHostedMemberRow(input.prisma, input.memberId);
 
+  if (input.authSource !== "better-auth") await assertHostedLegacyCredentialWriterTx(input.prisma, input.memberId);
   const currentAuthorization = await input.prisma.hostedMemberEmailAuthorization.findUnique({
     where: { memberId: input.memberId },
     select: {

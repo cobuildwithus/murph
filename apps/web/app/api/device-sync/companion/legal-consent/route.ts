@@ -3,7 +3,7 @@ import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import {
   readHostedOnboardingJsonObject,
 } from "@/src/lib/hosted-onboarding/http";
-import { requirePrivyMemberAuthFromBearerToken } from "@/src/lib/hosted-onboarding/request-auth";
+import { requireHostedMemberAuthFromBearerToken } from "@/src/lib/hosted-onboarding/request-auth";
 import {
   type HostedConsentLaunchScope,
   parseHostedConsentAcceptRequest,
@@ -24,7 +24,7 @@ function isLaunchScope(scope: string): scope is HostedConsentLaunchScope {
 // able to review and accept legal terms before protected product access resumes.
 export const GET = withJsonError(async (request: Request) => {
   const prisma = getPrisma();
-  const auth = await requirePrivyMemberAuthFromBearerToken(request, prisma);
+  const auth = await requireHostedMemberAuthFromBearerToken(request, prisma);
 
   return jsonOk(await readHostedConsentStatus({
     memberId: auth.member.id,
@@ -34,7 +34,7 @@ export const GET = withJsonError(async (request: Request) => {
 
 export const POST = withJsonError(async (request: Request) => {
   const prisma = getPrisma();
-  const auth = await requirePrivyMemberAuthFromBearerToken(request, prisma);
+  const auth = await requireHostedMemberAuthFromBearerToken(request, prisma);
   const consent = parseHostedConsentAcceptRequest(
     await readHostedOnboardingJsonObject(request, {
       limitBytes: COMPANION_CONSENT_BODY_MAX_BYTES,

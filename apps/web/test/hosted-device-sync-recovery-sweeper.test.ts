@@ -37,6 +37,18 @@ describe("hosted device-sync scheduled wake sweeper", () => {
     expect(preferenceHandoffSweeper).toHaveBeenCalledTimes(1);
   });
 
+  it("does not retry benign skipped wakes when the due sweep reports no failures", async () => {
+    const logger = { warn: vi.fn() };
+    await expect(runHostedDeviceSyncRecoverySweep({
+      logger,
+      runDueReconcileSweeper: async () => buildDueReconcileSweepResult({
+        wakeAccepted: 0, wakeNotAccepted: 1, wakeFailed: 0,
+      }),
+      runPreferenceHandoffSweeper: async () => buildPreferenceHandoffSweepResult(),
+    })).resolves.toMatchObject({ dueReconcileSweeper: { wakeNotAccepted: 1, wakeFailed: 0 } });
+    expect(logger.warn).not.toHaveBeenCalled();
+  });
+
   it("fails the command when due-reconcile wake handoff is not accepted", async () => {
     const logger = {
       warn: vi.fn(),
@@ -91,7 +103,7 @@ describe("hosted device-sync scheduled wake sweeper", () => {
 
 function buildDueReconcileSweepResult(overrides: Partial<{
   dueConnections: number;
-  skippedDueConnections: number;
+  hasMoreDueConnections: boolean;
   wakeAccepted: number;
   wakeAttempted: number;
   wakeFailed: number;
@@ -100,11 +112,11 @@ function buildDueReconcileSweepResult(overrides: Partial<{
 }> = {}) {
   return {
     dueConnections: 1,
-    skippedDueConnections: 0,
+    hasMoreDueConnections: false,
     wakeAccepted: 1,
     wakeAttempted: 1,
     wakeFailed: 0,
-    wakeLimit: 25,
+    wakeLimit: 100,
     wakeNotAccepted: 0,
     ...overrides,
   };

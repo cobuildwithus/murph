@@ -1,3 +1,5 @@
+import { parseHostedRuntimeResourcePurge, parseHostedRuntimeResourcePurgeResponse, type HostedRuntimeResourcePurge } from "@murphai/hosted-execution/runtime-resource-purge";
+import { parseHostedVoiceControlRequest, parseHostedVoiceControlResponse, type HostedVoiceControlRequest, type HostedVoiceControlResponse } from "@murphai/hosted-execution";
 import {
   parseHostedCipherEnvelope,
   parseHostedUserRecipientPublicKeyJwk,
@@ -61,6 +63,7 @@ import {
   CLOUDFLARE_HOSTED_CONTROL_MEAL_PHOTO_KEY_HEADER,
   CLOUDFLARE_HOSTED_CONTROL_MEAL_PHOTO_SHA256_HEADER,
   buildCloudflareHostedControlBrowserVaultSessionPath,
+  buildCloudflareHostedControlVoiceControlPath,
   buildCloudflareHostedControlEnvironmentRealtimeCallPath,
   buildCloudflareHostedControlEnvironmentVoiceDeletePath,
   buildCloudflareHostedControlEnvironmentVoiceStagePath,
@@ -69,10 +72,10 @@ import {
   buildCloudflareHostedControlMealPhotoStagePath,
   buildCloudflareHostedControlRuntimeEnsureProcessingPath,
   buildCloudflareHostedControlRuntimeHealthDataConsentPath,
-  buildCloudflareHostedControlRuntimeShellPrewarmPath,
   buildCloudflareHostedControlTelegramUsageLimitNoticePath,
   buildCloudflareHostedControlUserDataDeletionPath,
   buildCloudflareHostedControlUserStatusPath,
+  buildCloudflareHostedControlRuntimeResourcePurgePath,
 } from "./routes.ts";
 import { requireCloudflareHostedControlUserId } from "./user-id.ts";
 import {
@@ -183,6 +186,8 @@ export interface CloudflareHostedControlBrowserVaultReplicaAad {
 }
 
 export interface CloudflareHostedControlUserDataDeletionResult {
+  stateOwner?: "postgres";
+  runtimeStateCleared?: boolean;
   durableObject: {
     alarmCleared: boolean;
     deleteAllCompleted: boolean;
@@ -238,6 +243,7 @@ export type CloudflareHostedControlTelegramUsageLimitNoticeResponse =
   };
 
 export interface CloudflareHostedControlClient {
+  controlVoice(input: { userId: string; request: HostedVoiceControlRequest; signal?: AbortSignal }): Promise<HostedVoiceControlResponse>;
   createEnvironmentRealtimeCall(input: {
     sdp: string;
     userId: string;
@@ -257,6 +263,7 @@ export interface CloudflareHostedControlClient {
     replicaRef: HostedBrowserVaultReplicaRef;
     userId: string;
   }): Promise<CloudflareHostedControlBrowserVaultExportSession>;
+  purgeRuntimeResource(input: { userId: string; resource: HostedRuntimeResourcePurge }): Promise<{ deleted: true }>;
   deleteUserData(
     userId: string,
     options?: { signal?: AbortSignal },
@@ -270,18 +277,14 @@ export interface CloudflareHostedControlClient {
     userId: string;
   }): Promise<void>;
   ensureRuntimeProcessing(input: {
+    voiceCallId?: string;
+    admission?: import("@murphai/hosted-execution/runtime-owner").HostedRuntimeOwnerResponse;
     commandTimeoutMs?: number;
     onTiming?: (timing: CloudflareHostedControlRuntimeEnsureProcessingTiming) => void;
     orchestrationAttemptId: string;
     signal?: AbortSignal;
     userId: string;
   }): Promise<CloudflareHostedControlRuntimeEnsureProcessingResponse>;
-  prewarmRuntimeShell(input: {
-    orchestrationAttemptId: string;
-    requestStartedAtEpochMs: number;
-    source: CloudflareHostedControlRuntimeShellPrewarmSource;
-    userId: string;
-  }): Promise<CloudflareHostedControlRuntimeShellPrewarmAcceptedAck>;
   reconcileRuntimeHealthDataConsent(
     userId: string,
   ): Promise<CloudflareHostedControlRuntimeHealthDataConsentResult>;
@@ -313,15 +316,6 @@ export interface CloudflareHostedControlClient {
 export interface CloudflareHostedControlRuntimeEnsureProcessingAcceptedAck {
   accepted: true;
 }
-
-export interface CloudflareHostedControlRuntimeShellPrewarmAcceptedAck {
-  accepted: true;
-}
-
-export type CloudflareHostedControlRuntimeShellPrewarmSource =
-  | "linq-instant-start"
-  | "linq-message-routing"
-  | "linq-typing-started";
 
 export type CloudflareHostedControlRuntimeEnsureProcessingResponse =
   | HostedRuntimeEnsureProcessingResponse
@@ -510,6 +504,20 @@ export function createCloudflareHostedControlClient(
   };
 
   return {
+    controlVoice(input) {
+      const userId = requireCloudflareHostedControlUserId(input.userId);
+      return requestHostedExecutionAuthorizedJson({
+        baseUrl, boundUserId: userId, fetchImpl, getAuthorizationHeader,
+        label: "voice control",
+        parse: parseHostedVoiceControlResponse,
+        path: buildCloudflareHostedControlVoiceControlPath(userId),
+        request: {
+          method: "POST", headers: { "content-type": "application/json" },
+          body: JSON.stringify(parseHostedVoiceControlRequest(input.request)),
+        },
+        signal: input.signal, timeoutMs: 45_000,
+      });
+    },
     createEnvironmentRealtimeCall(input) {
       const userId = requireCloudflareHostedControlUserId(input.userId);
       const sdp = requireString(
@@ -562,6 +570,17 @@ export function createCloudflareHostedControlClient(
 
     createBrowserVaultExportSession(input) {
       return requestBrowserVaultExportSession(input);
+    },
+
+    purgeRuntimeResource(input) {
+      const userId = requireCloudflareHostedControlUserId(input.userId);
+      return requestHostedExecutionAuthorizedJson({
+        baseUrl, boundUserId: userId, fetchImpl, getAuthorizationHeader,
+        label: "runtime resource purge", parse: parseHostedRuntimeResourcePurgeResponse,
+        path: buildCloudflareHostedControlRuntimeResourcePurgePath(userId),
+        request: { body: JSON.stringify(parseHostedRuntimeResourcePurge(input.resource)), headers: { "content-type": "application/json; charset=utf-8" }, method: "POST" },
+        timeoutMs: options.timeoutMs,
+      });
     },
 
     deleteUserData(userId, requestOptions) {
@@ -651,6 +670,8 @@ export function createCloudflareHostedControlClient(
         request: {
           body: JSON.stringify({
             orchestrationAttemptId: input.orchestrationAttemptId,
+            voiceCallId: input.voiceCallId,
+            ...(input.admission === undefined ? {} : { admission: input.admission }),
           }),
           headers: {
             "content-type": "application/json; charset=utf-8",
@@ -664,31 +685,6 @@ export function createCloudflareHostedControlClient(
         runtimeEnsureProcessingOrchestrationAttemptId:
           input.orchestrationAttemptId,
         signal: input.signal,
-        timeoutMs: options.timeoutMs,
-      });
-    },
-    prewarmRuntimeShell(input) {
-      const expectedUserId = requireCloudflareHostedControlUserId(input.userId);
-
-      return requestHostedExecutionAuthorizedJson({
-        baseUrl,
-        boundUserId: expectedUserId,
-        fetchImpl,
-        getAuthorizationHeader,
-        label: "runtime shell prewarm",
-        parse: parseCloudflareHostedControlRuntimeShellPrewarmResponse,
-        path: buildCloudflareHostedControlRuntimeShellPrewarmPath(expectedUserId),
-        request: {
-          body: JSON.stringify({
-            orchestrationAttemptId: input.orchestrationAttemptId,
-            requestStartedAtEpochMs: input.requestStartedAtEpochMs,
-            source: input.source,
-          }),
-          headers: {
-            "content-type": "application/json; charset=utf-8",
-          },
-          method: "POST",
-        },
         timeoutMs: options.timeoutMs,
       });
     },
@@ -1802,6 +1798,8 @@ function parseCloudflareHostedControlUserDataDeletionResult(
   const userScopedSkipReason = r2.userScopedSkipReason;
 
   return {
+    ...(record.stateOwner === "postgres" ? { stateOwner: "postgres" as const,
+      runtimeStateCleared: requireBoolean(record.runtimeStateCleared, "Runtime state cleared") } : {}),
     deletedAt: requireString(record.deletedAt, "Cloudflare user-data deletion result deletedAt"),
     durableObject: {
       alarmCleared: requireBoolean(
@@ -1948,18 +1946,6 @@ function readCloudflareHostedControlRuntimeEnsureProcessingTimingResult(
     directEnsureResultKind: response.kind,
     directEnsureRuntimeAttemptId: response.runtimeAttemptId,
   };
-}
-
-function parseCloudflareHostedControlRuntimeShellPrewarmResponse(
-  value: unknown,
-): CloudflareHostedControlRuntimeShellPrewarmAcceptedAck {
-  const record = requireRecord(value, "Cloudflare runtime shell prewarm response");
-  if (record.accepted !== true) {
-    throw new TypeError(
-      "Cloudflare runtime shell prewarm response accepted must be true.",
-    );
-  }
-  return { accepted: true };
 }
 
 function parseCloudflareHostedControlTelegramUsageLimitNoticeResponse(

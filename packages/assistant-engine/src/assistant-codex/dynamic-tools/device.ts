@@ -1,5 +1,8 @@
 import type { MurphDynamicToolExecutionResult } from '../dynamic-tools.js'
-import { toolTextResult as deviceTextResult } from '../tool-failure-diagnostics.js'
+import {
+  toolTextResult as deviceTextResult,
+  withDeviceToolFailureDetails,
+} from '../tool-failure-diagnostics.js'
 import * as z from '@murphai/contracts/zod-runtime'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 
@@ -156,16 +159,20 @@ export async function executeDeviceDynamicTool(input: {
           text.failureReason,
         )
   } catch (error) {
-    return deviceTextResult(
-      false,
-      serializeDeviceToolError(
-        projectDeviceToolError(
-          error,
-          input.request.request.action,
-          input.abortSignal?.aborted === true,
+    return withDeviceToolFailureDetails(
+      deviceTextResult(
+        false,
+        serializeDeviceToolError(
+          projectDeviceToolError(
+            error,
+            input.request.request.action,
+            input.abortSignal?.aborted === true,
+          ),
         ),
+        'handler_exception', error,
       ),
-      'handler_exception', error,
+      input.request.request.action,
+      error,
     )
   }
 }

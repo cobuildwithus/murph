@@ -18,10 +18,11 @@ import {
 } from "@murphai/contracts";
 
 import type {
+  CanonicalEntity,
   CanonicalQuerySourceHash,
-  VaultReadModel,
 } from "@murphai/query";
 import type { BrowserVaultReplica } from "@murphai/query/browser";
+import type { BrowserVaultReplicaSourceStep } from "@murphai/query/browser-replica-server";
 import {
   assessBrowserVaultReplicaFreshness,
   HOSTED_BROWSER_VAULT_REPLICA_MAX_BYTES,
@@ -116,6 +117,11 @@ export interface HostedBrowserVaultReplicaRefreshPreparation {
   source: HostedBrowserVaultReplicaSourceSummary;
 }
 
+interface HostedBrowserVaultReplicaSourceReadTiming {
+  step: BrowserVaultReplicaSourceStep;
+  elapsedMs: number;
+}
+
 export type HostedBrowserVaultReplicaRefreshResult =
   | {
       byteLength: number;
@@ -145,6 +151,7 @@ export type HostedBrowserVaultReplicaRefreshResult =
       refreshStage: HostedBrowserVaultReplicaRefreshStage;
       refreshStep: HostedBrowserVaultReplicaRefreshStep;
       source: HostedBrowserVaultReplicaSourceSummary;
+      sourceReadAtDeadline?: HostedBrowserVaultReplicaSourceReadTiming;
       status: "deferred_timeout";
     }
   | {
@@ -159,12 +166,13 @@ export type HostedBrowserVaultReplicaRefreshResult =
       status: "publish_conflict" | "skipped_no_port" | "workspace_missing" | "refresh_failed";
     };
 
-const DEFAULT_HOSTED_BROWSER_VAULT_REFRESH_TIMEOUT_MS = 30_000;
+const DEFAULT_HOSTED_BROWSER_VAULT_REFRESH_TIMEOUT_MS = 60_000;
 const utf8Encoder = new TextEncoder();
 
 export async function createHostedBrowserVaultReplicaForSourceState(input: {
   generatedAt?: string;
   onRefreshStep?: (step: HostedBrowserVaultReplicaConstructionStep) => void;
+  onSourceStep?: (step: BrowserVaultReplicaSourceStep | null) => void;
   signal?: AbortSignal;
   sourceStateHash: string;
   vaultRoot: string;
@@ -177,13 +185,14 @@ export async function createHostedBrowserVaultReplicaForSourceState(input: {
   input.signal?.throwIfAborted();
   const { metricPoints, personalPatternVocabulary, vault } =
     await readBrowserVaultReplicaSource(input.vaultRoot, {
+      onSourceStep: input.onSourceStep,
       signal: input.signal,
     });
   input.onRefreshStep?.("replica_construction_experiment_outcome_read");
   input.signal?.throwIfAborted();
   const outcomeProjection = await readHostedBrowserVaultExperimentOutcomes(
     input.vaultRoot,
-    vault,
+    vault.experiments,
     input.signal,
   );
   input.signal?.throwIfAborted();
@@ -302,6 +311,7 @@ export async function refreshHostedBrowserVaultReplicaFromRuntime(input: {
       (signal) => createHostedBrowserVaultReplicaForSourceState({
         generatedAt,
         onRefreshStep: cancellation.recordConstructionStep,
+        onSourceStep: cancellation.recordSourceReadStep,
         signal,
         sourceStateHash: sourceBefore.hash,
         vaultRoot: input.vaultRoot,
@@ -399,6 +409,7 @@ export async function refreshHostedBrowserVaultReplicaFromRuntime(input: {
           refreshStage: error.refreshStage,
           refreshStep: error.refreshStep,
           source,
+          sourceReadAtDeadline: error.sourceReadAtDeadline,
           status: error.status,
         };
       }
@@ -544,20 +555,20 @@ export async function hashHostedBrowserVaultReplicaSources(
   const {
     hashCanonicalQuerySources,
     readBrowserVaultPersonalPatternVocabulary,
-    readBrowserVaultReplicaVault,
+    readBrowserVaultReplicaExperiments,
   } = await import("@murphai/query/browser-replica-server");
   signal?.throwIfAborted();
-  const [canonicalSourceResult, vaultResult, vocabularyResult] =
+  const [canonicalSourceResult, experimentsResult, vocabularyResult] =
     await Promise.allSettled([
       hashCanonicalQuerySources(vaultRoot, { signal }),
-      readBrowserVaultReplicaVault(vaultRoot, { signal }),
+      readBrowserVaultReplicaExperiments(vaultRoot, { signal }),
       readBrowserVaultPersonalPatternVocabulary(vaultRoot),
     ]);
   if (canonicalSourceResult.status === "rejected") {
     throw canonicalSourceResult.reason;
   }
-  if (vaultResult.status === "rejected") {
-    throw vaultResult.reason;
+  if (experimentsResult.status === "rejected") {
+    throw experimentsResult.reason;
   }
   if (vocabularyResult.status === "rejected") {
     throw vocabularyResult.reason;
@@ -565,7 +576,7 @@ export async function hashHostedBrowserVaultReplicaSources(
   signal?.throwIfAborted();
   const outcomeProjection = await readHostedBrowserVaultExperimentOutcomes(
     vaultRoot,
-    vaultResult.value,
+    experimentsResult.value,
     signal,
   );
   signal?.throwIfAborted();
@@ -603,17 +614,14 @@ export async function hashHostedBrowserVaultReplicaSources(
 
 async function readHostedBrowserVaultExperimentOutcomes(
   vaultRoot: string,
-  vault: VaultReadModel,
+  experiments: readonly CanonicalEntity[],
   signal?: AbortSignal,
 ): Promise<HostedBrowserVaultOutcomeProjection> {
   const outcomes: ExperimentOutcome[] = [];
   const sources: HostedBrowserVaultOutcomeSource[] = [];
 
-  for (const entity of vault.entities) {
+  for (const entity of experiments) {
     signal?.throwIfAborted();
-    if (entity.family !== "experiment") {
-      continue;
-    }
 
     const parsedFrontmatter = experimentFrontmatterSchema.safeParse(
       entity.frontmatter ?? entity.attributes,
@@ -762,6 +770,7 @@ class HostedBrowserVaultRefreshDeferredError extends Error {
   readonly refreshStage: HostedBrowserVaultReplicaRefreshStage;
   readonly refreshStep: HostedBrowserVaultReplicaRefreshStep;
   readonly source: HostedBrowserVaultReplicaSourceSummary | null;
+  readonly sourceReadAtDeadline?: HostedBrowserVaultReplicaSourceReadTiming;
   readonly status: Extract<
     HostedBrowserVaultReplicaRefreshResult["status"],
     "deferred_aborted" | "deferred_runtime_wake" | "deferred_timeout"
@@ -775,6 +784,7 @@ class HostedBrowserVaultRefreshDeferredError extends Error {
     refreshStage: HostedBrowserVaultReplicaRefreshStage;
     refreshStep: HostedBrowserVaultReplicaRefreshStep;
     source?: HostedBrowserVaultReplicaSourceSummary | null;
+    sourceReadAtDeadline?: HostedBrowserVaultReplicaSourceReadTiming;
     status: HostedBrowserVaultRefreshDeferredError["status"];
   }) {
     super(`Hosted browser-vault refresh ${input.status}.`);
@@ -786,6 +796,7 @@ class HostedBrowserVaultRefreshDeferredError extends Error {
     this.refreshStage = input.refreshStage;
     this.refreshStep = input.refreshStep;
     this.source = input.source ?? null;
+    this.sourceReadAtDeadline = input.sourceReadAtDeadline;
     this.status = input.status;
   }
 }
@@ -806,6 +817,7 @@ function createBrowserVaultRefreshCancellation(input: {
     refreshStep: HostedBrowserVaultReplicaConstructionStep,
   ): void;
   recordSource(source: HostedBrowserVaultReplicaSourceSummary): void;
+  recordSourceReadStep(step: BrowserVaultReplicaSourceStep | null): void;
   runOwned<T>(
     refreshStage: HostedBrowserVaultReplicaRefreshStage,
     operation: (signal: AbortSignal) => Promise<T>,
@@ -820,6 +832,31 @@ function createBrowserVaultRefreshCancellation(input: {
   let rejectDeferred: (error: HostedBrowserVaultRefreshDeferredError) => void = () => {};
   const refreshStartedAtMs = Date.now();
   let currentStepStartedAtMs = refreshStartedAtMs;
+  const deadlineAtMs = refreshStartedAtMs + Math.max(0, input.timeoutMs);
+  let sourceRead: { step: BrowserVaultReplicaSourceStep; startedAtMs: number } | null = null;
+  let sourceReadAtDeadline: HostedBrowserVaultReplicaSourceReadTiming | undefined;
+  const recordSourceReadStep = (step: BrowserVaultReplicaSourceStep | null) => {
+    if (deferred) {
+      return;
+    }
+    const observedAtMs = Date.now();
+    // A synchronous operation can cross the deadline before the timer runs.
+    // Retain that operation, not a later fast operation or cancellation yield.
+    if (
+      !sourceReadAtDeadline
+      && sourceRead
+      && sourceRead.startedAtMs < deadlineAtMs
+      && observedAtMs >= deadlineAtMs
+    ) {
+      sourceReadAtDeadline = {
+        step: sourceRead.step,
+        elapsedMs: toBoundedHostedBrowserVaultTimingMs(
+          observedAtMs - sourceRead.startedAtMs,
+        ),
+      };
+    }
+    sourceRead = step === null ? null : { step, startedAtMs: observedAtMs };
+  };
   const waiterAbortController = new AbortController();
   const deferredPromise = new Promise<never>((_resolve, reject) => {
     rejectDeferred = reject;
@@ -829,6 +866,7 @@ function createBrowserVaultRefreshCancellation(input: {
     if (deferred) {
       return;
     }
+    recordSourceReadStep(null);
     const deferredAtMs = Date.now();
     const refreshElapsedMs = toBoundedHostedBrowserVaultTimingMs(
       deferredAtMs - refreshStartedAtMs,
@@ -848,6 +886,7 @@ function createBrowserVaultRefreshCancellation(input: {
       refreshStage,
       refreshStep,
       source,
+      sourceReadAtDeadline,
       status,
     });
     if (!waiterAbortController.signal.aborted) {
@@ -897,6 +936,7 @@ function createBrowserVaultRefreshCancellation(input: {
     recordSource(nextSource: HostedBrowserVaultReplicaSourceSummary) {
       source = nextSource;
     },
+    recordSourceReadStep,
     async runOwned<T>(
       nextRefreshStage: HostedBrowserVaultReplicaRefreshStage,
       operation: (signal: AbortSignal) => Promise<T>,

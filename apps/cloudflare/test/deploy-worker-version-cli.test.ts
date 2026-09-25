@@ -1,6 +1,10 @@
 import path from "node:path";
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { syntheticHostedWebProtocolAdmission } from "./helpers/hosted-web-protocol";
+
+const webProtocolMocks = vi.hoisted(() => ({ admit: vi.fn() }));
+vi.mock("../scripts/deploy-web-protocol.ts", () => ({ assertHostedWebProtocolAdmission: webProtocolMocks.admit }));
 
 const fileMocks = vi.hoisted(() => ({ readFile: vi.fn(async () => "{}"), writeFile: vi.fn(async () => {}) }));
 vi.mock("node:fs/promises", async () => ({
@@ -19,9 +23,11 @@ vi.mock("../scripts/deploy-artifacts.js", async () => ({
 const imageMocks = vi.hoisted(() => ({ prepareHostedContainerDeployImage: vi.fn() }));
 vi.mock("../scripts/prepare-container-deploy-image.ts", () => imageMocks);
 const releaseMocks = vi.hoisted(() => ({
-  stageHostedRunnerRelease: vi.fn(), readWorkerVersion: vi.fn(), assertDrained: vi.fn(), runSmokeHostedDeploy: vi.fn(), admitApplication: vi.fn(), assertApplicationReady: vi.fn(),
+  stageHostedRunnerRelease: vi.fn(), readWorkerVersion: vi.fn(), assertDrained: vi.fn(), retireApplication: vi.fn(), assertCapacity: vi.fn(), runSmokeHostedDeploy: vi.fn(), admitApplication: vi.fn(), assertApplicationReady: vi.fn(),
 }));
-vi.mock("../scripts/stage-runner-release.ts", () => ({ stageHostedRunnerRelease: releaseMocks.stageHostedRunnerRelease }));
+vi.mock("../scripts/stage-runner-release.ts", () => ({
+  stageHostedRunnerRelease: releaseMocks.stageHostedRunnerRelease,
+}));
 vi.mock("../scripts/runner-release-provider.ts", () => ({ createRunnerReleaseProvider: () => releaseMocks }));
 vi.mock("../scripts/smoke-hosted-deploy.shared.ts", () => ({ runSmokeHostedDeploy: releaseMocks.runSmokeHostedDeploy }));
 const receiptMocks = vi.hoisted(() => ({
@@ -52,10 +58,116 @@ vi.mock("../scripts/container-release-receipt.js", () => ({
 import { runDeployWorkerVersionCli } from "../scripts/deploy-worker-version.cli.js";
 
 describe("runDeployWorkerVersionCli", () => {
+  it.each(["old-reader", "old-audience", "unavailable", "denied", "malformed", "unknown-version"])("rejects %s before image work or native mutation", async shape => {
+    await useRealWebAdmission(shape);
+    await expect(syntheticDeployment()).rejects.toThrow("Hosted Web protocol admission failed");
+    expect(imageMocks.prepareHostedContainerDeployImage).not.toHaveBeenCalled();
+    expect(wranglerMocks.runWranglerLoggedCaptured).not.toHaveBeenCalled();
+    expect(wranglerMocks.runWranglerLogged).not.toHaveBeenCalled();
+    expect(releaseMocks.admitApplication).not.toHaveBeenCalled();
+    expect(releaseMocks.retireApplication).not.toHaveBeenCalled();
+  });
+
+  it.each(["immediate", "worker-only"] as const)("admits current Web for %s without revision equality", async mode => {
+    await useRealWebAdmission("current");
+    if (mode === "worker-only") releaseMocks.stageHostedRunnerRelease.mockImplementation(async ({ configPath }) => ({
+      configPath, promotionConfigPath: configPath, activeApplicationName: "serving", workerOnly: true, applications: [], retirements: [],
+    }));
+    await syntheticDeployment(mode);
+    expect(wranglerMocks.runWranglerLogged).toHaveBeenCalled();
+    expect(webProtocolMocks.admit).toHaveBeenCalledWith(expect.anything());
+  });
+
+  it("does not mistake retaining the runner for proof that legacy audience is sufficient", async () => {
+    await useRealWebAdmission("old-audience");
+    releaseMocks.stageHostedRunnerRelease.mockImplementation(async ({ configPath }) => ({
+      configPath, promotionConfigPath: configPath, activeApplicationName: "serving", workerOnly: true, applications: [], retirements: [],
+    }));
+    await expect(syntheticDeployment("worker-only")).rejects.toThrow("thread_route_audience");
+    expect(wranglerMocks.runWranglerLogged).not.toHaveBeenCalled();
+    expect(releaseMocks.admitApplication).not.toHaveBeenCalled();
+  });
+
+  it.each(["retirement", "smoke-application", "compatibility", "serving", "promotion"])("rechecks Web immediately before %s", async boundary => {
+    const trace: string[] = [];
+    const serving = { name: renderedContainers[0]!.applicationName, className: "RunnerContainer", applicationId: "synthetic-serving", namespaceId: "synthetic-namespace", specification: {} };
+    releaseMocks.stageHostedRunnerRelease.mockImplementation(async ({ configPath }) => ({
+      configPath, promotionConfigPath: `${configPath}.promote`, activeApplicationName: serving.name, workerOnly: false,
+      applications: boundary === "serving" ? [serving]
+        : boundary === "smoke-application" ? [{ ...serving, name: "synthetic-smoke", className: "DeploySmokeRunnerContainer" }] : [],
+      retirements: boundary === "retirement" ? [{ name: "synthetic-retired", applicationId: "synthetic-retired", namespaceId: "synthetic-retired" }] : [],
+    }));
+    const failAt = ["serving", "promotion"].includes(boundary) ? 3 : 2;
+    await useRealWebAdmission(check => check === failAt ? "old-reader" : "current", () => trace.push("web"));
+    wranglerMocks.runWranglerJson.mockImplementation(async () => {
+      trace.push("identity");
+      return JSON.stringify({ versions: [{ percentage: 100, version_id: "version-direct" }] });
+    });
+    wranglerMocks.runWranglerLogged.mockImplementation(async args => { if (args[0] === "versions") trace.push("activation"); });
+    await expect(syntheticDeployment()).rejects.toThrow("runtime_log_event:runner.processing_finished");
+    expect(trace.at(-1)).toBe("web");
+    for (let i = 0; i < trace.length; i += 1) {
+      if (trace[i] === "activation") expect(trace.slice(i - 2, i)).toEqual(["web", "identity"]);
+    }
+    expect(trace.filter(event => event === "activation")).toHaveLength(failAt === 3 ? 1 : 0);
+    expect(releaseMocks.admitApplication).not.toHaveBeenCalled();
+    expect(releaseMocks.retireApplication).not.toHaveBeenCalled();
+  });
+
+  it("does not reuse admission after a previously successful deployment", async () => {
+    await useRealWebAdmission("current");
+    await syntheticDeployment();
+    const activations = wranglerMocks.runWranglerLogged.mock.calls.length;
+    await useRealWebAdmission("old-reader");
+    await expect(syntheticDeployment()).rejects.toThrow("runtime_log_event:runner.processing_finished");
+    expect(wranglerMocks.runWranglerLogged.mock.calls).toHaveLength(activations);
+  });
+
+  it("retires drained capacity, proves quota, activates compatibility, then rolls the serving image", async () => {
+    const trace: string[] = [];
+    const deployment = { active: { id: "synthetic-permanent" }, candidate: { id: "synthetic-permanent" }, previous: null };
+    const serving = { name: renderedContainers[0]!.applicationName, className: "RunnerContainer", applicationId: "serving-app", namespaceId: "serving-namespace", specification: {} };
+    const retirement = { name: "retired-app", applicationId: "retired-id", namespaceId: "retired-namespace" };
+    releaseMocks.stageHostedRunnerRelease.mockImplementation(async ({ configPath }) => ({ configPath, promotionConfigPath: `${configPath}.promote`, activeApplicationName: serving.name, workerOnly: false, deployment, applications: [serving], retirements: [retirement] }));
+    releaseMocks.assertDrained.mockImplementation(async () => { trace.push("drained"); });
+    releaseMocks.retireApplication.mockImplementation(async () => { trace.push("retired"); });
+    releaseMocks.assertCapacity.mockImplementation(async () => { trace.push("quota"); });
+    releaseMocks.admitApplication.mockImplementation(async () => { trace.push("native rollout"); return "modified"; });
+    releaseMocks.assertApplicationReady.mockImplementation(async () => { trace.push("distributed"); });
+    releaseMocks.runSmokeHostedDeploy.mockImplementation(async input => { trace.push(input.phase === "artifact" ? "artifact smoke" : "serving smoke"); });
+    wranglerMocks.runWranglerLogged.mockImplementation(async args => { if (args[0] === "versions") trace.push("activate"); });
+    await syntheticDeployment("gradual");
+    expect(releaseMocks.runSmokeHostedDeploy).toHaveBeenCalledWith(expect.objectContaining({ source: expect.objectContaining({ HOSTED_EXECUTION_RUNNER_DEPLOYMENT: JSON.stringify(deployment) }) }));
+    expect(trace).toEqual(["drained", "retired", "quota", "activate", "artifact smoke", "native rollout", "distributed", "serving smoke", "activate"]);
+    expect(releaseMocks.admitApplication).toHaveBeenCalledWith({ ...serving, rolloutStepPercentage: [10, 25, 50, 100] });
+  });
+
+  it("leaves the serving image untouched when isolated behavioral smoke fails", async () => {
+    const serving = { name: renderedContainers[0]!.applicationName, className: "RunnerContainer", applicationId: "serving-app", namespaceId: "serving-namespace", specification: {} };
+    releaseMocks.stageHostedRunnerRelease.mockImplementation(async ({ configPath }) => ({ configPath, promotionConfigPath: `${configPath}.promote`, activeApplicationName: serving.name, workerOnly: false, applications: [serving], retirements: [] }));
+    releaseMocks.runSmokeHostedDeploy.mockRejectedValue(new Error("candidate shell failed"));
+    await expect(syntheticDeployment("gradual")).rejects.toThrow("candidate shell failed");
+    expect(releaseMocks.admitApplication).not.toHaveBeenCalled();
+    expect(releaseMocks.runSmokeHostedDeploy).toHaveBeenCalledWith(expect.objectContaining({ phase: "artifact" }));
+    expect(wranglerMocks.runWranglerLogged.mock.calls.filter(([args]) => args[0] === "versions")).toHaveLength(1);
+  });
+
+  it("retains the compatible Worker and pending pair after serving rollout failure", async () => {
+    const serving = { name: renderedContainers[0]!.applicationName, className: "RunnerContainer", applicationId: "serving-app", namespaceId: "serving-namespace", specification: {} };
+    releaseMocks.stageHostedRunnerRelease.mockImplementation(async ({ configPath }) => ({ configPath, promotionConfigPath: `${configPath}.promote`, activeApplicationName: serving.name, workerOnly: false, applications: [serving], retirements: [] }));
+    releaseMocks.admitApplication.mockRejectedValue(new Error("lost rollout response"));
+    await expect(syntheticDeployment()).rejects.toThrow("lost rollout response");
+    expect(wranglerMocks.runWranglerLogged.mock.calls.filter(([args]) => args[0] === "versions")).toHaveLength(1);
+    expect(wranglerMocks.runWranglerLoggedCaptured).toHaveBeenCalledOnce();
+    expect(releaseMocks.runSmokeHostedDeploy).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ phase: "artifact" }));
+  });
+
   beforeEach(() => {
+    fileMocks.readFile.mockReset().mockResolvedValue("{}");
+    webProtocolMocks.admit.mockReset().mockResolvedValue(undefined);
     releaseMocks.stageHostedRunnerRelease.mockReset();
     releaseMocks.stageHostedRunnerRelease.mockImplementation(async ({ configPath }) => ({
-      configPath, promotionConfigPath: `${configPath}.promote`,
+      retirements: [], configPath, promotionConfigPath: `${configPath}.promote`,
       activeApplicationName: "hosted-worker-runnercontainer", applications: [], workerOnly: false,
     }));
     releaseMocks.readWorkerVersion.mockReset();
@@ -64,6 +176,8 @@ describe("runDeployWorkerVersionCli", () => {
     releaseMocks.admitApplication.mockResolvedValue("created");
     releaseMocks.assertApplicationReady.mockReset();
     releaseMocks.assertApplicationReady.mockResolvedValue(undefined);
+    releaseMocks.retireApplication.mockReset();
+    releaseMocks.assertCapacity.mockReset();
     releaseMocks.assertDrained.mockReset();
     releaseMocks.assertDrained.mockResolvedValue(undefined);
     releaseMocks.runSmokeHostedDeploy.mockReset();
@@ -81,10 +195,11 @@ describe("runDeployWorkerVersionCli", () => {
       readRollout: vi.fn(),
     });
     receiptMocks.buildContainerReleaseEntries.mockReset();
+    receiptMocks.buildContainerReleaseEntries.mockReturnValue(releasedContainers);
     receiptMocks.parseWranglerWorkerVersionId.mockReset();
     receiptMocks.parseWranglerWorkerVersionId.mockReturnValue("version-direct");
     receiptMocks.readCloudflareContainerApplicationIdentities.mockReset();
-    receiptMocks.readCloudflareContainerApplicationIdentities.mockResolvedValue([]);
+    receiptMocks.readCloudflareContainerApplicationIdentities.mockImplementation(async (containers) => containers.map((entry: { applicationName: string }) => ({ applicationName: entry.applicationName, applicationId: "provider-app-id", image: "image-before", version: 6 })));
     receiptMocks.readRenderedContainerIdentities.mockReset();
     receiptMocks.readRenderedContainerIdentities.mockResolvedValue(renderedContainers);
     receiptMocks.waitForCloudflareContainerReleaseEntries.mockReset();
@@ -145,13 +260,13 @@ describe("runDeployWorkerVersionCli", () => {
     rejectSmoke(new Error(state === "failed" ? "candidate image never became ready" : "synthetic cancelled preparation"));
     expect(await failure).toBeInstanceOf(Error);
     expect(wranglerMocks.runWranglerLoggedCaptured).toHaveBeenCalledTimes(1);
-    expect(receiptMocks.waitForCloudflareContainerReleaseEntries).toHaveBeenCalledOnce();
+    expect(receiptMocks.buildContainerReleaseEntries).toHaveBeenCalledOnce();
   });
 
   it("uploads container metadata before admission without switching traffic", async () => {
     releaseMocks.stageHostedRunnerRelease.mockImplementation(async ({ configPath }) => ({
-      configPath, promotionConfigPath: `${configPath}.promote`, activeApplicationName: "serving", workerOnly: false,
-      applications: [{ name: renderedContainers[0]!.applicationName, className: "RunnerContainer", applicationId: null, namespaceId: "synthetic-namespace", specification: {} }],
+      retirements: [], configPath, promotionConfigPath: `${configPath}.promote`, activeApplicationName: "serving", workerOnly: false,
+      applications: [{ name: renderedContainers[0]!.applicationName, className: "DeploySmokeRunnerContainer", applicationId: null, namespaceId: "synthetic-namespace", specification: {} }],
     }));
     let containerEnabled = false;
     wranglerMocks.runWranglerLoggedCaptured.mockImplementation(async () => {
@@ -183,8 +298,8 @@ describe("runDeployWorkerVersionCli", () => {
 
   it.each(["quota rejection", "pending distribution"])("keeps serving traffic unchanged during native %s", async (failure) => {
     releaseMocks.stageHostedRunnerRelease.mockImplementation(async ({ configPath }) => ({
-      configPath, promotionConfigPath: `${configPath}.promote`, activeApplicationName: "serving", workerOnly: false,
-      applications: [{ name: renderedContainers[0]!.applicationName, className: "RunnerContainer", applicationId: null, namespaceId: "synthetic-namespace", specification: {} }],
+      retirements: [], configPath, promotionConfigPath: `${configPath}.promote`, activeApplicationName: "serving", workerOnly: false,
+      applications: [{ name: renderedContainers[0]!.applicationName, className: "DeploySmokeRunnerContainer", applicationId: null, namespaceId: "synthetic-namespace", specification: {} }],
     }));
     let reject!: (error: Error) => void;
     const operation = failure === "quota rejection" ? releaseMocks.admitApplication : releaseMocks.assertApplicationReady;
@@ -203,7 +318,7 @@ describe("runDeployWorkerVersionCli", () => {
     const smoke = { name: "hosted-worker-smoke", className: "DeploySmokeRunnerContainer", applicationId: "smoke-app", namespaceId: "smoke-namespace", specification: {} };
     receiptMocks.readRenderedContainerIdentities.mockResolvedValue([{ applicationName: smoke.name, className: smoke.className }]);
     releaseMocks.stageHostedRunnerRelease.mockImplementation(async ({ configPath }) => ({
-      configPath, promotionConfigPath: `${configPath}.promote`, activeApplicationName: "serving", workerOnly: mode === "worker-only", applications: [smoke],
+      retirements: [], configPath, promotionConfigPath: `${configPath}.promote`, activeApplicationName: "serving", workerOnly: mode === "worker-only", applications: [smoke],
     }));
     releaseMocks.assertDrained.mockRejectedValue(new Error("synthetic member drain endpoint unavailable"));
     await syntheticDeployment(mode);
@@ -215,10 +330,11 @@ describe("runDeployWorkerVersionCli", () => {
     expect(releaseMocks.runSmokeHostedDeploy).toHaveBeenCalledOnce();
   });
 
-  it.each(["RunnerContainer", "NextRunnerContainer"])("still blocks reuse of %s when member drain evidence is unavailable", async (className) => {
+  it.each(["RunnerContainer", "NextRunnerContainer"])("still blocks retirement of %s when member drain evidence is unavailable", async (className) => {
     releaseMocks.stageHostedRunnerRelease.mockImplementation(async ({ configPath }) => ({
       configPath, promotionConfigPath: `${configPath}.promote`, activeApplicationName: "serving", workerOnly: false,
-      applications: [{ name: renderedContainers[0]!.applicationName, className, applicationId: "member-app", namespaceId: "member-namespace", specification: {} }],
+      applications: [],
+      retirements: [{ name: renderedContainers[0]!.applicationName, applicationId: "member-app", namespaceId: "member-namespace" }],
     }));
     releaseMocks.assertDrained.mockRejectedValue(new Error("synthetic member drain endpoint unavailable"));
     await expect(syntheticDeployment()).rejects.toThrow("member drain endpoint unavailable");
@@ -230,20 +346,20 @@ describe("runDeployWorkerVersionCli", () => {
 
   it("publishes an unchanged execution release once, with no container mutation", async () => {
     releaseMocks.stageHostedRunnerRelease.mockImplementation(async ({ configPath }) => ({
-      configPath, promotionConfigPath: `${configPath}.promote`, activeApplicationName: "serving", workerOnly: true, applications: [],
+      retirements: [], configPath, promotionConfigPath: `${configPath}.promote`, activeApplicationName: "serving", workerOnly: true, applications: [],
     }));
     await syntheticDeployment();
     expect(releaseMocks.admitApplication).not.toHaveBeenCalled();
     expect(wranglerMocks.runWranglerLoggedCaptured).toHaveBeenCalledOnce();
     expect(wranglerMocks.runWranglerLoggedCaptured.mock.calls[0]![0].slice(0, 2)).toEqual(["versions", "upload"]);
     expect(wranglerMocks.runWranglerLogged.mock.calls.filter(([args]) => args[0] === "versions")).toHaveLength(1);
-    expect(receiptMocks.buildContainerReleaseEntries).toHaveBeenCalledOnce();
+    expect(receiptMocks.buildContainerReleaseEntries).toHaveBeenCalledTimes(2);
   });
 
   it("forwards explicit retention and records only the effective application set", async () => {
     releaseMocks.stageHostedRunnerRelease.mockImplementation(async ({ configPath, retainServingRunner }) => {
       expect(retainServingRunner).toBe(true);
-      return { configPath: `${configPath}.retained`, promotionConfigPath: `${configPath}.retained`,
+      return { retirements: [], configPath: `${configPath}.retained`, promotionConfigPath: `${configPath}.retained`,
         activeApplicationName: "serving", workerOnly: true, applications: [] };
     });
     await runDeployWorkerVersionCli([], {
@@ -368,7 +484,6 @@ describe("runDeployWorkerVersionCli", () => {
     });
     receiptMocks.readCloudflareContainerApplicationIdentities.mockResolvedValueOnce(before);
 
-
     await runDeployWorkerVersionCli(
       ["--config", "./.deploy/wrangler.generated.jsonc"],
       {
@@ -420,13 +535,7 @@ describe("runDeployWorkerVersionCli", () => {
         readRollout,
       );
     expect(receiptMocks.parseWranglerWorkerVersionId).toHaveBeenCalledWith("deploy\n");
-    expect(receiptMocks.waitForCloudflareContainerReleaseEntries).toHaveBeenCalledWith({
-      actions,
-      before,
-      expectedContainers: renderedContainers,
-      listApplications,
-      readRollout,
-    });
+    expect(receiptMocks.buildContainerReleaseEntries).toHaveBeenCalledWith({ actions, before, after: before });
   });
 
   it("applies R2 lifecycle rules to configured bundles buckets before direct deploys", async () => {
@@ -512,7 +621,7 @@ describe("runDeployWorkerVersionCli", () => {
     expect(trace).toEqual(["r2", "r2", "deploy", "versions", "deploy", "versions"]);
   });
 
-  it("prepares the inactive image immediately and promotes without a container rollout", async () => {
+  it("uploads and promotes the immediate release through Worker versions", async () => {
     await runDeployWorkerVersionCli(
       ["--config", "./.deploy/wrangler.generated.jsonc"],
       {
@@ -609,13 +718,36 @@ const releasedContainers = [
   },
 ] as const;
 
-async function syntheticDeployment(containerRolloutMode: "immediate" | "worker-only" = "immediate") {
+async function syntheticDeployment(containerRolloutMode: "gradual" | "immediate" | "worker-only" = "immediate", extraEnv: Record<string, string> = {}) {
   return runDeployWorkerVersionCli([], {
     deployRoot: "/tmp/repo/apps/cloudflare", log: false,
-    env: { CF_WORKER_NAME: "hosted-worker", CF_BUNDLES_BUCKET: "hosted-bundles", CLOUDFLARE_ACCOUNT_ID: "fixture", CLOUDFLARE_API_TOKEN: "fixture" },
+    env: { CF_WORKER_NAME: "hosted-worker", CF_BUNDLES_BUCKET: "hosted-bundles", CLOUDFLARE_ACCOUNT_ID: "fixture", CLOUDFLARE_API_TOKEN: "fixture", ...extraEnv },
     runHostedWorkerDeployment: async ({ dependencies }) => {
       await dependencies.deployDirect({ configPath: "/tmp/config.jsonc", containerRolloutMode, deploymentMessage: "synthetic", includeSecrets: false, secretsFilePath: "/tmp/secrets.json", versionTag: "synthetic", workerName: "hosted-worker" });
       return createDeploymentResult();
     },
+  });
+}
+
+async function useRealWebAdmission(shape: string | ((check: number) => string), onCheck?: () => void) {
+  const { assertHostedWebProtocolAdmission } = await vi.importActual<typeof import("../scripts/deploy-web-protocol.ts")>("../scripts/deploy-web-protocol.ts");
+  const keys = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, ["sign", "verify"]);
+  const signingKey = JSON.stringify(await crypto.subtle.exportKey("jwk", keys.privateKey));
+  let checks = 0;
+  webProtocolMocks.admit.mockImplementation(env => {
+    const responseShape = typeof shape === "function" ? shape(++checks) : shape;
+    onCheck?.();
+    return assertHostedWebProtocolAdmission({
+      ...env, HOSTED_WEB_BASE_URL: "https://web.example.test", HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: signingKey,
+    }, { sleep: async () => {}, fetchImpl: async input => {
+      if (responseShape === "unavailable") return new Response(null, { status: 503 });
+      if (responseShape === "malformed") return new Response("not JSON", { headers: { "cache-control": "no-store", "content-type": "application/json" } });
+      const url = new URL(input instanceof Request ? input.url : String(input));
+      const evidence = syntheticHostedWebProtocolAdmission(url.searchParams.get("nonce")!);
+      if (responseShape === "old-reader") evidence.runtimeLogEventCodes = evidence.runtimeLogEventCodes.filter(code => code !== "runner.processing_finished");
+      if (responseShape === "old-audience") evidence.threadRouteAuthority = { direct: { authorized: true }, group: { authorized: true } };
+      if (responseShape === "denied") evidence.threadRouteAuthority = { direct: { authorized: false }, group: { authorized: true, threadIsDirect: false } };
+      return Response.json(responseShape === "unknown-version" ? { ...evidence, schemaVersion: 2 } : evidence, { headers: { "cache-control": "no-store" } });
+    } });
   });
 }

@@ -7,11 +7,17 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { BiomarkerAboutGrid } from "@/src/components/biomarkers/biomarker-detail/biomarker-about-grid";
 import {
   listHealthCommonsBiomarkerRoutes,
-  resolveHealthCommonsBiomarkerDetail,
-} from "@/src/lib/health-commons/biomarker-detail";
+  resolveHealthCommonsBiomarkerShell,
+  resolveHealthCommonsBiomarkerOverview,
+} from "@/src/lib/health-commons/biomarker-projections";
 import type {
   BiomarkerShellProjection,
 } from "@/src/lib/health-commons/biomarker-projections";
+
+vi.mock("node:fs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs")>();
+  return { ...actual, readFileSync: vi.fn(actual.readFileSync) };
+});
 
 const mocks = vi.hoisted(() => ({
   biomarkerLayoutClient: vi.fn(),
@@ -57,15 +63,6 @@ import BiomarkerDetailLayout, {
   generateStaticParams,
 } from "../app/(dashboard)/biomarkers/[biomarkerId]/layout";
 import { generateMetadata } from "../app/(dashboard)/biomarkers/[biomarkerId]/page";
-import { createHealthCommonsCatalogReader } from "@murphai/health-commons/runtime";
-import {
-  createHealthCommonsRouteBundleFixtureCatalog,
-} from "./health-commons-fixture-catalog";
-
-function createFixtureCatalog() {
-  return createHealthCommonsRouteBundleFixtureCatalog();
-}
-
 const repoRoot = path.resolve(import.meta.dirname, "../../..");
 const spo2PagePath = path.join(
   repoRoot,
@@ -89,7 +86,7 @@ describe("BiomarkerPage", () => {
 
   it("publishes the production-ready biomarker routes", () => {
     const source = readFileSync(
-      new URL("../src/lib/health-commons/biomarker-detail.ts", import.meta.url),
+      new URL("../src/lib/health-commons/biomarker-projections.ts", import.meta.url),
       "utf8",
     );
 
@@ -169,7 +166,7 @@ describe("BiomarkerPage", () => {
     })).rejects.toThrow("NEXT_REDIRECT:/biomarkers/blood-oxygen-spo2");
 
     expect(mocks.redirect).toHaveBeenCalledWith("/biomarkers/blood-oxygen-spo2");
-    expect(resolveHealthCommonsBiomarkerDetail("spo2")).toEqual(expect.objectContaining({
+    expect(resolveHealthCommonsBiomarkerShell("spo2")).toEqual(expect.objectContaining({
       key: "biomarker:blood-oxygen-spo2",
       routeId: "blood-oxygen-spo2",
     }));
@@ -187,7 +184,7 @@ describe("BiomarkerPage", () => {
     })).rejects.toThrow("NEXT_REDIRECT:/biomarkers/resting-heart-rate");
 
     expect(mocks.redirect).toHaveBeenCalledWith("/biomarkers/resting-heart-rate");
-    expect(resolveHealthCommonsBiomarkerDetail("rhr")).toEqual(expect.objectContaining({
+    expect(resolveHealthCommonsBiomarkerShell("rhr")).toEqual(expect.objectContaining({
       key: "biomarker:resting-heart-rate",
       routeId: "resting-heart-rate",
     }));
@@ -340,7 +337,7 @@ describe("BiomarkerPage", () => {
   });
 
   it("renders the resting-heart-rate about grid from Health Commons markdown", () => {
-    const detail = resolveHealthCommonsBiomarkerDetail("resting-heart-rate");
+    const detail = resolveHealthCommonsBiomarkerShell("resting-heart-rate");
 
     expect(detail).not.toBeNull();
     if (!detail) {
@@ -369,12 +366,12 @@ describe("BiomarkerPage", () => {
     const publishedRoutes = generateStaticParams().map((param) => param.biomarkerId);
 
     for (const routeId of publishedRoutes) {
-      const detail = resolveHealthCommonsBiomarkerDetail(routeId);
+      const detail = resolveHealthCommonsBiomarkerShell(routeId);
 
       expect(detail?.about, routeId).toHaveLength(3);
     }
 
-    expect(resolveHealthCommonsBiomarkerDetail("blood-oxygen-spo2")?.about).toEqual([
+    expect(resolveHealthCommonsBiomarkerShell("blood-oxygen-spo2")?.about).toEqual([
       expect.objectContaining({
         iconKey: "whyPeopleCare",
         title: "Why people care",
@@ -434,7 +431,7 @@ describe("BiomarkerPage", () => {
   });
 
   it("derives biomarker protocol rankings from protocol expected signals", () => {
-    const detail = resolveHealthCommonsBiomarkerDetail("estimated-vo2max");
+    const detail = resolveHealthCommonsBiomarkerOverview("estimated-vo2max");
 
     expect(detail?.protocolRankings.slice(0, 4).map((protocol) => protocol.title)).toEqual([
       "Norwegian 4x4",
@@ -463,7 +460,7 @@ describe("BiomarkerPage", () => {
     }));
     expect(detail?.protocolRankings[0]).not.toHaveProperty("rankScore");
     expect(
-      resolveHealthCommonsBiomarkerDetail("hrv-rmssd")?.protocolRankings.map((protocol) =>
+      resolveHealthCommonsBiomarkerOverview("hrv-rmssd")?.protocolRankings.map((protocol) =>
         protocol.expectedSignalLabel
       ),
     ).not.toEqual(expect.arrayContaining([
@@ -473,105 +470,33 @@ describe("BiomarkerPage", () => {
     ]));
   });
 
-  it("excludes draft protocol variants from biomarker rankings", () => {
-    const catalog = createFixtureCatalog();
-    const norwegianFourByFour = catalog.entities.find((entity) =>
-      entity.entityType === "protocol_variant" && entity.title === "Norwegian 4x4"
-    );
+});
 
-    expect(norwegianFourByFour).toBeDefined();
-    if (!norwegianFourByFour) {
-      throw new Error("Expected the Norwegian 4x4 protocol fixture.");
-    }
-    norwegianFourByFour.status = "draft";
 
-    const detail = resolveHealthCommonsBiomarkerDetail(
-      "estimated-vo2max",
-      createHealthCommonsCatalogReader(catalog),
-    );
-
-    expect(detail?.protocolRankings.map((protocol) => protocol.title)).not.toContain(
-      "Norwegian 4x4",
-    );
-  });
-
-  it("keeps incomplete biomarker pages unpublished without requiring private metric bindings", () => {
-    const catalog = createFixtureCatalog();
-    const biomarker = catalog.entities.find(
-      (entity) => entity.key === "biomarker:resting-heart-rate",
-    );
-
-    expect(biomarker?.entityType).toBe("biomarker");
-
-    if (!biomarker || biomarker.entityType !== "biomarker") {
-      throw new Error("Expected the resting-heart-rate biomarker fixture.");
-    }
-
-    if (!biomarker.biomarker) {
-      throw new Error("Expected the resting-heart-rate biomarker spec.");
-    }
-
-    biomarker.biomarker = {
-      ...biomarker.biomarker,
-      privateMetricBindings: [],
-    };
-
-    catalog.entities.push({
-      ...biomarker,
-      key: "biomarker:incomplete-rhr-fixture",
-      slug: "biomarkers/incomplete-rhr-fixture",
-      title: "Incomplete RHR Fixture",
-      communityOutcomeSummary: undefined,
-      revision: {
-        ...biomarker.revision,
-        pageRevisionId: "sha256:1111111111111111111111111111111111111111111111111111111111111111",
-      },
-      biomarker: biomarker.biomarker
-        ? {
-            ...biomarker.biomarker,
-            explainerCards: undefined,
-          }
-        : biomarker.biomarker,
-    });
-
-    const reader = createHealthCommonsCatalogReader(catalog);
-
-    const routeIds = listHealthCommonsBiomarkerRoutes(reader);
-    expect(routeIds).toEqual(expect.arrayContaining([
-      "blood-oxygen-spo2",
-      "deep-sleep-minutes",
-      "estimated-vo2max",
-      "hrv-rmssd",
-      "rem-sleep-minutes",
-      "resting-heart-rate",
-    ]));
-    expect(routeIds).not.toContain("blood-glucose");
-    expect(routeIds).not.toContain("incomplete-rhr-fixture");
-    expect(routeIds).not.toContain("apolipoprotein-b");
-    expect(routeIds).not.toContain("sleep-quality");
-    expect(resolveHealthCommonsBiomarkerDetail("resting-heart-rate", reader)?.privateMetricBindings).toEqual([]);
-    expect(resolveHealthCommonsBiomarkerDetail("apolipoprotein-b", reader)).toBeNull();
-    expect(resolveHealthCommonsBiomarkerDetail("sleep-quality", reader)).toBeNull();
-    expect(resolveHealthCommonsBiomarkerDetail("incomplete-rhr-fixture", reader)).toBeNull();
-  });
-
-  it("does not directly resolve hidden biomarker pages with protocol signals", () => {
-    const catalog = createFixtureCatalog();
-    const biomarker = catalog.entities.find(
-      (entity) => entity.key === "biomarker:resting-heart-rate",
-    );
-
-    expect(biomarker?.entityType).toBe("biomarker");
-
-    if (!biomarker || biomarker.entityType !== "biomarker") {
-      throw new Error("Expected the resting-heart-rate biomarker fixture.");
-    }
-
-    biomarker.hidden = true;
-
-    const reader = createHealthCommonsCatalogReader(catalog);
-
-    expect(listHealthCommonsBiomarkerRoutes(reader)).not.toContain("resting-heart-rate");
-    expect(resolveHealthCommonsBiomarkerDetail("resting-heart-rate", reader)).toBeNull();
-  });
+it("builds the same device biomarker list with one index read and no overview reads", async () => {
+  const { getGeneratedBiomarkerIndex } = await import("@/src/lib/health-commons/generated-biomarker-artifacts");
+  const expected = getGeneratedBiomarkerIndex().biomarkers
+    .filter((entry) => entry.published && !entry.hidden)
+    .flatMap((entry) => {
+      const overview = resolveHealthCommonsBiomarkerOverview(entry.routeId);
+      return overview && overview.privateMetricBindings.length > 0 ? [{
+        category: entry.categories[0] ?? null,
+        privateMetricBindings: overview.privateMetricBindings,
+        routeId: entry.routeId,
+        shortName: overview.shortName,
+        summary: entry.summary,
+        unit: overview.unit,
+        valuePrecision: overview.valuePrecision,
+      }] : [];
+    })
+    .sort((left, right) => left.shortName.localeCompare(right.shortName));
+  const { default: BiomarkersPage } = await import("../app/(dashboard)/biomarkers/page");
+  vi.mocked(readFileSync).mockClear();
+  const result = await BiomarkersPage();
+  expect(result.props.deviceBiomarkers).toEqual(expected);
+  expect(expected.length).toBeGreaterThan(0);
+  const jsonReads = vi.mocked(readFileSync).mock.calls
+    .filter(([file]) => String(file).endsWith(".json"));
+  expect(jsonReads.map(([file]) => String(file).split("/generated/web/").at(-1)))
+    .toEqual(["browse/biomarkers.json"]);
 });

@@ -36,7 +36,7 @@ describe("RecentMemberRetention", () => {
       />,
     );
 
-    expect(html).toContain("No real member signups yet.");
+    expect(html).toContain("No real member accounts yet.");
   });
 });
 

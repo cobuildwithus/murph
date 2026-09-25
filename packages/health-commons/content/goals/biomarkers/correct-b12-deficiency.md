@@ -3,8 +3,8 @@ schemaVersion: murph.commons.page.v1
 entityType: goal_template
 key: goal_template:correct-b12-deficiency
 slug: correct-b12-deficiency
-title: Correct My Vitamin B12 Deficiency
-summary: Restore vitamin B12, identify whether diet or absorption caused the problem, and protect blood and nerve function.
+title: Understand My B12 Deficiency
+summary: Understand vitamin B12 deficiency, possible causes, test results, and clinician-directed care.
 status: field-testing
 quality: usable
 aliases:
@@ -17,7 +17,7 @@ categories:
 goal:
   category: biomarkers
   outcomeKind: biomarker
-  goalPhrase: correct my vitamin B12 deficiency
+  goalPhrase: understand my B12 deficiency
   successSignals:
     - id: b12_status
       kind: biomarker
@@ -34,7 +34,7 @@ goal:
     kind: care_support
     ownerSkillIds:
       - micronutrients-supplements
-  startPrompt: Hey Murph, help me correct my vitamin B12 deficiency.
+  startPrompt: Hey Murph, help me understand my B12 deficiency.
   indexable: true
 safety:
   cautionLevel: moderate
@@ -90,4 +90,4 @@ Folic acid can improve the anemia while B12-related nerve injury continues, so n
 
 ## Related goals
 
-[Correct My Iron Deficiency](/goals/correct-iron-deficiency) · [Recover From Iron-Deficiency Anemia](/goals/recover-from-iron-deficiency-anemia)
+[Understand My Iron Deficiency](/goals/correct-iron-deficiency) · [Understand My Iron-Deficiency Anemia](/goals/recover-from-iron-deficiency-anemia)

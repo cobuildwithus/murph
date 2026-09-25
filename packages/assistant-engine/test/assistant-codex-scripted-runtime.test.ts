@@ -28,7 +28,8 @@ import type {
 import {
   createDefaultLocalAssistantModelTarget,
 } from '@murphai/operator-config/assistant-backend'
-import { readMemoryDocument } from '@murphai/core'
+import { readMemoryDocument, upsertMemory } from '@murphai/core'
+import { readAssistantCurrentStatePrompt } from '../src/assistant/current-state.ts'
 import {
   HOSTED_OPENAI_CODEX_MODEL_PROVIDER_ID,
 } from '@murphai/operator-config/assistant/target-runtime'
@@ -3522,7 +3523,7 @@ text(result.output);
     expect(summaries.flatMap(
       (summary) => summary.functionCallOutputs ?? [],
     )).toEqual([
-      `Unknown model \`${model}\` for spawn_agent. Available models: gpt-5.6-sol, gpt-5.6-terra, gpt-5.6-luna`,
+      `Unknown model \`${model}\` for spawn_agent. Available models: gpt-6-sol, gpt-6-luna, gpt-5.6-sol, gpt-5.6-luna`,
     ])
     expect(scenario.stub.requestCountSinceBaseline()).toBe(2)
   })
@@ -3882,6 +3883,57 @@ text(result.output);
     }
   })
 
+  it.skipIf(process.env.MURPH_MEASURE_MEMORY_INPUT !== '1').each(['direct', 'group'] as const)(
+    'memory profile complete provider input (%s)', { timeout: TURN_TIMEOUT_MS }, async (scope) => {
+      const groupConversation = scope === 'group'
+      const scenario = await prepareScriptedTurnScenario()
+      for (let index = 0; index < 8; index += 1) {
+        await upsertMemory(scenario.turnInput.workingDirectory, {
+          now: new Date(Date.UTC(2030, 0, 1, 12, index)), section: 'Preferences',
+          text: `For synthetic activity ${index}, prefers brief suggestions with one optional next step.`,
+        })
+      }
+      const tools = resolveMurphDynamicTools({
+        allowFinishWithoutReply: true, assistantConfigurationAvailable: !groupConversation,
+        automationAvailable: true, groupAssistantConfigurationAvailable: groupConversation,
+        groupAvailable: !groupConversation, groupChallengeResponseCardsAvailable: groupConversation,
+        groupSharedReadAvailable: groupConversation, imageGenerationAvailable: false,
+        progressUpdatesAvailable: false, responseCardsAvailable: !groupConversation,
+      })
+      const layers = buildAssistantSystemPromptLayers({
+        assistantCliContract: null, assistantHostedAutomationAvailable: true,
+        assistantHostedGroupToolSurface: groupConversation ? 'shared_read' : 'families',
+        assistantProgressUpdatesAvailable: false, assistantStyleSettingsAvailable: false,
+        channel: 'linq', cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+        conversationScope: scope, currentLocalDate: '2030-01-10',
+        currentInstant: '2030-01-10T16:00:00.000Z', currentTimeZone: 'UTC',
+        hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic',
+        onboardingGuidance: false, ordinaryInboundTurn: true,
+      })
+      const developerInstructions = [layers.staticCacheableCorePrompt, layers.stableRouteCapabilityPrompt, layers.threadContextPrompt].join('\n\n')
+      const memory = groupConversation ? null : await readAssistantCurrentStatePrompt({ vaultRoot: scenario.turnInput.workingDirectory })
+      const prompt = [layers.dynamicTurnContextPrompt, memory, 'Suggest a brief reset for this evening.'].filter(Boolean).join('\n\n')
+      scenario.stub.markRequestBaseline()
+      scenario.stub.captureProviderRequestDiagnostics({ completeInput: true })
+      scenario.stub.queue({ text: 'SYNTHETIC_MEMORY_INPUT_CAPTURED' })
+      const result = await executeCodexAppServerTurn({
+        ...scenario.turnInput, baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        developerInstructions, dynamicTools: tools, groupConversation, prompt,
+      })
+      expect(result.finalMessage).toBe('SYNTHETIC_MEMORY_INPUT_CAPTURED')
+      expect(scenario.stub.requestCountSinceBaseline()).toBe(1)
+      const capture = scenario.stub.requestSummariesSinceBaseline()[0]?.completeProviderInput
+      if (!capture) throw new Error('Missing complete provider input')
+      const normalized = normalizeSharedSchemaFirstInputForEquality(capture.json)
+      const directory = process.env.MURPH_MEMORY_INPUT_OUTPUT_DIR
+      if (directory) {
+        await mkdir(directory, { recursive: true })
+        await writeFile(path.join(directory, `${scope}.json`), normalized.json)
+      }
+      process.stdout.write(`[memory-input] ${JSON.stringify({ scope, bytes: Buffer.byteLength(normalized.json), instructionsBytes: Buffer.byteLength(developerInstructions), memoryBytes: Buffer.byteLength(memory ?? ''), toolBytes: Buffer.byteLength(JSON.stringify(tools)) })}\n`)
+    },
+  )
+
   // Optional, synthetic, free measurement against the supplied PR3059 baseline.
   // Both phases retain its card recovery paragraph and identical canonical tools.
   // The test-only ablation removes ONLY the shared adapter, not Codex conversion.
@@ -3960,7 +4012,6 @@ text(result.output);
           developerInstructions,
           dynamicTools: tools,
           env: { ...scenario.turnInput.env, [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: modelCatalogJson },
-          excludeResumeTurns: true,
           groupConversation,
           prompt,
         })
@@ -4051,7 +4102,7 @@ text(result.output);
         candidateSha256: createHash('sha256').update(candidate.equalityInput.json).digest('hex'),
         identical: candidate.equalityInput.json === baseline.equalityInput.json,
       },
-      targetTokenizer: { countBaseline: null, countCandidate: null, delta: null, reason: 'No exact Terra tokenizer is configured for this measurement; synthetic provider usage is not tokenization.' },
+      targetTokenizer: { countBaseline: null, countCandidate: null, delta: null, reason: 'No exact Sol tokenizer is configured for this measurement; synthetic provider usage is not tokenization.' },
     })}\n`)
     expect(candidate.excludedTransportFields).toEqual(baseline.excludedTransportFields)
     // Remove only the exact added suffixes, after validating actual native
@@ -4092,7 +4143,7 @@ text(result.output);
     })
   })
 
-  it('uses exact Terra mixed mode to discover a condition reminder schema before one save', {
+  it('uses exact GPT-6 Sol mixed mode to discover a condition reminder schema before one save', {
     timeout: TURN_TIMEOUT_MS,
   }, async () => {
     expect(MURPH_AUTOMATION_TOOL.deferLoading).toBe(true)
@@ -4173,6 +4224,7 @@ text(result.output);
 
     const result = await executeCodexAppServerTurn({
       ...scenario.turnInput,
+      model: 'gpt-6-sol',
       dynamicTools: [MURPH_AUTOMATION_TOOL, ...MURPH_GROUP_FAMILY_TOOLS],
       env: {
         ...scenario.turnInput.env,
@@ -4224,7 +4276,7 @@ text(result.output);
 
     const summaries = scenario.stub.requestSummariesSinceBaseline()
     expect(summaries[0]).toMatchObject({
-      model: 'gpt-5.6-terra',
+      model: 'gpt-6-sol',
       providerRequestDiagnostics: {
         includesAllTools: true,
         includesAutomation: false,
@@ -4252,7 +4304,27 @@ text(result.output);
       .find((tool) => tool.name === 'automation')
     expect(automationSearchTool).not.toBeUndefined()
     const automationParameters = readRecord(automationSearchTool?.parameters)
-    const automationProperties = readRecord(automationParameters?.properties)
+    const automationSaveContract = Array.isArray(automationParameters?.oneOf)
+      ? automationParameters.oneOf.map(readRecord).find((branch) => {
+          // Native discovery normalizes const to a single-value enum.
+          const action = readRecord(readRecord(branch?.properties)?.action)
+          return Array.isArray(action?.enum)
+            && action.enum.length === 1 && action.enum[0] === 'save'
+        })
+      : null
+    expect(automationSaveContract).toBeTruthy()
+    expect(readRecord(automationSaveContract?.properties)?.contextReferences)
+      .toMatchObject({ type: 'array' })
+    // Codex shortens deep native parameters too; the complete description is authoritative.
+    const canonicalSchema = readRecord(readVisibleCanonicalSchema(
+      typeof automationSearchTool?.description === 'string' ? automationSearchTool.description : '',
+    ))
+    expect(canonicalSchema).toEqual(MURPH_AUTOMATION_TOOL.inputSchema)
+    const canonicalSaveContract = Array.isArray(canonicalSchema?.oneOf)
+      ? canonicalSchema.oneOf.map(readRecord).find((branch) =>
+          readRecord(readRecord(branch?.properties)?.action)?.const === 'save')
+      : null
+    const automationProperties = readRecord(canonicalSaveContract?.properties)
     const contextReferences = readRecord(
       automationProperties?.contextReferences,
     )
@@ -7337,7 +7409,7 @@ if (!tool) {
     expect(result.finalMessage).not.toMatch(/no (?:future|later) delivery/iu)
   })
 
-  it('preserves current response-card shapes and rejects legacy-only nutrition authoring through the real App Server boundary', {
+  it('preserves current response-card shapes and rejects unverified workouts and legacy-only nutrition authoring through the real App Server boundary', {
     timeout: TURN_TIMEOUT_MS,
   }, async () => {
     const completedWorkoutCard = {
@@ -7414,7 +7486,10 @@ if (!tool) {
     ] as const
     const completeNutritionCard = cards[2]
 
-    for (const card of cards) {
+    for (const card of [...cards, {
+      ...completeNutritionCard,
+      goals: { calories: null, proteinGrams: null, carbsGrams: null, fatGrams: null, fiberGrams: null },
+    }]) {
       const scenario = await prepareScriptedTurnScenario()
       scenario.stub.captureProviderRequestDiagnostics()
       scenario.stub.queue(
@@ -7426,7 +7501,7 @@ if (!tool) {
             namespace: 'murph',
           },
         },
-        { text: 'CARD_ATTACHED' },
+        { text: 'workout' in card ? 'WORKOUT_CARD_UNAVAILABLE' : 'CARD_ATTACHED' },
       )
 
       const result = await executeCodexAppServerTurn({
@@ -7450,18 +7525,21 @@ if (!tool) {
         'meal totals --from <date> --to <same-date> --resolve-goals --format json',
       )
       expect(JSON.stringify(discovered)).not.toContain('goal list --status active')
-      expect(result.runtimeIssueInputs).toEqual([])
       if ('workout' in card) {
-        expect(result.responseCard).toMatchObject({
-          ...card,
-          tracking: {
-            ...card.tracking,
-            snapshotAt: expect.stringMatching(
-              /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u,
-            ),
-          },
-        })
+        expect(result.responseCard).toBeNull()
+        expect(result.runtimeIssueInputs).toEqual([
+          expect.objectContaining({
+            component: 'assistant.workout-card-editor',
+            errorCode: 'WORKOUT_CARD_EDITOR_UNAVAILABLE',
+          }),
+          expect.objectContaining({
+            component: 'assistant.codex-action',
+            errorCode: 'CODEX_DYNAMIC_TOOL_CALL_FAILED',
+          }),
+        ])
+        expect(result.finalMessage).toBe('WORKOUT_CARD_UNAVAILABLE')
       } else {
+        expect(result.runtimeIssueInputs).toEqual([])
         expect(result.responseCard).toEqual(card)
       }
     }
@@ -7476,16 +7554,6 @@ if (!tool) {
           proteinGrams: { total: 70, mealCount: 2 },
           carbsGrams: { total: 80, mealCount: 2 },
           fatGrams: { total: 30, mealCount: 2 },
-        },
-      },
-      {
-        ...completeNutritionCard,
-        goals: {
-          calories: null,
-          proteinGrams: null,
-          carbsGrams: null,
-          fatGrams: null,
-          fiberGrams: null,
         },
       },
       ...([
@@ -8280,7 +8348,7 @@ if (!tool) {
     expect(recoveryResult.finalMessage).toBe('PHYSICAL_NOTE_RECOVERY_OK')
   })
 
-  it('keeps narrow group reads eager beside deferred Terra tools', {
+  it('keeps narrow group reads eager beside deferred Sol tools', {
     timeout: TURN_TIMEOUT_MS,
   }, async () => {
     const scenario = await prepareScriptedTurnScenario()
@@ -8366,11 +8434,11 @@ text(JSON.stringify(result));
     const assistantInputId = `ain_${'g'.repeat(32)}`
     const configurationRequests: unknown[] = []
     const groupSnapshot = (
-      model: 'gpt-5.6-sol' | 'gpt-5.6-terra',
+      model: 'gpt-5.6-sol' | 'gpt-6-sol',
     ): HostedRuntimeAssistantConfigurationSnapshot => ({
       availableModels: [
         'gpt-5.6-luna',
-        'gpt-5.6-terra',
+        'gpt-6-sol',
         'gpt-5.6-sol',
       ],
       availableProviders: ['openai'],
@@ -8383,7 +8451,7 @@ text(JSON.stringify(result));
       solAvailable: true,
     })
     const currentSnapshot = groupSnapshot('gpt-5.6-sol')
-    const updatedSnapshot = groupSnapshot('gpt-5.6-terra')
+    const updatedSnapshot = groupSnapshot('gpt-6-sol')
     const groupDeveloperInstructions = buildAssistantSystemPrompt({
       assistantCliContract: null,
       assistantContextSnapshotPrompt: null,
@@ -8419,7 +8487,7 @@ text(JSON.stringify(result));
           input: `
 const result = await tools.murph__assistant_configuration({
   action: "update",
-  model: "gpt-5.6-terra",
+  model: "gpt-6-sol",
 });
 text(JSON.stringify(result));
 `,
@@ -8474,14 +8542,14 @@ text(JSON.stringify(result));
       },
       model: 'gpt-5.6-sol',
       prompt:
-        'Use the current group room request to switch this room to Terra, then reply exactly GROUP_MODEL_SWITCH_OK.',
+        'Use the current group room request to switch this room to GPT-6 Sol, then reply exactly GROUP_MODEL_SWITCH_OK.',
     })
 
     expect(configurationRequests).toEqual([
       {
         action: 'update',
         assistantInputId,
-        model: 'gpt-5.6-terra',
+        model: 'gpt-6-sol',
       },
     ])
     const summaries = scenario.stub.requestSummariesSinceBaseline()
@@ -8493,7 +8561,7 @@ text(JSON.stringify(result));
     const groupConfigurationOutput =
       summaries[1]?.customToolCallOutputs?.join('\n') ?? ''
     expect(groupConfigurationOutput).toContain('gpt-5.6-sol')
-    expect(groupConfigurationOutput).toContain('gpt-5.6-terra')
+    expect(groupConfigurationOutput).toContain('gpt-6-sol')
     expect(groupConfigurationOutput).toContain('next_turn')
     expect(groupConfigurationOutput).toContain('updated')
     expect(result.finalMessage).toBe('GROUP_MODEL_SWITCH_OK')
@@ -8509,7 +8577,7 @@ text(JSON.stringify(result));
     })
 
     expect(scenario.stub.requestSummariesSinceBaseline()[2]?.model).toBe(
-      'gpt-5.6-terra',
+      'gpt-6-sol',
     )
     expect(nextTurn.finalMessage).toBe('GROUP_MODEL_NEXT_TURN_OK')
     expect(nextTurn.sessionId).toBe(result.sessionId)

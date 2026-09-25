@@ -8,6 +8,7 @@ import {
 import {
   normalizeHostedExecutionBaseUrl,
 } from "@murphai/hosted-execution/env";
+import { addHostedExecutionRuntimeAuthority, readHostedExecutionRuntimeAuthority } from "@murphai/hosted-execution/auth";
 
 import {
   createHostedWebCallbackSignatureHeaders,
@@ -51,7 +52,7 @@ export function normalizeHostedWebControlBaseUrl(
 export async function fetchHostedExecutionWebControlPlaneResponse(input: {
   baseUrl: string;
   body?: string;
-  boundUserId: string;
+  boundUserId: string | null;
   fetchImpl?: typeof fetch;
   headers?: Headers;
   method: "GET" | "POST";
@@ -61,7 +62,9 @@ export async function fetchHostedExecutionWebControlPlaneResponse(input: {
   search?: string | null;
   signal?: AbortSignal | null;
   timeoutMs: number | null;
+  timing?: { prepareMs?: number; fetchHeadersMs?: number };
 }): Promise<Response> {
+  const startedAt = performance.now();
   const fetchImpl = normalizeCloudflareWorkerFetch(input.fetchImpl);
   const targetUrl = new URL(
     input.path.replace(/^\/+/u, ""),
@@ -74,8 +77,22 @@ export async function fetchHostedExecutionWebControlPlaneResponse(input: {
     targetUrl.search = input.search;
   }
 
+  // Runtime authority is derived from bound headers, never adopted from a
+  // caller-supplied search string that the Worker is about to sign.
+  if (readHostedExecutionRuntimeAuthority(targetUrl, new Headers()) !== null) {
+    throw new TypeError("Runtime authority must be derived before callback signing.");
+  }
   const headers = createHostedWebControlForwardHeaders(input.headers);
-  headers.set(HOSTED_EXECUTION_USER_ID_HEADER, input.boundUserId);
+  if (input.boundUserId !== null) headers.set(HOSTED_EXECUTION_USER_ID_HEADER, input.boundUserId);
+  const attemptId = headers.get("x-hosted-runtime-attempt-id");
+  const generation = headers.get("x-hosted-runtime-lease-generation");
+  if (attemptId !== null || generation !== null) {
+    addHostedExecutionRuntimeAuthority(targetUrl, {
+      attemptId: attemptId ?? "",
+      generation: generation ?? "",
+      workspaceVersion: headers.get("x-hosted-runtime-workspace-version"),
+    });
+  }
 
   if (input.body !== undefined) {
     headers.set("content-type", "application/json");
@@ -101,7 +118,9 @@ export async function fetchHostedExecutionWebControlPlaneResponse(input: {
     }
   }
 
-  return fetchImpl(targetUrl.toString(), {
+  const fetchStartedAt = performance.now();
+  if (input.timing) input.timing.prepareMs = Math.max(0, Math.round(fetchStartedAt - startedAt));
+  const response = await fetchImpl(targetUrl.toString(), {
     ...(input.body === undefined ? {} : { body: input.body }),
     headers,
     method: input.method,
@@ -112,6 +131,37 @@ export async function fetchHostedExecutionWebControlPlaneResponse(input: {
         : undefined
     ),
   });
+  if (input.timing) input.timing.fetchHeadersMs = Math.max(0, Math.round(performance.now() - fetchStartedAt));
+  return response;
+}
+
+// Diagnostic categories only, after native Headers normalization. Never retain raw values.
+export function readHostedSnapshotResponseHeaderMetadata(
+  response: Response,
+  isSnapshot: boolean,
+): {
+  responseContentEncodingCategory?: "missing" | "identity" | "gzip" | "br" | "deflate" | "other";
+  responseContentLengthCategory?: "missing" | "valid" | "invalid";
+} {
+  if (!isSnapshot || !response.ok) {
+    return {};
+  }
+  const { headers } = response;
+  const rawEncoding = headers.get("content-encoding");
+  // Bound normalization before examining untrusted strings; compound codings are "other".
+  const encoding = rawEncoding !== null && rawEncoding.length <= 8
+    ? rawEncoding.toLowerCase()
+    : "";
+  const length = headers.get("content-length");
+  const parsedLength = length !== null && length.length <= 16 ? Number(length) : NaN;
+  return {
+    responseContentEncodingCategory: rawEncoding === null ? "missing"
+      : encoding === "identity" || encoding === "gzip" || encoding === "br" || encoding === "deflate"
+      ? encoding : "other",
+    responseContentLengthCategory: length === null ? "missing"
+      : Number.isSafeInteger(parsedLength) && parsedLength >= 0
+        && String(parsedLength) === length ? "valid" : "invalid",
+  };
 }
 
 function createHostedWebControlForwardHeaders(

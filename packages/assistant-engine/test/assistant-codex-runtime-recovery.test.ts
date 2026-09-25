@@ -873,7 +873,7 @@ describe('assistant codex runtime', () => {it('handles current Codex v2 turn-tag
     ).toBe(false)
   })
 
-  it('poisons warm Codex when an aborted turn later completes', async () => {
+  it.each(['completed', 'interrupted'])('reuses warm Codex after native abort finishes as %s', async (status) => {
     const hostedCodexHome = await createTempDir('assistant-codex-warm-abort-home-')
     const workingDirectory = await createTempDir('assistant-codex-warm-abort-work-')
     const controller = new AbortController()
@@ -900,58 +900,60 @@ describe('assistant codex runtime', () => {it('handles current Codex v2 turn-tag
           const initialize = await waitForRpcMethod(spawnedChild, 'initialize')
           spawnedChild.stdout.write(jsonLine({ id: initialize.id, result: {} }))
 
-          const thread = await waitForRpcMethod(spawnedChild, 'thread/start')
-          const threadId = spawnedChildren.length === 1
-            ? 'thread-warm-abort-one'
-            : 'thread-warm-abort-two'
-          const turnId = spawnedChildren.length === 1
-            ? 'turn-warm-abort-one'
-            : 'turn-warm-abort-two'
-          spawnedChild.stdout.write(jsonLine({
-            id: thread.id,
-            result: {
-              thread: {
-                id: threadId,
-              },
-            },
-          }))
-
-          const turn = await waitForRpcMethod(spawnedChild, 'turn/start')
-          spawnedChild.stdout.write(jsonLine({
-            id: turn.id,
-            result: {
-              turn: {
-                id: turnId,
-              },
-            },
-          }))
-          spawnedChild.stdout.write(jsonLine({
-            method: 'turn/started',
-            params: {
-              turn: {
-                id: turnId,
-              },
-            },
-          }))
-
-          if (spawnedChildren.length === 1) {
-            controller.abort()
-            const interrupt = await waitForRpcMethod(spawnedChild, 'turn/interrupt')
+          for (let ordinal = 1; ordinal <= 2; ordinal += 1) {
+            const thread = await waitForRpcMethodCount(spawnedChild, 'thread/start', ordinal)
+            const threadId = ordinal === 1
+              ? 'thread-warm-abort-one'
+              : 'thread-warm-abort-two'
+            const turnId = ordinal === 1
+              ? 'turn-warm-abort-one'
+              : 'turn-warm-abort-two'
             spawnedChild.stdout.write(jsonLine({
-              id: interrupt.id,
-              result: {},
+              id: thread.id,
+              result: {
+                thread: {
+                  id: threadId,
+                },
+              },
+            }))
+
+            const turn = await waitForRpcMethodCount(spawnedChild, 'turn/start', ordinal)
+            spawnedChild.stdout.write(jsonLine({
+              id: turn.id,
+              result: {
+                turn: {
+                  id: turnId,
+                },
+              },
+            }))
+            spawnedChild.stdout.write(jsonLine({
+              method: 'turn/started',
+              params: {
+                turn: {
+                  id: turnId,
+                },
+              },
+            }))
+
+            if (ordinal === 1) {
+              controller.abort()
+              const interrupt = await waitForRpcMethod(spawnedChild, 'turn/interrupt')
+              spawnedChild.stdout.write(jsonLine({
+                id: interrupt.id,
+                result: {},
+              }))
+            }
+
+            spawnedChild.stdout.write(jsonLine({
+              method: 'turn/completed',
+              params: {
+                turn: {
+                  id: turnId,
+                  status: ordinal === 1 ? status : 'completed',
+                },
+              },
             }))
           }
-
-          spawnedChild.stdout.write(jsonLine({
-            method: 'turn/completed',
-            params: {
-              turn: {
-                id: turnId,
-                status: 'completed',
-              },
-            },
-          }))
         })()
       })
 
@@ -965,17 +967,20 @@ describe('assistant codex runtime', () => {it('handles current Codex v2 turn-tag
       PATH: '/usr/bin',
     }
 
-    await expect(
-      executeCodexAppServerTurn({
-        abortSignal: controller.signal,
-        env: hostedEnv,
-        prompt: 'aborted but completed',
-        workingDirectory,
-      }),
-    ).resolves.toMatchObject({
-      sessionId: 'thread-warm-abort-one',
-      turnId: 'turn-warm-abort-one',
+    const abortedTurn = executeCodexAppServerTurn({
+      abortSignal: controller.signal,
+      env: hostedEnv,
+      prompt: 'aborted turn',
+      workingDirectory,
     })
+    if (status === 'interrupted') {
+      await expect(abortedTurn).rejects.toMatchObject({ code: 'ASSISTANT_CODEX_INTERRUPTED' })
+    } else {
+      await expect(abortedTurn).resolves.toMatchObject({
+        sessionId: 'thread-warm-abort-one',
+        turnId: 'turn-warm-abort-one',
+      })
+    }
 
     const replacementTrace = vi.fn()
 
@@ -991,17 +996,15 @@ describe('assistant codex runtime', () => {it('handles current Codex v2 turn-tag
       turnId: 'turn-warm-abort-two',
     })
 
-    expect(codexMocks.spawn).toHaveBeenCalledTimes(2)
+    expect(codexMocks.spawn).toHaveBeenCalledTimes(1)
     expect(replacementTrace).toHaveBeenCalledWith(
       expect.objectContaining({
         rawEvent: expect.objectContaining({
-          codexTimingColdStartReason: 'previous-turn-abort',
-          codexTimingStage: 'initialized',
+          codexTimingStage: 'warm-reused',
         }),
       }),
     )
-    expect(process.kill).toHaveBeenCalledWith(-20_000, 'SIGINT')
-    expect(process.kill).toHaveBeenCalledWith(-20_000, 'SIGTERM')
+    expect(process.kill).not.toHaveBeenCalled()
   })
 
   it.each([
@@ -1135,9 +1138,8 @@ describe('assistant codex runtime', () => {it('handles current Codex v2 turn-tag
         if (interruptPromise) {
           await interruptPromise
           expect(process.kill).not.toHaveBeenCalledWith(-pidBase, 'SIGINT')
-        } else {
-          expect(process.kill).toHaveBeenCalledWith(-pidBase, 'SIGINT')
         }
+        expect(process.kill).not.toHaveBeenCalledWith(-pidBase, 'SIGINT')
 
         await vi.advanceTimersByTimeAsync(15_000)
         await expect(timedOutTurn).rejects.toMatchObject({
@@ -1751,6 +1753,71 @@ describe('assistant codex runtime', () => {it('handles current Codex v2 turn-tag
       expect.any(Object),
     )
   })
+
+  it.each([false, true])(
+    'handles batched account responses and notifications with unexpected response=%s',
+    async (unexpectedResponse) => {
+      const workingDirectory = await createTempDir('assistant-codex-account-rpc-work-')
+      const codexHome = await createTempDir('assistant-codex-account-rpc-home-')
+      const child = new MockChildProcess()
+      const onDeviceCode = vi.fn()
+      codexMocks.spawn.mockReturnValue(child)
+      const operation = executeCodexManagedAccountOperation({
+        action: 'connect',
+        codexHome,
+        onDeviceCode,
+        workingDirectory,
+      })
+      const outcome = unexpectedResponse
+        ? expect(operation).rejects.toMatchObject({
+            code: 'ASSISTANT_CODEX_APP_SERVER_PROTOCOL_ERROR',
+            context: { retryable: false },
+          })
+        : expect(operation).resolves.toEqual({ kind: 'connected' })
+
+      const initialize = await waitForRpcMethod(child, 'initialize')
+      child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+      const read = await waitForRpcMethod(child, 'account/read')
+      child.stdout.write(jsonLine({ id: read.id, result: { account: null, requiresOpenaiAuth: true } }))
+      const login = await waitForRpcMethod(child, 'account/login/start')
+      child.stdout.write([
+        {
+          id: login.id,
+          result: {
+            type: 'chatgptDeviceCode',
+            loginId: 'login-batched-account',
+            verificationUrl: 'https://example.com/device',
+            userCode: 'TEST-CODE',
+          },
+        },
+        ...(unexpectedResponse ? [{ id: 'unknown-account-response', result: {} }] : []),
+        {
+          method: 'account/login/completed',
+          params: { loginId: 'login-batched-account', success: true },
+        },
+        { method: 'account/updated', params: { authMode: 'chatgpt', planType: 'pro' } },
+      ].map(jsonLine).join(''))
+
+      if (!unexpectedResponse) {
+        const verifiedRead = await waitForRpcMethodCount(child, 'account/read', 2)
+        child.stdout.write(jsonLine({
+          id: verifiedRead.id,
+          result: {
+            account: { type: 'chatgpt', email: 'user@example.com', planType: 'pro' },
+            requiresOpenaiAuth: true,
+          },
+        }))
+      }
+      await outcome
+      expect(onDeviceCode).toHaveBeenCalledTimes(1)
+      expect(onDeviceCode).toHaveBeenCalledWith({
+        userCode: 'TEST-CODE',
+        verificationUrl: 'https://example.com/device',
+      })
+      expect(readWrittenRpcMessages(child).filter((message) => message.method === 'account/read'))
+        .toHaveLength(unexpectedResponse ? 1 : 2)
+    },
+  )
 
   it('preserves Codex managed ChatGPT login completion errors', async () => {
     const workingDirectory = await createTempDir('assistant-codex-managed-auth-error-work-')

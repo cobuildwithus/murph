@@ -85,7 +85,7 @@ describe("hosted local Linq group route drift e2e", () => {
     });
     scenario = await startHostedLocalFullStackScenario({
       additionalEnv: {
-        HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: "1",
+        HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "1000",
         HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS: ownerPhone,
         LINQ_API_BASE_URL: requireLinqStub().runnerBaseUrl,
         LINQ_API_TOKEN: linqApiToken,
@@ -157,7 +157,7 @@ describe("hosted local Linq group route drift e2e", () => {
       throw new Error("Expected the first durable group-route reply to be observed.");
     }
     expect(requireLinqStub().readObservedMessageText(firstSend)).toBe(firstReplyText);
-    expect(firstSend.authorizationStatus).toBe("hosted-sentinel");
+    expect(firstSend.authorizationStatus).toBe("expected");
 
     const provisionReads = await requireLinqStub().waitForMatchingRequestCount({
       expectedCount: canonicalReadBaseline + 1,
@@ -201,7 +201,7 @@ describe("hosted local Linq group route drift e2e", () => {
       requireLinqStub().readObservedMessageText(request)
     )).toEqual([firstReplyText, secondReplyText]);
     expect(newSends.every((request) =>
-      request.authorizationStatus === "hosted-sentinel"
+      request.authorizationStatus === "expected"
     )).toBe(true);
 
     expect(countCanonicalChatReads()).toBe(canonicalReadsAfterProvision);

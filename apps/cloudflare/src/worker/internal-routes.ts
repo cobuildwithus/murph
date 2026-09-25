@@ -1,3 +1,4 @@
+import { runtimeResourcePurgeRoutes } from "./route-handlers/runtime-resource-purge.ts";
 import {
   browserVaultRoutes,
 } from "./route-handlers/browser-vault-session.ts";
@@ -34,6 +35,7 @@ export const workerInternalRoutes = [
   ...runtimeProcessingRoutes,
   ...inferenceVerificationRoutes,
   ...userDataDeleteRoutes,
+  ...runtimeResourcePurgeRoutes,
   ...telegramUsageLimitNoticeRoutes,
   ...environmentRealtimeRoutes,
   ...environmentVoiceRoutes,

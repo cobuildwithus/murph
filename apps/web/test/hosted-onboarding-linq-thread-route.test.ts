@@ -103,6 +103,18 @@ const pendingGroupSetupMocks = vi.hoisted(() => ({
   readHostedPendingGroupSetupCandidatesForParticipantsTx: vi.fn(),
 }));
 
+// The row fixtures do not execute Prisma relation filters. Preserve their
+// state-based access decisions; the PostgreSQL proof covers the boolean query.
+vi.mock("@/src/lib/hosted-onboarding/member-access", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/src/lib/hosted-onboarding/member-access")>();
+  return {
+    ...actual,
+    readActiveHostedMemberAccess: async (
+      input: Parameters<typeof actual.readActiveHostedMemberAccess>[0],
+    ) => await actual.readActiveHostedMemberAccessState(input) !== null,
+  };
+});
+
 vi.mock("../src/lib/hosted-routing/thread-route-store", async (importOriginal) => {
   const actual = await importOriginal<
     typeof import("../src/lib/hosted-routing/thread-route-store")
@@ -1152,7 +1164,6 @@ function createPrisma(input: {
 
 function createStatefulThreadRoutePrisma() {
   type LinqLineFixture = {
-    activeMemberLimit: number | null;
     assignmentWeight: number;
     configuredAt: Date | null;
     egressPolicy: string;
@@ -1628,7 +1639,6 @@ function createStatefulThreadRoutePrisma() {
         throw new Error("Expected a managed Linq line lookup key.");
       }
       linqLines.set(lookupKey, {
-        activeMemberLimit: null,
         assignmentWeight: 100,
         configuredAt: new Date("2026-06-24T00:00:00.000Z"),
         egressPolicy: overrides.egressPolicy ?? "enabled",
@@ -3555,7 +3565,16 @@ describe("Linq explicit external-thread routing", () => {
       });
   });
 
-  it("routes a bound Linq group thread into the container runtime", async () => {
+  it.each([
+    { mode: "normal", text: "How did we sleep?", attachmentId: "a".repeat(256), attachmentCount: 32 },
+    { mode: "compact", text: "\u0000".repeat(20_000), attachmentId: "a".repeat(256), attachmentCount: 16 },
+    { mode: "minimal", text: "\u0000".repeat(20_000), attachmentId: "\u0000".repeat(256), attachmentCount: 0 },
+  ])("preserves bound group routing through $mode mailbox staging", async ({
+    mode,
+    text,
+    attachmentId,
+    attachmentCount,
+  }) => {
     const prisma = createPrisma({
       routeContainerMemberId: "member_thread_container_123",
     });
@@ -3604,10 +3623,44 @@ describe("Linq explicit external-thread routing", () => {
       }),
     });
 
+    const event = buildLinqMessageReceivedEvent({
+      parts: [
+        { type: "text", value: text },
+        ...Array.from({ length: 32 }, (_, index) => ({
+          attachment_id: attachmentId,
+          filename: "f".repeat(160),
+          mime_type: "m".repeat(120),
+          size: index,
+          type: "media" as const,
+          url: `https://example.test/signed-attachment/${index}?signature=synthetic`,
+        })),
+      ],
+    });
+    const originalEvent = structuredClone(event);
     const plan = await planHostedOnboardingLinqWebhook({
-      event: buildLinqMessageReceivedEvent({}),
+      event,
       prisma: prisma as never,
     });
+
+    expect(event).toEqual(originalEvent);
+    const stagedMessage = readAppendedConversationMessage(0);
+    if (stagedMessage.channel !== "linq") {
+      throw new Error("Expected a staged Linq conversation message.");
+    }
+    expect(stagedMessage.linqMessage.parts.filter((part) => part.type === "media"))
+      .toHaveLength(attachmentCount);
+    const serializedEnvelope = JSON.stringify(
+      vi.mocked(mailboxStore.appendHostedMailboxEnvelopeTx).mock.calls[0]?.[0].envelope,
+    );
+    expect(new TextEncoder().encode(serializedEnvelope).byteLength).toBeLessThan(128 * 1024);
+    expect(serializedEnvelope).not.toContain("signed-attachment");
+    if (mode === "normal") {
+      expect(serializedEnvelope).not.toContain("Internal staging note:");
+    } else {
+      expect(serializedEnvelope).toContain(mode === "compact"
+        ? "payload was compacted"
+        : "exceeded hosted mailbox staging limits");
+    }
 
     expect(plan.response).toMatchObject({
       ignored: false,
@@ -6598,6 +6651,7 @@ describe("Linq group chat auto-provision", () => {
         });
         expect(mailboxStore.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
           envelope: expect.objectContaining({
+            userId: "member_thread_container_123",
             message: expect.objectContaining({
               linqMessage: expect.objectContaining({
                 chatId: "chat_group_123",
@@ -6731,10 +6785,8 @@ describe("Linq group chat auto-provision", () => {
     vi.mocked(prismaModule.getPrisma).mockReturnValue(prisma as never);
     vi.mocked(linqModule.verifyAndParseHostedLinqWebhookRequest)
       .mockReturnValue(buildLinqMessageReceivedEvent({ isGroup: false }) as never);
-    vi.mocked(linqClient.getHostedLinqChatSummary).mockResolvedValue({
-      handles: [],
-      isGroup: false,
-    });
+    vi.mocked(linqClient.getHostedLinqChatSummary)
+      .mockRejectedValue(new Error("Chat HTTP is not ownership authority"));
     vi.mocked(linqClient.getHostedLinqChatHandles).mockResolvedValue([]);
 
     const response = await handleHostedOnboardingLinqWebhook({
@@ -6748,12 +6800,10 @@ describe("Linq group chat auto-provision", () => {
       ok: true,
       reason: "wake-appended-thread-route",
     });
-    expect(linqClient.getHostedLinqChatSummary).toHaveBeenCalledWith({
-      chatId: "chat_group_123",
-      timeoutMs: 1_500,
-    });
+    expect(linqClient.getHostedLinqChatSummary).not.toHaveBeenCalled();
     expect(mailboxStore.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
       envelope: expect.objectContaining({
+        userId: "member_thread_container_123",
         message: expect.objectContaining({
           linqMessage: expect.objectContaining({
             chatId: "chat_group_123",
@@ -6777,19 +6827,9 @@ describe("Linq group chat auto-provision", () => {
       webhookIsGroup: true,
     },
     {
-      description: "incorrectly says direct",
-      service: "iMessage",
-      webhookIsGroup: false,
-    },
-    {
       description: "omits group directness",
       service: "iMessage",
       webhookIsGroup: null,
-    },
-    {
-      description: "incorrectly says direct",
-      service: "sms",
-      webhookIsGroup: false,
     },
     {
       description: "omits group directness",
@@ -8741,6 +8781,7 @@ describe("Linq group chat auto-provision", () => {
         userId: containerCreate.data.memberId,
       },
       mailboxItemId: "mailbox_group_123",
+      onSignalStarted: expect.any(Function),
     });
   });
 

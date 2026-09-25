@@ -43,12 +43,12 @@ export function LocalRunSection({
             </div>
 
             <div className="border-t border-white/8 pt-5">
-              <p className="text-[#f5f0e8]/60"># Start chatting</p>
+              <p className="text-[#f5f0e8]/60"># Ask Murph</p>
               <p className="mt-2 break-all text-[#f5f0e8]">
                 <span className="select-none text-[#d4b87a]" aria-hidden="true">
                   {"$ "}
                 </span>
-                murph chat
+                murph assistant ask &quot;Hello&quot;
               </p>
             </div>
           </div>

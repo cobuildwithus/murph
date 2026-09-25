@@ -10,6 +10,7 @@ import {
   importDeviceBatch,
   initializeVault,
   readEvent,
+  readIntegrationIngestById,
   type DeviceBatchImportTiming,
 } from "../src/index.ts";
 
@@ -239,5 +240,47 @@ test("does not fail a committed import when the timing observer throws", async (
 
     assert.equal(result.applied, true);
     assert.equal(result.events.length, 1);
+  });
+});
+
+test("preserves raw evidence identity across reordered frozen nested values", async () => {
+  await withTempVault(async (vaultRoot) => {
+    const importedAt = "2026-01-02T00:00:00.000Z";
+    const nested = Object.freeze({ z: 2, a: 1, omitted: undefined });
+    const literalPrototype = Object.freeze({ retained: true });
+    const firstContent = Object.freeze(Object.fromEntries([
+      ["timestamp", new Date(importedAt)],
+      ["nested", nested],
+      ["__proto__", literalPrototype],
+      ["10", "ten"],
+      ["2", "two"],
+    ]));
+    const replayContent = Object.freeze(Object.fromEntries([
+      ["2", "two"],
+      ["10", "ten"],
+      ["__proto__", Object.freeze({ retained: true })],
+      ["nested", Object.freeze({ a: 1, z: 2 })],
+      ["timestamp", importedAt],
+    ]));
+    const session = createDeviceBatchImportSession();
+    const makeInput = (content: Record<string, unknown>) => ({
+      vaultRoot,
+      provider: "synthetic",
+      importedAt,
+      events: [buildObservation("frozen-content", importedAt, 1)],
+      evidenceParts: [{ role: "snapshot", fileName: "snapshot.json", content }],
+    });
+    const original = await importDeviceBatch(makeInput(firstContent), { session });
+    assert.ok(original.applied);
+    const replay = await importDeviceBatch(makeInput(replayContent), { session });
+    assert.equal(replay.applied, false);
+    assert.deepEqual(replay.events.map((event) => event.id), original.events.map((event) => event.id));
+    const stored = await readIntegrationIngestById(vaultRoot, original.ingestId);
+    assert.ok(stored);
+    assert.deepEqual(JSON.parse(stored.record.parts[0]?.content ?? ""), replayContent);
+    assert.equal(firstContent.nested, nested);
+    assert.equal(firstContent.__proto__, literalPrototype);
+    assert.ok(firstContent.timestamp instanceof Date);
+    assert.deepEqual(Object.keys(nested), ["z", "a", "omitted"]);
   });
 });

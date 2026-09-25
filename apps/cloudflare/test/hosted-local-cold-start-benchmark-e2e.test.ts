@@ -245,11 +245,11 @@ async function startBenchmarkScenario(input: {
       ...(input.restartEnvironment ?? {}),
       HOSTED_ASSISTANT_MODEL: assistantModel,
       HOSTED_ASSISTANT_PROVIDER: "openai",
-      HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS:
+      HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS:
         benchmarkTarget === "established-v2-r2" ? "1000" : "1",
       // Trials never overlap member runtimes. A short TTL keeps first-contact
       // trials isolated and established setup stacks short-lived.
-      HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "1000",
+
       HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS:
         trialUserIds.map(buildLinqRecipientPhoneNumber).join(","),
       LINQ_API_BASE_URL: requireLinqStub().runnerBaseUrl,
@@ -349,7 +349,7 @@ async function runColdStartTrial(
   if (!acceptedReply) {
     throw new Error("Expected one accepted benchmark reply.");
   }
-  expect(acceptedReply.authorizationStatus).toBe("hosted-sentinel");
+  expect(acceptedReply.authorizationStatus).toBe("expected");
 
   const finalStatus = await completionPromise;
   expect(finalStatus.lastErrorCode ?? null).toBeNull();

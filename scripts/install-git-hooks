@@ -1,11 +1,59 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+if_needed=0
+if [[ "$#" == 1 && "$1" == --if-needed ]]; then
+  if_needed=1
+elif (( $# != 0 )); then
+  printf 'usage: install-git-hooks [--if-needed]\n' >&2
+  exit 2
+fi
+
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 common_dir="$(git -C "$repo_root" rev-parse --path-format=absolute --git-common-dir)"
 state_dir="${MURPH_WORKTREE_GUARD_STATE_DIR:-$common_dir/murph-worktree-storage-guard}"
 lock_file="$state_dir/lock"
 lock_wait_seconds=180
+primary_worktree="$(
+  git -C "$repo_root" worktree list --porcelain |
+    awk '$1 == "worktree" && !found { print substr($0, 10); found = 1 }'
+)"
+
+if [[ -z "$primary_worktree" || ! -x "$primary_worktree/.githooks/pre-commit" ]]; then
+  printf 'install-git-hooks: primary checkout hook is unavailable\n' >&2
+  exit 1
+fi
+
+desired_hooks_path="$primary_worktree/.githooks"
+legacy_guard_config="$state_dir/gitconfig"
+guard_config="$state_dir/gitconfig.current"
+# Dependency preparation may observe an already-installed configuration without
+# taking the mutation lock. This does not authorize a commit: the shared hook
+# still runs the full guard under its lock at commit time.
+hooks_are_current() {
+  [[ -f "$state_dir/authorization-initialized" ]] || return 1
+  [[ "$(git config --file "$common_dir/config" --get-all include.path | tail -n 1)" == "$guard_config" ]] || return 1
+  [[ "$(git config --file "$guard_config" --get core.hooksPath)" == "$desired_hooks_path" ]] || return 1
+  [[ "$(git -C "$repo_root" config --get core.hooksPath)" == "$desired_hooks_path" ]] || return 1
+  [[ "$repo_root" != "$primary_worktree" ]] || return 0
+
+  local admin_dir
+  admin_dir="$(git -C "$repo_root" rev-parse --absolute-git-dir)" || return 1
+  case "$admin_dir" in
+    "$common_dir"/worktrees/*)
+      [[ -f "$admin_dir/murph-storage-guard-authorized" \
+        && ! -L "$admin_dir/murph-storage-guard-authorized" \
+        && ! -e "$admin_dir/murph-storage-guard-isolated" \
+        && ! -L "$admin_dir/murph-storage-guard-isolated" ]]
+      ;;
+    *) return 1 ;;
+  esac
+}
+
+if (( if_needed == 1 )) && hooks_are_current; then
+  exit 0
+fi
+
 mkdir -p "$state_dir"
 
 if [[ "${MURPH_WORKTREE_GUARD_LOCK_HELD:-0}" != 1 ]]; then
@@ -14,11 +62,11 @@ if [[ "${MURPH_WORKTREE_GUARD_LOCK_HELD:-0}" != 1 ]]; then
   set +e
   if command -v flock >/dev/null 2>&1; then
     flock -w "$lock_wait_seconds" "$lock_file" \
-      env MURPH_WORKTREE_GUARD_LOCK_HELD=1 "$0"
+      env MURPH_WORKTREE_GUARD_LOCK_HELD=1 "$0" "$@"
     lock_status=$?
   elif command -v lockf >/dev/null 2>&1; then
     lockf -t "$lock_wait_seconds" "$lock_file" \
-      env MURPH_WORKTREE_GUARD_LOCK_HELD=1 "$0"
+      env MURPH_WORKTREE_GUARD_LOCK_HELD=1 "$0" "$@"
     lock_status=$?
   else
     set -e
@@ -33,19 +81,6 @@ if [[ "${MURPH_WORKTREE_GUARD_LOCK_HELD:-0}" != 1 ]]; then
   exit "$lock_status"
 fi
 
-primary_worktree="$(
-  git -C "$repo_root" worktree list --porcelain |
-    awk '$1 == "worktree" && !found { print substr($0, 10); found = 1 }'
-)"
-
-if [[ -z "$primary_worktree" || ! -x "$primary_worktree/.githooks/pre-commit" ]]; then
-  printf 'install-git-hooks: primary checkout hook is unavailable\n' >&2
-  exit 1
-fi
-
-desired_hooks_path="$primary_worktree/.githooks"
-legacy_guard_config="$state_dir/gitconfig"
-guard_config="$state_dir/gitconfig.current"
 tmp_config="$guard_config.tmp.$$"
 : >"$tmp_config"
 git config --file "$tmp_config" core.hooksPath "$desired_hooks_path"

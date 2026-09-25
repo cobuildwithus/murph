@@ -329,6 +329,267 @@ async function verifyWorkspaceDependencyDeclaration({
   return `${path.relative(repoRoot, filePath)} imports ${JSON.stringify(specifier)}, but ${sourceMember}/package.json does not declare ${packageName} as a direct dependency. Add the direct workspace dependency so the package graph reflects the real owner boundary instead of relying on a transitive install.`;
 }
 
+// Preserve declaration order when one import matches several binding restrictions.
+const namedBindingImportRules = [
+  {
+    specifier: "@murphai/assistant-runtime",
+    members: ["apps/cloudflare"],
+    bindings: [
+      "HostedEmailSendRequest",
+      "HostedEmailSendTargetKind",
+      "hostedEmailSendTargetKindValues",
+      "parseHostedEmailSendRequest",
+    ],
+    importDescription: " imports hosted email transport codecs from ",
+    guidance: "; Cloudflare transport code must use @murphai/assistant-runtime/hosted-email so the assistant-runtime root stays on the canonical hosted runtime surface.",
+  },
+  {
+    specifier: "@murphai/assistant-runtime",
+    members: ["apps/cloudflare"],
+    pathFragment: `${path.sep}apps${path.sep}cloudflare${path.sep}src${path.sep}`,
+    bindings: [
+      "HostedWorkspaceRuntimeJobOptions",
+      "runHostedWorkspaceRuntimeJobInProcess",
+    ],
+    importDescription: " imports hosted workspace invocation internals from ",
+    guidance: "; apps/cloudflare/src must use @murphai/assistant-runtime/hosted-invocation so hosted invocation assembly stays package-owned.",
+  },
+  {
+    specifier: "@murphai/assistant-runtime/hosted-invocation",
+    members: ["apps/cloudflare"],
+    pathFragment: `${path.sep}apps${path.sep}cloudflare${path.sep}src${path.sep}`,
+    bindings: [
+      "HostedWorkspaceRuntimeJobOptions",
+      "HostedRuntimeBridgeCheckpointLease",
+      "createHostedWorkspaceRuntimeBridgeJobOptions",
+      "checkpointHostedRuntimeBridgeWorkspace",
+      "checkpointHostedRuntimeBridgeWebWorkspace",
+      "snapshotHostedRuntimeBridgeWorkspaceBundle",
+    ],
+    importDescription: " imports hosted workspace bridge internals from ",
+    guidance: "; apps/cloudflare/src must call runHostedWorkspaceInvocation from the invocation facade and use focused capability subpaths for non-invocation bridge ports.",
+  },
+  {
+    specifier: "@murphai/runtime-state/node",
+    members: ["apps/cloudflare"],
+    pathFragment: `${path.sep}apps${path.sep}cloudflare${path.sep}src${path.sep}`,
+    bindings: [
+      "collectHostedWorkspaceSnapshotArchivePlan",
+      "createHostedWorkspaceSnapshotArchivePlanSizeDiagnostics",
+    ],
+    importDescription: " imports workspace snapshot planning from ",
+    guidance: "; app Cloudflare code may build encrypted archives, but snapshot planning and diagnostics belong to @murphai/assistant-runtime/hosted-invocation.",
+  },
+  {
+    specifier: "@murphai/hosted-execution",
+    members: ["packages/assistant-runtime", "apps/cloudflare"],
+    bindings: [
+      "readHostedEmailCapabilities",
+      "resolveHostedEmailSenderIdentity",
+    ],
+    importDescription: " imports hosted email helpers from ",
+    guidance: "; use @murphai/hosted-execution/hosted-email so hosted email policy and sender identity stay on their focused owner surface.",
+  },
+  {
+    specifier: "@murphai/hosted-execution",
+    members: ["packages/assistant-runtime", "packages/cloudflare-hosted-control", "apps/cloudflare", "apps/web"],
+    bindings: [
+      "parseHostedExecutionCursorState",
+      "parseHostedExecutionEvent",
+      "parseHostedExecutionUserStatus",
+      "parseHostedExecutionBundlePayload",
+      "parseHostedExecutionBundleRef",
+      "parseHostedExecutionRunnerRequest",
+      "parseHostedExecutionRunnerResult",
+      "parseHostedWakeAppendRequest",
+      "parseHostedWakeAppendResponse",
+      "parseHostedWakeExecutionPayload",
+      "parseHostedWakeRecord",
+    ],
+    importDescription: " imports hosted execution parsers from ",
+    guidance: "; use @murphai/hosted-execution/parsers so parse helpers stay on the dedicated parser surface instead of the hosted-execution root barrel.",
+  },
+  {
+    specifier: "@murphai/hosted-execution",
+    members: ["packages/assistant-runtime", "apps/cloudflare"],
+    bindings: [
+      "HostedAssistantDeliveryEffect",
+      "HostedAssistantDeliveryRecord",
+      "HostedAssistantDeliverySideEffect",
+      "buildHostedAssistantDeliveryEffect",
+      "buildHostedAssistantDeliveryFailedRecord",
+      "buildHostedAssistantDeliveryPendingRecord",
+      "buildHostedAssistantDeliverySendingRecord",
+      "buildHostedAssistantDeliverySentRecord",
+      "parseHostedAssistantDeliverySideEffect",
+      "parseHostedAssistantDeliverySideEffects",
+      "parseHostedAssistantDeliveryRecord",
+      "sameHostedAssistantDeliveryAttempt",
+      "sameHostedAssistantDeliveryFailure",
+      "sameHostedAssistantDeliveryReceipt",
+      "sameHostedAssistantDeliverySideEffectIdentity",
+    ],
+    importDescription: " imports hosted assistant delivery helpers from ",
+    guidance: "; use @murphai/hosted-execution/side-effects so assistant delivery records stay on their dedicated owner surface.",
+  },
+  {
+    specifier: "@murphai/hosted-execution",
+    members: ["apps/cloudflare", "apps/web"],
+    bindings: [
+      "encodeHostedExecutionSignedRequestPayload",
+      "readHostedExecutionSignatureHeaders",
+    ],
+    importDescription: " imports hosted execution callback-auth helpers from ",
+    guidance: "; use @murphai/hosted-execution/auth so signed-request codecs stay on their dedicated auth surface.",
+  },
+  {
+    specifier: "@murphai/hosted-execution",
+    members: ["apps/cloudflare", "apps/web"],
+    bindings: [
+      "HOSTED_EXECUTION_NONCE_HEADER",
+      "HOSTED_EXECUTION_SIGNATURE_HEADER",
+      "HOSTED_EXECUTION_SIGNING_KEY_ID_HEADER",
+      "HOSTED_EXECUTION_TIMESTAMP_HEADER",
+      "HOSTED_EXECUTION_USER_ID_HEADER",
+    ],
+    importDescription: " imports hosted execution callback-auth headers from ",
+    guidance: "; use @murphai/hosted-execution/contracts so signed-request header names stay on the dedicated contract surface.",
+  },
+  {
+    specifier: "@murphai/inboxd",
+    members: ["packages/inbox-services"],
+    pathFragment: `${path.sep}src${path.sep}`,
+    bindings: [
+      "ConnectorRestartPolicy",
+    ],
+    importDescription: " imports ConnectorRestartPolicy from ",
+    guidance: "; use @murphai/inboxd/runtime so inbox-services runtime composition stays off the inboxd root barrel for daemon restart-policy typing.",
+  },
+  {
+    specifier: "@murphai/hosted-execution",
+    members: ["packages/cloudflare-hosted-control", "apps/cloudflare", "apps/web"],
+    bindings: [
+      "normalizeHostedExecutionBaseUrl",
+    ],
+    importDescription: " imports hosted execution base-url normalization from ",
+    guidance: "; use @murphai/hosted-execution/env so env normalization stays on the dedicated env surface.",
+  },
+  {
+    specifier: "@murphai/cloudflare-hosted-control",
+    members: ["apps/cloudflare", "apps/web"],
+    bindings: [
+      "buildCloudflareHostedControlPendingUsageUsersPath",
+      "buildCloudflareHostedControlUserPendingUsagePath",
+      "buildCloudflareHostedControlUserRunPath",
+      "buildCloudflareHostedControlUserStatusPath",
+    ],
+    importDescription: " imports Cloudflare hosted-control route helpers from ",
+    guidance: "; use @murphai/cloudflare-hosted-control/routes so route ownership stays on the dedicated control-route surface.",
+  },
+  {
+    specifier: "@murphai/cloudflare-hosted-control",
+    members: ["apps/cloudflare", "apps/web"],
+    bindings: [
+      "CloudflareHostedManagedUserCryptoStatus",
+      "CloudflareHostedUserEnvStatus",
+      "CloudflareHostedUserEnvUpdate",
+    ],
+    importDescription: " imports Cloudflare hosted-control contract types from ",
+    guidance: "; use @murphai/cloudflare-hosted-control/contracts so mutable control contracts stay on the dedicated contract surface.",
+  },
+  {
+    specifier: "@murphai/cloudflare-hosted-control",
+    members: ["apps/cloudflare"],
+    bindings: [
+      "parseCloudflareHostedManagedUserCryptoStatus",
+      "parseCloudflareHostedUserEnvStatus",
+      "parseCloudflareHostedUserEnvUpdate",
+    ],
+    importDescription: " imports Cloudflare hosted-control parsers from ",
+    guidance: "; use @murphai/cloudflare-hosted-control/parsers so parsing stays on the dedicated codec surface.",
+  },
+  {
+    specifier: "@murphai/cloudflare-hosted-control",
+    members: ["apps/web"],
+    bindings: [
+      "CloudflareHostedControlClient",
+      "createCloudflareHostedControlClient",
+    ],
+    importDescription: " imports the Cloudflare hosted-control client from ",
+    guidance: "; use @murphai/cloudflare-hosted-control/client so requester logic stays on the dedicated client surface.",
+  },
+  {
+    specifier: "@murphai/hosted-execution",
+    members: ["apps/cloudflare"],
+    bindings: [
+      "HOSTED_EXECUTION_RUNNER_EMAIL_SEND_PATH",
+    ],
+    importDescription: " imports runner route constants from ",
+    guidance: "; apps/cloudflare must use @murphai/hosted-execution/routes so runtime route construction stays on the focused route surface.",
+  },
+  {
+    specifier: "@murphai/runtime-state",
+    bindings: [
+      "isValidAssistantOpaqueId",
+      "normalizeAssistantOpaqueId",
+    ],
+    importDescription: " imports assistant opaque id helpers from ",
+    guidance: "; use @murphai/runtime-state/assistant-ids so the dedicated helper stays off the broad runtime-state root barrel.",
+  },
+  {
+    specifier: "@murphai/query",
+    bindings: [
+      "ALL_QUERY_ENTITY_FAMILIES",
+    ],
+    importDescription: " imports query entity-family metadata from ",
+    guidance: "; use @murphai/query/entity-families so the constant stays on its dedicated query-owned surface instead of the broad query root barrel.",
+  },
+  {
+    specifier: "@murphai/vault-usecases/runtime",
+    bindings: [
+      "ALL_QUERY_ENTITY_FAMILIES",
+    ],
+    importDescription: " imports query entity-family metadata from ",
+    guidance: "; import ALL_QUERY_ENTITY_FAMILIES from @murphai/query/entity-families so the constant stays on its query-owned surface instead of the vault-usecases runtime helper layer.",
+  },
+  {
+    specifier: "@murphai/importers",
+    excludedMembers: ["packages/importers"],
+    bindings: [
+      "GARMIN_DEVICE_PROVIDER_DESCRIPTOR",
+      "OURA_DEVICE_PROVIDER_DESCRIPTOR",
+      "WHOOP_DEVICE_PROVIDER_DESCRIPTOR",
+      "defaultDeviceProviderDescriptors",
+      "createNamedDeviceProviderRegistry",
+      "resolveDeviceProviderDescriptor",
+      "resolveDeviceProviderSourcePriority",
+      "requireDeviceProviderSyncDescriptor",
+      "requireDeviceProviderWebhookDescriptor",
+      "DeviceProviderDescriptor",
+      "DeviceProviderMetricFamily",
+      "NamedDeviceProviderRegistry",
+    ],
+    importDescription: " imports provider-descriptor metadata from ",
+    guidance: "; workspace consumers must use @murphai/importers/device-providers/provider-descriptors so they do not depend on the full device-provider barrel.",
+  },
+];
+
+function verifyNamedBindingImportPolicy({ filePath, source, sourceMember, specifier }) {
+  for (const rule of namedBindingImportRules) {
+    if (
+      specifier !== rule.specifier
+      || (rule.members && !rule.members.includes(sourceMember))
+      || rule.excludedMembers?.includes(sourceMember)
+      || (rule.pathFragment && !filePath.includes(rule.pathFragment))
+      || !importsNamedBindingsFromSpecifier(source, specifier, rule.bindings)
+    ) {
+      continue;
+    }
+    return `${path.relative(repoRoot, filePath)}${rule.importDescription}${JSON.stringify(specifier)}${rule.guidance}`;
+  }
+  return null;
+}
+
 export function verifyWorkspaceImportPolicy({
   filePath,
   source,
@@ -408,47 +669,6 @@ export function verifyWorkspaceImportPolicy({
   }
 
   if (
-    sourceMember === "apps/cloudflare"
-    && specifier === "@murphai/assistant-runtime"
-    && importsNamedBindingsFromSpecifier(source, specifier, [
-      "HostedEmailSendRequest",
-      "HostedEmailSendTargetKind",
-      "hostedEmailSendTargetKindValues",
-      "parseHostedEmailSendRequest",
-    ])
-  ) {
-    return `${path.relative(repoRoot, filePath)} imports hosted email transport codecs from ${JSON.stringify(specifier)}; Cloudflare transport code must use @murphai/assistant-runtime/hosted-email so the assistant-runtime root stays on the canonical hosted runtime surface.`;
-  }
-
-  if (
-    sourceMember === "apps/cloudflare"
-    && filePath.includes(`${path.sep}apps${path.sep}cloudflare${path.sep}src${path.sep}`)
-    && specifier === "@murphai/assistant-runtime"
-    && importsNamedBindingsFromSpecifier(source, specifier, [
-      "HostedWorkspaceRuntimeJobOptions",
-      "runHostedWorkspaceRuntimeJobInProcess",
-    ])
-  ) {
-    return `${path.relative(repoRoot, filePath)} imports hosted workspace invocation internals from ${JSON.stringify(specifier)}; apps/cloudflare/src must use @murphai/assistant-runtime/hosted-invocation so hosted invocation assembly stays package-owned.`;
-  }
-
-  if (
-    sourceMember === "apps/cloudflare"
-    && filePath.includes(`${path.sep}apps${path.sep}cloudflare${path.sep}src${path.sep}`)
-    && specifier === "@murphai/assistant-runtime/hosted-invocation"
-    && importsNamedBindingsFromSpecifier(source, specifier, [
-      "HostedWorkspaceRuntimeJobOptions",
-      "HostedRuntimeBridgeCheckpointLease",
-      "createHostedWorkspaceRuntimeBridgeJobOptions",
-      "checkpointHostedRuntimeBridgeWorkspace",
-      "checkpointHostedRuntimeBridgeWebWorkspace",
-      "snapshotHostedRuntimeBridgeWorkspaceBundle",
-    ])
-  ) {
-    return `${path.relative(repoRoot, filePath)} imports hosted workspace bridge internals from ${JSON.stringify(specifier)}; apps/cloudflare/src must call runHostedWorkspaceInvocation from the invocation facade and use focused capability subpaths for non-invocation bridge ports.`;
-  }
-
-  if (
     !isTestFile
     && specifier === "@murphai/assistant-runtime/hosted-invocation-testkit"
   ) {
@@ -464,18 +684,6 @@ export function verifyWorkspaceImportPolicy({
     )
   ) {
     return `${path.relative(repoRoot, filePath)} imports ${JSON.stringify(specifier)}; hosted workspace bridge ownership lives in @murphai/assistant-runtime/hosted-invocation, not app-local Cloudflare bridge files.`;
-  }
-
-  if (
-    sourceMember === "apps/cloudflare"
-    && filePath.includes(`${path.sep}apps${path.sep}cloudflare${path.sep}src${path.sep}`)
-    && specifier === "@murphai/runtime-state/node"
-    && importsNamedBindingsFromSpecifier(source, specifier, [
-      "collectHostedWorkspaceSnapshotArchivePlan",
-      "createHostedWorkspaceSnapshotArchivePlanSizeDiagnostics",
-    ])
-  ) {
-    return `${path.relative(repoRoot, filePath)} imports workspace snapshot planning from ${JSON.stringify(specifier)}; app Cloudflare code may build encrypted archives, but snapshot planning and diagnostics belong to @murphai/assistant-runtime/hosted-invocation.`;
   }
 
   if (
@@ -495,103 +703,6 @@ export function verifyWorkspaceImportPolicy({
   }
 
   if (
-    (
-      sourceMember === "packages/assistant-runtime"
-      || sourceMember === "apps/cloudflare"
-    )
-    && specifier === "@murphai/hosted-execution"
-    && importsNamedBindingsFromSpecifier(source, specifier, [
-      "readHostedEmailCapabilities",
-      "resolveHostedEmailSenderIdentity",
-    ])
-  ) {
-    return `${path.relative(repoRoot, filePath)} imports hosted email helpers from ${JSON.stringify(specifier)}; use @murphai/hosted-execution/hosted-email so hosted email policy and sender identity stay on their focused owner surface.`;
-  }
-
-  if (
-    (
-      sourceMember === "packages/assistant-runtime"
-      || sourceMember === "packages/cloudflare-hosted-control"
-      || sourceMember === "apps/cloudflare"
-      || sourceMember === "apps/web"
-    )
-    && specifier === "@murphai/hosted-execution"
-    && importsNamedBindingsFromSpecifier(source, specifier, [
-      "parseHostedExecutionCursorState",
-      "parseHostedExecutionEvent",
-      "parseHostedExecutionUserStatus",
-      "parseHostedExecutionBundlePayload",
-      "parseHostedExecutionBundleRef",
-      "parseHostedExecutionRunnerRequest",
-      "parseHostedExecutionRunnerResult",
-      "parseHostedWakeAppendRequest",
-      "parseHostedWakeAppendResponse",
-      "parseHostedWakeExecutionPayload",
-      "parseHostedWakeRecord",
-    ])
-  ) {
-    return `${path.relative(repoRoot, filePath)} imports hosted execution parsers from ${JSON.stringify(specifier)}; use @murphai/hosted-execution/parsers so parse helpers stay on the dedicated parser surface instead of the hosted-execution root barrel.`;
-  }
-
-  if (
-    (
-      sourceMember === "packages/assistant-runtime"
-      || sourceMember === "apps/cloudflare"
-    )
-    && specifier === "@murphai/hosted-execution"
-    && importsNamedBindingsFromSpecifier(source, specifier, [
-      "HostedAssistantDeliveryEffect",
-      "HostedAssistantDeliveryRecord",
-      "HostedAssistantDeliverySideEffect",
-      "buildHostedAssistantDeliveryEffect",
-      "buildHostedAssistantDeliveryFailedRecord",
-      "buildHostedAssistantDeliveryPendingRecord",
-      "buildHostedAssistantDeliverySendingRecord",
-      "buildHostedAssistantDeliverySentRecord",
-      "parseHostedAssistantDeliverySideEffect",
-      "parseHostedAssistantDeliverySideEffects",
-      "parseHostedAssistantDeliveryRecord",
-      "sameHostedAssistantDeliveryAttempt",
-      "sameHostedAssistantDeliveryFailure",
-      "sameHostedAssistantDeliveryReceipt",
-      "sameHostedAssistantDeliverySideEffectIdentity",
-    ])
-  ) {
-    return `${path.relative(repoRoot, filePath)} imports hosted assistant delivery helpers from ${JSON.stringify(specifier)}; use @murphai/hosted-execution/side-effects so assistant delivery records stay on their dedicated owner surface.`;
-  }
-
-  if (
-    (
-      sourceMember === "apps/cloudflare"
-      || sourceMember === "apps/web"
-    )
-    && specifier === "@murphai/hosted-execution"
-    && importsNamedBindingsFromSpecifier(source, specifier, [
-      "encodeHostedExecutionSignedRequestPayload",
-      "readHostedExecutionSignatureHeaders",
-    ])
-  ) {
-    return `${path.relative(repoRoot, filePath)} imports hosted execution callback-auth helpers from ${JSON.stringify(specifier)}; use @murphai/hosted-execution/auth so signed-request codecs stay on their dedicated auth surface.`;
-  }
-
-  if (
-    (
-      sourceMember === "apps/cloudflare"
-      || sourceMember === "apps/web"
-    )
-    && specifier === "@murphai/hosted-execution"
-    && importsNamedBindingsFromSpecifier(source, specifier, [
-      "HOSTED_EXECUTION_NONCE_HEADER",
-      "HOSTED_EXECUTION_SIGNATURE_HEADER",
-      "HOSTED_EXECUTION_SIGNING_KEY_ID_HEADER",
-      "HOSTED_EXECUTION_TIMESTAMP_HEADER",
-      "HOSTED_EXECUTION_USER_ID_HEADER",
-    ])
-  ) {
-    return `${path.relative(repoRoot, filePath)} imports hosted execution callback-auth headers from ${JSON.stringify(specifier)}; use @murphai/hosted-execution/contracts so signed-request header names stay on the dedicated contract surface.`;
-  }
-
-  if (
     sourceMember === "packages/assistant-runtime"
     && filePath.includes(
       `${path.sep}packages${path.sep}assistant-runtime${path.sep}src${path.sep}`,
@@ -602,128 +713,11 @@ export function verifyWorkspaceImportPolicy({
   }
 
   if (
-    sourceMember === "packages/inbox-services"
-    && specifier === "@murphai/inboxd"
-    && filePath.includes(`${path.sep}src${path.sep}`)
-    && importsNamedBindingsFromSpecifier(source, specifier, [
-      "ConnectorRestartPolicy",
-    ])
-  ) {
-    return `${path.relative(repoRoot, filePath)} imports ConnectorRestartPolicy from ${JSON.stringify(specifier)}; use @murphai/inboxd/runtime so inbox-services runtime composition stays off the inboxd root barrel for daemon restart-policy typing.`;
-  }
-
-  if (
-    (
-      sourceMember === "packages/cloudflare-hosted-control"
-      || sourceMember === "apps/cloudflare"
-      || sourceMember === "apps/web"
-    )
-    && specifier === "@murphai/hosted-execution"
-    && importsNamedBindingsFromSpecifier(source, specifier, [
-      "normalizeHostedExecutionBaseUrl",
-    ])
-  ) {
-    return `${path.relative(repoRoot, filePath)} imports hosted execution base-url normalization from ${JSON.stringify(specifier)}; use @murphai/hosted-execution/env so env normalization stays on the dedicated env surface.`;
-  }
-
-  if (
-    (
-      sourceMember === "apps/cloudflare"
-      || sourceMember === "apps/web"
-    )
-    && specifier === "@murphai/cloudflare-hosted-control"
-    && importsNamedBindingsFromSpecifier(source, specifier, [
-      "buildCloudflareHostedControlPendingUsageUsersPath",
-      "buildCloudflareHostedControlUserPendingUsagePath",
-      "buildCloudflareHostedControlUserRunPath",
-      "buildCloudflareHostedControlUserStatusPath",
-    ])
-  ) {
-    return `${path.relative(repoRoot, filePath)} imports Cloudflare hosted-control route helpers from ${JSON.stringify(specifier)}; use @murphai/cloudflare-hosted-control/routes so route ownership stays on the dedicated control-route surface.`;
-  }
-
-  if (
-    (
-      sourceMember === "apps/cloudflare"
-      || sourceMember === "apps/web"
-    )
-    && specifier === "@murphai/cloudflare-hosted-control"
-    && importsNamedBindingsFromSpecifier(source, specifier, [
-      "CloudflareHostedManagedUserCryptoStatus",
-      "CloudflareHostedUserEnvStatus",
-      "CloudflareHostedUserEnvUpdate",
-    ])
-  ) {
-    return `${path.relative(repoRoot, filePath)} imports Cloudflare hosted-control contract types from ${JSON.stringify(specifier)}; use @murphai/cloudflare-hosted-control/contracts so mutable control contracts stay on the dedicated contract surface.`;
-  }
-
-  if (
-    sourceMember === "apps/cloudflare"
-    && specifier === "@murphai/cloudflare-hosted-control"
-    && importsNamedBindingsFromSpecifier(source, specifier, [
-      "parseCloudflareHostedManagedUserCryptoStatus",
-      "parseCloudflareHostedUserEnvStatus",
-      "parseCloudflareHostedUserEnvUpdate",
-    ])
-  ) {
-    return `${path.relative(repoRoot, filePath)} imports Cloudflare hosted-control parsers from ${JSON.stringify(specifier)}; use @murphai/cloudflare-hosted-control/parsers so parsing stays on the dedicated codec surface.`;
-  }
-
-  if (
-    sourceMember === "apps/web"
-    && specifier === "@murphai/cloudflare-hosted-control"
-    && importsNamedBindingsFromSpecifier(source, specifier, [
-      "CloudflareHostedControlClient",
-      "createCloudflareHostedControlClient",
-    ])
-  ) {
-    return `${path.relative(repoRoot, filePath)} imports the Cloudflare hosted-control client from ${JSON.stringify(specifier)}; use @murphai/cloudflare-hosted-control/client so requester logic stays on the dedicated client surface.`;
-  }
-
-  if (
-    sourceMember === "apps/cloudflare"
-    && specifier === "@murphai/hosted-execution"
-    && importsNamedBindingsFromSpecifier(source, specifier, [
-      "HOSTED_EXECUTION_RUNNER_EMAIL_SEND_PATH",
-    ])
-  ) {
-    return `${path.relative(repoRoot, filePath)} imports runner route constants from ${JSON.stringify(specifier)}; apps/cloudflare must use @murphai/hosted-execution/routes so runtime route construction stays on the focused route surface.`;
-  }
-
-  if (
-    (sourceMember === "packages/assistant-runtime" || sourceMember === "packages/assistantd")
+    sourceMember === "packages/assistant-runtime"
     && specifier === "@murphai/vault-usecases"
     && filePath.includes(`${path.sep}src${path.sep}`)
   ) {
     return `${path.relative(repoRoot, filePath)} imports ${JSON.stringify(specifier)} from the vault-usecases root; headless assistant runtimes must depend on @murphai/vault-usecases/vault-services or @murphai/vault-usecases/runtime so they do not couple to CLI descriptor exports.`;
-  }
-
-  if (
-    specifier === "@murphai/runtime-state"
-    && importsNamedBindingsFromSpecifier(source, specifier, [
-      "isValidAssistantOpaqueId",
-      "normalizeAssistantOpaqueId",
-    ])
-  ) {
-    return `${path.relative(repoRoot, filePath)} imports assistant opaque id helpers from ${JSON.stringify(specifier)}; use @murphai/runtime-state/assistant-ids so the dedicated helper stays off the broad runtime-state root barrel.`;
-  }
-
-  if (
-    specifier === "@murphai/query"
-    && importsNamedBindingsFromSpecifier(source, specifier, [
-      "ALL_QUERY_ENTITY_FAMILIES",
-    ])
-  ) {
-    return `${path.relative(repoRoot, filePath)} imports query entity-family metadata from ${JSON.stringify(specifier)}; use @murphai/query/entity-families so the constant stays on its dedicated query-owned surface instead of the broad query root barrel.`;
-  }
-
-  if (
-    specifier === "@murphai/vault-usecases/runtime"
-    && importsNamedBindingsFromSpecifier(source, specifier, [
-      "ALL_QUERY_ENTITY_FAMILIES",
-    ])
-  ) {
-    return `${path.relative(repoRoot, filePath)} imports query entity-family metadata from ${JSON.stringify(specifier)}; import ALL_QUERY_ENTITY_FAMILIES from @murphai/query/entity-families so the constant stays on its query-owned surface instead of the vault-usecases runtime helper layer.`;
   }
 
   if (
@@ -748,28 +742,7 @@ export function verifyWorkspaceImportPolicy({
     return `${path.relative(repoRoot, filePath)} imports ${JSON.stringify(specifier)} directly; apps/cloudflare must depend on @murphai/assistant-runtime or another hosted-runtime owner surface instead of lower local assistant owner packages.`;
   }
 
-  if (
-    specifier === "@murphai/importers"
-    && sourceMember !== "packages/importers"
-    && importsNamedBindingsFromSpecifier(source, specifier, [
-      "GARMIN_DEVICE_PROVIDER_DESCRIPTOR",
-      "OURA_DEVICE_PROVIDER_DESCRIPTOR",
-      "WHOOP_DEVICE_PROVIDER_DESCRIPTOR",
-      "defaultDeviceProviderDescriptors",
-      "createNamedDeviceProviderRegistry",
-      "resolveDeviceProviderDescriptor",
-      "resolveDeviceProviderSourcePriority",
-      "requireDeviceProviderSyncDescriptor",
-      "requireDeviceProviderWebhookDescriptor",
-      "DeviceProviderDescriptor",
-      "DeviceProviderMetricFamily",
-      "NamedDeviceProviderRegistry",
-    ])
-  ) {
-    return `${path.relative(repoRoot, filePath)} imports provider-descriptor metadata from ${JSON.stringify(specifier)}; workspace consumers must use @murphai/importers/device-providers/provider-descriptors so they do not depend on the full device-provider barrel.`;
-  }
-
-  return null;
+  return verifyNamedBindingImportPolicy({ filePath, source, sourceMember, specifier });
 }
 
 function isGenericInboxConnectorNormalizerSpecifier(specifier) {

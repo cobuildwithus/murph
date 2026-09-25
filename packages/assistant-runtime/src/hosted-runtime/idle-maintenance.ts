@@ -15,6 +15,7 @@ import {
 import {
   normalizeHostedAiUsageAllowancePricedModelId,
   resolveHostedAiUsageTokenPricingBasis,
+  type HostedWorkspaceInvocationProcessingMode,
 } from "@murphai/hosted-execution/runtime-control";
 import {
   resolveAssistantCodexUsageProviderName,
@@ -25,6 +26,7 @@ import {
   readHostedExecutionSafeErrorName,
 } from "@murphai/hosted-execution";
 import {
+  archiveClosedAuditShards,
   archiveClosedEventLedgerShards,
   archiveClosedIntegrationIngestShards,
   runGeneratedImageCaptureRetention,
@@ -36,6 +38,7 @@ import {
   runInboxMediaRetention,
   runInboxEnvelopeMigration,
   runInboxTextRetention,
+  type InboxEnvelopeMigrationResult,
   type InboxMediaRetentionMaterializeResult,
   type InboxMediaRetentionResult,
   type InboxTextRetentionResult,
@@ -64,7 +67,20 @@ export {
 // lower threshold. Keep both below the hosted Codex auto-compact ceiling so
 // idle shutdown can compact large-but-below-ceiling threads before the next
 // wake pays the full resend cost.
+// Interruptions yield promptly to foreground work and retain the short retry.
 export const HOSTED_INBOX_MEDIA_RETENTION_RETRY_DELAY_MS = 5 * 60 * 1000;
+// A failed cleanup must allow the runner's idle window to expire. Retry on the
+// hourly recovery cadence; ordinary idle maintenance can recover sooner.
+export const HOSTED_INBOX_RETENTION_FAILURE_RETRY_DELAY_MS = 60 * 60 * 1000;
+const HOSTED_INBOX_RETENTION_BLOCKED_RECHECK_MS = 24 * 60 * 60 * 1000;
+
+export interface HostedInboxRetentionIssue {
+  stage: "pending_inputs" | "transcripts" | "media" | "generated_images" | "envelope_migration" | "text";
+  outcome: "failed" | "blocked";
+  errorCode?: string;
+  legacyCapturesSkipped?: number;
+  migrationBlockerCount?: number;
+}
 
 type HostedIdleMaintenanceWake = {
   nextWakeAt?: string;
@@ -101,12 +117,14 @@ export async function runHostedIdleCheckpointMaintenance(input: {
   memberId: string;
   model: string | null;
   pendingWork: boolean;
+  processingMode?: HostedWorkspaceInvocationProcessingMode;
   persistGeneratedImageRetention?: (<T>(write: () => Promise<T>) => Promise<T>) | null;
   protectedAttachmentIds?: readonly string[];
   protectedCaptureIds?: readonly string[];
   protectedStoredPaths?: readonly string[];
   providerName: string | null;
   recordUsage: ((record: AssistantUsageRecord) => Promise<void>) | null;
+  reportRetentionIssue?: ((issue: HostedInboxRetentionIssue) => Promise<void>) | null;
   resolveAssistantSessionId: ((codexThreadId: string) => Promise<string | null>) | null;
   shutdownSignal: AbortSignal | null;
   vaultRoot?: string | null;
@@ -140,6 +158,7 @@ export async function runHostedIdleCheckpointMaintenance(input: {
     let retentionWake: HostedIdleMaintenanceWake = {};
     if (input.vaultRoot) {
       const vaultRoot = input.vaultRoot;
+      let retentionStage: HostedInboxRetentionIssue["stage"] = "pending_inputs";
       try {
         const pendingInputRetention =
           await runHostedPendingAssistantInputContentRetention({
@@ -149,6 +168,7 @@ export async function runHostedIdleCheckpointMaintenance(input: {
         retentionWake = resolveAssistantTranscriptRetentionWake(
           pendingInputRetention.nextEligibleAt,
         );
+        retentionStage = "transcripts";
         const transcriptRetention =
           await runAssistantTranscriptContentRetention({
             signal: abortController.signal,
@@ -160,6 +180,7 @@ export async function runHostedIdleCheckpointMaintenance(input: {
             transcriptRetention.nextEligibleAt,
           ),
         );
+        retentionStage = "media";
         const retentionResult = await runInboxMediaRetention({
           materializeCandidatePaths: input.materializeRetentionCandidatePaths ?? undefined,
           ...(input.pendingWork ? { maxAttachments: 1 } : {}),
@@ -173,6 +194,7 @@ export async function runHostedIdleCheckpointMaintenance(input: {
           retentionWake,
           resolveInboxMediaRetentionWake(retentionResult),
         );
+        retentionStage = "generated_images";
         const generatedImageRetentionMaxCaptures =
           input.generatedImageRetentionMaxCaptures === undefined
             ? input.pendingWork ? 1 : undefined
@@ -210,21 +232,21 @@ export async function runHostedIdleCheckpointMaintenance(input: {
             resolveGeneratedImageRetentionWake(generatedImageRetention),
           );
         }
+        retentionStage = "envelope_migration";
         const envelopeMigration = await runInboxEnvelopeMigration({
           apply: true,
           ...(input.pendingWork ? { maxFiles: 1 } : {}),
           signal: abortController.signal,
           vaultRoot: input.vaultRoot,
         });
-        if (envelopeMigration.hasMore) {
-          retentionWake = mergeInboxRetentionWakes(
-            retentionWake,
-            resolveInboxMediaRetentionImmediateWake(),
-          );
-        }
+        retentionWake = mergeInboxRetentionWakes(
+          retentionWake,
+          resolveInboxEnvelopeMigrationWake(envelopeMigration),
+        );
         // Text retention runs after the media pass and shares its wake pointer:
         // both expire inbound content on the same 14-day clock, so a second
         // pointer would only create two schedules to keep in agreement.
+        retentionStage = "text";
         const textRetentionResult = await runInboxTextRetention({
           ...(input.pendingWork ? { maxCaptures: 1 } : {}),
           signal: abortController.signal,
@@ -234,6 +256,11 @@ export async function runHostedIdleCheckpointMaintenance(input: {
           retentionWake,
           resolveInboxTextRetentionWake(textRetentionResult),
         );
+        await reportBlockedInboxMigration({
+          report: input.reportRetentionIssue,
+          legacyCapturesSkipped: textRetentionResult.legacyCapturesSkipped,
+          migrationBlockerCount: envelopeMigration.blockerCount,
+        });
       } catch (error) {
         if (isInboxRetentionAbortError(error, abortController.signal)) {
           return buildInterruptedMaintenanceOutcome({
@@ -250,8 +277,16 @@ export async function runHostedIdleCheckpointMaintenance(input: {
         emitInboxMediaRetentionFailureLog({
           error,
           memberId: input.memberId,
+          stage: retentionStage,
         });
-        retentionWake = resolveInboxMediaRetentionFailureWake();
+        await reportRetentionIssueBestEffort(
+          input.reportRetentionIssue,
+          buildInboxRetentionFailureIssue(error, retentionStage),
+        );
+        retentionWake = mergeInboxRetentionWakes(
+          retentionWake,
+          resolveInboxMediaRetentionFailureWake(HOSTED_INBOX_RETENTION_FAILURE_RETRY_DELAY_MS),
+        );
       }
     }
     if (abortController.signal.aborted) {
@@ -271,71 +306,14 @@ export async function runHostedIdleCheckpointMaintenance(input: {
         retentionWake,
       );
     }
-    if (input.vaultRoot) {
-      const archiveSignal = AbortSignal.any([
-        abortController.signal,
-        AbortSignal.timeout(HOSTED_IDLE_ARCHIVE_TIMEOUT_MS),
-      ]);
-      try {
-        const archiveResult = await archiveClosedEventLedgerShards({
-          signal: archiveSignal,
-          vaultRoot: input.vaultRoot,
-        });
-        if (
-          archiveResult.archivedShardCount > 0
-          || archiveResult.repairedShardCount > 0
-          || archiveResult.blockedShardCount > 0
-        ) {
-          emitEventLedgerArchiveLog({
-            memberId: input.memberId,
-            result: archiveResult,
-          });
-        }
-      } catch (error) {
-        if (abortController.signal.aborted) {
-          return buildInterruptedMaintenanceOutcome({
-            retentionWake,
-            shutdownSignal: input.shutdownSignal,
-            vaultRoot: input.vaultRoot,
-            wakeInterrupted,
-          });
-        }
-        emitEventLedgerArchiveFailureLog({
-          error,
-          memberId: input.memberId,
-        });
-      }
-      if (!archiveSignal.aborted) {
-        try {
-          const archiveResult = await archiveClosedIntegrationIngestShards({
-            signal: archiveSignal,
-            vaultRoot: input.vaultRoot,
-          });
-          if (
-            archiveResult.archivedShardCount > 0
-            || archiveResult.repairedShardCount > 0
-            || archiveResult.blockedShardCount > 0
-          ) {
-            emitIntegrationIngestArchiveLog({
-              memberId: input.memberId,
-              result: archiveResult,
-            });
-          }
-        } catch (error) {
-          if (abortController.signal.aborted) {
-            return buildInterruptedMaintenanceOutcome({
-              retentionWake,
-              shutdownSignal: input.shutdownSignal,
-              vaultRoot: input.vaultRoot,
-              wakeInterrupted,
-            });
-          }
-          emitIntegrationIngestArchiveFailureLog({
-            error,
-            memberId: input.memberId,
-          });
-        }
-      }
+    // Finite content-retention wakes must not rescan unrelated canonical
+    // history. Ordinary idle checkpoints remain the archive owner.
+    if (input.vaultRoot && input.processingMode !== "inbox_media_retention") {
+      await archiveHostedIdleCanonicalHistory({
+        memberId: input.memberId,
+        signal: abortController.signal,
+        vaultRoot: input.vaultRoot,
+      });
     }
     if (abortController.signal.aborted) {
       return buildInterruptedMaintenanceOutcome({
@@ -415,6 +393,40 @@ export async function runHostedIdleCheckpointMaintenance(input: {
     input.shutdownSignal?.removeEventListener("abort", onShutdownAbort);
     wakeWatchAbort.abort();
     await wakeWatch;
+  }
+}
+
+async function archiveHostedIdleCanonicalHistory(input: {
+  memberId: string;
+  signal: AbortSignal;
+  vaultRoot: string;
+}): Promise<void> {
+  const archiveSignal = AbortSignal.any([
+    input.signal,
+    AbortSignal.timeout(HOSTED_IDLE_ARCHIVE_TIMEOUT_MS),
+  ]);
+  await archiveClosedLedgersDuringIdle({
+    vaultRoot: input.vaultRoot,
+    memberId: input.memberId,
+    signal: archiveSignal,
+  });
+  if (archiveSignal.aborted) return;
+  try {
+    const archiveResult = await archiveClosedIntegrationIngestShards({
+      archiveCurrentMonth: true,
+      signal: archiveSignal,
+      vaultRoot: input.vaultRoot,
+    });
+    if (
+      archiveResult.archivedShardCount > 0
+      || archiveResult.repairedShardCount > 0
+      || archiveResult.blockedShardCount > 0
+    ) {
+      emitIntegrationIngestArchiveLog({ memberId: input.memberId, result: archiveResult });
+    }
+  } catch (error) {
+    if (input.signal.aborted) return;
+    emitIntegrationIngestArchiveFailureLog({ error, memberId: input.memberId });
   }
 }
 
@@ -500,6 +512,18 @@ function emitGeneratedImageRetentionBlockedLog(input: {
     details: {
       failureCode: "generated_image_retention_capture_blocked",
       generatedImageRetentionBlockedCaptures: input.result.blockedCaptureCount,
+      generatedImageRetentionAttachmentInvalidCaptures:
+        input.result.blockedCaptureCounts.GENERATED_IMAGE_RETENTION_ATTACHMENT_INVALID,
+      generatedImageRetentionEventInvalidCaptures:
+        input.result.blockedCaptureCounts.GENERATED_IMAGE_RETENTION_EVENT_INVALID,
+      generatedImageRetentionEventMissingCaptures:
+        input.result.blockedCaptureCounts.GENERATED_IMAGE_RETENTION_EVENT_MISSING,
+      generatedImageRetentionManifestInvalidCaptures:
+        input.result.blockedCaptureCounts.GENERATED_IMAGE_RETENTION_MANIFEST_INVALID,
+      generatedImageRetentionPreconditionFailedCaptures:
+        input.result.blockedCaptureCounts.GENERATED_IMAGE_RETENTION_PRECONDITION_FAILED,
+      generatedImageRetentionVaultFileMissingCaptures:
+        input.result.blockedCaptureCounts.VAULT_FILE_MISSING,
       generatedImageRetentionRetiredCaptures: input.result.retiredCaptureCount,
     },
     level: "warn",
@@ -534,7 +558,45 @@ function emitIntegrationIngestArchiveLog(input: {
   });
 }
 
-function emitEventLedgerArchiveLog(input: {
+async function archiveClosedLedgersDuringIdle(input: {
+  vaultRoot: string;
+  memberId: string;
+  signal: AbortSignal;
+}): Promise<void> {
+  for (const [family, archive] of [
+    ["eventLedger", archiveClosedEventLedgerShards],
+    ["audit", archiveClosedAuditShards],
+  ] as const) {
+    if (input.signal.aborted) break;
+    try {
+      const archiveResult = await archive({
+        signal: input.signal,
+        vaultRoot: input.vaultRoot,
+      });
+      if (
+        archiveResult.archivedShardCount > 0
+        || archiveResult.repairedShardCount > 0
+        || archiveResult.blockedShardCount > 0
+      ) {
+        emitLedgerArchiveLog({
+          family,
+          memberId: input.memberId,
+          result: archiveResult,
+        });
+      }
+    } catch (error) {
+      if (input.signal.aborted) return;
+      emitLedgerArchiveFailureLog({
+        family,
+        error,
+        memberId: input.memberId,
+      });
+    }
+  }
+}
+
+function emitLedgerArchiveLog(input: {
+  family: "eventLedger" | "audit";
   memberId: string;
   result: ArchiveClosedEventLedgerShardsResult;
 }): void {
@@ -542,23 +604,24 @@ function emitEventLedgerArchiveLog(input: {
   emitHostedExecutionStructuredLog({
     component: "runtime",
     details: {
-      eventLedgerArchiveBytes: input.result.archivedByteCount,
-      eventLedgerArchiveRepairedShards: input.result.repairedShardCount,
-      eventLedgerArchiveSourceBytes: input.result.sourceByteCount,
-      eventLedgerArchivedShards: input.result.archivedShardCount,
-      eventLedgerBlockedShards: input.result.blockedShardCount,
-      eventLedgerScannedShards: input.result.scannedShardCount,
+      [`${input.family}ArchiveBytes`]: input.result.archivedByteCount,
+      [`${input.family}ArchiveRepairedShards`]: input.result.repairedShardCount,
+      [`${input.family}ArchiveSourceBytes`]: input.result.sourceByteCount,
+      [`${input.family}ArchivedShards`]: input.result.archivedShardCount,
+      [`${input.family}BlockedShards`]: input.result.blockedShardCount,
+      [`${input.family}ScannedShards`]: input.result.scannedShardCount,
     },
     level: blocked ? "warn" : "info",
     message: blocked
-      ? "Hosted idle maintenance archived eligible event ledger shards, but one or more shards require repair."
-      : "Hosted idle maintenance archived eligible event ledger shards.",
+      ? `Hosted idle maintenance archived eligible ${input.family} shards, but one or more shards require repair.`
+      : `Hosted idle maintenance archived eligible ${input.family} shards.`,
     phase: "checkpoint",
     userId: input.memberId,
   });
 }
 
-function emitEventLedgerArchiveFailureLog(input: {
+function emitLedgerArchiveFailureLog(input: {
+  family: "eventLedger" | "audit";
   error: unknown;
   memberId: string;
 }): void {
@@ -566,7 +629,7 @@ function emitEventLedgerArchiveFailureLog(input: {
   emitHostedExecutionStructuredLog({
     component: "runtime",
     details: {
-      failureCode: "event_ledger_archive_failed",
+      failureCode: input.family === "audit" ? "audit_archive_failed" : "event_ledger_archive_failed",
       ...(typeof diagnostics?.errorCode === "string"
         ? { failureErrorCode: diagnostics.errorCode }
         : {}),
@@ -584,7 +647,7 @@ function emitEventLedgerArchiveFailureLog(input: {
     error: input.error,
     level: "warn",
     message:
-      "Hosted idle maintenance could not archive closed event ledger shards; checkpointing will continue.",
+      `Hosted idle maintenance could not archive closed ${input.family} shards; checkpointing will continue.`,
     phase: "checkpoint",
     userId: input.memberId,
   });
@@ -640,6 +703,15 @@ function isInboxRetentionAbortError(
     );
 }
 
+function resolveInboxEnvelopeMigrationWake(
+  result: InboxEnvelopeMigrationResult,
+): HostedIdleMaintenanceWake {
+  if (result.blockerCount > 0) {
+    return resolveInboxMediaRetentionFailureWake(HOSTED_INBOX_RETENTION_BLOCKED_RECHECK_MS);
+  }
+  return result.hasMore ? resolveInboxMediaRetentionImmediateWake() : {};
+}
+
 function resolveInboxTextRetentionWake(
   result: InboxTextRetentionResult,
 ): HostedIdleMaintenanceWake {
@@ -647,18 +719,15 @@ function resolveInboxTextRetentionWake(
     return resolveInboxMediaRetentionImmediateWake();
   }
 
-  if (result.nextEligibleAt) {
-    return {
-      nextWakeAt: result.nextEligibleAt,
-      nextWakeReason: "inbox_media_retention",
-    };
-  }
-
-  if (result.legacyCapturesSkipped > 0) {
-    return resolveInboxMediaRetentionFailureWake();
-  }
-
-  return {};
+  // Migration has already run. Legacy rows left behind cannot become actionable
+  // merely by repeating the same pass, so use the existing blocked-media cadence.
+  // Keep an earlier real content expiry even when migration is blocked.
+  return mergeInboxRetentionWakes(
+    resolveAssistantTranscriptRetentionWake(result.nextEligibleAt),
+    result.legacyCapturesSkipped > 0
+      ? resolveInboxMediaRetentionFailureWake(HOSTED_INBOX_RETENTION_BLOCKED_RECHECK_MS)
+      : {},
+  );
 }
 
 function resolveGeneratedImageRetentionWake(
@@ -697,9 +766,50 @@ function mergeInboxRetentionWakes(
   return Date.parse(right.nextWakeAt) < Date.parse(left.nextWakeAt) ? right : left;
 }
 
-function resolveInboxMediaRetentionFailureWake(): HostedIdleMaintenanceWake {
+function buildInboxRetentionFailureIssue(
+  error: unknown,
+  stage: HostedInboxRetentionIssue["stage"],
+): HostedInboxRetentionIssue {
+  const errorCode = buildHostedExecutionSafeErrorDiagnostics(error)?.errorCode;
   return {
-    nextWakeAt: new Date(Date.now() + HOSTED_INBOX_MEDIA_RETENTION_RETRY_DELAY_MS).toISOString(),
+    stage,
+    outcome: "failed",
+    ...(typeof errorCode === "string" ? { errorCode } : {}),
+  };
+}
+
+async function reportBlockedInboxMigration(input: {
+  report: ((issue: HostedInboxRetentionIssue) => Promise<void>) | null | undefined;
+  legacyCapturesSkipped: number;
+  migrationBlockerCount: number;
+}): Promise<void> {
+  if (input.legacyCapturesSkipped === 0 && input.migrationBlockerCount === 0) {
+    return;
+  }
+  await reportRetentionIssueBestEffort(input.report, {
+    stage: "envelope_migration",
+    outcome: "blocked",
+    legacyCapturesSkipped: input.legacyCapturesSkipped,
+    migrationBlockerCount: input.migrationBlockerCount,
+  });
+}
+
+async function reportRetentionIssueBestEffort(
+  report: ((issue: HostedInboxRetentionIssue) => Promise<void>) | null | undefined,
+  issue: HostedInboxRetentionIssue,
+): Promise<void> {
+  try {
+    await report?.(issue);
+  } catch {
+    // Diagnostics are never checkpoint or cleanup authority.
+  }
+}
+
+function resolveInboxMediaRetentionFailureWake(
+  delayMs = HOSTED_INBOX_MEDIA_RETENTION_RETRY_DELAY_MS,
+): HostedIdleMaintenanceWake {
+  return {
+    nextWakeAt: new Date(Date.now() + delayMs).toISOString(),
     nextWakeReason: "inbox_media_retention",
   };
 }
@@ -707,12 +817,14 @@ function resolveInboxMediaRetentionFailureWake(): HostedIdleMaintenanceWake {
 function emitInboxMediaRetentionFailureLog(input: {
   error: unknown;
   memberId: string;
+  stage: HostedInboxRetentionIssue["stage"];
 }): void {
   const diagnostics = buildHostedExecutionSafeErrorDiagnostics(input.error);
   emitHostedExecutionStructuredLog({
     component: "runtime",
     details: {
       failureCode: "inbox_media_retention_failed",
+      retentionStage: input.stage,
       ...(typeof diagnostics?.errorCode === "string"
         ? { failureErrorCode: diagnostics.errorCode }
         : {}),

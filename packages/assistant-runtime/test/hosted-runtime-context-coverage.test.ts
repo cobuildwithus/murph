@@ -27,7 +27,6 @@ const mocks = vi.hoisted(() => ({
   emitHostedExecutionStructuredLog: vi.fn(),
   ensureHostedAssistantOperatorDefaults: vi.fn(),
   readOperatorConfig: vi.fn(),
-  resolveHostedAssistantConfig: vi.fn(),
   resolveHostedAssistantOperatorDefaultsState: vi.fn(),
   vaultInit: vi.fn(),
 }));
@@ -67,7 +66,6 @@ vi.mock("@murphai/operator-config/operator-config", async () => {
   return {
     ...actual,
     readOperatorConfig: mocks.readOperatorConfig,
-    resolveHostedAssistantConfig: mocks.resolveHostedAssistantConfig,
   };
 });
 
@@ -136,7 +134,6 @@ beforeEach(() => {
     source: "missing",
   });
   mocks.readOperatorConfig.mockResolvedValue(null);
-  mocks.resolveHostedAssistantConfig.mockResolvedValue(null);
   mocks.resolveHostedAssistantOperatorDefaultsState.mockReturnValue({
     configured: false,
     provider: null,
@@ -446,7 +443,6 @@ describe("hosted runtime context coverage", () => {
     });
 
     mocks.readOperatorConfig.mockResolvedValueOnce(null);
-    mocks.resolveHostedAssistantConfig.mockResolvedValueOnce(null);
     mocks.resolveHostedAssistantOperatorDefaultsState.mockReturnValueOnce({
       configured: false,
       provider: null,

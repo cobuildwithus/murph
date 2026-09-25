@@ -19,6 +19,7 @@ import {
   MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID,
   MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_AUTOMATION_ID,
   MURPH_MANAGED_AUTOMATIONS,
+  MURPH_PERSONAL_PATTERNS_UPDATE_AUTOMATION_ID,
   MURPH_ONBOARDING_FOLLOWUP_AUTOMATION,
   MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
   MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
@@ -39,7 +40,7 @@ import {
 } from '../src/assistant/onboarding-state.ts'
 import { ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG } from '../src/assistant/automation-tags.ts'
 import { upsertAssistantCronAutomation } from '../src/assistant/cron/authoring.ts'
-import { resolveAssistantCronDefaultTimeZone } from '../src/assistant/cron/canonical-jobs.ts'
+import { projectCanonicalAssistantCronJob, requireCanonicalAssistantCronRecord, resolveAssistantCronDefaultTimeZone } from '../src/assistant/cron/canonical-jobs.ts'
 import { computeAssistantCronFirstRunAfterCurrentLocalDay } from '../src/assistant/cron/schedule.ts'
 import * as assistantCronRuntimeState from '../src/assistant/cron/runtime-state.ts'
 import {
@@ -172,6 +173,82 @@ async function startOnboarding(input: {
 }
 
 describe('applyMurphManagedAutomations core integration', () => {
+  it.each(['America/New_York', 'Asia/Tokyo', 'Pacific/Auckland'])(
+    'spreads existing Personal Patterns after the current local day in %s without resetting execution metadata', async (timeZone) => {
+      const vaultRoot = await createVaultRoot()
+      const seed = MURPH_MANAGED_AUTOMATIONS.find(entry => entry.automationId === MURPH_PERSONAL_PATTERNS_UPDATE_AUTOMATION_ID)!
+      const now = new Date('2026-09-21T17:10:00Z')
+      await upsertAutomation({ ...seed, tags: [...(seed.tags ?? [])], status: 'active', route: defaultRoute,
+        schedule: { kind: 'cron', expression: '0 13 * * *', timeZone }, vaultRoot,
+        now: new Date('2026-09-01T00:00:00Z') })
+      const paths = resolveAssistantStatePaths(vaultRoot)
+      const runtime = assistantCronRuntimeState.createAssistantCronCanonicalRuntimeRecord({
+        jobId: seed.automationId, now: now.toISOString(),
+      })
+      runtime.state.lastSucceededAt = '2026-09-20T17:00:00.000Z'
+      await assistantCronRuntimeState.writeAssistantCronCanonicalRuntimeStore(paths, {
+        version: 1, jobs: [runtime],
+      })
+      const before = await showAutomation({ automationId: seed.automationId, vaultRoot })
+      const result = await applyMurphManagedAutomations({ seeds: [seed], now, vaultRoot })
+      if (result.stableKeyFailure) throw result.stableKeyFailure
+      expect(result).toMatchObject({ updated: 1 })
+      const after = (await showAutomation({ automationId: seed.automationId, vaultRoot }))!
+      expect(after.schedule).toMatchObject({ kind: 'dailyLocal', timeZone })
+      if (after.schedule.kind !== 'dailyLocal') throw new Error('Expected a daily schedule')
+      expect(after.schedule).not.toEqual(before?.schedule)
+      expect(after.assistantTargetOverride).toEqual(before?.assistantTargetOverride)
+      expect(after.instructions).toBe(before?.instructions)
+      const expectedFirst = computeAssistantCronFirstRunAfterCurrentLocalDay({ after: now,
+        schedule: { ...after.schedule, timeZone } })
+      const job = projectCanonicalAssistantCronJob({
+        source: requireCanonicalAssistantCronRecord(after, timeZone), runtimeState: runtime,
+      })
+      expect(job.state.nextRunAt).toBe(expectedFirst)
+      const state = await assistantCronRuntimeState.readAssistantCronCanonicalRuntimeStore(paths)
+      expect(state.jobs).toEqual([runtime])
+      await applyMurphManagedAutomations({ seeds: [seed], now, vaultRoot })
+      expect((await showAutomation({ automationId: seed.automationId, vaultRoot }))?.scheduleAnchorAt).toBe(after.scheduleAnchorAt)
+    },
+  )
+
+  it.each(['runningAt', 'pendingDeliveryIntentId', 'pendingOccurrenceAt', 'retryAfterAt'] as const)(
+    'defers the legacy spread while %s owns an occurrence', async (field) => {
+      const vaultRoot = await createVaultRoot()
+      const seed = MURPH_MANAGED_AUTOMATIONS.find(entry => entry.automationId === MURPH_PERSONAL_PATTERNS_UPDATE_AUTOMATION_ID)!
+      const now = new Date('2026-09-21T17:10:00Z')
+      await upsertAutomation({ ...seed, tags: [...(seed.tags ?? [])], status: 'active', route: defaultRoute, vaultRoot, now })
+      const paths = resolveAssistantStatePaths(vaultRoot)
+      const runtime = assistantCronRuntimeState.createAssistantCronCanonicalRuntimeRecord({ jobId: seed.automationId, now: now.toISOString() })
+      runtime.state[field] = field === 'pendingDeliveryIntentId' ? 'synthetic_intent' : now.toISOString()
+      // Fixture setup must preserve the claim regardless of the wall-clock date.
+      await assistantCronRuntimeState.writeAssistantCronCanonicalRuntimeStore(paths, { version: 1, jobs: [runtime] },
+        { reclaimStaleRunningClaims: false })
+      await applyMurphManagedAutomations({ seeds: [seed], now, vaultRoot })
+      expect((await showAutomation({ automationId: seed.automationId, vaultRoot }))?.schedule).toEqual(seed.schedule)
+      runtime.state[field] = null
+      await assistantCronRuntimeState.writeAssistantCronCanonicalRuntimeStore(paths, { version: 1, jobs: [runtime] })
+      await applyMurphManagedAutomations({ seeds: [seed], now, vaultRoot })
+      expect((await showAutomation({ automationId: seed.automationId, vaultRoot }))?.schedule).not.toEqual(seed.schedule)
+    },
+  )
+
+  it.each([
+    { status: 'paused' as const, expression: '0 13 * * *' },
+    { status: 'active' as const, expression: '15 18 * * *' },
+  ])('preserves a $status Personal Patterns schedule $expression', async ({ status, expression }) => {
+    const vaultRoot = await createVaultRoot()
+    const seed = MURPH_MANAGED_AUTOMATIONS.find(entry => entry.automationId === MURPH_PERSONAL_PATTERNS_UPDATE_AUTOMATION_ID)!
+    const now = new Date('2026-09-21T17:10:00Z')
+    const before = await upsertAutomation({ ...seed, tags: [...(seed.tags ?? [])], status, route: defaultRoute,
+      schedule: { kind: 'cron', expression, timeZone: 'America/New_York' }, vaultRoot, now })
+    await applyMurphManagedAutomations({ seeds: [seed], now, vaultRoot })
+    const after = await showAutomation({ automationId: seed.automationId, vaultRoot })
+    expect(after?.schedule).toEqual(before.record.schedule)
+    expect(after?.status).toBe(status)
+    expect(after?.scheduleAnchorAt).toBe(before.record.scheduleAnchorAt)
+  })
+
   it('seeds one finite follow-up from durable onboarding start and preserves archive', async () => {
     const vaultRoot = await createVaultRoot()
     const route = {
@@ -617,7 +694,7 @@ describe('applyMurphManagedAutomations core integration', () => {
     })
     expectCronSchedule(insightRecord?.schedule)
     expect(insightRecord?.assistantTargetOverride).toEqual({
-      model: 'gpt-5.6-sol',
+      model: 'gpt-6-sol',
       reasoningEffort: 'high',
     })
     expect(insightRecord?.tags).toContain('murph-managed:weekly-health-insight')
@@ -639,7 +716,7 @@ describe('applyMurphManagedAutomations core integration', () => {
     expect(insightRecord?.instructions).toContain('better to send nothing')
     expect(insightRecord?.instructions).toContain('knowledge append-section weekly-health-insights YYYY-MM-DD')
     expect(insightRecord?.instructions).toContain('section already exists')
-    expect(insightRecord?.instructions).toContain('useful enough to repeat now')
+    expect(insightRecord?.instructions).toContain('does not repeat an already-covered takeaway')
     expect(insightRecord?.instructions).toContain('apply the same current interestingness gate')
     expect(insightRecord?.instructions).toContain(
       '{"kind":"skip","privateSummary":"No weekly health insight cleared the interestingness bar."}',
@@ -734,7 +811,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       title: 'Monthly improvement coach',
     })
     expect(improvementCoachRecord?.assistantTargetOverride).toEqual({
-      model: 'gpt-5.6-sol',
+      model: 'gpt-6-sol',
       reasoningEffort: 'high',
     })
     expect(improvementCoachRecord?.tags).toContain('murph-managed:monthly-improvement-coach')
@@ -1227,7 +1304,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       },
       vaultRoot,
     })).resolves.toEqual({
-      created: 8,
+      created: 7,
       skipped: 0,
       updated: 0,
     })
@@ -1277,8 +1354,12 @@ describe('applyMurphManagedAutomations core integration', () => {
     expect(automation.instructions).toContain('Do not save assistant speculation')
   })
 
-  it('creates managed health automations for hosted email targets without a local sender identity', async () => {
+  it('creates health automations and onboarding follow-up for hosted email without a local sender identity', async () => {
     const vaultRoot = await createVaultRoot()
+    await startAssistantOnboarding({
+      startedAt: '2026-06-09T12:00:00.000Z',
+      vault: vaultRoot,
+    })
     const hostedEmailTarget = serializeHostedEmailThreadTarget({
       subject: 'Hosted reminder',
       to: ['member@example.test'],
@@ -1291,12 +1372,13 @@ describe('applyMurphManagedAutomations core integration', () => {
         identityId: 'hid_email_identity',
         participantId: null,
         threadId: null,
+        threadIsDirect: true,
       },
       now: new Date('2026-06-09T12:00:00.000Z'),
       routeValidationProfile: 'hosted',
       vaultRoot,
     })).resolves.toEqual({
-      created: 5,
+      created: 7,
       skipped: 0,
       updated: 0,
     })
@@ -1313,6 +1395,26 @@ describe('applyMurphManagedAutomations core integration', () => {
         threadId: null,
       },
       slug: 'weekly-health-digest',
+      status: 'active',
+    })
+    await expect(showAutomation({
+      slug: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.slug,
+      vaultRoot,
+    })).resolves.toMatchObject({
+      route: {
+        channel: 'email',
+        deliveryTarget: hostedEmailTarget,
+        threadIsDirect: true,
+      },
+      status: 'active',
+    })
+    await expect(showAutomation({
+      slug: 'onboarding-early-stall-check-in',
+      vaultRoot,
+    })).resolves.toMatchObject({
+      route: { channel: 'email', deliveryTarget: hostedEmailTarget, threadIsDirect: true },
+      schedule: { kind: 'at', at: '2026-06-09T12:15:00.000Z' },
+      activeUntil: '2026-06-09T12:30:00.000Z',
       status: 'active',
     })
   })
@@ -2280,7 +2382,7 @@ describe('applyMurphManagedAutomations core integration', () => {
     expect(migrated).toMatchObject({
       automationId: MURPH_MONTHLY_IMPROVEMENT_COACH_AUTOMATION_ID,
       assistantTargetOverride: {
-        model: 'gpt-5.6-sol',
+        model: 'gpt-6-sol',
         reasoningEffort: 'high',
       },
       route: existingRoute,

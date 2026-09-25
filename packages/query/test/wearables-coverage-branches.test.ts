@@ -183,6 +183,8 @@ function makeSleepWindowCandidate(
     recordIds: overrides.recordIds ?? [overrides.candidateId],
     sourceFamily: overrides.sourceFamily,
     sourceKind: overrides.sourceKind,
+    sleepState: overrides.sleepState,
+    sleepType: overrides.sleepType,
     startAt: overrides.startAt ?? null,
     title: overrides.title ?? null,
   };
@@ -663,6 +665,29 @@ test("dedupe, selection, confidence, and summary helpers preserve deterministic 
   assert.equal(duplicateWindows.length, 2);
   assert.deepEqual(duplicateWindows[0]?.paths, ["sleep-a.jsonl", "sleep-b.jsonl"]);
   assert.equal(duplicateWindows[0]?.recordedAt, "2026-04-02T06:20:00Z");
+
+  const sameShortWindow = (candidateId: string, sleepState: "tentative" | "confirmed") =>
+    makeSleepWindowCandidate({
+      candidateId,
+      date: "2026-04-01",
+      durationMinutes: 40,
+      endAt: "2026-04-01T12:40:00Z",
+      nap: false,
+      provider: "garmin",
+      sleepState,
+      sleepType: "short_sleep",
+      sourceFamily: "event",
+      sourceKind: "sleep_session",
+      startAt: "2026-04-01T12:00:00Z",
+    });
+  const stateWindows = dedupeSleepWindowCandidates([
+    sameShortWindow("garmin:short:tentative", "tentative"),
+    sameShortWindow("garmin:short:confirmed", "confirmed"),
+    sameShortWindow("garmin:short:stale", "tentative"),
+  ]);
+  assert.equal(stateWindows.length, 1);
+  assert.equal(stateWindows[0]?.sleepType, "short_sleep");
+  assert.equal(stateWindows[0]?.sleepState, "confirmed");
 
   const sessionCandidates = [
     makeMetricCandidate({

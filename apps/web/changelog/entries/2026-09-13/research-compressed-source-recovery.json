@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-13",
+  "order": 100,
+  "item": {
+    "id": "research-compressed-source-recovery",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Research updates keep building on older evidence",
+    "summary": "Fixed a case where older source references could prevent Murph from saving and sharing a new research finding.",
+    "details": "Existing research history and its source references are preserved.",
+    "relevanceTags": ["research", "reliability"],
+    "sourcePullRequests": [3401]
+  }
+}

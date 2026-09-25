@@ -635,7 +635,7 @@ test("runMurphCliAction rejects explicit --vault overrides for murph product com
 
   await assert.rejects(
     () =>
-      runMurphCliAction(["assistant", "chat", "--vault", "/vaults/other"], {
+      runMurphCliAction(["assistant", "status", "--vault", "/vaults/other"], {
         argv0: "murph",
       }),
     /`murph` uses one active vault/u,
@@ -903,7 +903,7 @@ test("runMurphCliEntrypoint installs env loading and sqlite warning filtering be
   });
 
   try {
-    await runMurphCliEntrypoint(["assistant", "chat"]);
+    await runMurphCliEntrypoint(["assistant", "status"]);
 
     assert.deepEqual(loadEnvFile.mock.calls.length, 2);
     assert.deepEqual(loadEnvFileCalls, [
@@ -912,7 +912,7 @@ test("runMurphCliEntrypoint installs env loading and sqlite warning filtering be
     ]);
     assert.deepEqual(serve.mock.calls, [
       [
-        ["assistant", "chat"],
+        ["assistant", "status"],
         {
           env: process.env,
         },
@@ -968,7 +968,7 @@ test("runMurphCliEntrypoint does not mask command failure when warm Codex shutdo
 
   let caughtError: unknown = null;
   try {
-    await runMurphCliEntrypoint(["assistant", "chat"]);
+    await runMurphCliEntrypoint(["assistant", "status"]);
   } catch (error) {
     caughtError = error;
   }
@@ -1008,7 +1008,7 @@ test("runMurphCliEntrypoint preserves command failure when warm Codex shutdown a
   });
 
   await assert.rejects(
-    () => runMurphCliEntrypoint(["assistant", "chat"]),
+    () => runMurphCliEntrypoint(["assistant", "status"]),
     (error) => error === primaryError,
   );
 });
@@ -1041,12 +1041,12 @@ test("runMurphCliEntrypoint surfaces warm Codex shutdown failure after success",
   });
 
   await assert.rejects(
-    () => runMurphCliEntrypoint(["assistant", "chat"]),
+    () => runMurphCliEntrypoint(["assistant", "status"]),
     (error) => error === cleanupError,
   );
 });
 
-test("runMurphCliAction reuses setup results for wearable launches and assistant chat handoff", async () => {
+test("runMurphCliAction reuses setup results for wearable launches and without a terminal chat handoff", async () => {
   const serve = vi.fn(async () => undefined);
   const stderrWrites: string[] = [];
   const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation((chunk) => {
@@ -1094,7 +1094,7 @@ test("runMurphCliAction reuses setup results for wearable launches and assistant
         },
       ]),
       listSetupReadyWearables: vi.fn(() => ["oura"]),
-      resolveSetupPostLaunchAction: vi.fn(() => "assistant-chat"),
+      resolveSetupPostLaunchAction: vi.fn(() => null),
     },
   });
 
@@ -1110,19 +1110,12 @@ test("runMurphCliAction reuses setup results for wearable launches and assistant
         env: process.env,
       },
     ],
-    [
-      ["assistant", "chat"],
-      {
-        env: process.env,
-      },
-    ],
   ]);
   assert.deepEqual(stderrSpy.mock.calls, [
     [
       "\nSelected wearable setup is waiting on credentials: WHOOP (WHOOP_CLIENT_ID). Set the missing wearable environment variables.\n",
     ],
     ["\nOpening OURA connect flow in your browser.\n\n"],
-    ["\nOpening Murph assistant chat. Type /exit to quit.\n\n"],
   ]);
 });
 

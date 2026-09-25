@@ -45,7 +45,7 @@ import {
   HOSTED_ASSISTANT_PROVIDERS,
   HOSTED_ASSISTANT_REASONING_EFFORTS,
   HOSTED_ASSISTANT_SOL_MODEL,
-  HOSTED_ASSISTANT_TERRA_MODEL,
+  HOSTED_ASSISTANT_DEFAULT_MODEL,
   type HostedAssistantProductModel,
   type HostedAssistantReasoningEffort,
 } from '@murphai/hosted-execution/assistant-model'
@@ -190,7 +190,6 @@ describe('assistant codex runtime', () => {
       baseInstructions: 'Do not use this in normal Murph config.',
       developerInstructions: 'Stable Murph instructions.',
       dynamicTools: MURPH_DYNAMIC_TOOLS_WITHOUT_PROGRESS,
-      excludeResumeTurns: true,
       model: 'gpt-5',
       modelProvider: 'vercel-ai-gateway',
       prompt: 'User message:\nWhat changed?',
@@ -397,6 +396,19 @@ describe('assistant codex runtime', () => {
       serviceTier: 'flex',
       threadId: 'thread-1',
     })
+    expect(
+      buildCodexTurnStartParams({
+        images: [],
+        input: {
+          ...baseInput,
+          serviceTier: 'priority',
+        },
+        codexThreadId: 'thread-1',
+      }),
+    ).toMatchObject({
+      serviceTier: 'priority',
+      threadId: 'thread-1',
+    })
 
     expect(
       buildCodexTurnStartParams({
@@ -524,7 +536,7 @@ describe('assistant codex runtime', () => {
     },
     {
       expectedImageDetail: 'original',
-      model: 'gpt-5.6-terra',
+      model: 'gpt-6-sol',
       modelProvider: 'openai',
       providerRequestOrdinal: 1,
     },
@@ -1219,10 +1231,10 @@ describe('assistant codex runtime', () => {
     expect(groupSharedRead).toHaveBeenCalledTimes(2)
     expect(groupSharedRead).toHaveBeenNthCalledWith(1, {
       projectionScopes: [{ projectionKind: 'steps-days.v0' }],
-    })
+    }, { signal: expect.any(AbortSignal) })
     expect(groupSharedRead).toHaveBeenNthCalledWith(2, {
       projectionScopes: [{ projectionKind: 'steps-days.v0' }],
-    })
+    }, { signal: expect.any(AbortSignal) })
     expect(codexMocks.spawn).toHaveBeenCalledTimes(1)
   })
 
@@ -1509,7 +1521,7 @@ describe('assistant codex runtime', () => {
     const firstUpdateStarted = createDeferred<void>()
     const releaseFirstUpdate = createDeferred<void>()
     const configurationCalls: string[] = []
-    let savedModel: HostedAssistantProductModel = HOSTED_ASSISTANT_TERRA_MODEL
+    let savedModel: HostedAssistantProductModel = HOSTED_ASSISTANT_DEFAULT_MODEL
     let savedReasoningEffort: HostedAssistantReasoningEffort = 'low'
     let updateCount = 0
 
@@ -1560,7 +1572,7 @@ describe('assistant codex runtime', () => {
       assistantConfigurationTool,
       currentAssistantInputId: () => `ain_${'a'.repeat(32)}`,
       currentAssistantTarget: () => ({
-        model: HOSTED_ASSISTANT_TERRA_MODEL,
+        model: HOSTED_ASSISTANT_DEFAULT_MODEL,
         provider: "openai",
         reasoningEffort: 'low',
       }),
@@ -1601,7 +1613,7 @@ describe('assistant codex runtime', () => {
             params: {
               arguments: {
                 action: 'update',
-                model: HOSTED_ASSISTANT_TERRA_MODEL,
+                model: HOSTED_ASSISTANT_DEFAULT_MODEL,
               },
               namespace: 'murph',
               tool: 'assistant_configuration',
@@ -1628,7 +1640,7 @@ describe('assistant codex runtime', () => {
           })
           expect(configurationCalls).toEqual([
             `update:${HOSTED_ASSISTANT_SOL_MODEL}`,
-            `update:${HOSTED_ASSISTANT_TERRA_MODEL}`,
+            `update:${HOSTED_ASSISTANT_DEFAULT_MODEL}`,
           ])
 
           child.stdout.write(jsonLine({
@@ -1664,7 +1676,7 @@ describe('assistant codex runtime', () => {
     })).resolves.toMatchObject({
       finalMessage: 'Configuration updates complete',
     })
-    expect(savedModel).toBe(HOSTED_ASSISTANT_TERRA_MODEL)
+    expect(savedModel).toBe(HOSTED_ASSISTANT_DEFAULT_MODEL)
   })
 
   it('allows only the first overlapping subscription action in a provider turn', async () => {

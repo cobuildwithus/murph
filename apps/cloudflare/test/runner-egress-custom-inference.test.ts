@@ -163,6 +163,40 @@ describe("hosted custom inference egress", () => {
     expect(parsed.tools[1].function.name).toMatch(/^murph_custom_/u);
   });
 
+  it.each(["tools", "additional_tools"] as const)(
+    "preserves complete function, custom, and namespace contracts from %s",
+    (location) => {
+      const schema = {
+        type: "object", additionalProperties: false,
+        properties: { expectedUpdatedAt: { type: "string", minLength: 1 } },
+        required: ["expectedUpdatedAt"],
+      };
+      const description = "Synthetic complete tool guidance. ".repeat(180)
+        + "\nMURPH_INPUT_SCHEMA_JSON: " + JSON.stringify(schema);
+      expect(description.length).toBeGreaterThan(4_096);
+      const tools = [
+        { type: "function", name: "inspect_fixture", description, parameters: schema },
+        { type: "custom", name: "execute_fixture", description },
+        { type: "namespace", name: "fixture", tools: [
+          { name: "patch_fixture", description, input_schema: schema },
+        ] },
+      ];
+      const parsed = JSON.parse(buildHostedCustomInferenceUpstreamRequestBody({
+        body: encodeJson({
+          model: CUSTOM_MODEL_ALIAS,
+          ...(location === "tools"
+            ? { input: "Synthetic schema inspection.", tools }
+            : { input: [{ type: "additional_tools", role: "developer", tools }] }),
+        }),
+        target: buildTarget({ protocol: "chat_completions" }),
+      }));
+      expect(parsed.tools).toHaveLength(3);
+      for (const tool of parsed.tools) expect(tool.function.description).toBe(description);
+      expect(parsed.tools[0].function.parameters).toEqual(schema);
+      expect(parsed.tools[2].function.parameters).toEqual(schema);
+    },
+  );
+
   it("groups contiguous Responses tool calls into one Chat assistant turn", () => {
     const body = buildHostedCustomInferenceUpstreamRequestBody({
       body: encodeJson({

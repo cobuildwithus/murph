@@ -51,6 +51,9 @@ import {
   recordHostedAssistantMilestonesBestEffort,
 } from "../src/hosted-runtime/assistant-latency-trace.ts";
 import {
+  recordHostedDeliveryCommittedBestEffort,
+} from "../src/hosted-runtime/delivery-latency-trace.ts";
+import {
   buildHostedLinqChannelEnv,
   buildHostedTelegramChannelEnv,
   createHostedAssistantChannelTypingDependencies,
@@ -162,7 +165,7 @@ test("hosted Linq typing uses the hosted env after target context validation", a
   assert.equal(mocks.startLinqTypingIndicator.mock.calls[0]?.[1]?.refreshMs, 45_000);
 });
 
-test("hosted Linq typing records exact request and acceptance milestones without payload data", async () => {
+test("hosted Linq typing records requests and admitted-input acceptance without payload data", async () => {
   const latencyTraceRecord = vi.fn(async (_request: HostedRuntimeLatencyTraceRequest) => ({
     matchedCount: 1,
     recorded: true,
@@ -171,12 +174,13 @@ test("hosted Linq typing records exact request and acceptance milestones without
   mocks.startLinqTypingIndicator.mockResolvedValue({
     stop: vi.fn(async () => undefined),
   });
+  const assistantInputIds = ["input_typing_trace_1"];
   const typing = createHostedAssistantChannelTypingDependencies({
     forwardedEnv: {
       LINQ_API_TOKEN: "linq-token",
     },
     latencyTraceContext: {
-      assistantInputIds: ["input_typing_trace_1"],
+      assistantInputIds,
       latencyTracePort: {
         record: latencyTraceRecord,
       },
@@ -201,6 +205,7 @@ test("hosted Linq typing records exact request and acceptance milestones without
   const handle = await typing.startLinqTyping?.({
     target: "chat_typing_trace_1",
   });
+  typing.onTypingAccepted?.({ acceptedInputIds: assistantInputIds, at: new Date().toISOString(), channel: "linq" });
   await vi.waitFor(() => {
     expect(latencyTraceRecord).toHaveBeenCalledTimes(2);
   });
@@ -223,7 +228,46 @@ test("hosted Linq typing records exact request and acceptance milestones without
   ]);
   expect(JSON.stringify(latencyTraceRecord.mock.calls)).not.toContain("+15551234567");
   expect(JSON.stringify(latencyTraceRecord.mock.calls)).not.toContain("msg_typing_trace_1");
+  const acceptedAt = latencyTraceRecord.mock.calls[1]?.[0].event.at;
+  assistantInputIds[0] = "input_typing_trace_2";
+  typing.onTypingAccepted?.({ acceptedInputIds: ["input_typing_trace_2"], at: acceptedAt!, channel: "linq" });
+  expect(mocks.startLinqTypingIndicator).toHaveBeenCalledOnce();
+  await vi.waitFor(() => expect(latencyTraceRecord).toHaveBeenLastCalledWith({ event: expect.objectContaining({
+    assistantInputIds: ["input_typing_trace_2"],
+    at: acceptedAt,
+    milestone: "linq_typing_accepted",
+  }) }));
   await handle?.stop();
+});
+
+test("delivered mailbox telemetry is detached, bounded, and retries without moving its completion time", async () => {
+  vi.useFakeTimers();
+  const record = vi.fn()
+    .mockRejectedValueOnce(new Error("Synthetic old callback consumer"))
+    .mockResolvedValueOnce({ matchedCount: 0, recorded: false, unmatchedCount: 64 })
+    .mockResolvedValue({ matchedCount: 64, recorded: true, unmatchedCount: 0 });
+  try {
+    const ids = Array.from({ length: 100 }, (_, index) => `mailbox_${index}`);
+    recordHostedDeliveryCommittedBestEffort({
+      context: { latencyTracePort: { record }, runtimeAttemptId: "attempt_delivery" },
+      intent: {
+        answeredMailboxItemIds: [...ids, ids[0]!],
+        status: "sent", sentAt: "2026-04-26T00:01:00.000Z",
+        delivery: { channel: "email", idempotencyKey: null, messageLength: 0,
+          providerMessageId: "message_email", providerThreadId: null,
+          sentAt: "2026-04-26T00:01:00.000Z", target: "member@example.test", targetKind: "explicit" },
+      },
+    });
+    expect(record).not.toHaveBeenCalled();
+    await vi.runAllTimersAsync();
+    expect(record).toHaveBeenCalledTimes(4);
+    expect(record.mock.calls[0]).toEqual(record.mock.calls[2]);
+    expect(record.mock.calls[2]?.[0].event.mailboxItemIds).toEqual(ids.slice(0, 64));
+    expect(record.mock.calls[3]?.[0].event.mailboxItemIds).toEqual(ids.slice(64));
+    expect(record.mock.calls[3]?.[0].event.at).toBe("2026-04-26T00:01:00.000Z");
+  } finally {
+    vi.useRealTimers();
+  }
 });
 
 test("hosted assistant milestones retry when staging has not claimed the runtime attempt yet", async () => {
@@ -282,6 +326,45 @@ test("hosted assistant milestones retry when staging has not claimed the runtime
   } finally {
     vi.useRealTimers();
   }
+});
+
+test.each(["transport", "late-staging"] as const)("typing acceptance recovers after two %s failures", async (failure) => {
+  vi.useFakeTimers();
+  const record = vi.fn();
+  for (let attempt = 0; attempt < 2; attempt++) {
+    if (failure === "transport") record.mockRejectedValueOnce(new Error("Synthetic unavailable transport"));
+    else record.mockResolvedValueOnce({ matchedCount: 0, recorded: false, unmatchedCount: 1 });
+  }
+  record.mockResolvedValue({ matchedCount: 1, recorded: true, unmatchedCount: 0 });
+  try {
+    recordHostedAssistantMilestonesBestEffort({
+      context: { assistantInputIds: ["synthetic-input"], runtimeAttemptId: "synthetic-attempt",
+        source: "linq", latencyTracePort: { record } },
+      milestones: [{ at: "2026-09-01T12:00:00.000Z", milestone: "linq_typing_accepted" }],
+    });
+    expect(record).not.toHaveBeenCalled();
+    await vi.runAllTimersAsync();
+    expect(record).toHaveBeenCalledTimes(3);
+    expect(record.mock.calls[2]).toEqual(record.mock.calls[0]);
+  } finally { vi.useRealTimers(); }
+});
+
+test("typing acceptance exhaustion is bounded and reports no identifiers or error prose", async () => {
+  vi.useFakeTimers();
+  const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+  const record = vi.fn().mockRejectedValue(new Error("Synthetic private error prose"));
+  try {
+    recordHostedAssistantMilestonesBestEffort({
+      context: { assistantInputIds: ["synthetic-private-input"], runtimeAttemptId: "synthetic-private-attempt",
+        source: "linq", latencyTracePort: { record } },
+      milestones: [{ at: "2026-09-01T12:00:00.000Z", milestone: "linq_typing_accepted" }],
+    });
+    await vi.runAllTimersAsync();
+    expect(record).toHaveBeenCalledTimes(3);
+    expect(warn).toHaveBeenCalledExactlyOnceWith(
+      "Hosted typing acceptance telemetry exhausted its retry budget.", { source: "linq", inputCount: 1 },
+    );
+  } finally { warn.mockRestore(); vi.useRealTimers(); }
 });
 
 test("hosted Linq typing starts without route authority when the target context matches", async () => {
@@ -1089,4 +1172,25 @@ test("hosted progress Linq delivery recovers the redacted routed same-wake chat"
     target: "linq_chat_current",
     targetKind: "thread",
   });
+});
+
+test.each(["linq", "telegram"])("typing telemetry uses admitted IDs and the actual %s channel", async (channel) => {
+  const record = vi.fn(async (_request: HostedRuntimeLatencyTraceRequest) => ({
+    matchedCount: 1, recorded: true, unmatchedCount: 0,
+  }));
+  const typing = createHostedAssistantChannelTypingDependencies({
+    forwardedEnv: {}, userEnv: {},
+    latencyTraceContext: {
+      assistantInputIds: ["initial-input"], latencyTracePort: { record },
+      runtimeAttemptId: "synthetic-attempt", source: "linq",
+    },
+  });
+  typing.onTypingAccepted?.({
+    acceptedInputIds: ["admitted-followup"], at: "2026-09-11T00:00:00.000Z", channel,
+  });
+  await vi.waitFor(() => expect(record).toHaveBeenCalledWith({ event: {
+    assistantInputIds: ["admitted-followup"], at: "2026-09-11T00:00:00.000Z",
+    milestone: `${channel}_typing_accepted`, runtimeAttemptId: "synthetic-attempt",
+    source: channel, type: "assistant_milestone",
+  } }));
 });

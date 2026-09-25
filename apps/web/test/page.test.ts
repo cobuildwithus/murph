@@ -253,7 +253,7 @@ test("HomePage renders the canonical landing page at the root route", async () =
     markup,
     /curl -fsSL https:\/\/www\.withmurph\.ai\/install\.sh \| bash/
   );
-  assert.match(markup, /murph chat/);
+  assert.match(markup, /murph assistant ask &quot;Hello&quot;/);
   assert.match(markup, /Do I need a wearable\?/);
   assert.match(markup, /No\. A wearable can add useful signals/);
   assert.match(markup, /Can I do challenges with friends and family\?/);

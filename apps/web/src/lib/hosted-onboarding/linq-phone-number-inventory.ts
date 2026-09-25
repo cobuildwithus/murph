@@ -1,3 +1,6 @@
+import { randomInt } from "node:crypto";
+import { setTimeout as delay } from "node:timers/promises";
+
 import { Prisma, type PrismaClient } from "@prisma/client";
 import type { PhoneNumberListResponse } from "@linqapp/sdk/resources/phone-numbers";
 
@@ -83,6 +86,7 @@ export async function syncHostedLinqPhoneNumberInventory(input: {
       attempt <= HOSTED_LINQ_PHONE_NUMBER_INVENTORY_APPLY_MAX_ATTEMPTS;
       attempt += 1
     ) {
+      input.signal?.throwIfAborted();
       try {
         return await prisma.$transaction(
           (tx) => applyHostedLinqPhoneNumberInventorySnapshot({
@@ -99,6 +103,9 @@ export async function syncHostedLinqPhoneNumberInventory(input: {
         ) {
           throw error;
         }
+        // Give competing snapshots time to finish after rollback releases our
+        // connection. Keep the existing three-attempt convergence budget.
+        await delay(randomInt(50, 251), undefined, { signal: input.signal });
       }
     }
     throw new Error("Hosted Linq inventory convergence retries were exhausted.");
@@ -315,10 +322,16 @@ function buildHostedLinqPhoneNumberInventorySnapshotQuery(input: {
 }
 
 function isHostedLinqInventoryConvergenceConflict(error: unknown): boolean {
-  if (!error || typeof error !== "object" || !("code" in error)) {
+  if (!error || typeof error !== "object") {
     return false;
   }
-  const code = typeof error.code === "string" ? error.code : null;
+  // Adapter errors at COMMIT are not wrapped in a Prisma P2010 error.
+  if ("name" in error && error.name === "DriverAdapterError") {
+    return ["23505", "40001", "40P01"].includes(
+      readHostedLinqInventoryPostgresErrorCode({ driverAdapterError: error }) ?? "",
+    );
+  }
+  const code = "code" in error && typeof error.code === "string" ? error.code : null;
   if (code === "P2002" || code === "P2034") {
     return true;
   }

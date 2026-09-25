@@ -246,6 +246,27 @@ describe("Linq group-line recovery inside the canonical webhook owner", () => {
     });
   });
 
+  it("acknowledges exhausted recovery without reporting a send", async () => {
+    mocks.drainHostedLinqSideEffectsDirect.mockResolvedValue({
+      sentCount: 0,
+      skipped: [{
+        effectId: sideEffect.effectId,
+        reason: "effect_unresolved",
+        template: "group_line_recovery",
+      }],
+    });
+
+    await expect(handleHostedOnboardingLinqWebhook({
+      rawBody: "{}",
+      signature: null,
+      timestamp: null,
+    })).resolves.toEqual({
+      ignored: true,
+      ok: true,
+      reason: "group-chat-line-unavailable",
+    });
+  });
+
   it("returns sent when the stale recovery claim is reclaimed and dispatched", async () => {
     await expect(handleHostedOnboardingLinqWebhook({
       rawBody: "{}",

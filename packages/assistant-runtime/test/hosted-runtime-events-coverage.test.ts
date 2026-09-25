@@ -145,6 +145,7 @@ describe("hosted runtime event coverage", () => {
       conversationMetrics: null,
       mailboxLane: "member-activated",
       nextWakeAt: null,
+      nextWakeReason: null,
       postCheckpointRecord: null,
       redactedLogEntries: [],
     });
@@ -195,7 +196,7 @@ describe("hosted runtime event coverage", () => {
       runtimeLogPlatform: runtime.platform,
       resolvedConfig: runtime.resolvedConfig,
       signal,
-      timeoutMs: 120_000,
+      timeoutMs: 300_000,
       vaultRoot: "/tmp/assistant-runtime-events-coverage",
       wake: deviceSyncWake,
     });
@@ -224,7 +225,7 @@ describe("hosted runtime event coverage", () => {
       runtime,
       runtimeEnv: {},
       signal,
-      shouldYieldDeviceSync,
+      shouldYieldBackgroundMaintenance: shouldYieldDeviceSync,
       vaultRoot: "/tmp/assistant-runtime-events-coverage-yield",
     });
 

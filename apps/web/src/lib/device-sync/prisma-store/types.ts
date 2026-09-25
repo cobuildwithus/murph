@@ -54,6 +54,7 @@ export interface HostedDeviceSyncDirtyResource {
   providerSendToWebhookMs?: number | null;
   jobKind: string;
   payload?: Record<string, boolean | number | string>;
+  providerDedupeKey?: string;
   resource: string | null;
   resourceCategory: string | null;
   sourceProviderSlug: string | null;

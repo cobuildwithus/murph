@@ -849,7 +849,6 @@ describe("syncHostedLinqConfiguredLinesTx", () => {
     const phoneNumbers = ["+15550100002", "+1 (555) 010-0001"];
 
     await syncHostedLinqConfiguredLinesTx({
-      activeMemberLimit: 250,
       observedAt: new Date("2026-06-30T12:00:00.000Z"),
       phoneNumbers,
       prisma: { $transaction: transaction } as never,
@@ -873,7 +872,6 @@ describe("syncHostedLinqConfiguredLinesTx", () => {
     expect(query.values).toEqual(expect.arrayContaining([
       "*** 0001",
       "*** 0002",
-      250,
     ]));
     expect(JSON.stringify(query.values)).not.toContain("+1555010000");
   });
@@ -886,7 +884,6 @@ describe("syncHostedLinqConfiguredLinesTx", () => {
     const transaction = vi.fn();
 
     await expect(syncHostedLinqConfiguredLinesTx({
-      activeMemberLimit: null,
       phoneNumbers: ["not-a-phone"],
       prisma: { $transaction: transaction } as never,
     })).rejects.toThrow(/valid phone number/u);
@@ -949,7 +946,7 @@ describe("upsertHostedLinqLineForPhoneTx", () => {
     expect(transactionClient.hostedLinqLine.upsert).toHaveBeenCalledTimes(1);
   });
 
-  it("updates an existing legacy lookup-key row and bootstraps missing configured caps", async () => {
+  it("updates an existing legacy lookup-key row without a second configured-line write", async () => {
     restoreContactPrivacyKeyring = configureHostedContactPrivacyKeyringForTest({
       currentVersion: "v1",
       entries: { v1: TEST_KEYRING_ENTRIES.v1 },
@@ -995,7 +992,6 @@ describe("upsertHostedLinqLineForPhoneTx", () => {
 
     await expect(
       upsertHostedLinqLineForPhoneTx({
-        activeMemberLimit: 250,
         observedAt,
         phoneNumber,
         prisma,
@@ -1023,16 +1019,7 @@ describe("upsertHostedLinqLineForPhoneTx", () => {
         source: "configured",
       }),
     }));
-    expect(update.mock.calls[0]?.[0].data).not.toHaveProperty("activeMemberLimit");
-    expect(updateMany).toHaveBeenCalledWith({
-      where: {
-        activeMemberLimit: null,
-        phoneNumberLookupKey: legacyLookupKey,
-      },
-      data: {
-        activeMemberLimit: 250,
-      },
-    });
+    expect(updateMany).not.toHaveBeenCalled();
     expect(create).not.toHaveBeenCalled();
   });
 });
@@ -1065,7 +1052,6 @@ function buildAssignableLineRow(
   }> = {},
 ) {
   return {
-    activeMemberLimit: null,
     assignmentWeight: 100,
     maxNewConversationsPerDay: null,
     phoneNumberEncrypted: encryptHostedLinqLinePhoneNumber(phoneNumber),

@@ -1,7 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 
-import { HostedPrivyProvider } from "@/src/components/hosted-onboarding/privy-provider";
 import { HostedDataPrivacySettings } from "@/src/components/settings/hosted-data-privacy-settings";
 import { PageHeader } from "@/src/components/ui/page-header";
 import { getHostedPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
@@ -21,8 +20,6 @@ export default async function SettingsDataPrivacyPage() {
     return <SettingsDataPrivacyAuthRequired />;
   }
 
-  const privyAppId = process.env.NEXT_PUBLIC_PRIVY_APP_ID?.trim() || null;
-  const privyClientId = process.env.NEXT_PUBLIC_PRIVY_CLIENT_ID?.trim() || null;
   const content = (
     <main className="min-h-dvh bg-background px-4 py-10 text-foreground sm:px-6">
       <div className="mx-auto flex w-full max-w-xl flex-col gap-8">
@@ -35,7 +32,7 @@ export default async function SettingsDataPrivacyPage() {
         <section id="data-privacy" className="flex flex-col gap-4">
           <HostedDataPrivacySettings
             authenticated
-            authorizationEnabled={Boolean(privyAppId)}
+            authorizationEnabled
           />
         </section>
 
@@ -58,9 +55,5 @@ export default async function SettingsDataPrivacyPage() {
     </main>
   );
 
-  return privyAppId ? (
-    <HostedPrivyProvider appId={privyAppId} clientId={privyClientId}>
-      {content}
-    </HostedPrivyProvider>
-  ) : content;
+  return content;
 }

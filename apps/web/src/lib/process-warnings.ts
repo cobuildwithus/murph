@@ -34,8 +34,17 @@ type ProcessEmitWarningRestArgs = Parameters<typeof process.emitWarning> extends
 const PG_CONCURRENT_QUERY_DEPRECATION_MESSAGE =
   "Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.";
 
-const PG_WARNING_FILTER_FLAG = Symbol.for(
-  "murph.pgConcurrentQueryDeprecationWarningFilterInstalled",
+// Node 24 emits both notices even for a capability probe via
+// crypto.subtle.constructor.supports("importKey", "ML-DSA-44"). They report
+// API stability, not a failed crypto operation. Match only these exact notices
+// so other experimental algorithms and actual crypto failures remain visible.
+const WEB_CRYPTO_EXPERIMENTAL_MESSAGES = new Set([
+  "The supports Web Crypto API method is an experimental feature and might change at any time",
+  "The ML-DSA-44 Web Crypto API algorithm is an experimental feature and might change at any time",
+]);
+
+const HOSTED_WARNING_FILTER_FLAG = Symbol.for(
+  "murph.hostedWebNoiseWarningFilterInstalled",
 );
 
 type ProcessWithWarningFilterFlag = NodeJS.Process & {
@@ -46,7 +55,7 @@ export function installHostedWebWarningFilters(): void {
   installSqliteExperimentalWarningFilterWithOptions({
     matchMode: "includes",
   });
-  installPgConcurrentQueryDeprecationWarningFilter();
+  installHostedWebNoiseWarningFilter();
 }
 
 export function isHostedWebNoiseWarning(
@@ -56,7 +65,9 @@ export function isHostedWebNoiseWarning(
   return (
     isSqliteExperimentalWarning(warning, args, {
       matchMode: "includes",
-    }) || isPgConcurrentQueryDeprecationWarning(warning, args)
+    }) ||
+    isPgConcurrentQueryDeprecationWarning(warning, args) ||
+    isWebCryptoExperimentalWarning(warning, args)
   );
 }
 
@@ -72,18 +83,32 @@ export function isPgConcurrentQueryDeprecationWarning(
   );
 }
 
-function installPgConcurrentQueryDeprecationWarningFilter(): void {
+function isWebCryptoExperimentalWarning(
+  warning: string | Error,
+  args: readonly unknown[],
+): boolean {
+  const message = typeof warning === "string" ? warning : warning.message;
+  return (
+    readWarningType(warning, args) === "ExperimentalWarning" &&
+    WEB_CRYPTO_EXPERIMENTAL_MESSAGES.has(message)
+  );
+}
+
+function installHostedWebNoiseWarningFilter(): void {
   const processWithFlag = process as ProcessWithWarningFilterFlag;
 
-  if (processWithFlag[PG_WARNING_FILTER_FLAG] === true) {
+  if (processWithFlag[HOSTED_WARNING_FILTER_FLAG] === true) {
     return;
   }
 
-  processWithFlag[PG_WARNING_FILTER_FLAG] = true;
+  processWithFlag[HOSTED_WARNING_FILTER_FLAG] = true;
   const originalEmitWarning = process.emitWarning.bind(process);
 
   process.emitWarning = ((warning: string | Error, ...args: unknown[]) => {
-    if (isPgConcurrentQueryDeprecationWarning(warning, args)) {
+    if (
+      isPgConcurrentQueryDeprecationWarning(warning, args) ||
+      isWebCryptoExperimentalWarning(warning, args)
+    ) {
       return;
     }
 

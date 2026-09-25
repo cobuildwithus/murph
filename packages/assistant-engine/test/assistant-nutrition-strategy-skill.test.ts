@@ -168,14 +168,14 @@ describe('assistant nutrition strategy skill', () => {
     expect(nutrition).toContain('It is not the owner for body-composition strategy, digestive symptom strategy, or clinician-managed therapeutic diets.')
     expect(nutrition).toContain('The lowest useful tracking burden wins')
     expect(nutrition).toContain(
-      'Outside the one first-run managed closeout proposal below, do not give',
+      "Do not give unsolicited calorie, macro, or weight-loss targets.",
     )
     expect(nutrition).toContain('Treat appetite cues as information')
     expect(nutrition).not.toContain('### Body composition')
     expect(nutrition).not.toContain('### GI comfort and performance')
   })
 
-  it('grounds first-card goals in one researched, explanation-first owner', async () => {
+  it('keeps explicit target-setting in its researched, explanation-first owner', async () => {
     const { bodyComposition, cardGoals, nutrition } = await readSkills()
     const compactGoals = cardGoals.replace(/\s+/gu, ' ').trim()
 
@@ -253,7 +253,7 @@ describe('assistant nutrition strategy skill', () => {
       'Reuse at most one Goal with slug `murph-daily-nutrition-starting-targets`.',
     )
     expect(compactGoals).toContain(
-      'Use the target-authority and canonical-discovery rules below after every explicit interactive request to set nutrition targets or receive a numeric daily nutrition card, even when the visible context appears to contain a complete bundle.',
+      "Use the canonical target-authority read below before every private daily card, including ordinary meal replies and replies to scheduled check-ins.",
     )
     expect(compactGoals).toContain(
       'run `vault-cli meal totals --from <date> --to <same-date> --resolve-goals --format json`.',
@@ -277,25 +277,25 @@ describe('assistant nutrition strategy skill', () => {
       'Separately run `vault-cli goal list --limit 200 --format json`',
     )
     expect(compactGoals).toContain(
-      'It authorizes only the one paused canonical proposal below so the provisional values do not live in transient assistant state; it does not accept, activate, or use those targets.',
+      "The proposal remains paused until explicit acceptance after explanation.",
     )
     expect(nutrition).toContain(
-      'The narrow paused daily-card proposal below has two initiation paths:',
+      "Only an explicit target-setting request initiates the paused canonical",
     )
     expect(nutrition).toContain(
-      'an explicit numeric-card request, or the first eligible managed automatic meal',
+      "A numeric card, ordinary meal log, or scheduled closeout is not target-setting",
     )
     expect(compactGoals).toContain(
-      'The owning automatic-meal-capture skill may also use this workflow for one first eligible managed closeout',
+      "A meal log, daily summary, numeric-card request, and managed closeout never create, explain, repeat, accept, activate, revise, or abandon a target proposal.",
     )
     expect(compactGoals).toContain(
-      'a complete all-status Goal read proves that no Goal with slug `murph-daily-nutrition-starting-targets` exists in any status.',
+      "an abandoned or completed record is an opt-out and must not be recreated automatically.",
     )
     expect(compactGoals).toContain(
-      'That scheduled exception may use only already-known responsible inputs, creates and explains one paused proposal in ordinary text, asks no question, attaches no card, and never activates the proposal.',
+      "Only explicit target-setting intent authorizes the proposal workflow below.",
     )
     expect(compactGoals).toContain(
-      'Once the managed Goal exists in any status, later scheduled closeouts may use an accepted active bundle but never create, change, or automatically repeat a numeric proposal.',
+      "Silence, a meal reply, reminder acceptance, and a request for totals are not acceptance.",
     )
     expect(compactGoals).toContain('status `paused`')
     expect(compactGoals).toContain(
@@ -369,7 +369,7 @@ describe('assistant nutrition strategy skill', () => {
       'A target-setting-only request, correction, decline, ambiguous acceptance, or compound request remains ordinary text with no card.',
     )
     expect(compactGoals).toContain(
-      'Otherwise, a later eligible response may attach the card only when the target-authority read above resolves one complete, unambiguous card-authorizing bundle.',
+      'Otherwise, a later eligible response may attach a goal-aware card only when the target-authority read above resolves one complete, unambiguous card-authorizing bundle.',
     )
     expect(compactGoals).toContain(
       'Consume that resolved bundle directly; do not restate accepted metric keys or require a second `dietary-calories` owner after calorie resolution.',
@@ -463,7 +463,7 @@ describe('assistant nutrition strategy skill', () => {
       'An out-of-window target remains canonical authority for its own period, but it is not a current owner or conflict',
     )
     expect(compactGoals).toContain(
-      'If one complete applicable bundle does not remain, use ordinary text or one narrow interactive question with no mutation; a scheduled closeout asks nothing and sends no card.',
+      'A genuinely missing applicable bundle uses all-null totals-only goals; conflict, incompatible and capacity stay text-only.',
     )
     expect(compactGoals).toContain(
       "send the managed Goal's complete retained array without that overlapping metric; never edit the explicit Goal.",
@@ -472,7 +472,7 @@ describe('assistant nutrition strategy skill', () => {
       'If the member declines, update the same Goal to `abandoned`.',
     )
     expect(compactGoals).toContain(
-      'On an interactive card request, explain an existing paused proposal again',
+      "An ordinary interactive card request does not repeat a paused proposal: use totals-only when the active bundle is missing, without changing any Goal.",
     )
     expect(compactGoals).toContain(
       'an abandoned or completed record is an opt-out and must not be recreated automatically.',

@@ -39,7 +39,7 @@ export function hostedSystemMailboxWakeIsDueForModelFreeOwner(
 
 export function createHostedRuntimeWakeCandidate(
   at: string | null | undefined,
-  reason: string | null,
+  reason: string | null | undefined,
 ): HostedRuntimeWakeCandidate {
   return {
     at: at ?? null,

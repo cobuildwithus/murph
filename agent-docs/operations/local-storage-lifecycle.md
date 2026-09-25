@@ -137,6 +137,17 @@ so unrelated task work can continue while the global audit remains blocked.
 Registered worktrees, including locked `data/research:` worktrees, do not count
 as unmanaged.
 
+Dependency preparation calls `scripts/install-git-hooks --if-needed`. When the
+current shared include and effective primary hook path are already installed,
+the authorization baseline exists, and the current checkout is primary or has
+an authorization marker without an isolation marker, setup returns without
+writing state or taking the shared storage lock. This lets repeated installs
+finish while another guarded operation owns that lock. Missing or stale setup
+uses the normal serialized installer. This read-only observation grants no
+commit or creation authority: the default installer, committer, creation helper,
+and actual pre-commit guard retain their locked checks. Storage admission is
+checked when creating or committing, not on a no-op dependency preparation.
+
 Registered-worktree authorization is checkout-scoped at commit time after the
 primary guard advances. The branch-independent hook then supplies the
 committing checkout, so a raw worktree fails its own commit without blocking an

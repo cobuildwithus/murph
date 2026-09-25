@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { emptyCliTiming } from "@murphai/runtime-state/cli-timing";
 
 import {
   recordHostedAiUsageRecords,
@@ -1039,6 +1040,31 @@ describe("recordHostedAiUsageRecords", () => {
     expect(droppedCreate).toBeDefined();
     expect(droppedCreate?.turnProfileJson).toBeUndefined();
     expect(droppedCreate?.inputTokens).toBe(120);
+  });
+
+  it("persists only finite failure diagnostics and preserves valid usage when optional detail is malformed", async () => {
+    const timing = { ...emptyCliTiming(), commands: [{ command: "experiment session log", outcome: "error",
+      calls: 1, phases: [], failures: [{ code: "invalid_payload", stage: "validation", count: 1 }] }] };
+    const profile = { schema: "murph.assistant-turn-profile.v2", modelContextWindow: null, requestCount: 0,
+      requests: [], requestsTruncated: false, tools: [], toolsTruncated: false };
+    const legacyTiming = { ...timing, commands: [{ command: "experiment session log", outcome: "error", calls: 1, phases: [] }] };
+    for (const [diagnostics, expected] of [
+      [timing, timing],
+      [{ ...timing, commands: [{ ...timing.commands[0], failures: [{ code: "PRIVATE_SENTINEL", stage: "PRIVATE_SENTINEL", count: 1,
+        message: "PRIVATE_SENTINEL", context: "PRIVATE_SENTINEL" }] }] },
+        { ...timing, commands: [{ ...timing.commands[0], failures: [{ code: "unknown", stage: "unknown", count: 1 }] }] }],
+      [{ ...timing, commands: [{ ...timing.commands[0], failures: "PRIVATE_SENTINEL" }] }, legacyTiming],
+    ]) {
+      const upsert = vi.fn(async (args: { create: Record<string, unknown> }) => args.create);
+      const result = await recordHostedAiUsageRecords({ prisma: makeUsagePrisma(upsert) as never,
+        trustedUserId: "member_123", usage: [{ ...BASE_USAGE_RECORD, turnProfileJson: { ...profile, cliTiming: diagnostics } }] });
+      expect(result.recordedIds).toEqual(["turn_123.attempt-1"]);
+      const persisted = upsert.mock.calls[0]?.[0]?.create;
+      expect(persisted?.turnProfileJson).toEqual({ ...profile, cliTiming: expected });
+      expect(persisted?.inputTokens).toBe(120);
+      expect(persisted?.outputTokens).toBe(45);
+      expect(JSON.stringify(persisted?.turnProfileJson)).not.toContain("PRIVATE_SENTINEL");
+    }
   });
 
   it("dedupes identical usage rows by usageId before persisting them", async () => {

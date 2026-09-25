@@ -1,10 +1,14 @@
+import { createPostgresTestOwner, mockPostgresOwnerCommand, forbiddenLegacyRuntime, settledNativeRuntime } from "./postgres-owner-fixtures.ts";
 import { execFile } from "node:child_process";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { createRequire } from "node:module";
+import { realpathSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
+
+import { HOSTED_RUNTIME_IMAGE_GENERATION_ACCESS_PATH } from "@murphai/hosted-execution/routes";
 
 import { executeCodexAppServerTurn } from "@murphai/assistant-engine/assistant-codex";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -12,6 +16,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   hostedRunnerIntercept,
 } from "../src/runner-egress-intercept.ts";
+import { createHostedLiveSessionReference } from "../src/runner-egress-openai-live.ts";
+import { nativeLiveRequest } from "./fixtures/native-live-request.ts";
 import {
   createHostedProviderEgressCredential,
 } from "../src/hosted-provider-egress-credential.ts";
@@ -84,6 +90,9 @@ describe("pinned Codex OpenAI egress conformance", () => {
       .toBe(expectedVersion);
     expect(installedPackage.version).toBe(expectedVersion);
     expect(baseDockerfile).toContain(`ARG CODEX_CLI_VERSION=${expectedVersion}`);
+    expect(baseDockerfile).toContain(
+      `ARG CODEX_UPSTREAM_REVISION=${PINNED_CODEX_OPENAI_EGRESS_INVENTORY.upstreamCommit}`,
+    );
     expect(workspace).toContain(`'@openai/codex@${expectedVersion}||`);
     expect(PINNED_CODEX_OPENAI_EGRESS_INVENTORY.upstreamTag)
       .toBe(`rust-v${expectedVersion}`);
@@ -218,7 +227,7 @@ describe("pinned Codex OpenAI egress conformance", () => {
     const requiredBinaryCorroboration = new Set(
       PINNED_CODEX_OPENAI_EGRESS_INVENTORY.routes
         .filter((route) =>
-          route.owner === "codex" && route.disposition !== "blocked"
+          route.owner === "codex" && route.disposition !== "blocked" && route.proof !== "reviewed_source"
         )
         .map((route) => route.pathname),
     );
@@ -270,14 +279,29 @@ describe("pinned Codex OpenAI egress conformance", () => {
     const env = createOpenAiInterceptEnv({
       validateRuntimeProviderEgressCredential,
     });
-    const upstreamFetch = vi.fn<typeof fetch>(async () => new Response("ok"));
-    vi.stubGlobal("fetch", upstreamFetch);
+    const upstreamFetch = vi.fn<typeof fetch>(async (input) => {
+      const url = new URL(input instanceof Request ? input.url : String(input));
+      return url.pathname === "/v1/live/sessions" ? Response.json({
+        session: { id: "synthetic-session" }, transport: { type: "webrtc", sdp: "v=0\r\nanswer" },
+      }, { status: 201 }) : new Response("ok");
+    });
+    const imageAccessFetch = vi.fn<typeof fetch>(async () =>
+      Response.json({ allowed: true, reason: "allowed" })
+    );
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>(async (request, init) => {
+      const url = new URL(request instanceof Request ? request.url : String(request));
+      if (url.pathname === "/api/internal/hosted-runtime/log") return Response.json({ accepted: true });
+      return url.pathname === HOSTED_RUNTIME_IMAGE_GENERATION_ACCESS_PATH
+        ? imageAccessFetch(request, init)
+        : upstreamFetch(request, init);
+    }));
 
     for (const route of PINNED_CODEX_OPENAI_EGRESS_INVENTORY.routes) {
+      const imageAccessCallsBefore = imageAccessFetch.mock.calls.length;
       const upstreamCallsBefore = upstreamFetch.mock.calls.length;
       const validationsBefore = validateRuntimeProviderEgressCredential.mock.calls.length;
       const response = await hostedRunnerIntercept(
-        createInventoryRequest(route, credential),
+        await createInventoryRequest(route, credential),
         env,
         { containerId: "opaque-container-id" },
       );
@@ -291,11 +315,14 @@ describe("pinned Codex OpenAI egress conformance", () => {
         continue;
       }
 
-      expect(response.status, `${route.method} ${route.pathname}`).toBe(200);
+      expect(response.status, `${route.method} ${route.pathname}`).toBe(route.pathname === "/v1/live/sessions" ? 201 : 200);
+      expect(imageAccessFetch.mock.calls.length, route.feature).toBe(
+        imageAccessCallsBefore + (route.pathname.startsWith("/v1/images/") || (route.pathname === "/v1/responses" && route.transport === "websocket") ? 1 : 0),
+      );
       expect(upstreamFetch.mock.calls.length, route.feature)
         .toBe(upstreamCallsBefore + 1);
       expect(validateRuntimeProviderEgressCredential.mock.calls.length, route.feature)
-        .toBe(validationsBefore + 1);
+        .toBe(validationsBefore + (route.disposition === "allowed_scoped_websocket_only" ? 0 : 1));
       const forwarded = upstreamFetch.mock.calls.at(-1)?.[0];
       expect(forwarded, route.feature).toBeInstanceOf(Request);
       const forwardedRequest = forwarded as Request;
@@ -347,6 +374,7 @@ describe("pinned Codex OpenAI egress conformance", () => {
       const request = input instanceof Request
         ? input.clone()
         : new Request(input, init);
+      if (new URL(request.url).pathname === "/api/internal/hosted-runtime/log") return Response.json({ accepted: true });
       forwardedRequests.push({
         body: await request.clone().text(),
         headers: new Headers(request.headers),
@@ -500,10 +528,12 @@ function resolveVitestTempRoot(): string {
 }
 
 function resolveInstalledCodexBinary(): string {
+  const explicitBinary = process.env.MURPH_TEST_CODEX_COMMAND?.trim();
+  if (explicitBinary) return explicitBinary;
   const target = resolveCodexTarget();
   const platformPackage = `@openai/codex-${target.packageSuffix}`;
   const requireFromCodex = createRequire(
-    path.join(repoRoot, "packages/assistant-engine/node_modules/@openai/codex/package.json"),
+    realpathSync(path.join(repoRoot, "packages/assistant-engine/node_modules/@openai/codex/package.json")),
   );
   const platformPackageJson = requireFromCodex.resolve(`${platformPackage}/package.json`);
   return path.join(
@@ -516,7 +546,7 @@ function resolveInstalledCodexBinary(): string {
 }
 
 function resolveCodexCommand(): string {
-  return path.join(
+  return process.env.MURPH_TEST_CODEX_COMMAND?.trim() || path.join(
     repoRoot,
     "packages/assistant-engine/node_modules/.bin",
     process.platform === "win32" ? "codex.cmd" : "codex",
@@ -558,10 +588,10 @@ function resolveCodexTarget(): { packageSuffix: string; triple: string } {
   return target;
 }
 
-function createInventoryRequest(
+async function createInventoryRequest(
   route: PinnedCodexOpenAiEgressRoute,
   credential: string,
-): Request {
+): Promise<Request> {
   const headers = new Headers({
     authorization: `Bearer ${credential}`,
   });
@@ -572,7 +602,12 @@ function createInventoryRequest(
     headers.set("upgrade", "websocket");
   }
   const body = buildInventoryRequestBody(route, headers);
-  return new Request(`https://api.openai.com${route.pathname}`, {
+  const pathname = route.disposition === "allowed_scoped_websocket_only"
+    ? `/v1/live/sessions/${await createHostedLiveSessionReference("synthetic-session", {
+        userId: TEST_USER_ID, attemptId: "attempt_codex_route_conformance", leaseGeneration: "7",
+      }, { HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET: PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET })}/attach`
+    : route.pathname;
+  return new Request(`https://api.openai.com${pathname}`, {
     ...(body === undefined ? {} : { body }),
     headers,
     method: route.method,
@@ -596,6 +631,7 @@ function buildInventoryRequestBody(
     return form;
   }
   headers.set("content-type", "application/json");
+  if (route.pathname === "/v1/live/sessions") return JSON.stringify(nativeLiveRequest());
   return JSON.stringify({
     input: "synthetic route contract",
     model: SCRIPTED_MODEL,
@@ -635,20 +671,22 @@ function createOpenAiInterceptEnv(input: {
   }) => Promise<WorkerProviderEgressCredentialValidationResult>
     | WorkerProviderEgressCredentialValidationResult;
 }): RunnerOutboundEnvironmentSource {
+  mockPostgresOwnerCommand(async ({ userId, command }) => {
+    if (command.operation === "reconcile") return { cutover: "postgres", status: "observed", owner: createPostgresTestOwner({
+      userId, attemptId: "attempt_codex_route_conformance", generation: "7", runnerContainerName: RUNNER_CONTAINER_NAME,
+    }) };
+    if (command.operation !== "authorize_provider" || !command.runnerContainerName) throw new Error("Unexpected owner operation.");
+    const result = await input.validateRuntimeProviderEgressCredential({ userId, providerKind: command.providerKind, runnerContainerName: command.runnerContainerName });
+    return { cutover: "postgres", status: result.owns ? "authorized" : "stale", owner: result.owns ? createPostgresTestOwner({ userId, attemptId: result.attemptId, generation: result.leaseGeneration, workspaceVersion: result.workspaceVersion, runnerContainerName: command.runnerContainerName }) : null };
+  });
   return {
     ...createHostedExecutionTestEnv(),
     BUNDLES: {} as RunnerOutboundEnvironmentSource["BUNDLES"],
     HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET:
       PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET,
     OPENAI_API_KEY: "openai-worker-secret",
-    USER_RUNNER: {
-      getByName: () => ({
-        validateRuntimeProviderEgressCredential: async (validationInput) =>
-          await input.validateRuntimeProviderEgressCredential(validationInput),
-        validateRuntimeProviderEgressToken: async () => ({ owns: false }),
-        validateRuntimeWriteFence: async () => false,
-      }),
-    },
+    USER_RUNNER: forbiddenLegacyRuntime,
+    RUNNER_CONTAINER: { getByName: () => settledNativeRuntime },
   };
 }
 

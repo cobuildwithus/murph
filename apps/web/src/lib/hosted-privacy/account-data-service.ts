@@ -1,5 +1,4 @@
 import { type HostedBillingStatus, Prisma, type PrismaClient } from "@prisma/client";
-import type Stripe from "stripe";
 
 import { sanitizeHostedRuntimeErrorCode } from "@murphai/device-syncd/hosted-runtime";
 import { isDeviceSyncError } from "@murphai/device-syncd/errors";
@@ -27,7 +26,6 @@ import {
   formatHostedDeviceSyncProviderLabel,
   resolveHostedDeviceSyncBrowserProviderLabel,
 } from "../device-sync/provider-label";
-import { resolveHostedDeviceSyncConnectionCleanup } from "../device-sync/provider-application-cleanup";
 import {
   HOSTED_STRIPE_EFFECT_PENDING_ERROR_CODE,
   hostedOnboardingError,
@@ -49,6 +47,7 @@ import {
   type PreparedHostedMemberIdentityWrite,
 } from "../hosted-onboarding/hosted-member-identity-store";
 import { buildHostedPersistedPhoneIdentityFields } from "../hosted-onboarding/member-identity-fields";
+import { readHostedLinqProductionCanaryMemberId } from "../hosted-onboarding/linq-production-canary";
 import {
   HOSTED_ACCOUNT_GROUP_BILLING_STRIPE_CHECKOUT_SESSION_FIELD,
   HOSTED_ACCOUNT_GROUP_BILLING_STRIPE_CUSTOMER_FIELD,
@@ -81,17 +80,7 @@ import {
 } from "../hosted-onboarding/privy-phone-transfer-retirement";
 import { readHostedPrivyUserById } from "../hosted-onboarding/privy";
 import { buildHostedPrivySessionState } from "../hosted-onboarding/privy-user";
-import {
-  isHostedPulseTrialSubscriptionForKnownPolicy,
-  retrieveHostedPulseTrialCleanupTarget,
-} from "../hosted-onboarding/pulse-trial-subscription-cleanup";
-import {
-  hasHostedStripeSubscriptionPaymentMethod,
-} from "../hosted-onboarding/stripe-subscription-payment-method";
-import {
-  getHostedOnboardingStripe,
-  requireHostedStripeBillingPlanConfig,
-} from "../hosted-onboarding/runtime";
+import { getHostedOnboardingStripe } from "../hosted-onboarding/runtime";
 import { logHostedStripeFailure } from "../hosted-onboarding/stripe-error-log";
 import { retrieveAndExpireHostedSubscriptionCheckout } from "../hosted-onboarding/subscription-checkout-lifecycle";
 import {
@@ -140,6 +129,7 @@ import {
   type PreparedHostedAccountDeletionCleanup,
 } from "./account-deletion-cleanup";
 import { sha256Hex } from "../primitives";
+import { assertUnusedHostedSignupTx } from "./unused-signup";
 
 export type {
   HostedAccountVendorDeletionResult,
@@ -160,14 +150,8 @@ const HOSTED_ACCOUNT_DELETION_SUSPENSION_FENCE_TRANSACTION_OPTIONS = {
   // correlated consequence before suspension crosses the shared drain.
   timeout: 20_000,
 } as const;
-const HOSTED_PRIVY_PHONE_TRANSFER_STRIPE_AUTHORITY_TIMEOUT_MS = 5_000;
-const HOSTED_PRIVY_PHONE_TRANSFER_MIN_TRIAL_REMAINING_SECONDS = 10;
 const HOSTED_ACCOUNT_DELETION_REFRESH_LEASE_RECOVERY_LIMIT = 32;
 const HOSTED_ACCOUNT_DELETION_MAX_FAMILY_CLAIM_OWNER_ROWS = 4;
-const HOSTED_PRIVY_PHONE_TRANSFER_STRIPE_AUTHORITY_REQUEST_OPTIONS: Stripe.RequestOptions = {
-  maxNetworkRetries: 0,
-  timeout: HOSTED_PRIVY_PHONE_TRANSFER_STRIPE_AUTHORITY_TIMEOUT_MS,
-};
 
 export interface HostedAccountDataStoreCoverageEntry {
   readonly slug: string;
@@ -520,12 +504,6 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
     note: "Deletes member-scoped source-provider reminder intervals and opt-outs in the canonical account transaction.",
   },
   {
-    slug: "prisma.device_provider_application",
-    label: "Encrypted member-owned device provider applications",
-    deletion: "live-delete",
-    note: "Deletes each member-owned OAuth client application and encrypted client credentials after linked device connection rows are removed. Browser-vault export omits the client identity, ciphertext, and credentials.",
-  },
-  {
     slug: "prisma.device_sync_companion_capture_receipt",
     label: "Companion capture replay receipts",
     deletion: "live-delete",
@@ -811,8 +789,6 @@ type DeviceConnectionIdentity = {
   keyVersion: string | null;
   metadataJson: Prisma.JsonValue;
   provider: string;
-  providerApplicationId: string | null;
-  providerApplicationRevision: number | null;
   providerAccountBlindIndex: string;
   providerConfigKey: string | null;
   refreshLeaseExpiresAt: Date | null;
@@ -915,6 +891,7 @@ export function parseHostedAccountExitFeedback(
 }
 
 export async function deleteHostedAccountData(input: {
+  unusedSignupCreatedAt?: Date;
   exitFeedback?: HostedAccountExitFeedback | null;
   memberId: string;
   prisma: PrismaClient;
@@ -924,6 +901,31 @@ export async function deleteHostedAccountData(input: {
   const result = await deleteHostedAccountDataInternal({
     ...input,
     phoneTransfer: null,
+    retainRuntimeDiagnostics: false,
+  });
+  return result.deletion;
+}
+
+// Only the fixed canary reset may retain diagnostics. Normal account deletion
+// has no retention option, including when the account happens to be the canary.
+export async function deleteHostedLinqProductionCanaryAccountData(input: {
+  memberId: string;
+  prisma: PrismaClient;
+  request: Request;
+}): Promise<HostedAccountDeletionResult> {
+  const canaryMemberId = await readHostedLinqProductionCanaryMemberId({ prisma: input.prisma });
+  if (!canaryMemberId || canaryMemberId !== input.memberId) {
+    throw hostedOnboardingError({
+      code: "HOSTED_LINQ_PRODUCTION_CANARY_TARGET_MISMATCH",
+      httpStatus: 409,
+      message: "The production canary reset target changed.",
+    });
+  }
+  const result = await deleteHostedAccountDataInternal({
+    ...input,
+    exitFeedback: null,
+    phoneTransfer: null,
+    retainRuntimeDiagnostics: true,
   });
   return result.deletion;
 }
@@ -956,6 +958,7 @@ export async function deleteHostedPrivyPhoneTransferSourceAccountData(input: {
     },
     prisma: input.prisma,
     request: input.request,
+    retainRuntimeDiagnostics: false,
   });
   if (!result.channelSyncDispatch) {
     throwHostedPrivyPhoneTransferTargetNotReady();
@@ -966,31 +969,20 @@ export async function deleteHostedPrivyPhoneTransferSourceAccountData(input: {
   };
 }
 
-async function deleteHostedAccountDataInternal(input: {
-  exitFeedback?: HostedAccountExitFeedback | null;
-  memberId: string;
-  phoneTransfer: HostedPrivyPhoneTransferAccountDeletionCompletion | null;
-  prisma: PrismaClient;
-  providerAccessRemovalConfirmationToken?: string | null;
-  request: Request;
-}): Promise<HostedAccountDeletionInternalResult> {
-  const member = await input.prisma.hostedMember.findUnique({
-    select: { billingStatus: true, createdAt: true, id: true },
-    where: { id: input.memberId },
-  });
-
-  if (!member) {
-    throw hostedOnboardingError({
-      code: "HOSTED_MEMBER_NOT_FOUND",
-      httpStatus: 404,
-      message: "Your hosted member record was not found.",
-    });
-  }
-
-  const deletionStartedAt = new Date();
+async function prepareHostedAccountDeletionSuspension(
+  input: Parameters<typeof deleteHostedAccountData>[0] & { now: Date },
+): Promise<string[]> {
+  // Ops cleanup must prove unused state under the ordinary deletion locks and
+  // suspend before any refresh, billing or provider operation can run.
+  const unusedSignupMemberIds = input.unusedSignupCreatedAt
+    ? await markHostedMembersSuspendedForAccountDeletion({
+      now: input.now, ownerMemberId: input.memberId, prisma: input.prisma,
+      providerAccessRemovalConfirmationToken: null,
+      unusedSignupCreatedAt: input.unusedSignupCreatedAt,
+    }) : null;
   await resolveHostedAccountDeletionRefreshLeases({
     memberId: input.memberId,
-    now: deletionStartedAt,
+    now: input.now,
     prisma: input.prisma,
     request: input.request,
   });
@@ -1014,12 +1006,41 @@ async function deleteHostedAccountDataInternal(input: {
       retryable: true,
     });
   }
-  const deletionMemberIds = await markHostedMembersSuspendedForAccountDeletion({
-    now: deletionStartedAt,
+  return unusedSignupMemberIds ?? await markHostedMembersSuspendedForAccountDeletion({
+    now: input.now,
     ownerMemberId: input.memberId,
     prisma: input.prisma,
     providerAccessRemovalConfirmationToken:
       input.providerAccessRemovalConfirmationToken ?? null,
+  });
+}
+
+async function deleteHostedAccountDataInternal(input: {
+  unusedSignupCreatedAt?: Date;
+  exitFeedback?: HostedAccountExitFeedback | null;
+  memberId: string;
+  phoneTransfer: HostedPrivyPhoneTransferAccountDeletionCompletion | null;
+  prisma: PrismaClient;
+  providerAccessRemovalConfirmationToken?: string | null;
+  request: Request;
+  retainRuntimeDiagnostics: boolean;
+}): Promise<HostedAccountDeletionInternalResult> {
+  const member = await input.prisma.hostedMember.findUnique({
+    select: { billingStatus: true, createdAt: true, id: true },
+    where: { id: input.memberId },
+  });
+
+  if (!member) {
+    throw hostedOnboardingError({
+      code: "HOSTED_MEMBER_NOT_FOUND",
+      httpStatus: 404,
+      message: "Your hosted member record was not found.",
+    });
+  }
+
+  const deletionStartedAt = new Date();
+  const deletionMemberIds = await prepareHostedAccountDeletionSuspension({
+    ...input, now: deletionStartedAt,
   });
   // Sponsorship owns a beneficiary-first, payer-second lock order. Run that
   // existing owner immediately after the durable suspension fence so no new
@@ -1063,6 +1084,11 @@ async function deleteHostedAccountDataInternal(input: {
       stripeCustomerIds,
       stripeSubscriptionIds,
     });
+    if (input.retainRuntimeDiagnostics) {
+      // Persist the settled no-op with the existing retry owner, so a later
+      // vendor-cleanup retry cannot erase the retained canary runtime logs.
+      preparedCleanup.runtimeLogsCompletedAt = deletionStartedAt;
+    }
   } catch (error) {
     throw hostedOnboardingError({
       code: "ACCOUNT_DELETION_CLEANUP_OWNER_CREATE_FAILED",
@@ -1136,10 +1162,8 @@ async function deleteHostedAccountDataInternal(input: {
       HOSTED_PRIVY_PHONE_TRANSFER_RETIREMENT_TRANSACTION_OPTIONS,
     );
     if (
-      !isSameHostedPrivyPhoneTransferRetirement(
-        retirementBeforeBillingCleanup,
-        phoneTransfer.retirement,
-      )
+      retirementBeforeBillingCleanup.sourceMemberId
+        !== phoneTransfer.retirement.sourceMemberId
     ) {
       throwHostedPrivyPhoneTransferTargetNotReady();
     }
@@ -1351,6 +1375,7 @@ async function deleteHostedAccountDataInternal(input: {
       connectionIdentities: deviceConnectionIdentities,
       memberIds: transactionDeletionMemberIds,
       prisma: tx,
+      retainRuntimeDiagnostics: input.retainRuntimeDiagnostics,
     });
     let channelSyncDispatch: HostedAccountDeletionDatabaseResult["channelSyncDispatch"] =
       null;
@@ -1601,22 +1626,6 @@ async function assertHostedPrivyPhoneTransferRawFingerprintUnchangedTx(input: {
   if (currentFingerprint !== input.expectedFingerprint) {
     throwHostedPrivyPhoneTransferTargetNotReady();
   }
-}
-
-function isSameHostedPrivyPhoneTransferRetirement(
-  current: HostedPrivyPhoneTransferSourceRetirementProof,
-  expected: HostedPrivyPhoneTransferSourceRetirementProof,
-): boolean {
-  return current.sourceMemberId === expected.sourceMemberId
-    && (
-      current.autoTrialBilling === null
-        ? expected.autoTrialBilling === null
-        : expected.autoTrialBilling !== null
-          && current.autoTrialBilling.stripeCustomerId
-            === expected.autoTrialBilling.stripeCustomerId
-          && current.autoTrialBilling.stripeSubscriptionId
-            === expected.autoTrialBilling.stripeSubscriptionId
-    );
 }
 
 function throwHostedPrivyPhoneTransferTargetNotReady(): never {
@@ -1928,6 +1937,7 @@ async function prepareHostedAccountDeletionExternalTargets(input: {
 }
 
 async function markHostedMembersSuspendedForAccountDeletion(input: {
+  unusedSignupCreatedAt?: Date;
   now: Date;
   ownerMemberId: string;
   prisma: PrismaClient;
@@ -1972,6 +1982,11 @@ async function markHostedMembersSuspendedForAccountDeletion(input: {
       memberIds,
       prisma: tx,
     });
+    if (input.unusedSignupCreatedAt) {
+      await assertUnusedHostedSignupTx({
+        createdAt: input.unusedSignupCreatedAt, memberId: input.ownerMemberId, tx,
+      });
+    }
     await assertNoDeviceRefreshLeasesBeforeAccountSuspensionTx({
       memberIds,
       prisma: tx,
@@ -2483,8 +2498,6 @@ function buildDeviceConnectionAuthorityFingerprint(
         connection.externalAccountIdEncrypted,
         connection.credentialKind,
         connection.providerConfigKey,
-        connection.providerApplicationId,
-        connection.providerApplicationRevision,
         connection.accessTokenEncrypted,
         connection.accessTokenExpiresAt instanceof Date
           ? connection.accessTokenExpiresAt.toISOString()
@@ -2785,31 +2798,16 @@ async function cancelHostedStripeSubscriptionsForAccountDeletion(input: {
   stripeSubscriptionIds: readonly string[];
 }): Promise<HostedAccountVendorDeletionResult> {
   if (input.phoneTransferRetirement) {
-    if (input.phoneTransferRetirement.sourceMemberId !== input.memberId) {
-      throwHostedPrivyPhoneTransferBillingAuthorityChanged();
-    }
-    const autoTrialBilling = input.phoneTransferRetirement.autoTrialBilling;
-    if (autoTrialBilling === null) {
-      if (input.stripeSubscriptionIds.length > 0) {
-        throwHostedPrivyPhoneTransferBillingAuthorityChanged();
-      }
-      return {
-        errorCode: null,
-        status: "skipped_no_record",
-      };
-    }
     if (
-      input.stripeSubscriptionIds.length !== 1
-      || input.stripeSubscriptionIds[0]
-        !== autoTrialBilling.stripeSubscriptionId
+      input.phoneTransferRetirement.sourceMemberId !== input.memberId
+      || input.stripeSubscriptionIds.length > 0
     ) {
       throwHostedPrivyPhoneTransferBillingAuthorityChanged();
     }
-    return cancelHostedPrivyPhoneTransferAutoTrialForAccountDeletion({
-      memberId: input.memberId,
-      stripeCustomerId: autoTrialBilling.stripeCustomerId,
-      stripeSubscriptionId: autoTrialBilling.stripeSubscriptionId,
-    });
+    return {
+      errorCode: null,
+      status: "skipped_no_record",
+    };
   }
 
   let result: HostedAccountVendorDeletionResult = {
@@ -2823,171 +2821,6 @@ async function cancelHostedStripeSubscriptionsForAccountDeletion(input: {
     });
   }
   return result;
-}
-
-async function cancelHostedPrivyPhoneTransferAutoTrialForAccountDeletion(input: {
-  memberId: string;
-  stripeCustomerId: string;
-  stripeSubscriptionId: string;
-}): Promise<HostedAccountVendorDeletionResult> {
-  const { priceId, stripe } = requireHostedStripeBillingPlanConfig({
-    billingPlanCode: "launch_monthly",
-  });
-  let subscription: Awaited<
-    ReturnType<typeof retrieveHostedPulseTrialCleanupTarget>
-  >;
-  try {
-    subscription = await retrieveHostedPulseTrialCleanupTarget({
-      expandCustomer: true,
-      expectedCustomerId: input.stripeCustomerId,
-      memberId: input.memberId,
-      priceId,
-      requestOptions:
-        HOSTED_PRIVY_PHONE_TRANSFER_STRIPE_AUTHORITY_REQUEST_OPTIONS,
-      stripe,
-      subscriptionId: input.stripeSubscriptionId,
-    });
-  } catch (error) {
-    if (
-      isHostedOnboardingError(error)
-      && error.code === "HOSTED_PULSE_TRIAL_CLEANUP_TARGET_CHANGED"
-    ) {
-      throwHostedPrivyPhoneTransferBillingAuthorityChanged();
-    }
-    throw error;
-  }
-  if (!subscription) {
-    throwHostedPrivyPhoneTransferBillingAuthorityChanged();
-  }
-  assertHostedPrivyPhoneTransferUnusedStripeSurface({
-    memberId: input.memberId,
-    priceId,
-    stripeCustomerId: input.stripeCustomerId,
-    stripeSubscriptionId: input.stripeSubscriptionId,
-    subscription,
-  });
-  if (subscription.status === "canceled") {
-    assertHostedPrivyPhoneTransferCanceledDuringTrial(subscription);
-    return {
-      errorCode: null,
-      status: "completed",
-    };
-  }
-  if (subscription.status === "incomplete_expired") {
-    return {
-      errorCode: null,
-      status: "completed",
-    };
-  }
-  if (subscription.status !== "trialing") {
-    throwHostedPrivyPhoneTransferBillingAuthorityChanged();
-  }
-  const trialEnd = subscription.trial_end;
-  if (
-    typeof trialEnd !== "number"
-    || !Number.isInteger(trialEnd)
-    || trialEnd <= (
-      Math.floor(Date.now() / 1_000)
-      + HOSTED_PRIVY_PHONE_TRANSFER_MIN_TRIAL_REMAINING_SECONDS
-    )
-  ) {
-    throwHostedPrivyPhoneTransferBillingAuthorityChanged();
-  }
-
-  let canceledSubscription: Awaited<
-    ReturnType<typeof stripe.subscriptions.cancel>
-  >;
-  try {
-    canceledSubscription = await stripe.subscriptions.cancel(
-      input.stripeSubscriptionId,
-      { expand: ["customer"] },
-      HOSTED_PRIVY_PHONE_TRANSFER_STRIPE_AUTHORITY_REQUEST_OPTIONS,
-    );
-  } catch (error) {
-    logHostedStripeFailure({
-      error,
-      operationName: "subscription.cancel.phone-transfer",
-    });
-    throw hostedOnboardingError({
-      code: "ACCOUNT_DELETION_STRIPE_SUBSCRIPTION_CANCEL_FAILED",
-      httpStatus: 502,
-      message:
-        "We could not cancel the unused trial while linking your phone. Try again, or contact support if it keeps failing.",
-      retryable: true,
-    });
-  }
-  if (
-    canceledSubscription.status !== "canceled"
-  ) {
-    throwHostedPrivyPhoneTransferBillingAuthorityChanged();
-  }
-  assertHostedPrivyPhoneTransferUnusedStripeSurface({
-    memberId: input.memberId,
-    priceId,
-    stripeCustomerId: input.stripeCustomerId,
-    stripeSubscriptionId: input.stripeSubscriptionId,
-    subscription: canceledSubscription,
-  });
-  assertHostedPrivyPhoneTransferCanceledDuringTrial(canceledSubscription);
-  return {
-    errorCode: null,
-    status: "completed",
-  };
-}
-
-function assertHostedPrivyPhoneTransferUnusedStripeSurface(input: {
-  memberId: string;
-  priceId: string;
-  stripeCustomerId: string;
-  stripeSubscriptionId: string;
-  subscription: Stripe.Subscription;
-}): void {
-  const customer = input.subscription.customer;
-  if (
-    input.subscription.id !== input.stripeSubscriptionId
-    || !customer
-    || typeof customer !== "object"
-    || customer.object !== "customer"
-    || customer.deleted
-    || customer.id !== input.stripeCustomerId
-    || !isHostedPulseTrialSubscriptionForKnownPolicy({
-      memberId: input.memberId,
-      priceId: input.priceId,
-      subscription: input.subscription,
-    })
-    || input.subscription.collection_method !== "charge_automatically"
-    || hasHostedStripeSubscriptionPaymentMethod(input.subscription)
-    || input.subscription.cancel_at !== null
-    || input.subscription.cancel_at_period_end !== false
-    || input.subscription.pending_invoice_item_interval !== null
-    // Stripe itself attaches a pending SetupIntent to every
-    // automatic-collection trial without a payment method, so its presence
-    // is provider scaffolding. A setup intent that ever succeeded sets the
-    // payment method checked above, which stays fail-closed.
-    || input.subscription.pending_update !== null
-    || input.subscription.pause_collection !== null
-    || input.subscription.schedule !== null
-    || input.subscription.trial_settings?.end_behavior.missing_payment_method
-      !== "pause"
-  ) {
-    throwHostedPrivyPhoneTransferBillingAuthorityChanged();
-  }
-}
-
-function assertHostedPrivyPhoneTransferCanceledDuringTrial(
-  subscription: Stripe.Subscription,
-): void {
-  const endedAt = subscription.ended_at;
-  const trialEnd = subscription.trial_end;
-  if (
-    typeof endedAt !== "number"
-    || !Number.isInteger(endedAt)
-    || typeof trialEnd !== "number"
-    || !Number.isInteger(trialEnd)
-    || endedAt > trialEnd
-  ) {
-    throwHostedPrivyPhoneTransferBillingAuthorityChanged();
-  }
 }
 
 function throwHostedPrivyPhoneTransferBillingAuthorityChanged(): never {
@@ -3101,6 +2934,7 @@ async function deleteHostedAccountPrismaRows(input: {
   connectionIdentities: readonly DeviceConnectionIdentity[];
   memberIds: readonly string[];
   prisma: Prisma.TransactionClient;
+  retainRuntimeDiagnostics: boolean;
 }): Promise<HostedAccountDataCounts> {
   const memberIds = uniqueStrings(input.memberIds);
   const memberIdsSql = buildPostgresTextArray(memberIds);
@@ -3181,6 +3015,7 @@ async function deleteHostedAccountPrismaRows(input: {
         deleted_ingress_traces AS (
           DELETE FROM hosted_ingress_latency_trace AS trace
           WHERE trace.user_id IN (SELECT id FROM target_members)
+            AND ${input.retainRuntimeDiagnostics !== true}
           RETURNING 1
         ),
         deleted_usage_credit_grants AS (
@@ -3731,11 +3566,6 @@ async function deleteHostedAccountPrismaRows(input: {
           DELETE FROM hosted_web_internal_request_nonce AS nonce
           WHERE nonce.user_id IN (SELECT id FROM target_members)
           RETURNING 1
-        ),
-        deleted_device_provider_applications AS (
-          DELETE FROM device_provider_application AS application
-          WHERE application.member_id IN (SELECT id FROM target_members)
-          RETURNING 1
         )
         SELECT
           (SELECT count(*) FROM deleted_mailbox_lane_counters)
@@ -3809,9 +3639,7 @@ async function deleteHostedAccountPrismaRows(input: {
           (SELECT count(*) FROM deleted_device_browser_nonces)
             AS "prisma.device_browser_assertion_nonce",
           (SELECT count(*) FROM deleted_web_internal_nonces)
-            AS "prisma.hosted_web_internal_request_nonce",
-          (SELECT count(*) FROM deleted_device_provider_applications)
-            AS "prisma.device_provider_application"
+            AS "prisma.hosted_web_internal_request_nonce"
       `,
     ),
   );
@@ -3883,8 +3711,6 @@ async function listDeviceConnectionIdentities(input: {
       keyVersion: true,
       metadataJson: true,
       provider: true,
-      providerApplicationId: true,
-      providerApplicationRevision: true,
       providerAccountBlindIndex: true,
       providerConfigKey: true,
       refreshLeaseExpiresAt: true,
@@ -4039,7 +3865,7 @@ async function revokeDeviceProvidersBestEffort(input: {
   let registry: ReturnType<typeof createHostedDeviceSyncRegistry> | null = null;
   for (const connection of input.connections) {
     // This canonical raw field is the sole cleanup authority. Do not hydrate an
-    // account or resolve a provider application after confirmed release.
+    // account after confirmed release.
     if (connection.credentialKind === "none") {
       results.push({
         connectionId: connection.id,
@@ -4089,22 +3915,13 @@ async function revokeDeviceProvidersBestEffort(input: {
         continue;
       }
 
-      const cleanup = await resolveHostedDeviceSyncConnectionCleanup({
-        connectionId: connection.id,
-        memberId: input.memberId,
-        prisma: controlPlane.store.prisma,
-        provider: connection.provider,
-        resolveSharedRegistry: () =>
-          (registry ??= createHostedDeviceSyncRegistry(process.env)),
-      });
-      const revokeAccess = cleanup.revokeAccessOverride === undefined
-        ? cleanup.registry?.get(connection.provider)?.connectionHandler?.revokeAccess
-        : cleanup.revokeAccessOverride ?? undefined;
+      registry ??= createHostedDeviceSyncRegistry(process.env);
+      const revokeAccess = registry.get(connection.provider)?.connectionHandler?.revokeAccess;
 
       if (!revokeAccess) {
         results.push({
           connectionId: connection.id,
-          errorCode: cleanup.warning?.code ?? "PROVIDER_REVOKE_NOT_CONFIGURED",
+          errorCode: "PROVIDER_REVOKE_NOT_CONFIGURED",
           providerLabel: resolveDeviceConnectionProviderLabel(connection),
           status: "failed",
           warningCode: null,

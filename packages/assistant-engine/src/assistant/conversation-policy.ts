@@ -20,7 +20,6 @@ export interface AssistantConversationAudience {
   bindingDelivery: AssistantBindingDelivery | null
   channel: string | null
   deliveryPolicy: AssistantConversationDeliveryPolicy
-  effectiveThreadIsDirect: boolean | null
   explicitTarget: string | null
   identityId: string | null
   replyToMessageId: string | null
@@ -41,18 +40,18 @@ export type AssistantConversationScope =
 export function resolveAssistantConversationScope(
   audience: AssistantConversationAudience,
 ): AssistantConversationScope {
-  if (audience.effectiveThreadIsDirect === false) {
+  if (audience.threadIsDirect === false) {
     return 'group'
   }
 
   const localPrivateAudience =
-    audience.effectiveThreadIsDirect === null &&
+    audience.threadIsDirect === null &&
     audience.bindingDelivery === null &&
     audience.channel === null &&
     audience.explicitTarget === null &&
     audience.threadId === null
 
-  return audience.effectiveThreadIsDirect === true || localPrivateAudience
+  return audience.threadIsDirect === true || localPrivateAudience
     ? 'direct'
     : 'unverified-external'
 }
@@ -131,7 +130,12 @@ export function resolveAssistantConversationAudience(input: {
     typeof input.message.threadIsDirect === 'boolean'
       ? input.message.threadIsDirect
       : threadIsDirectFromConversationDirectness(conversation?.directness)
-  const threadIsDirect = messageThreadIsDirect ?? binding.threadIsDirect
+  const threadIsDirect = resolveAssistantConversationAudienceDirectness({
+    binding,
+    explicitTarget,
+    messageBindingDeliveryTarget,
+    messageThreadIsDirect,
+  })
   const bindingDelivery = resolveConversationAudienceBindingDelivery({
     bindingDelivery: binding.delivery ?? null,
     channel,
@@ -149,16 +153,6 @@ export function resolveAssistantConversationAudience(input: {
         : explicitTarget
           ? 'explicit-target-override'
           : 'binding-target-only',
-    effectiveThreadIsDirect: resolveAssistantConversationAudienceDirectness({
-      actorId,
-      bindingDelivery,
-      messageBindingDeliveryTarget,
-      explicitTarget,
-      sessionThreadId: normalizeNullableString(binding.threadId),
-      threadId,
-      threadIsDirect: messageThreadIsDirect,
-      storedThreadIsDirect: binding.threadIsDirect,
-    }),
     explicitTarget,
     identityId,
     replyToMessageId,
@@ -167,101 +161,26 @@ export function resolveAssistantConversationAudience(input: {
   }
 }
 
+// Audience belongs to a destination, not an actor or a delivery-kind guess.
 function resolveAssistantConversationAudienceDirectness(input: {
-  actorId: string | null
-  bindingDelivery: AssistantBindingDelivery | null
-  messageBindingDeliveryTarget: string | null
+  binding: AssistantSession['binding']
   explicitTarget: string | null
-  sessionThreadId: string | null
-  storedThreadIsDirect: boolean | null
-  threadId: string | null
-  threadIsDirect: boolean | null | undefined
+  messageBindingDeliveryTarget: string | null
+  messageThreadIsDirect: boolean | null
 }): boolean | null {
   if (
-    input.explicitTarget !== null &&
-    input.explicitTarget === input.messageBindingDeliveryTarget &&
-    typeof input.threadIsDirect === 'boolean'
+    (input.explicitTarget === null || input.explicitTarget === input.messageBindingDeliveryTarget)
+    && input.messageThreadIsDirect !== null
   ) {
-    return input.threadIsDirect
+    return input.messageThreadIsDirect
   }
-
-  const explicitTargetDirectness = inferDirectAudienceFromTarget({
-    actorId: input.actorId,
-    bindingDelivery: input.bindingDelivery,
-    target: input.explicitTarget,
-    threadId: input.threadId,
-    // Fresh directness is authoritative for an explicit destination only
-    // when that raw destination matched the binding target above. Fallback
-    // inference may still use independently bound actor/participant identity
-    // or stored directness tied to the same stored thread.
-    threadIsDirect: null,
-    storedThreadId: input.sessionThreadId,
-    storedThreadIsDirect: input.storedThreadIsDirect,
-  })
-  if (explicitTargetDirectness !== null) {
-    return explicitTargetDirectness
+  if (
+    input.explicitTarget === null
+    || input.explicitTarget === normalizeNullableString(input.binding.delivery?.target)
+    || input.explicitTarget === normalizeNullableString(input.binding.threadId)
+  ) {
+    return input.binding.threadIsDirect
   }
-  if (input.explicitTarget !== null) {
-    return null
-  }
-  if (typeof input.threadIsDirect === 'boolean') {
-    return input.threadIsDirect
-  }
-
-  const bindingTargetDirectness = inferDirectAudienceFromTarget({
-    actorId: input.actorId,
-    bindingDelivery: input.bindingDelivery,
-    target: normalizeNullableString(input.bindingDelivery?.target),
-    threadId: input.threadId,
-    threadIsDirect: input.threadIsDirect ?? null,
-    storedThreadId: input.sessionThreadId,
-    storedThreadIsDirect: input.storedThreadIsDirect,
-  })
-  if (bindingTargetDirectness !== null) {
-    return bindingTargetDirectness
-  }
-
-  return input.storedThreadIsDirect
-}
-
-function inferDirectAudienceFromTarget(input: {
-  actorId: string | null
-  bindingDelivery: AssistantBindingDelivery | null
-  target: string | null
-  threadId: string | null
-  threadIsDirect: boolean | null
-  storedThreadId: string | null
-  storedThreadIsDirect: boolean | null
-}): boolean | null {
-  const target = normalizeNullableString(input.target)
-  if (!target) {
-    return null
-  }
-
-  if (input.actorId && target === input.actorId) {
-    return true
-  }
-
-  const bindingDeliveryTarget = normalizeNullableString(input.bindingDelivery?.target)
-  if (input.bindingDelivery?.kind === 'participant' && bindingDeliveryTarget === target) {
-    return true
-  }
-
-  if (input.threadId && target === input.threadId) {
-    return input.threadIsDirect ??
-      (input.threadId === input.storedThreadId
-        ? input.storedThreadIsDirect
-        : null)
-  }
-
-  if (input.storedThreadId && target === input.storedThreadId) {
-    return input.storedThreadIsDirect
-  }
-
-  if (input.bindingDelivery?.kind === 'thread' && bindingDeliveryTarget === target) {
-    return input.storedThreadIsDirect
-  }
-
   return null
 }
 

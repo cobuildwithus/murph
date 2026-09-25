@@ -38,10 +38,12 @@ import {
 import { withAssistantRuntimeWriteLock } from './runtime-write-lock.js'
 import { isMissingFileError, normalizeNullableString } from './shared.js'
 import { resolveAssistantStatePaths } from './store/paths.js'
+import { buildUpcomingContextProjection, buildUpcomingContextPrompt, upcomingContextSchema, CONNECTED_CONTEXT_LEDGER_SLUG, type UpcomingContext } from './upcoming-context.js'
+import { buildKnowledgePageRelativePath } from '../knowledge/documents.js'
 
 export const ASSISTANT_CONTEXT_SNAPSHOT_SCHEMA =
   'murph.assistant-context-snapshot'
-export const ASSISTANT_CONTEXT_SNAPSHOT_SCHEMA_VERSION = 6
+export const ASSISTANT_CONTEXT_SNAPSHOT_SCHEMA_VERSION = 7
 export const ASSISTANT_CONTEXT_SNAPSHOT_FILE_NAME = 'context-snapshot.json'
 
 const ASSISTANT_CONTEXT_SNAPSHOT_NAVIGATION_HEADER =
@@ -66,6 +68,7 @@ export const ASSISTANT_CONTEXT_SNAPSHOT_DIRTY_DOMAINS = [
   'blood_tests',
   'health_context',
   'habitat',
+  'journal_plans',
 ] as const
 
 export type AssistantContextSnapshotDirtyDomain =
@@ -77,6 +80,7 @@ export interface AssistantContextSnapshotCompleted {
   promptBlock: string | null
   sectionPresence: AssistantContextSnapshotSectionPresence
   sourceDirtySequence: number
+  upcomingContext: UpcomingContext | null
 }
 
 export interface AssistantContextSnapshotSectionPresence {
@@ -107,7 +111,7 @@ export interface AssistantContextSnapshotRefreshResult {
 
 type AssistantContextSnapshotBuildResult = Pick<
   AssistantContextSnapshotCompleted,
-  'includedDomains' | 'promptBlock' | 'sectionPresence'
+  'includedDomains' | 'promptBlock' | 'sectionPresence' | 'upcomingContext'
 >
 
 type PromptLookupRecord = Readonly<{
@@ -116,14 +120,14 @@ type PromptLookupRecord = Readonly<{
 }>
 
 const ASSISTANT_CONTEXT_SNAPSHOT_ALL_DOMAINS =
-  ['experiments', 'blood_tests', 'health_context', 'habitat'] as const
+  ['experiments', 'blood_tests', 'health_context', 'habitat', 'journal_plans'] as const
 
 const MAX_ASSISTANT_CONTEXT_ACTIVE_SAFETY_RECORDS = 5
 const MAX_ASSISTANT_CONTEXT_ACTIVE_GOALS = 3
 const MAX_ASSISTANT_CONTEXT_ACTIVE_HABIT_REGIMENS = 3
 const MAX_ASSISTANT_CONTEXT_RELATED_RECORDS = 3
 const MAX_ASSISTANT_CONTEXT_SUPPLEMENT_INGREDIENTS = 3
-const MAX_ASSISTANT_CONTEXT_SNAPSHOT_PROMPT_BYTES = 64 * 1024
+const MAX_ASSISTANT_CONTEXT_SNAPSHOT_PROMPT_BYTES = 128 * 1024
 const MAX_ASSISTANT_CONTEXT_PROMPT_FIELD_LENGTH = 120
 const MAX_ASSISTANT_CONTEXT_FRONTMATTER_FILES_PER_DIR = 200
 export function resolveAssistantContextSnapshotPath(vaultRoot: string): string {
@@ -135,6 +139,7 @@ export function resolveAssistantContextSnapshotPath(vaultRoot: string): string {
 
 export async function readAssistantContextSnapshotPrompt(input: {
   vaultRoot: string
+  now?: Date
 }): Promise<string | null> {
   const { state } = await readAssistantContextSnapshotStateStatus({
     maxBytes: MAX_ASSISTANT_CONTEXT_SNAPSHOT_PROMPT_BYTES,
@@ -144,19 +149,18 @@ export async function readAssistantContextSnapshotPrompt(input: {
     state?.pendingDirtyDomains.includes('health_context') === true
   const canonicalHistoryPending =
     state?.pendingDirtyDomains.includes('blood_tests') === true
-  if (healthContextPending || canonicalHistoryPending) {
-    return buildAssistantContextSnapshotDegradedPrompt({
-      canonicalHistoryUnavailable: canonicalHistoryPending,
-      healthContextUnavailable: healthContextPending,
+  const unavailable = state === null || state.lastCompleted === null
+  const base = healthContextPending || canonicalHistoryPending || unavailable
+    ? buildAssistantContextSnapshotDegradedPrompt({
+      canonicalHistoryUnavailable: canonicalHistoryPending || unavailable,
+      healthContextUnavailable: healthContextPending || unavailable,
     })
-  }
-  if (state === null || state.lastCompleted === null) {
-    return buildAssistantContextSnapshotDegradedPrompt({
-      canonicalHistoryUnavailable: true,
-      healthContextUnavailable: true,
-    })
-  }
-  return normalizeNullableString(state.lastCompleted.promptBlock)
+    : normalizeNullableString(state.lastCompleted?.promptBlock)
+  const upcoming = buildUpcomingContextPrompt(
+    state?.pendingDirtyDomains.includes('journal_plans') ? null : state?.lastCompleted?.upcomingContext ?? null,
+    input.now ?? new Date(),
+  )
+  return [base, upcoming].filter(Boolean).join('\n\n') || null
 }
 
 function buildAssistantContextSnapshotDegradedPrompt(input: {
@@ -232,6 +236,7 @@ export async function refreshAssistantContextSnapshot(input: {
   const attemptedAt = resolveSnapshotTimestamp(input.now)
   const built = await buildAssistantContextSnapshotPrompt({
     currentDate: attemptedAt.slice(0, 10),
+    now: new Date(attemptedAt),
     shouldYield: input.shouldYield ?? null,
     signal: input.signal ?? null,
     vaultRoot: input.vaultRoot,
@@ -257,6 +262,7 @@ export async function refreshAssistantContextSnapshot(input: {
         promptBlock: built.promptBlock,
         sectionPresence: built.sectionPresence,
         sourceDirtySequence,
+        upcomingContext: built.upcomingContext,
       },
       lastRefreshAttempt: {
         attemptedAt,
@@ -350,8 +356,10 @@ export function listAssistantContextSnapshotDirtyDomainsForPath(
   }
 
   if (isPathUnder(normalized, VAULT_LAYOUT.eventLedgerDirectory)) {
-    return ['blood_tests']
+    return ['blood_tests', 'journal_plans']
   }
+
+  if (normalized === buildKnowledgePageRelativePath(CONNECTED_CONTEXT_LEDGER_SLUG)) return ['journal_plans']
 
   if (isPathUnder(normalized, VAULT_LAYOUT.habitatDirectory)) {
     return ['habitat']
@@ -408,6 +416,7 @@ async function readAssistantContextSnapshotStateStatus(input: {
 
 async function buildAssistantContextSnapshotPrompt(input: {
   currentDate: string
+  now: Date
   shouldYield: (() => boolean) | null
   signal: AbortSignal | null
   vaultRoot: string
@@ -420,6 +429,8 @@ async function buildAssistantContextSnapshotPrompt(input: {
     })
   assertAssistantContextSnapshotCanContinue(input)
   const coverage = await buildAssistantSnapshotCoverage(input)
+  assertAssistantContextSnapshotCanContinue(input)
+  const upcomingContext = await buildUpcomingContextProjection(input)
   assertAssistantContextSnapshotCanContinue(input)
 
   const safetyLines = coverage.safetyComplete
@@ -461,6 +472,7 @@ async function buildAssistantContextSnapshotPrompt(input: {
   return {
     includedDomains: ASSISTANT_CONTEXT_SNAPSHOT_ALL_DOMAINS,
     promptBlock: normalizeNullableString(promptBlock),
+    upcomingContext,
     sectionPresence: {
       activeExperiments: activeExperimentContext !== null,
       bloodTests: coverage.bloodTestsPresent,
@@ -931,6 +943,7 @@ function parseCompletedSnapshot(
     promptBlock,
     sectionPresence,
     sourceDirtySequence: parseNonNegativeInteger(value.sourceDirtySequence),
+    upcomingContext: upcomingContextSchema.safeParse(value.upcomingContext).data ?? null,
   }
 }
 

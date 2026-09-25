@@ -8,6 +8,8 @@ import {
   vi,
 } from "vitest";
 
+import type { PrismaPoolAcquisitionTiming } from "@/src/lib/prisma-operation-timing";
+
 import type { PrismaInteractiveTransactionOperation } from "@/src/lib/prisma";
 
 const mocks = vi.hoisted(() => {
@@ -18,6 +20,7 @@ const mocks = vi.hoisted(() => {
   }
 
   interface FakePool {
+    connect: (...args: unknown[]) => unknown;
     idleCount: number;
     options: Record<string, unknown>;
     totalCount: number;
@@ -39,10 +42,12 @@ const mocks = vi.hoisted(() => {
   const extensions: QueryExtension[] = [];
   const poolInstances: FakePool[] = [];
   const attachDatabasePool = vi.fn();
+  const connect = vi.fn();
   const Pool = vi.fn().mockImplementation(function (
     options: Record<string, unknown>,
   ) {
     const pool: FakePool = {
+      connect,
       idleCount: 0,
       options,
       totalCount: 0,
@@ -74,6 +79,7 @@ const mocks = vi.hoisted(() => {
 
   return {
     adapterOptions,
+    connect,
     attachDatabasePool,
     extensions,
     Pool,
@@ -119,6 +125,7 @@ describe("prisma module", () => {
     mocks.extensions.length = 0;
     mocks.poolInstances.length = 0;
     mocks.transaction.mockReset();
+    mocks.connect.mockReset();
     process.env = { ...ORIGINAL_ENV };
     resetPrismaGlobal();
   });
@@ -180,6 +187,7 @@ describe("prisma module", () => {
       connectionString: "postgresql://example.invalid/db?sslmode=require",
       connectionTimeoutMillis: 5_000,
       idleTimeoutMillis: 5_000,
+      options: "-c timezone=UTC",
       max: 15,
     });
     expect(mocks.attachDatabasePool).toHaveBeenCalledOnce();
@@ -234,12 +242,14 @@ describe("prisma module", () => {
       connectionString: "postgresql://example.invalid/first?sslmode=require",
       connectionTimeoutMillis: 5_000,
       idleTimeoutMillis: 5_000,
+      options: "-c timezone=UTC",
       max: 1,
     });
     expect(mocks.Pool).toHaveBeenNthCalledWith(2, {
       connectionString: "postgresql://example.invalid/second?sslmode=require",
       connectionTimeoutMillis: 5_000,
       idleTimeoutMillis: 5_000,
+      options: "-c timezone=UTC",
       max: 1,
     });
     expect(mocks.attachDatabasePool).toHaveBeenNthCalledWith(1, poolA);
@@ -295,6 +305,7 @@ describe("prisma module", () => {
       connectionString: "postgresql://example.invalid/db?sslmode=require",
       connectionTimeoutMillis: 5_000,
       idleTimeoutMillis: 5_000,
+      options: "-c timezone=UTC",
       max: 15,
     });
   });
@@ -336,6 +347,7 @@ describe("prisma module", () => {
       connectionString: "postgresql://example.invalid/db?sslmode=require",
       connectionTimeoutMillis: 5_000,
       idleTimeoutMillis: 5_000,
+      options: "-c timezone=UTC",
       max: 9,
     });
   });
@@ -911,13 +923,7 @@ describe("prisma module", () => {
     await expect(prisma.$transaction(async () => "unused")).rejects.toBe(failure);
 
     expect(mocks.transaction).toHaveBeenCalledOnce();
-    expect(pressureLogs(warn)).toEqual([{
-      idleConnections: 0,
-      poolMax: 15,
-      totalConnections: 15,
-      trigger: "at_capacity",
-      waitingRequests: 0,
-    }]);
+    expect(failureDispositions(warn)).toEqual(["terminal"]);
   });
 
   it("never replays a transaction that already ran", async () => {
@@ -1062,13 +1068,6 @@ describe("prisma module", () => {
 
     expect(query).toHaveBeenCalledOnce();
     expect(failureDispositions(warn)).toEqual(["terminal"]);
-    expect(pressureLogs(warn)).toEqual([{
-      idleConnections: 0,
-      poolMax: 15,
-      totalConnections: 15,
-      trigger: "at_capacity",
-      waitingRequests: 0,
-    }]);
   });
 
   it("does not begin an ambiguous retry after the pool becomes saturated", async () => {
@@ -1107,13 +1106,6 @@ describe("prisma module", () => {
 
     expect(query).toHaveBeenCalledOnce();
     expect(failureDispositions(warn)).toEqual(["terminal"]);
-    expect(pressureLogs(warn)).toEqual([{
-      idleConnections: 0,
-      poolMax: 15,
-      totalConnections: 15,
-      trigger: "at_capacity",
-      waitingRequests: 0,
-    }]);
   });
 
   it("does not schedule a retry when the failed attempt fills the pool", async () => {
@@ -1208,6 +1200,171 @@ describe("prisma module", () => {
     }
   });
 
+  it.each(["findUnique", "findUniqueOrThrow", "findFirst", "findFirstOrThrow", "findMany", "count", "aggregate", "groupBy"])(
+    "retries a disconnected standalone model %s once",
+    async (operation) => {
+      vi.spyOn(console, "warn").mockImplementation(() => undefined);
+      vi.spyOn(Math, "random").mockReturnValue(0);
+      const { createPrismaClient } = await import("@/src/lib/prisma");
+      createPrismaClient({ databaseUrl: "postgresql://example.invalid/db" });
+      const extension = mocks.extensions[0]!;
+      const query = vi.fn()
+        .mockRejectedValueOnce(new Error("Connection terminated unexpectedly"))
+        .mockResolvedValueOnce("rows");
+
+      await expect(extension.query.$allOperations({
+        args: {}, model: "HostedWorkspace", operation, query,
+      })).resolves.toBe("rows");
+      expect(query).toHaveBeenCalledTimes(2);
+    },
+  );
+
+  it.each(["create", "createMany", "update", "updateMany", "upsert", "delete", "deleteMany", "$queryRaw", "$executeRawUnsafe"])(
+    "classifies a plain disconnect without replaying %s",
+    async (operation) => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+      const { createPrismaClient } = await import("@/src/lib/prisma");
+      createPrismaClient({ databaseUrl: "postgresql://example.invalid/db" });
+      const failure = new Error("Connection terminated unexpectedly");
+      const query = vi.fn().mockRejectedValue(failure);
+
+      await expect(mocks.extensions[0]!.query.$allOperations({
+        args: {}, model: operation.startsWith("$") ? undefined : "HostedWorkspace",
+        operation, query,
+      })).rejects.toBe(failure);
+      expect(query).toHaveBeenCalledOnce();
+      expect(failureCategories(warn)).toEqual(["connection_closed"]);
+      expect(failureDispositions(warn)).toEqual(["terminal"]);
+    },
+  );
+
+  it.each([
+    new Error("outer", { cause: new Error("Connection terminated unexpectedly") }),
+    Object.assign(new Error("closed"), { code: "P1017" }),
+    Object.assign(new Error("closed"), { code: "ECONNRESET" }),
+  ])("retries classified disconnect shapes for model reads", async (failure) => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    const { createPrismaClient } = await import("@/src/lib/prisma");
+    createPrismaClient({ databaseUrl: "postgresql://example.invalid/db" });
+    const query = vi.fn().mockRejectedValueOnce(failure).mockResolvedValueOnce("rows");
+    await expect(mocks.extensions[0]!.query.$allOperations({
+      args: {}, model: "HostedWorkspace", operation: "findUnique", query,
+    })).resolves.toBe("rows");
+    expect(query).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not retry a disconnected read against a saturated pool", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const { createPrismaClient } = await import("@/src/lib/prisma");
+    createPrismaClient({ databaseUrl: "postgresql://example.invalid/db", poolMax: 1 });
+    mocks.poolInstances[0]!.totalCount = 1;
+    const failure = new Error("Connection terminated unexpectedly");
+    const query = vi.fn().mockRejectedValue(failure);
+    await expect(mocks.extensions[0]!.query.$allOperations({
+      args: {}, model: "HostedWorkspace", operation: "findUnique", query,
+    })).rejects.toBe(failure);
+    expect(query).toHaveBeenCalledOnce();
+    expect(failureDispositions(warn)).toEqual(["terminal"]);
+  });
+
+  it("keeps transaction scope isolated from concurrent and subsequent standalone reads", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    const { createPrismaClient } = await import("@/src/lib/prisma");
+    const prisma = createPrismaClient({ databaseUrl: "postgresql://example.invalid/db" });
+    let release!: () => void;
+    let markEntered!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    const entered = new Promise<void>((resolve) => { markEntered = resolve; });
+    mocks.transaction.mockImplementation(async (run: () => Promise<unknown>) => run());
+    const transaction = prisma.$transaction(async () => {
+      markEntered();
+      await held;
+    });
+    const read = async () => {
+      const query = vi.fn()
+        .mockRejectedValueOnce(new Error("Connection terminated unexpectedly"))
+        .mockResolvedValueOnce("rows");
+      await expect(mocks.extensions[0]!.query.$allOperations({
+        args: {}, model: "HostedWorkspace", operation: "findUnique", query,
+      })).resolves.toBe("rows");
+      expect(query).toHaveBeenCalledTimes(2);
+    };
+    try {
+      await entered;
+      await read();
+    } finally {
+      release();
+      await transaction;
+    }
+    await read();
+  });
+
+  it("stops a disconnected read after its only retry", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    const { createPrismaClient } = await import("@/src/lib/prisma");
+    createPrismaClient({ databaseUrl: "postgresql://example.invalid/db" });
+    const failure = new Error("Connection terminated unexpectedly");
+    const query = vi.fn().mockRejectedValue(failure);
+    await expect(mocks.extensions[0]!.query.$allOperations({
+      args: {}, model: "HostedWorkspace", operation: "findUnique", query,
+    })).rejects.toBe(failure);
+    expect(query).toHaveBeenCalledTimes(2);
+    expect(failureDispositions(warn)).toEqual(["retrying", "terminal"]);
+  });
+
+  it("retries a disconnect before interactive callback entry only", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    const { createPrismaClient } = await import("@/src/lib/prisma");
+    const prisma = createPrismaClient({ databaseUrl: "postgresql://example.invalid/db" });
+    const callback = vi.fn().mockResolvedValue("committed");
+    mocks.transaction
+      .mockRejectedValueOnce(new Error("Connection terminated unexpectedly"))
+      .mockImplementationOnce(async (run: () => Promise<unknown>) => run());
+    await expect(prisma.$transaction(callback)).resolves.toBe("committed");
+    expect(callback).toHaveBeenCalledOnce();
+    expect(mocks.transaction).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(["callback", "commit"])("never replays a disconnect during %s", async (phase) => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const { createPrismaClient } = await import("@/src/lib/prisma");
+    const prisma = createPrismaClient({ databaseUrl: "postgresql://example.invalid/db" });
+    const failure = new Error("Connection terminated unexpectedly");
+    const effect = vi.fn();
+    mocks.transaction.mockImplementation(async (run: () => Promise<unknown>) => {
+      await run();
+      throw failure;
+    });
+    await expect(prisma.$transaction(async () => {
+      effect();
+      if (phase === "callback") throw failure;
+    })).rejects.toBe(failure);
+    expect(effect).toHaveBeenCalledOnce();
+    expect(mocks.transaction).toHaveBeenCalledOnce();
+  });
+
+  it.each(["interactive", "batch"])("does not retry a disconnected read in %s transaction scope", async (kind) => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const { createPrismaClient } = await import("@/src/lib/prisma");
+    const prisma = createPrismaClient({ databaseUrl: "postgresql://example.invalid/db" });
+    const failure = new Error("Connection terminated unexpectedly");
+    const query = vi.fn().mockRejectedValue(failure);
+    const read = () => mocks.extensions[0]!.query.$allOperations({
+      args: {}, model: "HostedWorkspace", operation: "findUnique", query,
+    });
+    mocks.transaction.mockImplementation(async (run: unknown) => {
+      return typeof run === "function" ? run() : read();
+    });
+    await expect(kind === "interactive" ? prisma.$transaction(read) : prisma.$transaction([]))
+      .rejects.toBe(failure);
+    expect(query).toHaveBeenCalledOnce();
+    expect(mocks.transaction).toHaveBeenCalledOnce();
+  });
+
   it("does not retry operation failures that may have reached Postgres", async () => {
     process.env = {
       ...process.env,
@@ -1233,159 +1390,114 @@ describe("prisma module", () => {
     expect(query).toHaveBeenCalledOnce();
   });
 
-  it("warns before the first caller queues against a full pool", async () => {
-    process.env = {
-      ...process.env,
-      NODE_ENV: "production",
-      DATABASE_URL: "postgresql://example.invalid/db?sslmode=require",
-    };
+  it("samples and throttles actual checkouts before forwarding them", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    const { getPrisma } = await import("@/src/lib/prisma");
-
-    getPrisma();
-    const pool = mocks.poolInstances[0];
-    const extension = mocks.extensions[0];
-    if (!pool || !extension) {
-      throw new Error("Expected the Prisma pool and query extension to be captured.");
-    }
-    pool.idleCount = 0;
-    pool.totalCount = 15;
-    pool.waitingCount = 0;
-
-    const order: string[] = [];
-    warn.mockImplementation((message: unknown) => {
-      if (message === "Hosted web database pool pressure.") {
-        order.push("sampled");
-      }
-    });
-    const run = () => extension.query.$allOperations({
-      args: {},
-      operation: "queryRaw",
-      query: async () => {
-        order.push("attempted");
-        return "rows";
-      },
-    });
-
-    const nowSpy = vi.spyOn(Date, "now");
-    nowSpy.mockReturnValue(1_000_000);
-    await run();
-    await run();
-    await run();
-
-    // Three contended operations, but the pool is sampled at most once per
-    // interval so a burst cannot flood the log.
+    const { createPrismaClient } = await import("@/src/lib/prisma");
+    createPrismaClient({ databaseUrl: "postgresql://example.invalid/db", poolMax: 1 });
+    const pool = mocks.poolInstances[0]!;
+    pool.totalCount = 1;
+    const now = vi.spyOn(Date, "now").mockReturnValue(1_000_000);
+    for (let index = 0; index < 3; index += 1) pool.connect();
     expect(pressureLogs(warn)).toEqual([{
-      idleConnections: 0,
-      poolMax: 15,
-      totalConnections: 15,
-      trigger: "at_capacity",
-      waitingRequests: 0,
+      idleConnections: 0, poolMax: 1, totalConnections: 1,
+      trigger: "at_capacity", waitingRequests: 0,
     }]);
-    // Sampling must precede the attempt, otherwise the warning only appears
-    // after the very checkout it exists to pre-empt.
-    expect(order[0]).toBe("sampled");
-    expect(order[1]).toBe("attempted");
-
-    // Sustained pressure must report again once the interval elapses; a
-    // one-shot latch would go quiet exactly when the pool is worst.
-    nowSpy.mockReturnValue(1_000_000 + 10_000);
-    await run();
+    expect(mocks.connect).toHaveBeenCalledTimes(3);
+    expect(warn.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.connect.mock.invocationCallOrder[0]!,
+    );
+    now.mockReturnValue(1_010_000);
+    pool.connect();
     expect(pressureLogs(warn)).toHaveLength(2);
+  });
 
-    nowSpy.mockRestore();
+  it("forwards both checkout API forms and the pool receiver unchanged", async () => {
+    const { createPrismaClient } = await import("@/src/lib/prisma");
+    createPrismaClient({ databaseUrl: "postgresql://example.invalid/db" });
+    const pool = mocks.poolInstances[0]!;
+    const pending = Promise.resolve({ connected: true });
+    mocks.connect.mockReturnValueOnce(pending).mockReturnValueOnce(undefined);
+    expect(pool.connect()).toBe(pending);
+    const callback = vi.fn();
+    expect(pool.connect(callback)).toBeUndefined();
+    expect(mocks.connect.mock.calls).toEqual([[], [callback]]);
+    expect(mocks.connect.mock.contexts).toEqual([pool, pool]);
+  });
+
+  it("times promise and callback pool acquisition without changing results or release ownership", async () => {
+    const { createPrismaClient } = await import("@/src/lib/prisma");
+    const { runWithPrismaOperationTimings } = await import("@/src/lib/prisma-operation-timing");
+    createPrismaClient({ databaseUrl: "postgresql://example.invalid/db" });
+    const pool = mocks.poolInstances[0]!;
+    const samples: PrismaPoolAcquisitionTiming[] = [];
+    let clock = 0;
+    vi.spyOn(performance, "now").mockImplementation(() => clock);
+    const client = { connected: true };
+    const release = vi.fn();
+    const callback = vi.fn();
+    mocks.connect.mockImplementationOnce(async () => { clock = 40; return client; });
+    await runWithPrismaOperationTimings([], async () => {
+      await expect(pool.connect()).resolves.toBe(client);
+    }, samples);
+    mocks.connect.mockImplementationOnce((cb: (...args: unknown[]) => unknown) => {
+      clock = 70;
+      cb(null, client, release);
+    });
+    await runWithPrismaOperationTimings([], async () => {
+      expect(pool.connect(callback)).toBeUndefined();
+    }, samples);
+    expect(callback).toHaveBeenCalledWith(null, client, release);
+    expect(release).not.toHaveBeenCalled();
+    expect(samples.map(sample => sample.ms)).toEqual([40, 30]);
+    expect(samples[0]).toMatchObject({ idleConnections: 0, totalConnections: 0, waitingRequests: 0 });
+    expect(mocks.connect.mock.contexts).toEqual([pool, pool]);
+  });
+
+  it("preserves pool acquisition failures in both API forms", async () => {
+    const { createPrismaClient } = await import("@/src/lib/prisma");
+    const { runWithPrismaOperationTimings } = await import("@/src/lib/prisma-operation-timing");
+    createPrismaClient({ databaseUrl: "postgresql://example.invalid/db" });
+    const pool = mocks.poolInstances[0]!;
+    const failure = new Error("synthetic checkout failure");
+    const samples: PrismaPoolAcquisitionTiming[] = [];
+    const callback = vi.fn();
+    mocks.connect.mockRejectedValueOnce(failure).mockImplementationOnce((cb: (error: Error) => void) => cb(failure));
+    await runWithPrismaOperationTimings([], async () => {
+      await expect(pool.connect()).rejects.toBe(failure);
+      pool.connect(callback);
+    }, samples);
+    expect(callback).toHaveBeenCalledWith(failure);
+    expect(samples).toHaveLength(2);
   });
 
   it("throttles each pool independently", async () => {
-    process.env = {
-      ...process.env,
-      NODE_ENV: "test",
-    };
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const { createPrismaClient } = await import("@/src/lib/prisma");
-
-    createPrismaClient({
-      databaseUrl: "postgresql://example.invalid/first?sslmode=require",
-      poolMax: 1,
-    });
-    createPrismaClient({
-      databaseUrl: "postgresql://example.invalid/second?sslmode=require",
-      poolMax: 1,
-    });
-    const [poolA, poolB] = mocks.poolInstances;
-    const [extensionA, extensionB] = mocks.extensions;
-    if (!poolA || !poolB || !extensionA || !extensionB) {
-      throw new Error("Expected two pools and two query extensions to be captured.");
+    for (const name of ["first", "second"]) {
+      createPrismaClient({ databaseUrl: `postgresql://example.invalid/${name}`, poolMax: 1 });
     }
-    for (const pool of [poolA, poolB]) {
-      pool.idleCount = 0;
+    vi.spyOn(Date, "now").mockReturnValue(2_000_000);
+    for (const pool of mocks.poolInstances) {
       pool.totalCount = 1;
       pool.waitingCount = 2;
+      pool.connect();
     }
-
-    const nowSpy = vi.spyOn(Date, "now").mockReturnValue(2_000_000);
-    const query = async () => "rows";
-    await extensionA.query.$allOperations({ args: {}, operation: "queryRaw", query });
-    await extensionB.query.$allOperations({ args: {}, operation: "queryRaw", query });
-
-    // Same instant, two pools: one pool's sample must not silence the other.
     expect(pressureLogs(warn)).toHaveLength(2);
-    nowSpy.mockRestore();
+    expect(pressureLogs(warn)).toEqual(Array.from({ length: 2 }, () => ({
+      idleConnections: 0, poolMax: 1, totalConnections: 1,
+      trigger: "waiters", waitingRequests: 2,
+    })));
   });
 
-  it("stays silent while no caller is waiting for a connection", async () => {
-    process.env = {
-      ...process.env,
-      NODE_ENV: "production",
-      DATABASE_URL: "postgresql://example.invalid/db?sslmode=require",
-    };
+  it.each([0, 1])("stays silent with idle capacity and %i waiters", async (waitingCount) => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    const { getPrisma } = await import("@/src/lib/prisma");
-
-    getPrisma();
-    const pool = mocks.poolInstances[0];
-    const extension = mocks.extensions[0];
-    if (!pool || !extension) {
-      throw new Error("Expected the Prisma pool and query extension to be captured.");
-    }
-    pool.idleCount = 12;
-    pool.totalCount = 15;
-    pool.waitingCount = 0;
-
-    await extension.query.$allOperations({
-      args: {},
-      operation: "queryRaw",
-      query: async () => "rows",
-    });
-
-    expect(pressureLogs(warn)).toEqual([]);
-  });
-
-  it("does not report transient waiters while an idle connection is available", async () => {
-    process.env = {
-      ...process.env,
-      NODE_ENV: "production",
-      DATABASE_URL: "postgresql://example.invalid/db?sslmode=require",
-    };
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    const { getPrisma } = await import("@/src/lib/prisma");
-
-    getPrisma();
-    const pool = mocks.poolInstances[0];
-    const extension = mocks.extensions[0];
-    if (!pool || !extension) {
-      throw new Error("Expected the Prisma pool and query extension to be captured.");
-    }
+    const { createPrismaClient } = await import("@/src/lib/prisma");
+    createPrismaClient({ databaseUrl: "postgresql://example.invalid/db", poolMax: 1 });
+    const pool = mocks.poolInstances[0]!;
     pool.idleCount = 1;
     pool.totalCount = 1;
-    pool.waitingCount = 1;
-
-    await extension.query.$allOperations({
-      args: {},
-      operation: "queryRaw",
-      query: async () => "rows",
-    });
-
+    pool.waitingCount = waitingCount;
+    pool.connect();
     expect(pressureLogs(warn)).toEqual([]);
   });
 

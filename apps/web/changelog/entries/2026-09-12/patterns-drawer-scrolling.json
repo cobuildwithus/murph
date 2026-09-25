@@ -1,0 +1,15 @@
+{
+  "publishedOn": "2026-09-12",
+  "order": 100,
+  "item": {
+    "id": "patterns-drawer-scrolling",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Read every pattern detail on your phone",
+    "summary": "Pattern details scroll without a blank area covering the comparison evidence.",
+    "details": "The result heading and close button stay visible as you scroll. Comparison dates use a shorter footer with fewer repeated notes.",
+    "relevanceTags": ["patterns"],
+    "sourcePullRequests": [3386],
+    "tryIt": { "label": "View patterns", "href": "/patterns" }
+  }
+}

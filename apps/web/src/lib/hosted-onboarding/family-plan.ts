@@ -71,6 +71,7 @@ import {
   mapStripeSubscriptionStatusToHostedBillingStatus,
 } from "./billing";
 import {
+  HOSTED_FAMILY_BILLING_PLAN_CODE,
   HOSTED_FAMILY_MAX_SEATS,
   HOSTED_FAMILY_MIN_SEATS,
   HOSTED_FAMILY_PLAN_CODES,
@@ -194,7 +195,7 @@ export { HOSTED_FAMILY_DRAFT_CHECKOUT_ACTIVE_ERROR_CODE } from "./app-routes";
 
 export { HOSTED_FAMILY_MAX_SEATS, HOSTED_FAMILY_MIN_SEATS } from "./billing-plans";
 
-export const HOSTED_FAMILY_BILLING_PLAN_CODE = "launch_family_monthly" as const;
+export { HOSTED_FAMILY_BILLING_PLAN_CODE } from "./billing-plans";
 export const HOSTED_FAMILY_STRIPE_PRICE_ID_ENV_KEY =
   "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_SEAT_MONTHLY";
 export const HOSTED_FAMILY_STRIPE_METADATA_KIND = "hosted_family_plan";
@@ -302,7 +303,6 @@ const hostedAccountGroupInviteSelect =
 
 const hostedAccountGroupBillingRefSelect =
   Prisma.validator<Prisma.HostedAccountGroupBillingRefSelect>()({
-    billedSeatCount: true,
     checkoutAttemptId: true,
     checkoutCreatedAt: true,
     checkoutSeatCount: true,
@@ -326,7 +326,6 @@ const hostedFamilyOwnerDraftSelect =
   Prisma.validator<Prisma.HostedAccountGroupSelect>()({
     billingRef: {
       select: {
-        billedSeatCount: true,
         checkoutAttemptId: true,
         checkoutCreatedAt: true,
         checkoutSeatCount: true,
@@ -6530,34 +6529,15 @@ export function buildHostedFamilyInviteAcceptedNotification(input: {
   };
 }
 
-async function readHostedFamilyBilledSeatCountTx(input: {
-  groupId: string;
-  tx: HostedOnboardingReadClient;
-}): Promise<number | null> {
-  const billingRef = await input.tx.hostedAccountGroupBillingRef.findUnique({
-    select: {
-      billedSeatCount: true,
-    },
-    where: {
-      groupId: input.groupId,
-    },
-  });
-
-  return billingRef?.billedSeatCount ?? null;
-}
-
 async function readHostedFamilyPlanCapacitiesTx(input: {
   groupId: string;
   tx: HostedOnboardingReadClient;
 }): Promise<HostedFamilyPlanCapacities | null> {
-  const [rows, legacySeatCount] = await Promise.all([
-    input.tx.hostedAccountGroupPlanCapacity.findMany({
-      select: { billedQuantity: true, planCode: true },
-      where: { groupId: input.groupId },
-    }),
-    readHostedFamilyBilledSeatCountTx(input),
-  ]);
-  return readHostedFamilyPlanCapacities(rows, legacySeatCount);
+  const rows = await input.tx.hostedAccountGroupPlanCapacity.findMany({
+    select: { billedQuantity: true, planCode: true },
+    where: { groupId: input.groupId },
+  });
+  return readHostedFamilyPlanCapacities(rows);
 }
 
 async function replaceHostedFamilyPlanCapacitiesTx(input: {
@@ -7032,7 +7012,6 @@ function classifyHostedFamilyOwnerDraft(
     || billingRef.stripeSubscriptionLookupKey
     || billingRef.stripeSubscriptionItemIdEncrypted
     || billingRef.stripeSubscriptionItemLookupKey
-    || billingRef.billedSeatCount != null
     || billingRef.currentBillingPhase
     || billingRef.currentPeriodStart
     || billingRef.currentPeriodEnd
@@ -7645,7 +7624,6 @@ async function projectHostedAccountGroupBillingRefSnapshot(
   ]);
 
   return {
-    billedSeatCount: billingRef.billedSeatCount,
     checkoutAttemptId: billingRef.checkoutAttemptId,
     checkoutCreatedAt: billingRef.checkoutCreatedAt,
     checkoutSeatCount: billingRef.checkoutSeatCount,

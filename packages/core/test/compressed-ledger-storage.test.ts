@@ -110,8 +110,18 @@ test("Brotli integration shards preserve exact content through append replay and
   }), { code: "VAULT_FILE_EXISTS" });
   await assert.rejects(fs.access(path.join(vaultRoot, logicalPath)));
   assert.deepEqual(brotliDecompressSync(await fs.readFile(archivePath)), bytes);
-  await fs.writeFile(path.join(vaultRoot, `${logicalPath}.gz`), compressShard(bytes, "gzip"));
+  const gzipPath = path.join(vaultRoot, `${logicalPath}.gz`);
+  const retainedArchive = await fs.readFile(archivePath);
+  await fs.writeFile(gzipPath, compressShard(bytes, "gzip"));
+  assert.deepEqual((await readIntegrationIngestById(vaultRoot, first.id))?.record, first);
+  await assert.rejects(fs.access(gzipPath), { code: "ENOENT" });
+  assert.deepEqual(await fs.readFile(archivePath), retainedArchive);
+
+  const conflictingArchive = compressShard(Buffer.concat([bytes, Buffer.from(payload)]), "gzip");
+  await fs.writeFile(gzipPath, conflictingArchive);
   await assert.rejects(readIntegrationIngestById(vaultRoot, first.id), { code: "INTEGRATION_INGEST_SHARD_REPRESENTATION_CONFLICT" });
+  assert.deepEqual(await fs.readFile(gzipPath), conflictingArchive);
+  assert.deepEqual(await fs.readFile(archivePath), retainedArchive);
 });
 
 test("malformed Brotli shards fail closed through both public readers", async () => {

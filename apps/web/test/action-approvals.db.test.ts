@@ -51,6 +51,7 @@ const REQUEST: HostedActionApprovalRequest = {
 
 describe("hosted action approvals", () => {
   let deps: HostedWebTestkitDeps | null = null;
+  const memberIds: string[] = [];
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -58,13 +59,19 @@ describe("hosted action approvals", () => {
   });
 
   afterEach(async () => {
-    await deps?.prisma.$disconnect();
-    deps = null;
+    try {
+      await deps?.prisma.hostedMember.deleteMany({ where: { id: { in: memberIds } } });
+    } finally {
+      memberIds.length = 0;
+      await deps?.prisma.$disconnect();
+      deps = null;
+    }
   });
 
   async function setup() {
     deps = await createHostedWebTestkitDeps();
     const memberId = `member_action_${randomUUID().replaceAll("-", "")}`;
+    memberIds.push(memberId);
     await deps.prisma.hostedMember.create({
       data: {
         billingStatus: "active",
@@ -754,6 +761,8 @@ function verifiedApprovalChallenge(
 ) {
   return {
     bindingHash: pending.bindingHash,
+    credentialWrite: { memberId, expectedEncrypted: null, nextEncrypted: null },
+    passkeys: [],
     expiresAt: pending.expiresAt,
     kind: "assistant.action.approve" as const,
     memberId,

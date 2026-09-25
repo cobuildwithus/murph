@@ -248,9 +248,8 @@ describe('notification audience authority integration', () => {
       'danger-full-access',
     )
     expect(providerInput?.plan.conversationPolicy.audience).toMatchObject({
-      effectiveThreadIsDirect: threadIsDirect,
-      explicitTarget: target,
       threadIsDirect,
+      explicitTarget: target,
     })
     expect(boundaries.deliverMessage).toHaveBeenCalledWith(
       expect.objectContaining({

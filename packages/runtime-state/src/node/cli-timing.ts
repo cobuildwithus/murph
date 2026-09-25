@@ -3,6 +3,7 @@ import { createSocket, type Socket } from "node:dgram";
 import {
   CLI_TIMING_ENDPOINT_ENV, addCliPhaseSample, cliTimingCommand, CLI_TIMING_MAX_REPORT_BYTES, CLI_TIMING_MAX_SPANS,
   emptyCliTiming, incrementCliTimingDrop, mergeCliTiming, normalizeCliTiming,
+  cliTimingFailureCode, cliTimingFailureStage, cliTimingValidationFailure, readCliTimingOwnData as ownData, type CliFailureTiming,
   type CliPhaseTiming, type CliTiming, type CliTimingOutcome, type CliTimingPhase,
 } from "../cli-timing.ts";
 
@@ -20,6 +21,7 @@ interface Invocation {
   dispatchEnded: bigint | null;
   dispatchStarted: boolean;
   outcome: CliTimingOutcome;
+  failure: CliFailureTiming | null;
   closed: boolean;
   actionEnded: boolean;
   spans: number;
@@ -69,7 +71,7 @@ export async function timeCliDispatch(command: string, next: () => Promise<void>
   if (first) addCliPhaseSample(invocation.phases, "setup", elapsedUs(invocation.started));
   const end = startCliPhase("dispatch");
   try { await next(); }
-  catch (error) { invocation.outcome = "error"; throw error; }
+  catch (error) { noteCliTimingFailure(error); invocation.outcome = "error"; throw error; }
   finally { end(); invocation.dispatchEnded = process.hrtime.bigint(); }
 }
 
@@ -89,7 +91,7 @@ export async function withCliTiming<T>(
     closed: false, openInvocations: 0 };
   collection.openInvocations += 1;
   const invocation: Invocation = { command: "other", phases: [], started: process.hrtime.bigint(),
-    dispatchEnded: null, dispatchStarted: false, outcome: "unknown", closed: false, actionEnded: false,
+    dispatchEnded: null, dispatchStarted: false, outcome: "unknown", failure: null, closed: false, actionEnded: false,
     spans: 0, activeSpans: 0, collection };
   return await invocations.run(invocation, async () => {
     try {
@@ -97,6 +99,7 @@ export async function withCliTiming<T>(
       if (invocation.outcome !== "error") invocation.outcome = "ok";
       return result;
     } catch (error) {
+      noteCliTimingFailure(error);
       // bin.ts treats broken pipes specially; do not reinterpret them here.
       invocation.outcome = isBrokenPipe(error) ? "unknown" : "error";
       throw error;
@@ -107,8 +110,31 @@ export async function withCliTiming<T>(
   });
 }
 
+/** The bridge observes original typed errors before Incur projection. Later
+ * dispatch/exit catches only provide a fallback; one invocation contributes at
+ * most one observation, regardless of rethrows, wrapping or object reuse.
+ */
+export function noteCliTimingFailure(error: unknown): void {
+  const invocation = invocations.getStore();
+  if (!invocation || invocation.closed || invocation.collection.closed || invocation.failure) return;
+  const rawCode = ownData(error, "code");
+  const name = rawCode === undefined ? ownData(error, "name") : undefined;
+  const incurValidation = name === "Incur.ValidationError" || name === "Incur.ParseError";
+  const validation = incurValidation || name === "ZodError";
+  // Murph's pinned Incur error-envelope patch maps both exact types to this
+  // code (incur-smoke.test.ts), unlike unpatched upstream ParseError handling.
+  const code = rawCode ?? (incurValidation ? "VALIDATION_ERROR" :
+    name === "ZodError" ? "invalid_payload" : undefined);
+  const stage = ownData(ownData(error, "context"), "stage") ?? ownData(error, "stage") ??
+    (validation ? "validation" : undefined);
+  // Domain validation uses fieldErrors; schema-owned publicIssues take precedence.
+  invocation.failure = { code: cliTimingFailureCode(code), stage: cliTimingFailureStage(stage), count: 1,
+    ...cliTimingValidationFailure(invocation.command, code, error, "fieldErrors"),
+    ...cliTimingValidationFailure(invocation.command, code, error, "publicIssues") };
+}
+
 // Incur may call process.exit before an outer finally executes. Observe the
-// authoritative code, then delegate unchanged; unflushed datagrams can be lost.
+// authoritative code, then delegate unchanged; transport remains best-effort.
 export function isCliTimingActive(): boolean {
   const invocation = invocations.getStore();
   return !!invocation && !invocation.closed && !invocation.collection.closed;
@@ -144,7 +170,8 @@ function finishAction(invocation: Invocation): void {
   }
 }
 function isBrokenPipe(error: unknown): boolean {
-  return typeof error === "object" && error !== null && "code" in error && error.code === "EPIPE";
+  try { return typeof error === "object" && error !== null && "code" in error && error.code === "EPIPE"; }
+  catch { return false; }
 }
 function finishInvocation(invocation: Invocation): void {
   if (invocation.closed) return;
@@ -163,12 +190,16 @@ function finishInvocation(invocation: Invocation): void {
   mergeCliTiming(invocation.collection.report, { ...emptyCliTiming(), commands: [{
     command: invocation.command, outcome: invocation.outcome, calls: 1,
     phases: invocation.phases,
+    ...(invocation.outcome === "ok" ? {} : {
+      failures: [invocation.failure ?? { code: "unknown", stage: "unknown", count: 1 }],
+    }),
   }] });
 }
 
-/** One loopback datagram per naturally completed subprocess; no await, filesystem,
- * result-channel output, retry or keepalive. Bind early so normal final sends can
- * reach the kernel before process exit. Missing/failed transport is a no-op.
+/** One loopback datagram per subprocess; no await, filesystem, result-channel
+ * output, retry or keepalive. Fixed synchronous lookup lets native bind/send
+ * reach the kernel even immediately before process.exit. Delivery is still
+ * best-effort (including native send-buffer pressure); exits never wait on it.
  */
 function createCliTimingSender(): ((report: CliTiming) => void) | null {
   const endpoint = process.env[CLI_TIMING_ENDPOINT_ENV];
@@ -177,10 +208,15 @@ function createCliTimingSender(): ((report: CliTiming) => void) | null {
   const startedUs = Number(process.hrtime.bigint() / 1_000n);
   let socket: Socket;
   try {
-    socket = createSocket("udp4");
+    socket = createSocket({ type: "udp4",
+      // Even numeric addresses use asynchronous dns.lookup by default. Both
+      // endpoints are source-owned IPv4 loopback; no DNS work is necessary.
+      lookup: (_hostname, _options, callback) => callback(null, "127.0.0.1", 4),
+    });
     socket.unref();
     socket.on("error", () => { try { socket.close(); } catch {} });
-    socket.bind(0, "127.0.0.1");
+    // Avoid cluster's asynchronous shared-handle bind as well.
+    socket.bind({ port: 0, address: "127.0.0.1", exclusive: true });
   } catch { return null; }
   let sent = false;
   return (source) => {

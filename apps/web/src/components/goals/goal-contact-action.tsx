@@ -6,6 +6,7 @@ import {
   useEffect,
   useRef,
   useState,
+  type ComponentProps,
 } from "react";
 
 import { useAuth } from "@/src/components/hosted-onboarding/auth-dialog-provider";
@@ -16,7 +17,10 @@ import {
   GOAL_CONTACT_RESOLUTION_PATH,
   type GoalContactResolution,
 } from "@/src/lib/goals/goal-contact-contract";
-import type { MurphContactOption } from "@/src/lib/murph-contact-routing";
+import {
+  type MurphContactOption,
+  withMurphContactOptionBody,
+} from "@/src/lib/murph-contact-routing";
 import { cn } from "@/src/lib/utils";
 
 const GOAL_CONTACT_RESOLUTION_TIMEOUT_MS = 10_000;
@@ -36,6 +40,8 @@ export function GoalContactAction({
     <div>
       {requiresLiveResolution ? (
         <AuthenticatedGoalContactAction
+          aria-label="Ask Murph to help with this goal"
+          className={cn(buttonVariants({ size: "xl" }), "w-full sm:w-auto")}
           key={goalRouteId}
           goalRouteId={goalRouteId}
           initiallyUnavailable={authenticationStatus === "unavailable"}
@@ -59,12 +65,18 @@ interface GoalContactAttempt {
   timeout: ReturnType<typeof setTimeout>;
 }
 
-function AuthenticatedGoalContactAction({
+export function AuthenticatedGoalContactAction({
+  children = <GoalContactActionContents />,
+  errorClassName,
   goalRouteId,
-  initiallyUnavailable,
-}: {
-  goalRouteId: string;
-  initiallyUnavailable: boolean;
+  initiallyUnavailable = false,
+  prompt,
+  ...buttonProps
+}: Omit<ComponentProps<"button">, "onClick" | "disabled" | "type"> & {
+  errorClassName?: string;
+  goalRouteId?: string;
+  initiallyUnavailable?: boolean;
+  prompt?: string | null;
 }) {
   const activeAttempt = useRef<GoalContactAttempt | null>(null);
   const [status, setStatus] = useState<"failed" | "idle" | "opening">(
@@ -133,7 +145,10 @@ function AuthenticatedGoalContactAction({
 
         finishGoalContactAttempt(activeAttempt, attempt);
         try {
-          window.location.assign(resolvedOption.href);
+          const option = prompt
+            ? withMurphContactOptionBody(resolvedOption, prompt)
+            : resolvedOption;
+          window.location.assign(option.href);
           setStatus("idle");
         } catch {
           setStatus("failed");
@@ -150,17 +165,16 @@ function AuthenticatedGoalContactAction({
   return (
     <>
       <button
-        aria-label="Ask Murph to help with this goal"
+        {...buttonProps}
         aria-busy={status === "opening"}
-        className={cn(buttonVariants({ size: "xl" }), "w-full sm:w-auto")}
         disabled={status === "opening"}
         onClick={handlePersonalizedClick}
         type="button"
       >
-        <GoalContactActionContents />
+        {children}
       </button>
       {status === "failed" ? (
-        <p className="mt-2 text-sm text-muted-foreground" role="status">
+        <p className={cn("mt-2 text-sm text-muted-foreground", errorClassName)} role="status">
           Couldn’t open your Murph chat. Try again.
         </p>
       ) : null}
@@ -169,12 +183,13 @@ function AuthenticatedGoalContactAction({
 }
 
 async function resolvePersonalizedGoalContact(input: {
-  goalRouteId: string;
+  goalRouteId?: string;
   signal: AbortSignal;
 }): Promise<MurphContactOption> {
   const resolution = await requestHostedOnboardingJson<GoalContactResolution>({
     method: "POST",
-    payload: { goalRouteId: input.goalRouteId },
+    // Composer drafts stay in the browser; this request resolves only the route.
+    payload: input.goalRouteId ? { goalRouteId: input.goalRouteId } : {},
     signal: input.signal,
     url: GOAL_CONTACT_RESOLUTION_PATH,
   });

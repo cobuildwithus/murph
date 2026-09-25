@@ -1,0 +1,19 @@
+{
+  "publishedOn": "2026-09-21",
+  "order": 100,
+  "item": {
+    "id": "covered-conversation-startup",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Less repeated work when a conversation resumes",
+    "summary": "Murph can begin responding sooner when it already has the messages needed to resume your conversation.",
+    "details": "Startup can reuse messages already fetched when a duplicate wake arrives. Newer messages and uncertain work still get a fresh check. Reply times continue to vary.",
+    "relevanceTags": [
+      "conversations",
+      "performance"
+    ],
+    "sourcePullRequests": [
+      3626
+    ]
+  }
+}

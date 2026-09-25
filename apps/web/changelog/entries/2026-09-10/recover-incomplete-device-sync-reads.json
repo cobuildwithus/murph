@@ -1,0 +1,19 @@
+{
+  "publishedOn": "2026-09-10",
+  "order": 100,
+  "item": {
+    "id": "recover-incomplete-device-sync-reads",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Device syncing recovers from interrupted checks",
+    "summary": "Murph can retry an incomplete device-state check before waiting for a later sync pass.",
+    "details": "The retry stays within the original time limit. If the check still fails, the existing background recovery process takes over.",
+    "relevanceTags": [
+      "devices",
+      "reliability"
+    ],
+    "sourcePullRequests": [
+      3208
+    ]
+  }
+}

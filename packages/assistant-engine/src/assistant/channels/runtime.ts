@@ -684,6 +684,15 @@ export async function sendPreparedTelegramVoiceMemoMessage(
   })
 }
 
+function canSendNativeLinqCard(
+  card: AssistantResponseCard,
+): card is Exclude<AssistantResponseCard, { kind: 'exercise_routine' | 'telegram_rich_content' }> {
+  // Queued legacy workout cards have no editor; preserve their durable text fallback.
+  return card.kind !== 'exercise_routine'
+    && card.kind !== 'telegram_rich_content'
+    && !(card.kind === 'compact_table' && 'workout' in card && card.editor === undefined)
+}
+
 export async function sendLinqMessage(
   input: {
     card?: AssistantResponseCard | null
@@ -764,8 +773,7 @@ export async function sendLinqMessage(
   const idempotencyKey = normalizeOptionalText(input.idempotencyKey)
   const shouldAttemptDirectNativeCard =
     card !== null &&
-    card.kind !== 'exercise_routine' &&
-    card.kind !== 'telegram_rich_content' &&
+    canSendNativeLinqCard(card) &&
     input.targetKind === 'thread' &&
     input.threadIsDirect === true &&
     input.nativeReplyRequested !== true &&
@@ -817,6 +825,7 @@ export async function sendLinqMessage(
             card,
             chatId: target,
             idempotencyKey,
+            companionMessage: input.message,
           },
           {
             env,
@@ -1212,6 +1221,7 @@ export async function startAssistantChannelActivitySession(input: {
   }
 
   return {
+    isActive: () => !stopped && !linkedStopSignal.signal.aborted && refreshFailure === null,
     ...(afterMessageRefreshMs === null
       ? {}
       : {

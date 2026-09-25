@@ -43,6 +43,7 @@ export interface HostedStarterUsageEnrollmentResponse {
 
 export async function requestHostedOnboardingJson<T>(input: {
   credentials?: RequestCredentials;
+  fetchImpl?: typeof fetch;
   headers?: Record<string, string>;
   keepalive?: boolean;
   method?: "DELETE" | "GET" | "PATCH" | "POST" | "PUT";
@@ -55,14 +56,14 @@ export async function requestHostedOnboardingJson<T>(input: {
   const method = input.method ?? (input.payload ? "POST" : "GET");
   const body = input.payload ? JSON.stringify(input.payload) : undefined;
   const headers: Record<string, string> = {
-    ...(input.headers ?? {}),
+    ...input.headers,
   };
 
   if (input.payload) {
     headers["content-type"] = "application/json";
   }
 
-  const response = await fetch(input.url, {
+  const response = await (input.fetchImpl ?? fetch)(input.url, {
     method,
     headers,
     credentials: input.credentials ?? "same-origin",

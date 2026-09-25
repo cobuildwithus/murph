@@ -1,6 +1,6 @@
 import type {
-  AssistantVaultImageResponseMedia,
-} from '@murphai/operator-config/assistant-cli-contracts'
+  AssistantTrustedHostedImageCompletion,
+} from '../hosted-image-completion.js'
 import { normalizeIanaTimeZone } from '@murphai/contracts'
 import type { AssistantUserMessageContentPart } from '../content-types.js'
 import type {
@@ -27,7 +27,7 @@ import {
   type AssistantDerivedEvidenceReadBudget,
 } from '../attachment-evidence-model.js'
 import { normalizeAssistantRawAttachmentArtifactPath } from '../attachment-artifact-paths.js'
-import { readAssistantInputMessageRef } from '../message-target-selection.js'
+import { isAssistantInputEventId } from '../input-store.js'
 import {
   formatAssistantPromptInstant,
   formatAssistantPromptUtcInstant,
@@ -59,24 +59,6 @@ export interface AssistantAutoReplyPromptProjection {
   reasonCode: string | null
   status: AssistantInputProjectionStatus
 }
-
-export type AssistantTrustedHostedImageCompletion =
-  | {
-      diagnostic: string | null
-      status: 'failed'
-    }
-  | {
-      status: 'invalid'
-    }
-  | {
-      media: readonly [
-        AssistantVaultImageResponseMedia,
-      ]
-      originAssistantInputId: string | null
-      originAssistantInputIdExact: boolean
-      savedImageRef: string
-      status: 'ready'
-    }
 
 export interface AssistantAutoReplyPromptInput {
   actorIsSelf: boolean
@@ -167,7 +149,8 @@ export function buildAssistantAutoReplyPrompt(
         inputText: normalizeNullableString(entry.text),
         index,
         groupContext: renderAssistantInputGroupContextPrompt(entry),
-        messageRef: readAssistantInputMessageRef(entry),
+        // Source identity is independent of native reply/reaction eligibility.
+        messageRef: isAssistantInputEventId(entry.inputId) ? entry.inputId : null,
         promptUnavailableNote: renderAssistantInputPromptUnavailableNote(entry),
         projectionReasonCode: entry.projection?.reasonCode ?? null,
         projectionStatus: entry.projection?.status ?? null,
@@ -260,7 +243,8 @@ export async function prepareAssistantAutoReplyInput(
         inputText: normalizeNullableString(entry.text),
         index,
         groupContext: renderAssistantInputGroupContextPrompt(entry),
-        messageRef: readAssistantInputMessageRef(entry),
+        // Source identity is independent of native reply/reaction eligibility.
+        messageRef: isAssistantInputEventId(entry.inputId) ? entry.inputId : null,
         promptUnavailableNote: renderAssistantInputPromptUnavailableNote(entry),
         projectionReasonCode: entry.projection?.reasonCode ?? null,
         projectionStatus: entry.projection?.status ?? null,

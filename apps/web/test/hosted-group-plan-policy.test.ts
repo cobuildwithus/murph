@@ -15,7 +15,6 @@ import {
   canUpgradeHostedBillingPlan,
   formatHostedBillingPrice,
   getHostedAiUsageMonthlyAllowanceUsdMicros,
-  getHostedBillingPlanCodeForPlan,
   getHostedBillingPlanDefinition,
   listHostedBillingPlanPresentations,
   parseHostedBillingPlanCode,
@@ -34,10 +33,6 @@ describe("hosted Core plan policy", () => {
     ).toBe(2_800_000n);
     expect(formatHostedBillingPrice(350)).toBe("$3.50");
     expect(formatHostedBillingPrice(800)).toBe("$8");
-  });
-
-  it("keeps Pulse as the canonical runtime-to-billing default", () => {
-    expect(getHostedBillingPlanCodeForPlan("pulse")).toBe("launch_monthly");
   });
 
   it("keeps Core out of public signup catalogs and mutation parsing", () => {

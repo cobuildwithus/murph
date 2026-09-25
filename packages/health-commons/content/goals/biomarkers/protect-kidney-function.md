@@ -3,8 +3,8 @@ schemaVersion: murph.commons.page.v1
 entityType: goal_template
 key: goal_template:protect-kidney-function
 slug: protect-kidney-function
-title: Protect My Kidney Function
-summary: Slow preventable kidney damage by controlling blood pressure and diabetes, avoiding harmful exposures, and following kidney trends appropriately.
+title: Understand My Kidney Health
+summary: Understand kidney health measurements, organize trends, and prepare questions for your care team.
 status: field-testing
 quality: usable
 aliases:
@@ -17,7 +17,7 @@ categories:
 goal:
   category: biomarkers
   outcomeKind: function
-  goalPhrase: protect my kidney function
+  goalPhrase: understand my kidney health
   successSignals:
     - id: kidney_function_trend
       kind: biomarker
@@ -32,7 +32,7 @@ goal:
     kind: care_support
     ownerSkillIds:
       - cardiometabolic-health
-  startPrompt: Hey Murph, help me protect my kidney function.
+  startPrompt: Hey Murph, help me understand my kidney health.
   indexable: true
 safety:
   cautionLevel: moderate
@@ -89,4 +89,4 @@ Do not force water, potassium, or protein restriction without a reason. The righ
 
 ## Related goals
 
-[Reduce Albumin in My Urine](/goals/reduce-urine-albumin) · [Lower My Blood Pressure](/goals/lower-blood-pressure) · [Improve My Blood Sugar Control](/goals/improve-blood-sugar-control)
+[Understand My Urine Albumin](/goals/reduce-urine-albumin) · [Track My Blood Pressure](/goals/lower-blood-pressure) · [Track My Blood Sugar](/goals/improve-blood-sugar-control)

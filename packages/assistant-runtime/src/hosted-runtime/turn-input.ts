@@ -23,7 +23,6 @@ import {
   isSameAuthenticatedAssistantGroupRoute,
   shouldGroupAdjacentAssistantInputCandidates,
 } from "@murphai/assistant-engine/assistant-automation";
-import { assistantPreferenceCausalSeqSchema } from "@murphai/contracts";
 import {
   readHostedIngressLatencySource,
   type HostedIngressLatencySource,
@@ -63,16 +62,11 @@ export interface HostedAssistantInputSource extends AssistantInputSource {
   readSelectedInputIds(): string[];
 }
 
-export type HostedConversationActivityObservation =
-  | "not_observed"
-  | "observed"
-  | "uncertain";
-
 export async function resolveHostedCurrentInputIdForAcceptedInputs(input: {
   assistantInputIds: readonly string[];
   vaultRoot: string;
 }): Promise<{
-  conversationActivity: HostedConversationActivityObservation;
+  conversationActivityReceivedAtEpochMs: number | null;
   currentInputId: string | null;
   foregroundPriorityInputAccepted: boolean;
   latencyTraceInputGroups: Array<{
@@ -83,7 +77,7 @@ export async function resolveHostedCurrentInputIdForAcceptedInputs(input: {
   const inputIds = uniqueStrings(input.assistantInputIds);
   if (inputIds.length === 0) {
     return {
-      conversationActivity: "not_observed",
+      conversationActivityReceivedAtEpochMs: null,
       currentInputId: null,
       foregroundPriorityInputAccepted: false,
       latencyTraceInputGroups: [],
@@ -91,7 +85,7 @@ export async function resolveHostedCurrentInputIdForAcceptedInputs(input: {
   }
   if (inputIds.length !== input.assistantInputIds.length) {
     return {
-      conversationActivity: "uncertain",
+      conversationActivityReceivedAtEpochMs: null,
       currentInputId: null,
       foregroundPriorityInputAccepted: true,
       latencyTraceInputGroups: [],
@@ -105,7 +99,7 @@ export async function resolveHostedCurrentInputIdForAcceptedInputs(input: {
     });
   } catch {
     return {
-      conversationActivity: "uncertain",
+      conversationActivityReceivedAtEpochMs: null,
       currentInputId: null,
       foregroundPriorityInputAccepted: true,
       latencyTraceInputGroups: [],
@@ -116,15 +110,24 @@ export async function resolveHostedCurrentInputIdForAcceptedInputs(input: {
   );
   if (events.length !== inputIds.length) {
     return {
-      conversationActivity: "uncertain",
+      conversationActivityReceivedAtEpochMs: null,
       currentInputId: null,
       foregroundPriorityInputAccepted: true,
       latencyTraceInputGroups,
     };
   }
-  const conversationActivity = events.some(isHostedConversationActivityInputEvent)
-    ? "observed"
-    : "not_observed";
+  // The persisted receipt is admission evidence; execution/replay time and
+  // provider occurredAt are not. Unknown reads keep foreground priority above,
+  // but cannot manufacture a conversation deadline.
+  const nowMs = Date.now();
+  const conversationActivityReceivedAtEpochMs = events
+    .filter(isHostedConversationActivityInputEvent)
+    .reduce<number | null>((latest, event) => {
+      const receivedAt = event.receivedAt === null ? NaN : Date.parse(event.receivedAt);
+      return Number.isSafeInteger(receivedAt) && receivedAt >= 0 && receivedAt <= nowMs
+        ? Math.max(latest ?? receivedAt, receivedAt)
+        : latest;
+    }, null);
   const foregroundPriorityInputAccepted = events.some((event) =>
     isHostedConversationActivityInputEvent(event)
     || isAssistantHostedImageCompletionEvent(event)
@@ -143,14 +146,14 @@ export async function resolveHostedCurrentInputIdForAcceptedInputs(input: {
     });
   } catch {
     return {
-      conversationActivity,
+      conversationActivityReceivedAtEpochMs,
       currentInputId: null,
       foregroundPriorityInputAccepted,
       latencyTraceInputGroups,
     };
   }
   return {
-    conversationActivity,
+    conversationActivityReceivedAtEpochMs,
     currentInputId: batch.length === events.length
       ? batch.at(-1)?.inputId ?? null
       : null,
@@ -184,10 +187,13 @@ function groupHostedAssistantInputLatencyTraceEvents(
 function isHostedConversationActivityInputEvent(
   event: AssistantInputEventRecord,
 ): boolean {
-  return event.sourceRef.kind === "inbox-capture"
-    || (
-      event.sourceRef.kind === "hosted-mailbox"
-      && event.sourceRef.lane === "conversation"
+  return event.conversation?.actorIsSelf !== true
+    && (
+      event.sourceRef.kind === "inbox-capture"
+      || (
+        event.sourceRef.kind === "hosted-mailbox"
+        && event.sourceRef.lane === "conversation"
+      )
     );
 }
 
@@ -706,7 +712,7 @@ async function selectHostedAssistantExactSuccessorEvents(input: {
 
   // Exact invocation-local candidates avoid a global scan, but they do not
   // weaken the compound-batch boundary. Ignore duplicate candidates at or
-  // behind the supplied frontier, then stop at the first missing causal
+  // behind the supplied frontier, then stop at the first missing conversation
   // successor, incomplete projection, or non-replyable event and leave later
   // IDs pending.
   const successorEvents = [...input.events]
@@ -751,23 +757,31 @@ function isHostedAssistantInputEventBatchSuccessor(
     return false;
   }
 
-  const previousCausalSeq = readPositiveHostedAssistantInputCausalSeq(previous);
-  const candidateCausalSeq = readPositiveHostedAssistantInputCausalSeq(candidate);
-  return previousCausalSeq !== null
+  const previousLaneSeq = readPositiveHostedConversationInputSequence(previous, "laneSeq");
+  const candidateLaneSeq = readPositiveHostedConversationInputSequence(candidate, "laneSeq");
+  const previousCausalSeq = readPositiveHostedConversationInputSequence(previous, "causalSeq");
+  const candidateCausalSeq = readPositiveHostedConversationInputSequence(candidate, "causalSeq");
+  // System work shares causal order, but cannot create a missing conversation
+  // message. Effect owners retain their separate causal authority checks.
+  return previousLaneSeq !== null
+    && candidateLaneSeq === previousLaneSeq + 1n
+    && previousCausalSeq !== null
     && candidateCausalSeq !== null
-    && candidateCausalSeq === previousCausalSeq + 1n;
+    && candidateCausalSeq > previousCausalSeq;
 }
 
-function readPositiveHostedAssistantInputCausalSeq(
+function readPositiveHostedConversationInputSequence(
   event: AssistantInputEventRecord,
+  field: "causalSeq" | "laneSeq",
 ): bigint | null {
-  if (event.sourceRef.kind !== "hosted-mailbox") {
+  if (event.sourceRef.kind !== "hosted-mailbox"
+    || event.sourceRef.lane !== "conversation") {
     return null;
   }
-  const causalSeq = BigInt(
-    assistantPreferenceCausalSeqSchema.parse(event.sourceRef.causalSeq ?? "0"),
-  );
-  return causalSeq > 0n ? causalSeq : null;
+  const value = event.sourceRef[field] ?? "";
+  if (!/^[1-9][0-9]{0,18}$/u.test(value)) return null;
+  const seq = BigInt(value);
+  return seq <= 9_223_372_036_854_775_807n ? seq : null;
 }
 
 async function readHostedAssistantInputCandidatesById(input: {

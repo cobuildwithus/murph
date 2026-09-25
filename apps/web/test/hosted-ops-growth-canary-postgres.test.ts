@@ -7,7 +7,7 @@ import {
   createHostedLinqChatLookupKey,
   createHostedPhoneLookupKey,
 } from "@/src/lib/hosted-onboarding/contact-privacy";
-import { captureHostedGrowthDailySnapshot } from "@/src/lib/hosted-ops/growth-metrics";
+import { captureHostedGrowthDailySnapshot, readHostedMessageVolumeTotal } from "@/src/lib/hosted-ops/growth-metrics";
 import { createPrismaClient } from "@/src/lib/prisma";
 
 vi.mock("server-only", () => ({}));
@@ -45,6 +45,10 @@ describe.skipIf(!runPostgresProof)(
           },
         });
 
+        const publicTotalBeforeCanary = await readHostedMessageVolumeTotal(
+          fixture.firstRunAttemptedAt,
+          prisma,
+        );
         await seedCanaryRun({
           attemptedAt: fixture.firstRunAttemptedAt,
           memberId: fixture.firstMemberId,
@@ -53,6 +57,8 @@ describe.skipIf(!runPostgresProof)(
           runLabel: "first",
           ...fixture,
         });
+        await expect(readHostedMessageVolumeTotal(fixture.firstRunAttemptedAt, prisma))
+          .resolves.toBe(publicTotalBeforeCanary);
         await prisma.hostedMember.delete({
           where: { id: fixture.firstMemberId },
         });
@@ -75,6 +81,8 @@ describe.skipIf(!runPostgresProof)(
           },
         });
 
+        await expect(readHostedMessageVolumeTotal(fixture.ordinaryAttemptedAt, prisma))
+          .resolves.toBe(publicTotalBeforeCanary + 1);
         const capture = await captureHostedGrowthDailySnapshot(
           fixture.captureAt,
           prisma,
@@ -100,6 +108,7 @@ describe.skipIf(!runPostgresProof)(
             phoneNumberLookupKey: fixture.murphLineLookupKey,
           },
         })).resolves.toBe(4);
+        expect(capture.snapshot.inboundMessagesPriorDay).toBe(0);
         expect(capture.snapshot.outboundMessagesPriorDay).toBe(1);
       } finally {
         if (originalCanaryPhoneNumber === undefined) {
@@ -179,6 +188,18 @@ async function seedCanaryRun(input: ReturnType<typeof buildFixture> & {
         ? { pendingLinqChatLookupKey: input.canaryChatLookupKey }
         : { linqChatLookupKey: input.canaryChatLookupKey }),
       memberId: input.memberId,
+    },
+  });
+  await input.prisma.hostedMailboxItem.create({
+    data: {
+      id: `mailbox_${input.memberId}`,
+      userId: input.memberId,
+      lane: "conversation",
+      laneSeq: 1n,
+      dedupeKey: `message_${input.memberId}`,
+      kind: "conversation.message",
+      occurredAt: input.attemptedAt,
+      payloadSchema: "test",
     },
   });
   const deliveryOffset = input.runLabel === "first" ? 0 : 3;

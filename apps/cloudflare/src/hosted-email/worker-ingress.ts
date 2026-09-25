@@ -20,9 +20,6 @@ import {
   buildParsedEmailThreadTarget,
   resolveParsedEmailThreadKey,
 } from "@murphai/inboxd/connectors/email/normalize-parsed";
-import {
-  inferDirectEmailThreadFromParticipants,
-} from "@murphai/inboxd/connectors/email/directness";
 
 import { readHostedExecutionEnvironment } from "../env.ts";
 import type {
@@ -260,16 +257,6 @@ export async function handleHostedEmailIngress(
         groupId: route.groupId,
         providerThreadKey,
       });
-  const threadIsDirect = isGroupRoute
-    ? false
-    : inferDirectEmailThreadFromParticipants({
-        accountAddress: route.identityId,
-        bcc: parsedMessage.bcc,
-        cc: parsedMessage.cc,
-        from: parsedMessage.from,
-        selfAddresses: [route.routeAddress],
-        to: parsedMessage.to,
-      });
   const promptProjection = buildHostedEmailPromptProjection({
     message: parsedMessage,
     redactedForGroup: isGroupRoute,
@@ -303,7 +290,7 @@ export async function handleHostedEmailIngress(
               HOSTED_EMAIL_PROMPT_SELF_ADDRESS_MAX_CHARS,
             ),
           }),
-      threadIsDirect,
+      threadIsDirect: !isGroupRoute,
       threadKey: normalizeHostedEmailPromptMetadataScalar(
         threadKey,
         HOSTED_EMAIL_PROMPT_THREAD_KEY_MAX_CHARS,

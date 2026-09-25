@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 const codexAppServerMocks = vi.hoisted(() => ({
   executeCodexAppServerTurn: vi.fn(),
   preinitializeCodexAppServer: vi.fn(),
+  startCodexAppServerRealtime: vi.fn(),
   readCodexAppServerTurnFailureContext: vi.fn(),
 }))
 const diagnosticsMocks = vi.hoisted(() => ({
@@ -15,6 +16,7 @@ const turnsMocks = vi.hoisted(() => ({
 vi.mock('../src/assistant-codex.ts', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../src/assistant-codex.ts')>()),
   executeCodexAppServerTurn: codexAppServerMocks.executeCodexAppServerTurn,
+  startCodexAppServerRealtime: codexAppServerMocks.startCodexAppServerRealtime,
   preinitializeCodexAppServer:
     codexAppServerMocks.preinitializeCodexAppServer,
   readCodexAppServerTurnFailureContext:
@@ -54,7 +56,6 @@ import {
 } from '../src/assistant/codex-base-instructions.ts'
 import {
   DEFAULT_CODEX_MODEL_CAPABILITIES,
-  DEFAULT_CODEX_MODELS,
   createCatalogModel,
 } from '../src/assistant/providers/catalog.ts'
 import {
@@ -71,9 +72,9 @@ import {
   executeCodexAssistantTurnAttempt as executeCodexAssistantTurnAttemptUnchecked,
   executeCodexAssistantTurnAttemptFromInput,
   prepareHostedCodexAssistantProcess,
+  startHostedCodexAssistantVoice,
   resolveCodexAssistantCapabilities,
   resolveCodexAssistantLabel,
-  resolveCodexStaticModels,
   resolveCodexAssistantTargetCapabilities,
 } from '../src/assistant/codex-runtime.ts'
 import {
@@ -243,6 +244,7 @@ function executeCodexAssistantTurnAttempt(
 afterEach(() => {
   codexAppServerMocks.executeCodexAppServerTurn.mockReset()
   codexAppServerMocks.preinitializeCodexAppServer.mockReset()
+  codexAppServerMocks.startCodexAppServerRealtime.mockReset()
   codexAppServerMocks.readCodexAppServerTurnFailureContext.mockReset()
   diagnosticsMocks.recordAssistantDiagnosticEvent.mockReset()
   turnsMocks.appendAssistantTurnReceiptEvent.mockReset()
@@ -306,14 +308,15 @@ function findProviderPromptSizeTraceRawEvent(
 }
 
 describe('Codex assistant registry helpers', () => {
-  it('derives hosted process preparation from the same launch input as a real turn', async () => {
+  it.each(['hosted-openai', 'venice', 'hosted-custom-inference'] as const)(
+    'shares preparation, voice, and backing-turn process identity for %s', async (modelProvider) => {
     const target = {
       adapter: 'codex-cli',
       approvalPolicy: 'never',
       codexCommand: '/runtime/bin/codex',
       codexHome: '/runtime/codex-home',
       model: 'gpt-5.6-terra',
-      modelProvider: 'hosted-openai',
+      modelProvider,
       oss: false,
       profile: 'hosted',
       reasoningEffort: 'low',
@@ -348,6 +351,14 @@ describe('Codex assistant registry helpers', () => {
       target,
       workingDirectory: '/runtime/vault',
     })
+    const onInput = vi.fn()
+    const onUsage = vi.fn()
+    await startHostedCodexAssistantVoice({
+      env, signal, target, workingDirectory: '/runtime/vault',
+      mediaModel: 'gpt-5.6-terra', mediaModelProvider: 'hosted-openai',
+      sessionId: 'call-synthetic', sdp: 'synthetic-offer', prompt: 'Relay accepted speech.',
+      onInput, onUsage,
+    })
     await executeCodexAssistantTurnAttemptFromInput({
       providerConfig: assistantModelTargetToProviderConfigInput(target),
       turn: {
@@ -358,6 +369,7 @@ describe('Codex assistant registry helpers', () => {
       },
     })
 
+    const voiceInput = codexAppServerMocks.startCodexAppServerRealtime.mock.calls[0]?.[0]
     const preparationInput =
       codexAppServerMocks.preinitializeCodexAppServer.mock.calls[0]?.[0]
     const turnInput =
@@ -372,7 +384,14 @@ describe('Codex assistant registry helpers', () => {
       'workingDirectory',
     ] as const) {
       expect(preparationInput?.[key]).toEqual(turnInput?.[key])
+      expect(voiceInput?.[key]).toEqual(turnInput?.[key])
     }
+    expect(voiceInput).toMatchObject({
+      modelProvider: 'hosted-openai', model: 'gpt-5.6-terra', signal,
+      sessionId: 'call-synthetic', onInput, onUsage,
+    })
+    expect(voiceInput).not.toHaveProperty('dynamicTools')
+    expect(voiceInput?.env).not.toHaveProperty('GEMINI_API_KEY')
     expect(preparationInput?.signal).toBe(signal)
     expect(preparationInput?.env).not.toHaveProperty('GEMINI_API_KEY')
     expect(turnInput?.env).not.toHaveProperty('GEMINI_API_KEY')
@@ -3768,9 +3787,6 @@ describe('Codex assistant registry helpers', () => {
       supportsRichUserMessageContent: true,
     })
 
-    expect(resolveCodexStaticModels({ provider: 'codex-cli' })).toEqual(
-      DEFAULT_CODEX_MODELS,
-    )
   })
 
   it('merges progress activity labels into successful delegated execution attempts', async () => {

@@ -29,6 +29,7 @@ interface EntityEditCommandInput {
 export interface EventBackedEntityEditCommandInput
   extends EntityEditCommandInput {
   dayKeyPolicy?: 'keep' | 'recompute'
+  expectedRevision?: number
 }
 
 interface EntityDeleteCommandInput {
@@ -199,6 +200,8 @@ export function createEventBackedEntityEditCommandConfig<TResult>(
         set: mergePatchLists(patch.set, extraPatch?.set),
         clear: mergePatchLists(patch.clear, extraPatch?.clear),
         dayKeyPolicy: normalizeDayKeyPolicy(normalizedOptions.dayKeyPolicy),
+        expectedRevision: typeof normalizedOptions.expectedRevision === 'number'
+          ? normalizedOptions.expectedRevision : undefined,
       }
     },
   })

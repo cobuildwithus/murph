@@ -3,8 +3,8 @@ schemaVersion: murph.commons.page.v1
 entityType: goal_template
 key: goal_template:improve-chronic-insomnia
 slug: improve-chronic-insomnia
-title: Improve Chronic Insomnia
-summary: Use first-line behavioral treatment to make sleep less effortful and improve daytime function over time.
+title: Understand My Chronic Insomnia
+summary: Learn about chronic insomnia, sleep patterns, and evidence-based care options to discuss with a clinician.
 status: field-testing
 quality: usable
 aliases:
@@ -18,7 +18,7 @@ goal:
   category: sleep
   parentGoalKey: goal_template:sleep-better
   outcomeKind: symptom
-  goalPhrase: improve my chronic insomnia
+  goalPhrase: understand my chronic insomnia
   successSignals:
     - id: lower_insomnia_burden
       kind: symptom
@@ -37,7 +37,7 @@ goal:
     ownerSkillIds:
       - sleep-improvement
       - sleep-recovery-readiness
-  startPrompt: Hey Murph, help me improve my chronic insomnia.
+  startPrompt: Hey Murph, help me understand my chronic insomnia.
   indexable: true
 safety:
   cautionLevel: moderate

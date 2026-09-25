@@ -16,6 +16,12 @@ describe('hosted domain dynamic tools', () => {
     expect(resolveMurphDynamicTools({})).not.toContain(MURPH_DEVICE_TOOL)
     expect(resolveMurphDynamicTools({})).not.toContain(MURPH_AUTOMATION_TOOL)
     expect(MURPH_AUTOMATION_TOOL.deferLoading).toBe(true)
+    expect(MURPH_AUTOMATION_TOOL.description).toContain(
+      'During a voice call, save and explicit retarget use the member\'s connected messaging destination',
+    )
+    expect(MURPH_AUTOMATION_TOOL.description).toContain(
+      'Confirm the returned deliveryChannel without calling it this conversation or promising delivery in the call',
+    )
 
     const enabled = resolveMurphDynamicTools({
       automationAvailable: true,
@@ -147,10 +153,10 @@ describe('hosted domain dynamic tools', () => {
       'both camel-case keys are required on every entry',
     )
     expect(MURPH_AUTOMATION_TOOL.description).toContain(
-      'pass an object such as {"model":"gpt-5.6-luna"}',
+      'pass an object such as {"model":"gpt-6-luna"}',
     )
     expect(MURPH_AUTOMATION_TOOL.description).toContain(
-      'Never pass a bare string or Luna, Terra, or Sol.',
+      'Never pass a bare string or Luna or Sol.',
     )
   })
 
@@ -823,7 +829,7 @@ describe('hosted domain dynamic tools', () => {
       expect(MURPH_AUTOMATION_TOOL.description).toContain(scheduleExample)
     }
     expect(MURPH_AUTOMATION_TOOL.description).toContain(
-      'Changes to an existing automation use `action: patch`, never `action: update`, and every patch requires `lookup` identifying the existing automation.',
+      'Changes to an existing automation use `action: patch`, never `action: update`, and every patch requires `lookup` and the inspected `updatedAt` copied into `expectedUpdatedAt`.',
     )
     expect(MURPH_AUTOMATION_TOOL.description).toContain(
       'Never invent schedule, update, timezone, route, group, or member fields outside the schema.',
@@ -1032,6 +1038,7 @@ describe('hosted domain dynamic tools', () => {
       action: 'save' as const,
       automationId: 'automation-weekly-check-in',
       created: true,
+      deliveryChannel: 'telegram',
       contextReferences: [],
       effectiveTimeZone: 'America/New_York',
       lookupId: 'weekly-check-in',
@@ -1074,6 +1081,7 @@ describe('hosted domain dynamic tools', () => {
     expect(readResultPayload(result)).toMatchObject({
       action: 'save',
       effectiveTimeZone: 'America/New_York',
+      deliveryChannel: 'telegram',
       occurrenceProjection: {
         status: 'resolved',
       },

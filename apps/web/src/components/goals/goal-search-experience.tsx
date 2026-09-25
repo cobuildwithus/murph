@@ -26,7 +26,7 @@ import { cn } from "@/src/lib/utils";
 
 const GOAL_SEARCH_BATCH_SIZE = 16;
 const GOAL_SEARCH_EXAMPLES = [
-  "lower blood pressure",
+  "track blood pressure",
   "run a 5K",
   "reduce stress",
   "build muscle",

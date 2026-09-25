@@ -71,6 +71,8 @@ type HostedLinqContactCardShareFindManyInput = {
 // arrives minutes later, after the card is already in the chat, so 90s is
 // imperceptible to it while still covering the retry backoff.
 const HOSTED_LINQ_CONTACT_CARD_SHARE_THROTTLE_MS = 90 * 1000;
+// Native identity sharing is provider-recommended at most once per active day.
+const HOSTED_LINQ_NATIVE_CONTACT_CARD_SHARE_THROTTLE_MS = 24 * 60 * 60 * 1000;
 
 // A personalized send must reach a terminal result inside the runner's
 // 30-second web-control hop, or the turn reports something the send owner never
@@ -130,6 +132,7 @@ export async function reserveHostedLinqContactCardShareAttempt(input: {
   memberId: string;
   now?: Date;
   prisma: HostedLinqContactCardSharePersistenceClient;
+  throttleMs?: number;
 }): Promise<HostedLinqContactCardShareReserveDecision> {
   const now = input.now ?? new Date();
   const chatLookup = resolveHostedLinqContactCardShareLookup(input.chatId);
@@ -141,7 +144,7 @@ export async function reserveHostedLinqContactCardShareAttempt(input: {
   }
 
   const attemptBefore = new Date(
-    now.getTime() - HOSTED_LINQ_CONTACT_CARD_SHARE_THROTTLE_MS,
+    now.getTime() - (input.throttleMs ?? HOSTED_LINQ_CONTACT_CARD_SHARE_THROTTLE_MS),
   );
   const existingRows = await input.prisma.hostedLinqContactCardShare.findMany({
     where: {
@@ -362,6 +365,21 @@ export async function shareMurphHostedLinqNativeContactCardToChat(input: {
   prisma: HostedLinqContactCardSharePersistenceClient;
   signal?: AbortSignal;
 }): Promise<MurphHostedLinqNativeContactCardShareOutcome> {
+  const now = input.now ?? new Date();
+  const chatLookup = resolveHostedLinqContactCardShareLookup(input.chatId);
+  if (!chatLookup) return { status: "skipped", reason: "missing_chat_id" };
+  // Most delivered messages should require no provider work. The reservation
+  // below repeats this check atomically after preflight for concurrent receipts.
+  const previous = await input.prisma.hostedLinqContactCardShare.findMany({
+    where: { linqChatLookupKey: { in: [...chatLookup.readCandidates] } },
+    select: { lastContactCardShareAttemptedAt: true, linqChatLookupKey: true },
+  });
+  if (previous.some((row) => row.lastContactCardShareAttemptedAt
+    && row.lastContactCardShareAttemptedAt.getTime()
+      > now.getTime() - HOSTED_LINQ_NATIVE_CONTACT_CARD_SHARE_THROTTLE_MS)) {
+    return { status: "already_shared" };
+  }
+
   try {
     const handles = await getHostedLinqChatHandles({
       chatId: input.chatId,
@@ -400,8 +418,9 @@ export async function shareMurphHostedLinqNativeContactCardToChat(input: {
   const reservation = await reserveHostedLinqContactCardShareAttempt({
     chatId: input.chatId,
     memberId: input.memberId,
-    ...(input.now ? { now: input.now } : {}),
+    now,
     prisma: input.prisma,
+    throttleMs: HOSTED_LINQ_NATIVE_CONTACT_CARD_SHARE_THROTTLE_MS,
   });
   if (reservation.action !== "share") {
     return reservation.reason === "recent_attempt"

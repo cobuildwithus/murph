@@ -50,6 +50,7 @@ const EXPECTED_METABOLIC_DEFAULTS = [
 ];
 
 const EXPECTED_WIDE_CHUNK_IN_POLICY_ORDER = [
+  "weight",
   "body_mass_index",
   "carbohydrates",
   "fat",

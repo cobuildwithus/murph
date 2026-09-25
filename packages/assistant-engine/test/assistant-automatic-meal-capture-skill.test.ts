@@ -64,10 +64,10 @@ describe('assistant automatic meal capture skill', () => {
       'Automatic meal capture: automatic-meal-capture for the iPhone app, Photos permission, background timing, Meals review, import verification, and photo-only meal enrichment.',
     )
     expect(prompt).toContain(
-      'Food-journal owns requested-card incomplete-meal recovery: edit the exact meal from accepted evidence or ask one missing-detail question.',
+      'Food-journal owns selected-date incomplete-meal recovery on meal logging, estimation, and daily-card turns: inspect and edit existing meals from supported evidence or ask one focused missing-detail question.',
     )
     expect(prompt).toContain(
-      'Load automatic-meal-capture for device meals; imports are canonical, never duplicate them, and do not start model turns.',
+      'Explicit manual app submissions request immediate estimation; background captures wait for a meal-related turn or closeout.',
     )
     expect(prompt).toContain(
       'In a private direct conversation, when someone asks how to start recurring meal tracking or how Murph can track meals, load both automatic-meal-capture and food-journal even when they do not say "automatic."',
@@ -125,9 +125,9 @@ describe('assistant automatic meal capture skill', () => {
     )
     expect(skill).toContain('iOS may delay or skip any background\nopportunity')
     expect(skill).toContain(
-      'Automatic capture does not itself require a chat reply and its import does not\nstart a model turn.',
+      'Automatic background capture does not itself require a chat reply and its import\ndoes not start a model turn.',
     )
-    expect(skill).toContain('next eligible interactive turn')
+    expect(skill).toContain('next eligible meal-related interactive turn')
     expect(skill).toContain('scoped upload\ncredential may require renewal')
     expect(skill).toContain('vault-cli meal list --from <YYYY-MM-DD>')
     expect(skill).toContain('vault-cli meal show <meal-id> --format json')
@@ -227,19 +227,19 @@ describe('assistant automatic meal capture skill', () => {
       'This query owns the complete active target scan and deterministic rules below;',
     )
     expect(compactSkill).toContain(
-      'This active-target authority read is separate from any all-status Goal lookup used to reuse or honor Murph\'s managed paused or abandoned proposal',
+      "Do not perform an all-status proposal lookup; leave paused/abandoned Goals alone.",
     )
     expect(compactSkill).toContain(
-      'apply the concise known-context numeric-suitability rule in the `murph.attach_response_card` prompt',
+      "Apply the concise known-context numeric-suitability rule in the `murph.attach_response_card` prompt",
     )
     expect(compactSkill).toContain(
-      'Do not run a universal medical history or measurement checklist.',
+      "Do not run a universal medical-history or measurement checklist.",
     )
     expect(compactSkill).toContain(
-      'When known context suppresses numeric output or suitability remains unresolved, keep the ordinary compact closeout',
+      "Number-sensitive context or unresolved suitability retains ordinary nonnumeric closeout, no card, Goal/measurement mutation, or target-setup question.",
     )
     expect(compactSkill).toContain(
-      'Only when the complete target-authority read in step 6 resolves one unambiguous card-authorizing bundle',
+      "`missing` permits totals-only with all five goals null, never a proposal.",
     )
     expect(compactSkill).toContain(
       'New authoring uses `dietary-calories`. Resolve that canonical owner first; when it exists, use it and ignore every globally ambiguous `calories` target.',
@@ -293,35 +293,35 @@ describe('assistant automatic meal capture skill', () => {
       'Ignore an out-of-window target for current authority and conflict resolution; never copy, expose, derive from, or mutate a Goal because of it.',
     )
     expect(compactSkill).toContain(
-      'If fewer than five applicable targets remain, ask no question and use ordinary closeout text.',
+      "If fewer than five compatible applicable targets remain and the query reports `missing`, use all-null goals subject to complete totals and suitability, without questions or target mutations.",
     )
     expect(skill).not.toContain('daily-nutrition-card-safety.md')
     expect(compactSkill).toContain(
-      'does the first eligible managed closeout have one proposal-only exception',
+      "A scheduled closeout never creates, changes, repeats, accepts or activates goals, including on its first run.",
     )
     expect(skill).toContain(
       '$MURPH_ASSISTANT_SKILLS_ROOT/nutrition-strategy/references/daily-nutrition-card-goals.md',
     )
     expect(compactSkill).toContain(
-      'run `vault-cli goal list --limit 200 --format json` and detail-read only candidate managed records.',
+      "This query owns the complete active target scan and deterministic rules below; do not repeat goal list/show to re-resolve active authority.",
     )
     expect(compactSkill).toContain(
-      'The absence of that managed Goal is the first-run authority; add no flag or second state owner.',
+      "An ordinary interactive reply to a scheduled check-in uses food-journal's meal-log path, not this scheduled authority; a meal reply never accepts goals.",
     )
     expect(compactSkill).toContain(
-      'create that single canonical Goal as `paused`, with `window.startAt` equal to the occurrence local date.',
+      "`ready` still requires the suitability, intent, and meal-completeness gates.",
     )
     expect(compactSkill).toContain(
-      'Ask no question, attach no card, and never activate it on the scheduled turn.',
+      "Scheduled closeouts do not add goal invitations or questions.",
     )
     expect(compactSkill).toContain(
-      'If responsible inputs are missing or the bundle is infeasible, write nothing and keep the ordinary closeout.',
+      "A constraint affecting target advice does not alone suppress benign logged totals.",
     )
     expect(compactSkill).toContain(
-      'If numeric presentation is suppressed, or the active target bundle is ambiguous, unit-incompatible, or comparator-incompatible, retain the ordinary compact closeout and do not attach a card.',
+      "Target conflicts, incompatible authority and capacity stay text-only; never relabel them missing or acceptance.",
     )
     expect(compactSkill).toContain(
-      'Only when the complete target-authority read in step 6 resolves one unambiguous card-authorizing bundle',
+      "`missing` permits totals-only with all five goals null, never a proposal.",
     )
     expect(compactSkill).not.toContain(
       'Only when all five qualifying exact point targets resolve from active canonical Goals',

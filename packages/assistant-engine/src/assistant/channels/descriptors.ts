@@ -54,6 +54,33 @@ import type {
   AssistantEmailDeliverySummary,
 } from './types.js'
 
+const VOICE_CHANNEL_ADAPTER = createAssistantChannelAdapter({
+  channel: 'voice',
+  canAutoReply(input) {
+    return input.source === 'voice' && input.threadIsDirect === true
+      ? null : 'Voice replies require an authenticated private call.'
+  },
+  inferBindingDelivery({ deliveryTarget }) {
+    // Conversation identifiers are blinded; only the accepted reply target
+    // can name the ephemeral call. Never infer another member channel.
+    const target = normalizeOptionalText(deliveryTarget)
+    return target ? { kind: 'thread', target } : null
+  },
+  supportsIdempotencyKey: false,
+  supportedResponseMediaKinds: [],
+  targetRequiredMessage: 'Voice delivery requires the accepted call target.',
+  async sendMessage({ candidate, dependencies, message, threadIsDirect, answeredMailboxItemIds }) {
+    if (!dependencies.sendVoice || threadIsDirect !== true || !answeredMailboxItemIds?.length) {
+      throw Object.assign(new VaultCliError(
+        'ASSISTANT_VOICE_DELIVERY_UNAVAILABLE',
+        'The accepted voice call is no longer available.',
+      ), { deliveryMayHaveSucceeded: false, retryable: false })
+    }
+    await dependencies.sendVoice({ callId: candidate.target, message, answeredMailboxItemIds })
+    return { providerThreadId: candidate.target }
+  },
+})
+
 const TELEGRAM_CHANNEL_ADAPTER = createAssistantChannelAdapter({
   channel: 'telegram',
   canAutoReply(eligibility) {
@@ -118,7 +145,7 @@ const TELEGRAM_CHANNEL_ADAPTER = createAssistantChannelAdapter({
         fallbackMessage: message,
         idempotencyKey: idempotencyKey ?? null,
         replyToMessageId: replyToMessageId ?? null,
-        richMessage: buildTelegramRichMessage(card),
+        richMessage: buildTelegramRichMessage(card, message),
         ...(dependencies.signal ? { signal: dependencies.signal } : {}),
         target: candidate.target,
       }
@@ -1332,6 +1359,7 @@ export const ASSISTANT_CHANNEL_ADAPTERS: Readonly<Record<
   telegram: TELEGRAM_CHANNEL_ADAPTER,
   linq: LINQ_CHANNEL_ADAPTER,
   email: EMAIL_CHANNEL_ADAPTER,
+  voice: VOICE_CHANNEL_ADAPTER,
 })
 
 async function maybeRecoverMissingLinqDirectThread(input: {

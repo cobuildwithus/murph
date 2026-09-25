@@ -1,0 +1,19 @@
+{
+  "publishedOn": "2026-09-10",
+  "order": 100,
+  "item": {
+    "id": "goal-progress-saved-rules",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Goal progress follows saved measurement rules",
+    "summary": "Goal progress now checks saved measurement rules consistently before calculating a result.",
+    "details": "Valid rules stay intact, and invalid targets are left out instead of being evaluated with a different rule. Refreshing progress leaves your saved goals and health records unchanged.",
+    "relevanceTags": [
+      "goals",
+      "reliability"
+    ],
+    "sourcePullRequests": [
+      3138
+    ]
+  }
+}

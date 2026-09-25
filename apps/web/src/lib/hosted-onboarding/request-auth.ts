@@ -1,3 +1,5 @@
+export type { HostedNativeMemberAuthStage } from "../better-auth/native-auth";
+import { readHostedNativeMemberAuth, type HostedNativeMemberAuth, type HostedNativeMemberAuthOptions } from "../better-auth/native-auth";
 import { type PrismaClient } from "@prisma/client";
 
 import { getPrisma } from "../prisma";
@@ -19,7 +21,6 @@ import {
 import { type PrivyLinkedAccountLike } from "./privy-shared";
 import {
   type HostedPrivySession,
-  resolveHostedPrivySessionFromBearerToken,
   resolveHostedPrivySessionFromRequest,
 } from "./hosted-session";
 
@@ -31,17 +32,6 @@ export interface PrivyMemberAuthContext {
 }
 
 export type PrivySessionContext = HostedPrivySession;
-
-export type PrivyBearerMemberAuthStage =
-  | "identity_token_verification"
-  | "member_lookup";
-
-export interface PrivyBearerMemberAuthOptions {
-  runStage?<TResult>(
-    stage: PrivyBearerMemberAuthStage,
-    run: () => Promise<TResult>,
-  ): Promise<TResult>;
-}
 
 export interface AuthenticatedPrivyMemberAuthContext extends Omit<PrivyMemberAuthContext, "member"> {
   member: HostedMemberCoreState;
@@ -160,86 +150,32 @@ export async function requireActivePrivyMemberAuth(
   return context;
 }
 
-/**
- * Bearer-token variant of `requireActivePrivyMemberAuth` for native
- * (non-browser) Murph companion apps. The bearer token is
- * the Privy identity token and is verified through the same server-side
- * Privy verification path as cookie sessions; member resolution and the
- * active-access entitlement check are identical. There is intentionally no
- * cookie fallback, so these routes carry no browser ambient authority.
- */
-export async function requireActivePrivyMemberAuthFromBearerToken(
+// Native transport has no ambient cookie authority. The legacy verifier is
+// read-only; only explicit signup/completion routes may create a member.
+export async function requireActiveHostedMemberAuthFromBearerToken(
   request: Request,
   prisma: PrismaClient = getPrisma(),
-): Promise<AuthenticatedPrivyMemberAuthContext> {
-  const context = await requirePrivyMemberAuthFromBearerToken(request, prisma);
-  await assertActiveHostedMemberAccessAllowed({
-    memberId: context.member.id,
-    prisma,
-  });
-
+): Promise<HostedNativeMemberAuth> {
+  const context = await requireHostedMemberAuthFromBearerToken(request, prisma);
+  await assertActiveHostedMemberAccessAllowed({ memberId: context.member.id, prisma });
   return context;
 }
 
-/**
- * Native bearer-token member auth without an entitlement check. Keep this
- * narrower variant directly for authority-reducing operations such as
- * revoking a scoped credential, and for member-owned legal/account controls
- * such as reading or recording consent that must remain available independent
- * of entitlement. Protected product-data reads and authority issuance must use
- * the active wrapper above by default. Other callers may use this
- * identity-only variant only when they re-check active access and any required
- * consent inside a stronger owning transaction before the protected read or
- * write.
- */
-export async function requirePrivyMemberAuthFromBearerToken(
+// Legal, account and authority-reducing operations remain available without an
+// entitlement check. Product reads and new authority use the active wrapper.
+export async function requireHostedMemberAuthFromBearerToken(
   request: Request,
   prisma: PrismaClient = getPrisma(),
-  options: PrivyBearerMemberAuthOptions = {},
-): Promise<AuthenticatedPrivyMemberAuthContext> {
-  const runStage = options.runStage ?? ((_stage, run) => run());
-  const session = await runStage(
-    "identity_token_verification",
-    () => resolveHostedPrivySessionFromBearerToken(request),
-  );
-
-  if (!session) {
-    throw hostedOnboardingError({
-      code: "AUTH_REQUIRED",
-      message: "Sign in to continue.",
-      httpStatus: 401,
-    });
-  }
-
-  const member = await runStage(
-    "member_lookup",
-    () => resolvePrivyMemberAuthFromSession({
-      identity: session.identity,
-      prisma,
-    }),
-  );
-
-  if (!member) {
-    throw hostedOnboardingError({
-      code: "HOSTED_MEMBER_NOT_FOUND",
-      message: "Finish signup from your latest Murph link before continuing.",
-      httpStatus: 403,
-    });
-  }
-
-  return {
-    identity: session.identity,
-    linkedAccounts: session.linkedAccounts,
-    member,
-    verifiedPrivyUser: session.verifiedPrivyUser,
-  };
+  options: HostedNativeMemberAuthOptions = {},
+): Promise<HostedNativeMemberAuth> {
+  return readHostedNativeMemberAuth(request, prisma, options);
 }
 
 export async function requireFreshPrivyMemberAuthForHostedAppSession(
   request: Request,
   prisma: PrismaClient = getPrisma(),
 ): Promise<{
-  appSession: HostedAppSession;
+  appSession: HostedAppSession & { privyUserId: string };
   freshPrivy: AuthenticatedPrivyMemberAuthContext;
 }> {
   const [appSession, freshPrivy] = await Promise.all([
@@ -263,7 +199,7 @@ export async function requireFreshPrivyMemberAuthForHostedAppSession(
   // its new login method, so the exact Privy-user match lets the app session
   // supply the already-authenticated hosted member during that handoff.
   return {
-    appSession,
+    appSession: { ...appSession, privyUserId: freshPrivy.identity.userId },
     freshPrivy: {
       ...freshPrivy,
       member: appSession.member,
@@ -275,7 +211,7 @@ export async function requireFreshActivePrivyMemberAuthForHostedAppSession(
   request: Request,
   prisma: PrismaClient = getPrisma(),
 ): Promise<{
-  appSession: HostedAppSession;
+  appSession: HostedAppSession & { privyUserId: string };
   freshPrivy: AuthenticatedPrivyMemberAuthContext;
 }> {
   const context = await requireFreshPrivyMemberAuthForHostedAppSession(request, prisma);

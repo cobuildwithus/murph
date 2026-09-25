@@ -18,8 +18,8 @@ import {
   CODEX_ASSISTANT_CAPABILITIES,
   executeCodexAssistantTurnAttempt as executeCodexAssistantTurnAttemptUnchecked,
   preinitializeCodexAssistantProcess as preinitializeCodexAssistantProcessUnchecked,
+  startCodexAssistantVoice,
   resolveCodexAssistantLabel as resolveCodexAssistantConfigLabel,
-  resolveCodexStaticModels as resolveCodexStaticModelCatalog,
 } from './providers/codex-cli.js'
 import { createCatalogModel } from './providers/catalog.js'
 import type {
@@ -32,6 +32,7 @@ import type {
   AssistantProviderTurnExecutionResult,
   AssistantProviderTurnInput,
 } from './providers/types.js'
+import type { CodexRealtimeOptions, CodexRealtimeSession } from '../assistant-codex.js'
 
 export function resolveCodexAssistantCapabilities(): AssistantProviderCapabilities {
   return cloneAssistantProviderCapabilities(CODEX_ASSISTANT_CAPABILITIES)
@@ -46,6 +47,24 @@ export interface HostedCodexAssistantProcessPreparationInput {
 
 export interface HostedCodexAssistantProcessPreparation {
   cancelPending(): Promise<void>
+}
+
+export interface HostedCodexAssistantVoiceInput
+  extends Omit<HostedCodexAssistantProcessPreparationInput, 'signal'>, CodexRealtimeOptions {
+  mediaModel: string
+  mediaModelProvider: string
+}
+
+/** Keep the member's process identity; only the tool-free media thread uses OpenAI. */
+export async function startHostedCodexAssistantVoice(
+  input: HostedCodexAssistantVoiceInput,
+): Promise<CodexRealtimeSession> {
+  return await startCodexAssistantVoice({
+    ...input,
+    providerConfig: normalizeAssistantProviderConfig(
+      assistantModelTargetToProviderConfigInput(input.target),
+    ),
+  })
 }
 
 /**
@@ -89,13 +108,6 @@ export function resolveCodexAssistantLabel(
 ): string {
   const normalized = normalizeAssistantProviderConfig(input)
   return resolveCodexAssistantConfigLabel(normalized)
-}
-
-export function resolveCodexStaticModels(
-  input: AssistantProviderConfigLike | null | undefined,
-): readonly AssistantCatalogModel[] {
-  normalizeAssistantProviderConfig(input)
-  return resolveCodexStaticModelCatalog()
 }
 
 export async function executeCodexAssistantTurn(

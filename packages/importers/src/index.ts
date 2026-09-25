@@ -1,3 +1,4 @@
+export { isActiveCanonicalWriteLockError } from "@murphai/core";
 export {
   importAssessmentResponse,
   prepareAssessmentResponseImport,
@@ -5,13 +6,12 @@ export {
   type AssessmentResponseImportInput,
 } from "./assessment/import-assessment-response.ts";
 export type { AssessmentImportPort, AssessmentResponseImportPayload } from "./assessment/core-port.ts";
+export { parseDelimitedRows } from "./csv-parsing.ts";
 export {
   CsvSampleImportError,
   importCsvSamples,
-  parseDelimitedRows,
   prepareCsvSampleImport,
   profileCsvSampleFile,
-  summarizeSampleSeries,
 } from "./csv-sample-importer.ts";
 export type {
   CsvSampleFileColumnProfile,
@@ -27,13 +27,6 @@ export type {
   CsvSampleImportSkipReasonCount,
   CsvSampleImportWriteResult,
   PreparedCsvSampleImportPayload,
-  SampleSeriesInputRecord,
-  SampleSeriesSummaryInput,
-  SampleSummaryProfile,
-  SampleThresholdSummary,
-  SampleWindowGap,
-  SampleWindowScreen,
-  SampleWindowSummary,
 } from "./csv-sample-importer.ts";
 export {
   assertCanonicalWritePort,

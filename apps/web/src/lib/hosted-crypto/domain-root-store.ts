@@ -26,10 +26,16 @@ import {
 import { getPrisma } from "../prisma";
 import {
   areHostedDomainRootProviderCallsDisabled,
+  cacheHostedIngressRootKey,
   getHostedDomainRootUnwrapCache,
+  readCachedHostedIngressRootKey,
   type CachedUnwrappedHostedDomainRoot,
 } from "./domain-root-unwrap-cache";
-import { getHostedWebCryptoConfig, selectActiveHostedCloudflareAutomationRecipient } from "./env";
+import {
+  getHostedWebCryptoConfig,
+  selectActiveHostedCloudflareAutomationRecipient,
+  type HostedWebCryptoConfig,
+} from "./env";
 
 type HostedCryptoTx = Prisma.TransactionClient;
 type HostedCryptoClient = PrismaClient | Prisma.TransactionClient;
@@ -118,6 +124,12 @@ export interface UnwrappedHostedDomainRootReference
 export type PreparedHostedCryptoDomainRootCandidates =
   ReadonlyMap<HostedCryptoDomain, HostedDomainRootKeyEnvelopeV1>;
 
+// Metadata only: preparation snapshots never replace locked root authority.
+const preparedActiveHostedDomainRootRows = new WeakMap<
+  PreparedHostedCryptoDomainRootCandidates,
+  ReadonlyMap<HostedCryptoDomain, HostedUserCryptoEnvelopeRow>
+>();
+
 export interface PreparedHostedDomainRootForWeb {
   readonly domain: HostedCryptoDomain;
   readonly rootKeyId: string;
@@ -188,13 +200,13 @@ export async function prepareHostedDomainRootForWeb(input: {
     });
     rootKeyId = candidate.rootKeyId;
   } else {
-    const unwrapped = await unwrapHostedDomainRootForWeb({
+    const unwrapped = await unwrapActiveHostedDomainRootForWeb({
       domain: input.domain,
       prisma: input.prisma,
       retainFailureInScopedCache: true,
       signal: input.signal,
       userId: input.userId,
-    });
+    }, preparedActiveHostedDomainRootRows.get(preparedCandidates)?.get(input.domain));
     try {
       rootKeyId = unwrapped.envelope.rootKeyId;
     } finally {
@@ -350,15 +362,17 @@ async function unwrapWithScopedCache(
   retainFailureInScopedCache = false,
 ): Promise<UnwrappedHostedDomainRoot> {
   const cache = getHostedDomainRootUnwrapCache();
+  // A process-cache hit is not transaction preparation. Even without a scope,
+  // cache-only consumers must fail before metadata or provider work.
+  if (areHostedDomainRootProviderCallsDisabled() && !cache?.has(cacheKey)) {
+    throw new HostedDomainRootPreparationMismatchError();
+  }
   if (!cache) {
     return compute();
   }
 
   let pending = cache.get(cacheKey);
   if (!pending) {
-    if (areHostedDomainRootProviderCallsDisabled()) {
-      throw new HostedDomainRootPreparationMismatchError();
-    }
     pending = compute();
     cache.set(cacheKey, pending);
     if (!retainFailureInScopedCache) {
@@ -393,15 +407,17 @@ export async function prepareHostedCryptoDomainRootCandidates(input: {
   userId: string;
 }): Promise<PreparedHostedCryptoDomainRootCandidates> {
   const prisma = input.prisma ?? getPrisma();
-  const activeDomains = await readActiveHostedCryptoDomains({
+  const domains = [...new Set(input.domains ?? ALL_DOMAINS)];
+  const activeRows = await readActiveHostedDomainRootRows({
+    domains,
     prisma,
     userId: input.userId,
   });
-  const missing = (input.domains ?? ALL_DOMAINS).filter(
-    (domain) => !activeDomains.has(domain),
-  );
+  const prepared = new Map<HostedCryptoDomain, HostedDomainRootKeyEnvelopeV1>();
+  preparedActiveHostedDomainRootRows.set(prepared, activeRows);
+  const missing = domains.filter((domain) => !activeRows.has(domain));
   if (missing.length === 0) {
-    return new Map();
+    return prepared;
   }
   const preparedEntries: Array<readonly [
     HostedCryptoDomain,
@@ -421,7 +437,10 @@ export async function prepareHostedCryptoDomainRootCandidates(input: {
     return [];
   });
   if (pending.length === 0) {
-    return new Map(preparedEntries);
+    for (const [domain, envelope] of preparedEntries) {
+      prepared.set(domain, envelope);
+    }
+    return prepared;
   }
   const maxConcurrency = input.maxConcurrency ?? missing.length;
   if (!Number.isSafeInteger(maxConcurrency) || maxConcurrency <= 0) {
@@ -462,7 +481,10 @@ export async function prepareHostedCryptoDomainRootCandidates(input: {
   if (hasError) {
     throw firstError;
   }
-  return new Map(preparedEntries);
+  for (const [domain, envelope] of preparedEntries) {
+    prepared.set(domain, envelope);
+  }
+  return prepared;
 }
 
 export async function provisionHostedCryptoDomainRootsForUser(input: {
@@ -625,6 +647,13 @@ export async function unwrapHostedDomainRootForWeb(input: {
   signal?: AbortSignal;
   userId: string;
 }): Promise<UnwrappedHostedDomainRoot> {
+  return unwrapActiveHostedDomainRootForWeb(input);
+}
+
+async function unwrapActiveHostedDomainRootForWeb(
+  input: Parameters<typeof unwrapHostedDomainRootForWeb>[0],
+  preparedRow?: HostedUserCryptoEnvelopeRow,
+): Promise<UnwrappedHostedDomainRoot> {
   if (!WEB_UNWRAP_DOMAINS.has(input.domain)) {
     throw new Error(`Web is not allowed to unwrap hosted ${input.domain} domain roots.`);
   }
@@ -632,11 +661,13 @@ export async function unwrapHostedDomainRootForWeb(input: {
   const unwrapped = await unwrapWithScopedCache(
     activeCacheKey,
     async () => {
-      const envelope = await readActiveHostedDomainRootEnvelopeOrThrow({
-        domain: input.domain,
-        prisma: input.prisma,
-        userId: input.userId,
-      });
+      const envelope = preparedRow
+        ? await parseAssertAndVerifyEnvelope(preparedRow, input)
+        : await readActiveHostedDomainRootEnvelopeOrThrow({
+            domain: input.domain,
+            prisma: input.prisma,
+            userId: input.userId,
+          });
       const concreteCacheKey = createHostedDomainRootReferenceKey({
         domain: input.domain,
         rootKeyId: envelope.rootKeyId,
@@ -946,6 +977,24 @@ export async function readHostedRuntimeCryptoContextForWorker(input: {
   };
 }
 
+export async function readHostedRuntimeIngressCryptoContextForWorker(input: {
+  prisma?: HostedCryptoClient;
+  userId: string;
+}) {
+  const ingress = await readActiveHostedDomainRootEnvelopeRecordOrThrow({
+    domain: "ingress",
+    prisma: input.prisma ?? getPrisma(),
+    userId: input.userId,
+  });
+  return {
+    cacheMaxAgeMs: HOSTED_RUNTIME_CRYPTO_CONTEXT_CACHE_MAX_AGE_MS,
+    cryptoContextVersion: createHostedRuntimeCryptoContextVersion({ ingress, userId: input.userId }),
+    envelopes: { ingress: ingress.envelope },
+    schema: "murph.hosted-runtime-crypto-context.v1" as const,
+    userId: input.userId,
+  };
+}
+
 async function provisionActiveHostedDomainRootEnvelopeForUserOnlyTx(input: {
   candidate?: HostedDomainRootKeyEnvelopeV1 | undefined;
   domain: HostedCryptoDomain;
@@ -1170,8 +1219,9 @@ async function unwrapEnvelopeForWeb(input: {
   envelope: HostedDomainRootKeyEnvelopeV1;
   signal?: AbortSignal;
 }): Promise<Uint8Array> {
+  input.signal?.throwIfAborted();
   const config = getHostedWebCryptoConfig();
-  await verifyEnvelopeAuthoritySignature(input.envelope);
+  await verifyEnvelopeAuthoritySignature(input.envelope, config);
   const recipient = kmsRecipientForDomain(input.envelope.domain);
   if (!recipient) {
     throw new Error(
@@ -1184,24 +1234,55 @@ async function unwrapEnvelopeForWeb(input: {
       `Hosted ${input.envelope.domain} root envelope is missing ${recipient} wrap.`,
     );
   }
-  assertExpectedGcpKmsWrap({ envelope: input.envelope, recipient, wrap });
+  assertExpectedGcpKmsWrap({ envelope: input.envelope, recipient, wrap }, config);
+  input.signal?.throwIfAborted();
+  // Never cache row status, an active-root alias, or a preparation token. The
+  // complete verified envelope includes member/domain/root identity, generation,
+  // every wrap/context and signature. Configuration and KMS-client ownership
+  // prevent reuse across local signing/wrapping/provider configuration changes.
+  const identity = input.envelope.domain === "ingress"
+    ? createHash("sha256").update(JSON.stringify([
+        config.env,
+        config.webWrapKmsKeyName,
+        config.authorityVerifyKeyring,
+        input.envelope,
+      ])).digest("hex")
+    : null;
+  if (identity) {
+    const cached = readCachedHostedIngressRootKey({ identity, kmsClient: config.gcpKms });
+    if (cached) return cached;
+  }
   const decrypted = await config.gcpKms.decrypt({
     additionalAuthenticatedData: wrap.additionalAuthenticatedData,
     ciphertext: wrap.ciphertextBlob,
     keyName: wrap.kmsKeyName,
     signal: input.signal,
   });
-  if (decrypted.plaintext.byteLength !== 32) {
+  try {
+    input.signal?.throwIfAborted();
+    if (decrypted.plaintext.byteLength !== 32) {
+      throw new Error(
+        `Hosted ${input.envelope.domain} root GCP KMS decrypt returned invalid root length.`,
+      );
+    }
+    if (identity) {
+      cacheHostedIngressRootKey({
+        identity,
+        kmsClient: config.gcpKms,
+        rootKey: decrypted.plaintext,
+      });
+    }
+    return decrypted.plaintext;
+  } catch (error) {
     decrypted.plaintext.fill(0);
-    throw new Error(
-      `Hosted ${input.envelope.domain} root GCP KMS decrypt returned invalid root length.`,
-    );
+    throw error;
   }
-  return decrypted.plaintext;
 }
 
-async function verifyEnvelopeAuthoritySignature(envelope: HostedDomainRootKeyEnvelopeV1): Promise<void> {
-  const config = getHostedWebCryptoConfig();
+async function verifyEnvelopeAuthoritySignature(
+  envelope: HostedDomainRootKeyEnvelopeV1,
+  config: HostedWebCryptoConfig = getHostedWebCryptoConfig(),
+): Promise<void> {
   const publicKeyPem = selectHostedAuthorityVerifyPublicKeyPem({
     keyring: config.authorityVerifyKeyring,
     keyVersionName: envelope.authoritySignature.keyVersionName,
@@ -1221,8 +1302,7 @@ function assertExpectedGcpKmsWrap(input: {
   envelope: HostedDomainRootKeyEnvelopeV1;
   recipient: HostedCryptoKmsRecipientKind;
   wrap: HostedGcpKmsWrappedDomainRootKey;
-}): void {
-  const config = getHostedWebCryptoConfig();
+}, config: HostedWebCryptoConfig): void {
   if (input.wrap.kmsKeyName !== config.webWrapKmsKeyName) {
     throw new Error(
       `Hosted ${input.envelope.domain} root envelope uses an unexpected GCP KMS key.`,
@@ -1251,17 +1331,31 @@ function assertExpectedGcpKmsWrap(input: {
   }
 }
 
-async function readActiveHostedCryptoDomains(input: {
+async function readActiveHostedDomainRootRows(input: {
+  domains: readonly HostedCryptoDomain[];
   prisma: HostedCryptoClient;
   userId: string;
-}): Promise<Set<HostedCryptoDomain>> {
-  const rows = await input.prisma.$queryRaw<Array<{ domain: HostedCryptoDomain }>>`
-    SELECT DISTINCT domain::text AS domain
+}): Promise<ReadonlyMap<HostedCryptoDomain, HostedUserCryptoEnvelopeRow>> {
+  if (input.domains.length === 0) {
+    return new Map();
+  }
+  // The active user/domain unique index bounds this snapshot to four rows.
+  const rows = await input.prisma.$queryRaw<HostedUserCryptoEnvelopeRow[]>`
+    SELECT
+      id,
+      user_id AS "userId",
+      domain::text AS domain,
+      root_key_id AS "rootKeyId",
+      status::text AS status,
+      signed_envelope_json AS "signedEnvelopeJson",
+      updated_at AS "updatedAt"
     FROM hosted_user_crypto_envelope
     WHERE user_id = ${input.userId}
+      AND domain = ANY(${input.domains}::hosted_crypto_domain[])
       AND status = 'active'::hosted_crypto_envelope_status
+    LIMIT ${input.domains.length}
   `;
-  return new Set(rows.map((row) => row.domain));
+  return new Map(rows.map((row) => [row.domain, row]));
 }
 
 async function acquireHostedDomainRootAuthorityLockTx(input: {
@@ -1511,7 +1605,7 @@ function kmsRecipientForDomain(domain: HostedCryptoDomain): HostedCryptoKmsRecip
 
 function createHostedRuntimeCryptoContextVersion(input: {
   ingress: VerifiedHostedDomainRootEnvelopeRecord;
-  runtime: VerifiedHostedDomainRootEnvelopeRecord;
+  runtime?: VerifiedHostedDomainRootEnvelopeRecord;
   userId: string;
 }): string {
   const hash = createHash("sha256");
@@ -1521,10 +1615,10 @@ function createHostedRuntimeCryptoContextVersion(input: {
     ingressSignedAt: input.ingress.envelope.authoritySignature.signedAt,
     ingressStatus: input.ingress.status,
     ingressUpdatedAt: input.ingress.updatedAt,
-    runtimeRootKeyId: input.runtime.envelope.rootKeyId,
-    runtimeSignedAt: input.runtime.envelope.authoritySignature.signedAt,
-    runtimeStatus: input.runtime.status,
-    runtimeUpdatedAt: input.runtime.updatedAt,
+    runtimeRootKeyId: input.runtime?.envelope.rootKeyId,
+    runtimeSignedAt: input.runtime?.envelope.authoritySignature.signedAt,
+    runtimeStatus: input.runtime?.status,
+    runtimeUpdatedAt: input.runtime?.updatedAt,
     schema: "murph.hosted-runtime-crypto-context.version.v1",
     userId: input.userId,
   }));

@@ -183,6 +183,7 @@ export function createHostedWebDeviceSyncPort(input: {
         boundUserId: input.boundUserId,
         description: "Hosted device-sync runtime snapshot",
         fetchImpl: input.fetchImpl,
+        replayOnceOnRetryableFailure: true,
         route: HOSTED_RUNNER_WEB_CONTROL_ROUTES.deviceSyncRuntimeSnapshot,
         signal: runtimeInput.signal ?? null,
         timeoutMs: input.timeoutMs,

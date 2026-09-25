@@ -1,5 +1,3 @@
-import { HostedBillingStatus } from "@prisma/client";
-
 export const HOSTED_STARTER_USAGE_GRANT_USD_MICROS = 4_500_000n;
 export const HOSTED_STARTER_USAGE_POLICY_VERSION =
   "starter-usage-2026-08-07-v1" as const;
@@ -13,19 +11,6 @@ export const HOSTED_STARTER_USAGE_SOURCES = [
 
 export type HostedStarterUsageSource =
   (typeof HOSTED_STARTER_USAGE_SOURCES)[number];
-
-export function canGrantHostedStarterUsageForLegacyTrial(input: {
-  billingStatus: HostedBillingStatus;
-  suspendedAt: Date | null;
-}): boolean {
-  if (input.suspendedAt) {
-    return false;
-  }
-  return input.billingStatus === HostedBillingStatus.not_started
-    || input.billingStatus === HostedBillingStatus.incomplete
-    || input.billingStatus === HostedBillingStatus.active
-    || input.billingStatus === HostedBillingStatus.paused;
-}
 
 const HOSTED_STARTER_USAGE_PERIOD_START_MS = 0;
 const HOSTED_STARTER_USAGE_PERIOD_END_MS = Date.parse(

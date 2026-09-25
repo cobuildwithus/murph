@@ -162,10 +162,18 @@ Cards with only neutral measures use a compact header with a plain
 `No clear changes` status; their coverage bars remain tappable.
 Measures that still need data are omitted from mobile cards. `Show more`
 reveals the remaining report factors. The report keeps at most 100 sorted
-factors to bound Browser Vault size and calculation work. A recognized factor
-stays visible when it has no suitable comparison day. Its desktop cells explain that
-Murph needs more comparable data. Observations can appear with grade E. The
-page shows the evidence count, comparison basis, date range, and the factor and
+factors to bound Browser Vault size and calculation work. The page requires at
+least two recorded factor days and two independent
+comparison cases on both sides of each displayed result. Activities (including
+mixed activity factors) must have a recorded session within three calendar months
+of the report date, inclusive; month-end cutoffs clamp to the last day of the
+cutoff month. This uses the factor's latest observed date, even when that session
+has no matched outcome. Legacy replicas use their latest matched exposure date
+as conservative evidence of recency. Filtering happens before the 15-factor
+limit and Show more; hidden history remains in Journal. A factor with no eligible
+comparison is omitted. Grade E remains available in the underlying report, but
+one-case observations do not appear on this page. The page shows the evidence
+count, comparison basis, date range, and the factor and
 comparison dates needed to inspect the result.
 
 An empty report says that Murph needs more comparable data. The page does not
@@ -186,31 +194,62 @@ remain unchanged; an older backend leaves the native section retryable.
 
 ## Proactive messages
 
-The managed Personal Patterns automation checks each day at 13:00 local time.
+The managed Personal Patterns automation checks each day on the member’s assigned local schedule.
+Its model target is Luna with high reasoning, using the common Flex-first cron
+policy and Standard retries after failures. Before a clean scheduled model attempt,
+the exact managed recipe reads the current calculated report and the existing
+notification ledger. It skips model entry when the first digest is complete, every
+current factor was reviewed, and every current graded identity retains its reviewed
+grade. Extra observations, effect-size changes within a grade, and the report date
+do not alone require another daily model pass. New factors, identities, or grades
+remain eligible. Manual runs, retries, edited instructions, and missing, legacy,
+invalid, or degraded history retain ordinary model review.
+
+The existing `personal-pattern-notifications` Knowledge page uses version 1 JSON:
+`initialDigestSent`, `reviewedFactorIds`, `mutedFactorIds`, and `results`. Each result
+stores `factorId`, `outcomeId`, `comparisonBasis`, `lagDays`, `lastSeenGrade`,
+`firstSharedDate` (date or null), and `muted`. Missing legacy grades and delivery
+dates normalize to null without dropping identities or mutes. An unknown grade
+cannot prove that a current graded result was reviewed. Invalid supplied values
+still require model review. Identity includes the outcome's lag,
+falling back to the report lag. Duplicate identities or unknown fields cannot prove
+that a report is reviewed. The model converts legacy history only when all existing
+history and preferences can be preserved; otherwise it retains that history and
+normal model review. No second ledger, cache, or scheduler is added. First-digest
+import completeness and vocabulary/alias normalization remain with the existing
+model instructions; pending imports therefore retain model review.
+
 It sends at most one private message per run. Partial initial imports stay
-quiet. When source coverage proves the first report is complete, Murph sends
-one first digest with at most three grade A-D highlights. If that report has no
-grade A-D result, it marks the digest complete and stays quiet. Later new
-results become one summary with at most three highlights.
+quiet. When source coverage proves the first report is complete, Murph sends one
+first update with exactly one eligible grade A-D factor-and-outcome result. If
+that report has no grade A-D result, it marks the digest complete and stays
+quiet. Later new results receive the same one-finding limit. When several
+results qualify, choose the strongest or most useful one, including only one
+outcome for that factor. Record all reviewed identities as usual; unselected
+results are not queued for later messages.
 
 The hosted runtime emits a privacy-safe internal email alert when this managed
 run fails or when its occurrence starts too late and expires. Alert delivery
 uses the existing operational email channel and does not change the member's
-message. A complete platform outage requires an external uptime monitor,
+message. Usage-limit failures and expirations with recorded evidence of a usage
+pause are expected interruptions and do not send this alert, including when the
+expired occurrence is discovered after an allowance reset. Missing historical
+evidence preserves the alert; unrelated terminal failures still notify operators. A complete platform outage requires an external uptime monitor,
 because the runtime cannot report while it is offline.
 
 Only a new grade A-D identity can trigger that daily message. Letter grades and
-report classifications stay internal to selection and bookkeeping. Messages
-lead with the finding in a short conversational paragraph, with a light qualifier
-where evidence is limited and supporting counts in the report's actual unit.
-Uncertainty belongs within the finding, without repeated caveats or a standalone
-causation disclaimer. Messages preserve comparison and outcome timing without
-implying cause or prescribing habit changes. Links use the full
-`https://www.withmurph.ai/patterns` URL on its own final line; a bare route is
-never a message link. Grade E Observations remain visible on the page but stay
-quiet. A saved private ledger deduplicates result identities.
-It also stores factor or result mutes requested in conversation. Grade changes
-do not create separate messages. The weekly health insight can mention a useful
+report classifications stay internal to selection and bookkeeping. Messages lead
+with the finding in one short conversational paragraph, usually one or two
+sentences, with a light qualifier where evidence is limited and supporting
+counts in the report's actual unit. Uncertainty belongs within the finding,
+without repeated caveats or a standalone causation disclaimer. Messages name the
+comparison baseline and outcome timing, using one effect-size number when
+available instead of both group averages, without implying cause or prescribing
+habit changes. These proactive messages contain no links, Patterns-page
+invitations, or see-the-rest footers. Grade E Observations remain visible on the
+page but stay quiet. A saved private ledger deduplicates result identities. It
+also stores factor or result mutes requested in conversation. Grade changes do
+not create separate messages. The weekly health insight can mention a useful
 strengthening, weakening, or removed result.
 
 ## Weekly audit

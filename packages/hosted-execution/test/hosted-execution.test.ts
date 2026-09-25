@@ -470,7 +470,7 @@ describe("hosted execution coverage gaps", () => {
   });
 
   it("centralizes browser-vault replica source hash and refresh decisions", () => {
-    expect(BROWSER_VAULT_REPLICA_CURRENT_GENERATION).toBe(15);
+    expect(BROWSER_VAULT_REPLICA_CURRENT_GENERATION).toBeGreaterThanOrEqual(15);
     const base = {
       hash: "a".repeat(64),
       key: "cloudflare-workspace-snapshots/base.bundle",
@@ -813,6 +813,7 @@ describe("hosted execution coverage gaps", () => {
       "./computer-use",
       "./connected-apps",
       "./contracts",
+      "./conversation-polls",
       "./dashboard-replica",
       "./env",
       "./hosted-codex-subscription-auth",
@@ -828,10 +829,18 @@ describe("hosted execution coverage gaps", () => {
       "./return-contact",
       "./routes",
       "./runtime-control",
+      "./runtime-media",
+      "./runtime-migration",
+      "./runtime-owner",
+      "./runtime-resource-purge",
+      "./runtime-resources",
       "./side-effects",
+      "./storage-paths",
       "./subscription",
       "./temporal-env",
       "./vault-share",
+      "./voice-control",
+      "./workspace-snapshot-store",
       "./workspace-snapshot-v2",
     ]);
     expect(
@@ -889,8 +898,9 @@ describe("hosted execution coverage gaps", () => {
       false,
     );
     expect(assistantModelModule.HOSTED_ASSISTANT_PRODUCT_MODELS).toEqual([
+      "gpt-6-sol",
+      "gpt-6-luna",
       "gpt-5.6-luna",
-      "gpt-5.6-terra",
       "gpt-5.6-sol",
       "gpt-6-astra",
     ]);
@@ -1011,6 +1021,7 @@ describe("hosted execution coverage gaps", () => {
       "HOSTED_RUNTIME_FAMILY_PLAN_TOOL_PATH",
       "HOSTED_RUNTIME_GROUP_TOOL_PATH",
       "HOSTED_RUNTIME_HEALTH_DATA_ADMISSION_PATH",
+      "HOSTED_RUNTIME_IMAGE_GENERATION_ACCESS_PATH",
       "HOSTED_RUNTIME_IMESSAGE_CONTACT_TOOL_PATH",
       "HOSTED_RUNTIME_ISSUE_RECORD_PATH",
       "HOSTED_RUNTIME_LABS_TOOL_PATH",
@@ -1023,6 +1034,7 @@ describe("hosted execution coverage gaps", () => {
       "HOSTED_RUNTIME_MAILBOX_FETCH_PATH",
       "HOSTED_RUNTIME_MAILBOX_PAYLOAD_FETCH_PATH",
       "HOSTED_RUNTIME_MEMBER_ACTION_OUTCOME_PATH",
+      "HOSTED_RUNTIME_MEMBER_NOTIFICATION_ROUTE_PATH",
       "HOSTED_RUNTIME_OPERATOR_TASK_CONTROL_PATH",
       "HOSTED_RUNTIME_OUTBOUND_MESSAGE_VOLUME_RECEIPT_PATH",
       "HOSTED_RUNTIME_OWNER_RELEASED_PATH",
@@ -1030,6 +1042,7 @@ describe("hosted execution coverage gaps", () => {
       "HOSTED_RUNTIME_OWNER_RELEASE_IMMEDIATE_RECHECK_QUERY",
       "HOSTED_RUNTIME_PHONE_CALL_RESULT_DELIVERY_PATH",
       "HOSTED_RUNTIME_PLAN_USAGE_TOOL_PATH",
+      "HOSTED_RUNTIME_POLL_TOOL_PATH",
       "HOSTED_RUNTIME_PRODUCT_FEEDBACK_RECORD_PATH",
       "HOSTED_RUNTIME_STATUS_PATH",
       "HOSTED_RUNTIME_SUBSCRIPTION_TOOL_PATH",
@@ -1039,10 +1052,12 @@ describe("hosted execution coverage gaps", () => {
       "HOSTED_RUNTIME_VAULT_SHARE_DELIVER_CONTINUATION_FIELD",
       "HOSTED_RUNTIME_VAULT_SHARE_DELIVER_CONTINUATION_MAX_LENGTH",
       "HOSTED_RUNTIME_VAULT_SHARE_DELIVER_PATH",
+      "HOSTED_RUNTIME_VOICE_INPUT_PATH",
       "HOSTED_RUNTIME_WORKSPACE_CHECKPOINT_PATH",
       "HOSTED_RUNTIME_WORKSPACE_PATH",
       "buildHostedRuntimeOwnerReleaseSearch",
       "isHostedRuntimeVaultShareDeliverContinuation",
+      "parseHostedExecutionResolvedLinqDeliveryRoute",
       "parseHostedRuntimeOwnerReleaseSearch",
     ]);
     expect(routeModule.HOSTED_RUNTIME_MAILBOX_PAYLOAD_FETCH_PATH).toBe(

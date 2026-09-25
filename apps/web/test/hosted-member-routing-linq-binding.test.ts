@@ -5,7 +5,9 @@ import {
   createHostedPhoneLookupKey,
 } from "../src/lib/hosted-onboarding/contact-privacy";
 import {
+  reconcileHostedMemberLinqPhoneBindingsTx,
   readUnchangedHostedMemberHomeLinqBindingTx,
+  readUnchangedHostedLinqHomeRoute,
   upsertHostedMemberHomeLinqBindingTx,
 } from "../src/lib/hosted-onboarding/hosted-member-routing-linq";
 
@@ -77,6 +79,68 @@ beforeEach(() => {
 });
 
 describe("established Linq home binding", () => {
+  it("derives the matching home route from current indexes without opening ciphertext", () => {
+    const { routing } = createFixture();
+    expect(readUnchangedHostedLinqHomeRoute({
+      chatId: "synthetic-chat", recipientPhone: "+15550000000",
+      participantContact: { ...participant, value: "+15551111111" },
+      routingRecord: routing,
+    })).toEqual({ chatId: "synthetic-chat", recipientPhone: "+15550000000", assignedAt });
+  });
+
+  it.each([
+    { linqChatLookupKey: "different-chat" },
+    { linqRecipientPhoneLookupKey: "different-line" },
+    { linqParticipantContactLookupKey: "different-participant" },
+    { pendingLinqChatLookupKey: "pending-repair" },
+    { linqChatIdEncrypted: null },
+  ])("requires private routing preparation for a nonmatching or incomplete binding: %j", (change) => {
+    const { routing } = createFixture();
+    expect(readUnchangedHostedLinqHomeRoute({
+      chatId: "synthetic-chat", recipientPhone: "+15550000000",
+      participantContact: { ...participant, value: "+15551111111" },
+      routingRecord: { ...routing, ...change },
+    })).toBeNull();
+  });
+
+  it("clears only the replaced phone's chat authority while retaining its Murph number", async () => {
+    const { prisma } = createFixture();
+    const oldPhone = "+15550000002";
+    await reconcileHostedMemberLinqPhoneBindingsTx({
+      memberId: "synthetic-member",
+      previousIdentity: { phoneNumber: oldPhone, phoneNumberVerifiedAt: assignedAt },
+      nextPhone: { number: "+15550000003" },
+      prisma: prisma as never,
+    });
+    expect(prisma.hostedMemberRouting.updateMany).toHaveBeenCalledTimes(2);
+    const [home, pending] = prisma.hostedMemberRouting.updateMany.mock.calls.map(([query]) => query);
+    expect(home.where).toEqual({
+      memberId: "synthetic-member",
+      OR: [
+        { linqParticipantContactKind: null },
+        { linqParticipantContactKind: "phone", linqParticipantContactLookupKey: { in: [createHostedPhoneLookupKey(oldPhone)] } },
+      ],
+    });
+    expect(pending.where).toEqual({
+      memberId: "synthetic-member",
+      OR: [
+        { pendingLinqParticipantContactKind: null },
+        { pendingLinqParticipantContactKind: "phone", pendingLinqParticipantContactLookupKey: { in: [createHostedPhoneLookupKey(oldPhone)] } },
+      ],
+    });
+    expect(home.data).toEqual({
+      linqChatIdEncrypted: null, linqChatLookupKey: null,
+      linqParticipantContactKind: null, linqParticipantContactLookupKey: null,
+    });
+    expect(pending.data).toEqual({
+      pendingLinqChatIdEncrypted: null, pendingLinqChatLookupKey: null,
+      pendingLinqParticipantContactEncrypted: null, pendingLinqParticipantContactKind: null,
+      pendingLinqParticipantContactLookupKey: null, pendingLinqParticipantContactObservedAt: null,
+      pendingLinqRecipientPhoneEncrypted: null, pendingLinqRecipientPhoneLookupKey: null,
+    });
+    expect(mocks.encrypt).not.toHaveBeenCalled();
+  });
+
   it("retains a validated clean binding with only the pending-conflict read", async () => {
     const { prisma, retain } = createFixture();
     await expect(retain()).resolves.toEqual(participant);

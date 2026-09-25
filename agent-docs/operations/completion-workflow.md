@@ -1,6 +1,6 @@
 # Completion Workflow
 
-Last verified: 2026-09-04
+Last verified: 2026-09-11
 
 Use `agent-workflow-routing.md` for task scope, checkout, and plan/commit choice.
 Use `verification-and-runtime.md` for checks. This document owns completion;
@@ -36,22 +36,26 @@ alone does not authorize a narrower product or another state owner.
    plan-bearing commit, keep the plan active. `scripts/committer` takes explicit
    files and rejects directory targets; `scripts/finish-task` expands directories
    and closes the plan for the final commit. A PR with known edits still needed
-   stays draft.
+   stays draft. Before every subsequent push to an existing owned PR, follow
+   the verification guide's Draft-before-push sequence; do not wait for the
+   delayed controller to establish Draft.
 5. Once focused proof and parent candidate review pass and the pushed head is
    the intended candidate, mark the PR Ready. Start final ReviewGPT immediately
    when eligible, concurrently with CI. Follow the review loop's exact-head
    preflight and one completion owner; do not wait for CI before starting it.
 6. Triage findings against real evidence. Fix accepted issues at the smallest
-   correct boundary, rerun affected checks, and push. For a final ReviewGPT
-   `FINDINGS` result, follow its Finding Disposition Boundary before mutation;
+   correct boundary, rerun affected checks, mark Draft, and push. For a final
+   ReviewGPT `FINDINGS` result, follow its Finding Disposition Boundary before mutation;
    `PASS` proceeds without a user-resume pause. Re-establish readiness after
    any new push. Never rerun a review only to obtain agreement on a rejected finding.
 7. Perform the parent's final review after remediation. Close the active plan
-   and commit through `scripts/finish-task`; push and verify the resulting head.
+   and commit through `scripts/finish-task`; mark Draft before pushing and verify
+   the resulting head.
    Include every public-safe Frog entry created or modified during the task in that same scoped commit.
    A behavior-changing final edit needs the applicable checks and next review;
    explanatory docs and isolated proof additions follow the review loop's exemptions.
-8. Fetch the current base and prove mergeability with
+8. Refresh and verify the remote-tracking base using the explicit-refspec
+   procedure in `verification-and-runtime.md`, then prove mergeability with
    `git merge-tree --write-tree HEAD origin/<base>`. Keep green required CI on
    the PR-authored head. Reconcile the base when the authorized merge path
    needs it, following the review loop's Base-Update-Only Exception.
@@ -62,8 +66,12 @@ alone does not authorize a narrower product or another state owner.
 
 ## Product and Rendered Evidence
 
-The parent owns these checks; there is no mandatory preliminary specialist,
-local subagent, or separate simplify/final-review pass.
+The parent owns these checks as part of candidate and final review. Specialist
+passes are retired, including preliminary ReviewGPT specialists, local audit
+subagents, and separate coverage, security/privacy, frontend, prompt, Product UX,
+simplify, or task-finish passes. Do not schedule them from older plans, skills,
+or handoffs. Apply the relevant domain guidance directly and use Final ReviewGPT
+Eligibility below for the external completion gate.
 
 | Changed behavior | Required evidence |
 | --- | --- |
@@ -162,7 +170,9 @@ Before final ReviewGPT, read back the rendered PR body and confirm the complete
 intent and evidence. Add exactly one of each machine-readable line:
 
 - `ReviewGPT first-reviewed head: <full-sha>`: the 40-character pushed commit
-  from `git rev-parse HEAD`; this round-one baseline stays immutable.
+  from `git rev-parse HEAD`; this baseline stays immutable after the first valid
+  substantive review. Before then, an invalid initial attempt followed by an
+  authorized head change uses the recovery in `pr-reviewgpt-loop.md`.
 - `ReviewGPT context sensitivity: routine` or
   `ReviewGPT context sensitivity: sensitive`, with a reason. Any sensitive
   trigger above makes it sensitive regardless of size. Missing/invalid metadata

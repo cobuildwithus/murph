@@ -6,6 +6,11 @@ This document covers the narrow Cloudflare deploy surface for hosted execution.
 - `apps/cloudflare` owns execution coordination, encrypted runtime blobs, the native runner container, and the public/internal execution routes described in [README.md](./README.md).
 - Private `cobuildwithus/murph-cloud` owns production/preview GitHub environments, the protected deployment workflow, and rollback operations. Public Murph retains the source, render helpers, and smoke contracts that workflow consumes, but no deploy workflow or production credentials.
 
+For supported Cloudflare API reads and historical logs, prefer `cf` using the
+[operational CLI guidance](./README.md#cli-access-for-operational-reads).
+Deployment continues through the reviewed, pinned Wrangler helpers below;
+changing diagnostic CLI preference does not migrate the deployment contract.
+
 ## What The Deploy Flow Produces
 
 `pnpm --dir apps/cloudflare deploy:artifacts` renders:
@@ -22,104 +27,282 @@ That rendered surface is then used by:
 
 The rendered deploy helper path is the canonical direct Wrangler deploy contract consumed from the private deployment workflow. The checked-in Wrangler scaffold remains useful for local development, but production deploys must run from private Murph Cloud and use the rendered config so hosted email send bindings stay environment-specific and sender-restricted.
 `deploy:worker:apply` validates the generated Wrangler config, worker secrets payload, and `.deploy/runner-bundle/` manifest before invoking Wrangler. The runner bundle manifest records the assembled workspace closure and source/bundle fingerprints. Production assembly now builds the runner bundle first and renders those exact fingerprints into the Worker config; applying after a stale hosted-local bundle, a smoke-mutated bundle, or a config rendered for another bundle fails before upload.
-The production helper publishes one immutable registry image and uploads an
-inactive Worker version with its container class metadata. This declaration must
-precede native creation: an existing Durable Object namespace alone does not prove
-container enablement. Version upload does not move serving traffic. The helper
-revalidates the live version, then prepares only the inactive native application
-and dedicated smoke application through the Cloudflare Containers API. Quota
-admission and native rollout convergence must complete before Worker activation.
-A failed admission may leave an unactivated version; it never selects that version.
-The serving and retained legacy applications are excluded from native mutations.
-Native provider failures report the operation, HTTP status, numeric API codes,
-and at most five redacted messages of 320 characters each. The existing runtime
-redactor removes credential and personal-identifier shapes; the provider boundary
-also removes its exact token, account, requested name/image and native resource
-identifiers. Raw response details remain private. Inspect the provider explanation
-before retrying or changing capacity; transport and malformed responses stay distinct.
-Inactive-instance pagination rejection reports a fixed category (non-string, blank,
-oversized, or repeated token), page and native-row counts, and oversized token
-length. Cursor values, application identity, and provider response bodies are
-excluded. Inspection requests up to 1,000 rows per page to reduce cursor traversal over
-historical objects. All pages must still terminate normally and every native
-instance must be stopped; the 100-page, 10,000-native-row and time bounds remain.
+The production helper publishes one immutable registry image, uploads an inactive
+Worker version, and uses the native Containers API for image distribution. Normal
+releases keep the currently authoritative member application and its Durable
+Object namespace. They do not rotate between two positive-capacity banks.
+`CF_CONTAINER_MAX_INSTANCES` is one shared budget: subtract any retained legacy
+allowance, assign the remainder to the serving member application, and retain one
+additional deploy-smoke slot. The unused member application stays at zero.
+The scaffold declares the budget on `RunnerContainer`; staging moves that budget
+to `NextRunnerContainer` when the live release selects that namespace.
 
-Member applications require drain evidence before namespace reuse. The dedicated
-smoke application carries no member invocation, so it proceeds directly through
-native rollout and readiness checks without member drain admission.
+### Web-supplied runtime admission
 
-The controller is published with `wrangler versions upload` and activated at
-100% with `wrangler versions deploy`. Signed smoke proves the actual candidate
-namespace, exact image fingerprints, ready inventory, and configured runtime
-checks before a second Worker-only activation selects the candidate. Worker
-version commands preserve existing secrets and non-versioned settings; namespace
-bootstrap/migrations and changes to triggers or non-versioned settings remain
-separate infrastructure operations. The helper requires the candidate and smoke
-namespaces to exist before native preparation. Never substitute full
-`wrangler deploy` in this sequence: even `rollout_kind: none` can create a
-missing application after activating Worker code.
+Roll out this request change consumer first. Merge and deploy the Worker reader
+that accepts the optional `admission` on Web OIDC ensure-processing calls, then
+verify that serving Workers accept it before merging the separate Web producer
+PR. Older Web and signed Temporal calls omit the field and remain supported.
+The live Web protocol-admission probe below does not prove this reverse-direction
+contract. For rollback, restore and converge Web without the field before
+restoring an older Worker reader. Warm wakes retain exact native ownership
+checks; cold claims and recovery retain canonical Web mutations.
 
-`HOSTED_EXECUTION_RUNNER_DEPLOYMENT` owns active, candidate, and previous release
-identity. Identity includes the immutable image, exact bundle/source fingerprints,
-public commit provenance, and execution configuration, rather than the deployment
-attempt. Before rebuilding an image, the helper checks the admitted artifact
-against the requested commit, fingerprints, configuration, and namespace. A match
-reuses that immutable image despite rebuilt manifest timestamps, preserving its
-active identity or staged candidate inventory. Candidate promotion still requires
-successful smoke. A conflicting admitted candidate requires reconciliation.
-Public banner and health checks allow up to 30 attempts, two seconds apart, for
-the activated Worker version to propagate. Only a well-formed response from a
-different version is retried; HTTP failures and malformed responses fail
-immediately. Exhaustion still blocks candidate promotion.
-The legacy staging pointer predates immutable admission receipts. Its inactive
-application is reconciled through the existing drain/admission path, including
-when a native create committed but its response or subsequent Worker publication
-was lost. Its image is never reused as a verified artifact without provenance.
-A Worker-only release may retain a legacy active record with a mutable image tag.
-The reuse reader applies its legacy-provenance check to whichever release it
-selects, candidate or active, before inspecting the image. Such records require
-a normal immutable image build; they never authorize reuse of a legacy tag.
-No deployment-convergence restart retry is added to message processing.
+### Replica upload batches
 
-For a compatible Worker coordination change, the protected workflow may explicitly
-select `container_rollout=worker-only`. This retains the serving release's exact
-identity and all existing member application images and capacities, even when the
-new source has different bundle fingerprints. Only the existing one-slot deploy
-smoke application is admitted with the newly built artifact. Signed smoke still
-proves the selected serving namespace and its inventory, then exercises the new
-smoke artifact. There is one Worker activation and no member fleet promotion.
-An existing pending candidate becomes retained history; an absent inactive
-application is omitted from the effective config and exact-state receipt.
-Worker-only mode requires the predeploy gates and does not deploy runner changes.
-Production preflight accepts this explicit retained-image mode; production image
-changes still require immediate rollout and the existing state-isolation floors.
-The selected runner's old parser may omit new optional diagnostics; Worker-side
-logs remain available. Use a full release for changes that require a new runner.
-This mode does not change account quota or the overlap requirement of full image
-releases. Land the public selector before enabling its private workflow input.
+Deploy and converge Web's additive `admit_batch` and `release_batch` replica
+receipt consumer before deploying the Worker producer. Existing single-object
+Worker commands remain accepted. The existing live Web protocol admission gate
+requires full-size synthetic admission and settlement witnesses from Web's real
+replica command parser, so an old Web blocks the new Worker deployment. No
+fallback dispatches per-object writes after an uncertain batch response. Before
+reverting the Web consumer, first revert and converge every batch-producing
+Worker. After deployment verify the protocol probe and inspect bounded replica
+rejection and unresolved-upload aggregates; a successful 36-object refresh uses
+two receipt callbacks and still produces 36 durable physical-upload receipts.
 
-A bound, still-warm previous session retains its exact namespace, member, claim,
-and write fence through promotion. After its matching runtime completion is
-recorded, a previous release no longer retains warmth solely for an overdue or
-immediate wake. The ordinary lifecycle checks still require no active operation
-or child, no recent conversation warmth, available health, and no interaction
-race before retiring the shell. Fresh member allocation selects only the
-active release. Previous inventory cannot prepare, bind new members, or restart
-cold processes. Before reusing its namespace, CI requires native drain evidence
-from every page of the Containers dashboard instance endpoint used by Wrangler. Only an empty
-or entirely stopped native instance list proves drain; historical Durable Object
-identities are not occupancy. Unknown state, failed pages, invalid continuation
-tokens, and bounded-inspection exhaustion leave the active release serving. Native rollout admission uses
-the configured capacity without automatically reducing a serving ceiling.
-Account quota and overlap capacity must be verified against the actual account.
+### Runtime completion consolidation
 
-Worker/controller changes still require consumer-first compatibility with both
-supported images. This procedure cannot make a breaking protocol change safe
-without its compatibility release. A failed preparation leaves the current
-release selected. Promotion performs no native application mutations, verified
-against before/after native receipts. The effective config is recorded at the
-canonical generated path for private release verification. Rollback remains an
-explicitly authorized operation.
+Deploy the additive Web `complete` ownership command before activating the
+Worker that sends it. The existing live Web protocol admission requires early
+and settled completion witnesses from the deployed ownership command parser;
+an older Web is rejected before Worker activation. Old Workers still use the
+supported separate retirement, release, and owner-released requests. Warm
+containers keep their existing callback and native settlement receipt contract.
+Retain the new Web reader throughout Worker convergence and roll back the Worker
+producer before rolling Web below that reader. After deployment, inspect bounded
+ownership callback failures and confirm completion still progresses through
+retiring to idle without stale attempts changing a successor.
+
+### Live Web protocol admission
+
+`deploy-worker-version.cli.ts` admits the **served** `HOSTED_WEB_BASE_URL` before
+release work and again before each namespace bootstrap, native retirement or
+application admission, compatibility activation, and final promotion. Each
+boundary then rechecks the current Worker identity. Uploading an inactive version
+is not admission; artifact/fleet smoke and native convergence receipts remain
+required and do not attest Web compatibility. Retries and worker-only releases
+must obtain fresh admission; there is no persisted compatibility receipt or skip
+flag.
+
+The signed, bodyless GET `/api/internal/hosted-runtime/protocol-admission` uses
+existing Web callback signature verification and replay protection, with its own
+system nonce owner (not the Temporal binding-admission contract). The request
+binds the protocol version and a fresh nonce in the signed query. The no-store
+reply echoes that nonce and contains executable evidence from existing owners:
+
+- The Web runtime-log reader parses synthetic entries for its actual event-code
+  enum. The candidate requires its declared producer vocabulary to be a subset
+  of the reader's; a future reader's extra codes are allowed. The actual log route and
+  probe use the same parser, including `runner.processing_finished`.
+- The ownership command parser supplies early and settled completion witnesses.
+  The candidate verifies exact attempt/generation, native settlement target, and
+  immediate recheck semantics. The probe is synthetic and performs no mutation.
+- The normal thread-route authority handler and probe share their response
+  builder. The candidate uses the actual Worker response parser on both direct
+  and group witnesses, requiring explicit `true` and `false`. Denial, malformed
+  audience and inverted direct/group semantics fail closed. The Worker parser
+  still accepts legacy authorized responses for callers that do not need an
+  audience; the runtime's scheduled-delivery boolean requirement and independent
+  callback reauthorization are unchanged.
+
+Worker-only releases run both checks too: retaining an image does not prove that
+it lacks the audience requirement. Without an attested contract for that retained
+artifact, mode alone cannot safely lower the consumer floor. The declared log
+vocabulary is conservative (not pruned to call-site reachability); a legacy Web
+must gain the compatible reader/response encoding before this CLI can activate it.
+Old callers remain compatible with the additive Web response. Neither check
+requires equal or monotonically ordered source revisions.
+
+Each admission requires three successful samples, one second apart. Any failed
+sample ends the attempt, rather than retrying until a compatible replica happens
+to answer. Every sample has a ten-second end-to-end deadline and a 16 KiB streamed
+response limit. Only HTTPS origin requests, non-redirected HTTP 200, JSON, no-store
+and absent/zero Age are admitted. Authentication failures, unavailable Web,
+unknown protocol versions, stale nonce, malformed evidence and missing contracts
+fail closed. Diagnostics contain fixed reason codes or locally owned event codes,
+not remote response bodies, URLs, signatures or deployment identities.
+
+**Bootstrap:** deploy the additive Web endpoint and compatible readers to the
+actual serving Web origin first and finish propagation before deploying this
+CLI. A Web revision with no admission endpoint returns 404 and is deliberately
+not admitted, even when otherwise compatible. Backport the endpoint with evidence
+from that revision's real owners when retaining an older compatible Web; do not
+copy a newer revision's claimed evidence. Missing or incorrect callback signing
+configuration must be repaired through the existing protected deployment path.
+An already-incompatible live pair still needs a compatible Web forward fix; this
+guard prevents the next mutation, not damage already in progress.
+
+This is a bounded directed-contract check, not a Git SHA ordering rule or a claim
+of global atomic rollout. Three observations cannot prove every Web replica has
+converged, nor prevent an independent Web rollback after the check. Keep the
+serving alias stable and preserve the required reader floor throughout activation
+and subsequent operation. Admission tests event-code parsing and the authority
+response encoding, not database route correctness, every log field, or all
+Web-to-runtime features. In particular, selected custom-inference revisions flow
+in the opposite direction: the **Custom Inference Activation** procedure below
+still owns flag enablement, selected-state migration and the runtime rollback
+floor. This GET neither reads member selection nor authorizes that feature's
+activation. New wire obligations need narrowly derived executable witnesses at
+their actual owners, not labels in a general capability registry.
+
+### Retiring the selected-account size experiment
+
+All fresh member allocations use the regular runner fleet. The experiment's
+selector, custom sizing, bootstrap and dedicated rollout are removed. The
+`SmallRunnerContainer` class and binding remain solely for existing stored
+`runner-small--v-...` targets. Fresh preparation and binding are rejected;
+existing exact bindings still use the ordinary checkpoint and retirement owner.
+
+Migration history ends at `v9`. Normal releases use `wrangler versions upload`
+without a namespace migration. Release staging retains the existing small
+application's exact image, resources and capacity; its zero-capacity scaffold
+entry neither provisions an absent application nor changes a live one. It is
+excluded from image admission and native rollout. The regular member budget
+and isolated smoke capacity are unchanged.
+
+Physical deletion is deferred. It is unnecessary for ordinary releases and
+permanently destroys namespace data. Before proposing a later deletion, prove
+no persisted active or pending UserRunner target references the namespace,
+no invocation or instance remains, and the last workspace checkpoint committed.
+Zero native instances alone is insufficient. A later reviewed retirement must
+use protected `wrangler deploy --containers-rollout=none`, retain regular native
+resources and serving release variables, pass Web protocol admission and recheck
+live Worker identity immediately before activation. Never force-stop member
+work or erase routing state to satisfy drain. Cloudflare's
+[Durable Object migration contract](https://developers.cloudflare.com/durable-objects/reference/durable-object-class-migrations-legacy/)
+requires this separate activation; normal version uploads cannot apply deletion.
+
+### Migration and release order
+
+1. Read one authoritative live Worker version, its release manifest, the existing
+   application identities and namespace bindings. An old cross-bank pending
+   candidate must be reconciled before the first in-place release.
+2. Upload the compatible Worker without activating it. If the non-serving member
+   application still has capacity, wait for every native instance to stop, then
+   re-read drain evidence, reduce only its ceiling to zero, and verify the result.
+   Retain its class, binding, image, and previous-release descriptor for cleanup.
+   Historical Durable Object records are not running instances. Failed, unknown,
+   repeated-cursor, or bounded-out inspection stops the deployment.
+3. Read the account's actual CPU, memory, and disk limits and all application
+   ceilings. Prove the prospective serving ceiling fits, including smoke and
+   unrelated applications. Missing evidence fails closed; published defaults are
+   never substituted for measured quota.
+4. Admit the isolated one-slot smoke application and wait for native distribution.
+   Activate the compatible Worker with the old/target image pair before mutating
+   the member image. It keeps the same allocation ID and exact member ownership.
+   Run signed `/internal/deploy/artifact-smoke` against the isolated application:
+   exact bundle provenance, Codex shell, direct R2 publication, and the configured
+   bounded live-model check. This route never prepares serving slots or reads or
+   fills standby inventory. An old Worker returns 404 rather than accidentally
+   running the serving proof; edge propagation uses the existing bounded retries.
+   Failure leaves the serving image untouched and the pending pair available for
+   same-artifact recovery.
+5. Update the serving application in place and submit a native rolling rollout.
+   Gradual mode is the default in every context, including production, and sends
+   the configured 10/25/50/100 cumulative percentage targets; explicit immediate
+   mode sends one 100-percent step. Neither mode is an atomic switch.
+6. Wait for completed native distribution, then run signed smoke against the
+   target image and serving namespace. A final Worker-only activation removes the
+   old image from admission while preserving configured pristine standby inventory.
+   Verify that this publication did not mutate native applications and record
+   the effective config for private release verification.
+
+Cloudflare sends SIGTERM and allows up to fifteen minutes for a selected process
+to exit before replacement. Its active grace period is connection-age eligibility,
+not an application checkpoint deadline. Existing runner shutdown, checkpoint,
+write-fence, and process-generation checks remain required. Native replacement
+can temporarily interrupt a member process; this procedure does not promise a
+continuously warm shell during deployment. See the official
+[rollout contract](https://developers.cloudflare.com/containers/configuration/rollouts/).
+
+### Production rollout policy
+
+Preflight and execution share `container-rollout-policy.ts`: ordinary compatible
+releases default to gradual, explicit immediate and Worker-only remain supported,
+and unknown modes fail before mutation. The private protected workflow already
+selects gradual by default. Its separate requirement to use immediate when
+predeployment E2E gates are deliberately skipped remains in force.
+
+The removed blanket immediate-only rule described earlier audience-key,
+selector-scope, and schema-v16 first-writer migrations. It was not a live check of
+whether those migrations had converged. Runtime schema floors (currently 19),
+exact image-pair admission, audience/selector ownership, and effect persistence
+checks remain unchanged. Removing the mode restriction does not declare an
+unknown deployed image compatible or remove a rollback floor.
+
+Before a gradual release, establish the exact serving baseline, its completed
+native distribution, and compatibility of the staged Worker with both baseline
+and candidate images. Exercise applicable persisted state and mailbox formats;
+identity fingerprints alone do not prove protocol compatibility. A new writer
+that cannot coexist with the baseline requires a consumer-first compatibility
+release, an explicit immediate transition where the owner contract requires it,
+and normal convergence proof. Keep the first-writer instructions below for those
+transitions; immediate minimizes the mixed window but does not eliminate it.
+
+These are native automatic percentage steps, not application-health approvals
+between cohorts and not a maximum-unavailable guarantee. A failed job or smoke
+does not stop an already accepted automatic rollout. Native manual progression
+needs separate hosted hold/retry proof before it can provide that additional
+control. No manual scheduler or automatic rollback is introduced here.
+
+### Identity, recovery, and capacity
+
+`HOSTED_EXECUTION_RUNNER_DEPLOYMENT` retains active, candidate, and previous
+records. During an in-place transition, active and candidate share the permanent
+allocation ID and bank, but record separate exact bundle/source fingerprint
+pairs. The candidate also records the immutable image, commit provenance, and
+execution configuration before native mutation. Runtime admission accepts only
+those complete pairs, never mixed fingerprint halves or arbitrary historical
+images. Promotion changes the executing image without aging out member bindings.
+The other bank's previous descriptor remains available solely for existing
+retained ownership and cleanup; fresh allocation selects the serving bank.
+
+During an in-place image transition, configured pristine standby inventory stays
+eligible for preparation, claims, and refill. Both health gates admit the same
+complete active or candidate image pair; all pristine and immutable member-binding
+checks remain required. Native replacement can still require a slot to restart
+and reprove readiness. Promotion narrows admission to the candidate image.
+Worker-only deployments
+preserve an existing pending pair and all member images and capacities; only the
+smoke artifact changes. They never silently cancel a pending image rollout.
+
+A failed native mutation or smoke leaves the compatible Worker and immutable
+pending target in place. Retry the same artifact: reconcile an accepted active or
+completed rollout by its version and exact configuration before issuing another
+request. An interrupted PATCH without rollout evidence completes the pending
+rollout; a conflicting candidate or unrelated active rollout requires explicit
+reconciliation. Application target equality alone is not distribution proof.
+There is no automatic rollback, capacity reduction, or message-processing restart
+loop. A rollback below the compatible deployment reader is unsafe once a same-bank
+candidate has been published; rollback remains a separately authorized operation.
+
+The protected workflow and existing expected-live-version checks serialize this
+operation. Breaking Worker/runner protocols still require a consumer-first
+compatibility release before the new writer or image. Worker version commands
+preserve secrets and non-versioned settings; namespace bootstrap, triggers, and
+non-versioned infrastructure changes remain separate operations. Do not replace
+this sequence with a full `wrangler deploy`, which is nontransactional across
+Worker activation and container changes.
+
+The conservative capacity target is 702 member-application slots plus one smoke
+slot. At two vCPUs per container this reserves 1,406 vCPUs and leaves about 700
+member-bound slots after two standbys. Against a measured 1,500-vCPU limit that
+leaves 94 vCPUs before other applications. Require fresh CPU, memory, and disk
+accounting and preserve an explicit operational margin. A 748-slot ceiling plus
+smoke would consume 1,498 vCPUs and leave almost no CPU headroom; it is a maximum
+arithmetic case, not the recommended deployment target. Quota headroom does not
+make a member's exact container interchangeable with an unused slot. Actual
+account limits and current instance resources govern admission. The
+[published limits](https://developers.cloudflare.com/containers/platform/limits/)
+are context, not production evidence. Changing the protected environment's ceiling
+is a separate rollout action after this source release is verified.
+
+Provider failures retain bounded, redacted operation/status/code explanations.
+Drain inspection requests up to 1,000 rows per page and is bounded to 100 pages,
+10,000 native rows, and twenty minutes. Cursor values and raw private provider
+responses are excluded from diagnostics. Native rollout convergence is bounded
+separately and must finish before removing the compatibility pair.
 
 The deploy helper also rejects generated config or secrets that no longer match the current environment, and rejects runner bundles assembled with `runner:bundle:assemble-only` so smoke-only build shortcuts cannot be uploaded as production artifacts.
 Every protected deploy must set `HOSTED_EXECUTION_DEPLOY_TAG` to the private
@@ -132,24 +315,22 @@ raw application IDs, image references, account identifiers, tokens, and provider
 errors out of the receipt. Exact-name application discovery uses the provider
 list only to resolve one application identifier; both the pre-deploy and
 post-deploy receipt snapshots come from that application's detail endpoint.
-After Wrangler reports a successful container change, the deploy helper waits
-up to two minutes for the provider to expose the exact transition. While a
-rollout is active, the receipt uses that new rollout's authoritative target
-version and image only when its current version and image match the pre-deploy
-application and its identifier differs from any pre-existing active rollout.
-If the rollout has already completed, the receipt uses the transitioned
-application detail instead. Unreadable, reused, reverted, replaced, or
-unrelated rollout evidence fails closed instead of issuing a stale receipt.
-The provider application version is a release identity, not a deploy counter;
-an `updated` entry requires the existing provider application identity to
-remain continuous and either a newly active target or a completed detail
-transition. A later protected observer must match the receipt to 100% Worker
-traffic and the final container versions, image digests, capacities, and rollout
-outcomes. Land
-this public producer before enabling a private workflow that requires the
-receipt; the reverse order intentionally fails closed.
+The receipt is assembled after native distribution completes and records the exact
+resulting application version and image digest. A resumed deployment may record
+completion of its existing pending rollout when the original target version and
+image match exactly. Worker-only retention can preserve an unchanged pending
+rollout, but a full image release cannot finalize while distribution is active.
+A later protected observer must match the receipt to 100% Worker traffic and the
+final container versions, image digests, capacities, and rollout outcomes.
 Docker runner smoke derives a separate `.deploy/runner-smoke-bundle/` from the validated production bundle and overlays smoke-only entrypoints there, so the production `.deploy/runner-bundle/` remains the deploy artifact after smoke.
 Runner bundle assembly esbuild-bundles two boot-critical surfaces with byte budgets and assembly-time probes: the in-container `vault-cli` binary (`scripts/runner-bundle/bundle-cli.ts`) and the container entrypoint itself (`scripts/runner-bundle/bundle-entrypoint.ts`, output `dist-bundled/`, run by the image CMD). The Node-only CLI chunks use native UTF-8 output so existing Unicode literals are not expanded into ASCII escapes; assembly retains absolute entry-chunk and static-startup-closure caps, while canonical Ubuntu x86_64 host-support CI builds the exact candidate and its exact first parent in isolated sibling checkouts and permits total output growth only up to `max(96 KiB, floor(1% of base total))`. The CLI probe creates private synthetic initialized-vault fixtures, requires exact bundled/unbundled parity for populated `memory show --format json`, and separately preserves the successful empty result when canonical memory is absent. The bundled entrypoint cuts cold-boot module loading from ~960 file reads to ~27 chunk reads on lazily pulled image layers; package resolvers that derive asset paths from their own module location are pinned to the installed package copies via Dockerfile ENV (`MURPH_ASSISTANT_SKILLS_ROOT`, `MURPH_ASSISTANT_CLI_SURFACE_PREBUILT_ARTIFACT_PATH`, `MURPH_HEALTH_COMMONS_PACKAGE_ROOT`). Health Commons stays installed in the runner bundle for its compact protocol, biomarker desired-direction, and Goal-index artifacts, while its JS is inlined and assembly probes set the same package-root pin for bundled and unbundled parity. The broader web-only Health Commons artifact tree remains excluded; only the compact `generated/web/browse/goals.json` runtime index is retained. Zod stays installed for deferred package-loader paths, but production assembly removes declaration files, TypeScript source, the legacy v3 runtime, and unused mini variants after verifying that staged JavaScript imports only the retained root and v4 surfaces.
+The entrypoint bundler resolves its working directory to the canonical staged root.
+Emitted source comments and chunk hashes therefore stay independent of checkout
+and temporary-directory lengths; the existing startup byte caps still measure
+the actual emitted artifact. Lazy-chunk probes resolve metadata paths from that
+same root, including when the supplied staging path goes through a symlink.
+The standalone installer seeds registry resolutions from the committed production graph selected by `pnpm list --prod --depth Infinity --lockfile-only --json` for the runner and its packed workspace closure. Web-only package versions are excluded from that seed, so adding a Web dependency cannot silently select its newer version merely because the root lockfile contains it. Workspace tarballs, registry integrity checks, release-age policy and exact patch application retain their existing owners.
+
 The device-sync package boundary suite also walks the static source graph from the runner's runtime-config entrypoint and rejects provider runtime modules, importer modules, and the Junction SDK. This focused gate catches boot-closure ownership regressions before the packed-bundle guard validates the final esbuild metafile.
 Hosted assistant delivery recovery now relies on committed side-effect state inside the encrypted workspace and the web-owned hosted workspace checkpoint.
 
@@ -418,10 +599,9 @@ quarantine it during idle snapshot maintenance.
 
 Runner schema version 16 is a hard Cloudflare/runner rollback floor after the
 deploy reaches a member's Durable Object. Do not roll Worker or runner below
-that floor; use a forward fix on version 16 or newer. Production preflight keeps
-the immediate-container requirement fail closed, and the existing bundle
-fingerprint admission prevents a stale warm runner from becoming the first
-writer. After deployment, prove the managed runner fingerprint, send one
+that floor; use a forward fix on version 16 or newer. The first-writer release requires explicit immediate rollout and convergence;
+later compatible releases may use the production rollout policy above. Exact
+bundle admission and the runtime schema floor remain enforced. After deployment, prove the managed runner fingerprint, send one
 image-plus-link and one text-plus-voice response, checkpoint both workspaces,
 and confirm Workers Observability contains no outbox quarantine or runner schema
 version failures.
@@ -462,18 +642,17 @@ of an existing Durable Object row: after write authority is cleared,
 is confirmed destroyed. Withdrawal and account deletion both consume this
 pending-stop pointer before acknowledging their respective cleanup boundary.
 
-The first-contact shell hint now writes that same exact target before the
-container acknowledges registration of its platform-start operation. Deploy
-this Worker with `container_rollout=immediate`: an older Worker can have started
-a versioned shell without recording its name, so a gradual container drain
-cannot prove withdrawal or deletion will find every old hint. Deploy Web first,
-then deploy this Worker immediately. The response shape is unchanged, but Web
-can now deny an absent or suspended member while reporting a non-revoked
-consent state. An older Worker rejects that combination and fails closed; the
-new Worker accepts both legacy and fail-closed responses. Do not deploy the new
-Worker before Web because the old Web admission owner cannot deny a hint queued
-behind account deletion. After the first shell-hint target is reserved, this
-Worker is part of the existing hard rollback floor described below.
+The retired first-contact shell hint also reserved that exact target before the
+container acknowledged registration of its platform-start operation. Its rollout
+required Web first, then an immediate Worker rollout: an older Worker could
+have started a versioned shell without recording its name, and older Web
+admission could not deny a hint queued behind account deletion. The unchanged
+response shape allowed Web to deny an absent or suspended member while reporting
+a non-revoked consent state; the preceding Worker rejected that combination,
+while the compatible Worker accepted both legacy and fail-closed responses.
+After the first shell-hint target was reserved, that Worker became part of the
+existing hard rollback floor described below. Retiring the optional hint
+transport does not remove the exact-target cleanup requirement.
 
 After the first such pending-stop row is written, this Worker is a hard
 Cloudflare rollback floor. An older Worker treats the absent active attempt as
@@ -1423,7 +1602,7 @@ increase in failed starts, and a candidate p95 no more than one second slower
 than the prior version. A rollback must also preserve the unified-fleet
 identity compatibility floor described in the migration section.
 
-The production smoke also runs one real `gpt-5.6-terra` model turn inside the deployed runner container (`HOSTED_EXECUTION_SMOKE_LIVE_MODEL_TURN=true`, set by the deploy workflow's `live_model_turn` input, default on). The container runs a single non-interactive `codex exec` in a scratch workspace with the injected-credential placeholder; the Worker egress intercept authorizes exactly one deploy-smoke fenced `POST /v1/responses` request for `gpt-5.6-terra` and injects the real Worker-owned `OPENAI_API_KEY`, so the smoke proves the rollout target's OpenAI auth, account availability, quota, request compatibility, and network path without the raw key ever entering the container. The container accepts the smoke only when Codex JSONL reports the final agent output as exactly `OK`. Cost posture: exactly one bounded model turn per production deploy; the flag is never set in per-PR CI or hosted-local E2E, so those paths are byte-for-byte unchanged.
+The production smoke also runs one real `gpt-6-luna` model turn inside the deployed runner container (`HOSTED_EXECUTION_SMOKE_LIVE_MODEL_TURN=true`, set by the deploy workflow's `live_model_turn` input, default on). The container runs a single non-interactive `codex exec` in a scratch workspace with the injected-credential placeholder; the Worker egress intercept authorizes exactly one deploy-smoke fenced `POST /v1/responses` request for `gpt-6-luna` and injects the real Worker-owned `OPENAI_API_KEY`, so the smoke proves the rollout target's OpenAI auth, account availability, quota, request compatibility, and network path without the raw key ever entering the container. The container accepts the smoke only when Codex JSONL reports the final agent output as exactly `OK`. Cost posture: each enabled behavioral smoke phase runs one bounded model turn; an image release checks the isolated artifact before serving replacement and retains the existing post-rollout checks; the flag remains disabled in per-PR CI and hosted-local E2E.
 
 ## Venice Provider Activation
 
@@ -1577,9 +1756,36 @@ Core execution tuning:
   does not cancel a recent platform cold start; later readiness checks rejoin
   that same start until this container-owned window expires.
 - `CF_ALLOWED_RUNNER_SECRET_KEYS` to seed `HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS` in the rendered worker config
-- `HOSTED_EXECUTION_CONTAINER_ROLLOUT` controls the one-off Wrangler container rollout flag during deploy. While the vault-share selector-scope migration is active, production deploy helpers default to `immediate` and production preflight rejects explicit `gradual`; use `gradual` only for non-production deploys or after the selector-scope rollout guard is removed.
+- `HOSTED_EXECUTION_CONTAINER_ROLLOUT` selects native `gradual` (default), explicit `immediate`, or `worker-only`. Follow the Production rollout policy above for compatibility evidence and first-writer transitions.
 - `HOSTED_EXECUTION_RUNNER_ENV_PROFILES` adds deploy-time profiles on top of the runtime's minimal `assistant` baseline; deploy automation defaults to `exa,hosted-email,linq,mapbox,telegram`. Hosted device-sync runtime config is resolved from worker env directly rather than a runtime-env profile.
-- `HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS` defaults to `300000` (production sets `600000`) and controls the post-completion warm lease minted only by observed conversation activity. Reducing production from 20 minutes to 10 minutes means a follow-up in the former 11–20 minute warm window can take the existing cold-start path instead. `HOSTED_EXECUTION_RUNNER_LIFECYCLE_REEVALUATION_MS` defaults to the idle TTL when absent for rollback compatibility. Leave it unset for the additive code deploy and one legacy-TTL observation window, drain old containers, then set it to `60000` for a canary before widening the rollout. Device sync, system maintenance, replay, and generic runner activity do not extend conversation warmth. RunnerContainer derives the lease directly from the resident child process's private health watermark on every expiry, re-arms the platform timeout while the lease or active work remains, yields on uncertain cleanup state, and otherwise destroys the idle shell. An old child without the watermark remains protected and re-arms the lifecycle timer; its active-work count independently protects active work. A replacement child starts without inheriting the old process's warmth. Dirty foreground runtime state is checkpointed by the runtime-owned idle-floor—or last-chance shutdown—`idle_shutdown` path before the invocation returns; RunnerContainer never records pending checkpoint intent.
+- `HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS` defaults to `600000` and bounds
+  conversation warmth from the latest accepted inbound user's original server
+  receipt. `HOSTED_EXECUTION_RUNNER_LIFECYCLE_REEVALUATION_MS` defaults to
+  `60000` independently. RunnerContainer uses the existing SDK schedule owner
+  (not a replacement `alarm`) to check that absolute deadline despite generic
+  request activity. An invocation's completion, cleanup, replay, responses,
+  device work, and published wakes never grant a new ten-minute grace period.
+  Active work and uncertain health/stop state remain protected by the existing
+  lifecycle lock, exact interaction generation, child active-work count, and
+  safe-stop/recovery paths. The SDK task is pre-armed before asynchronous checks
+  because the SDK consumes a callback even on failure. Dirty runtime work still
+  checkpoints under its own owner; no host-owned checkpoint intent is added.
+
+  Receipt-deadline rollout is consumer-first: deploy the Worker consumer before
+  promoting the new runner image, using the existing deployment/release gates.
+  An old image's missing `conversationActivityReceivedAtEpochMs` grants no idle
+  warmth, but its validated active count still protects all in-flight work.
+  This can cause an earlier safe cold start during the transition. The new
+  image temporarily emits `conversationWarmActivityCompletedAtEpochMs` as a
+  wire alias of the same receipt watermark for the preceding Worker; it never
+  stores or mints a completion timestamp. A rollback to the old Worker can
+  temporarily restore its old generic-activity scheduling policy, but not
+  interrupt active work. Keep this one alias only through the supported Worker
+  rollback window and old-Worker drain; remove it once that rollback floor is
+  advanced. No Temporal/Web rollout or checkpoint-signal change is required.
+  Process replacement clears warmth rather than restoring a completed lease;
+  DO replacement recovers the SDK task and checks the live process.
+
 - `HOSTED_EXECUTION_STANDBY_MODE` defaults to `off`; `shadow` maintains ready
   inventory without allocating it, and `allocate` lets authenticated foreground
   conversation work claim it. Modes control inventory only; all fresh cold
@@ -1779,7 +1985,7 @@ Hosted assistant config:
 - `HOSTED_ASSISTANT_PROVIDER`; keep the fleet default `openai`. A per-member
   Venice selection arrives through the signed workspace projection rather than
   this deploy default.
-- `HOSTED_ASSISTANT_MODEL`; worker deploy preflight requires an explicit allowance-priced direct OpenAI model slug. Supported slugs are `gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna`. Production deploys require `HOSTED_ASSISTANT_REASONING_EFFORT=low`.
+- `HOSTED_ASSISTANT_MODEL`; worker deploy preflight requires an explicit allowance-priced direct OpenAI model slug. Supported slugs include `gpt-6-sol`, `gpt-6-luna`, `gpt-6-astra`, `gpt-5.6-sol`, and `gpt-5.6-luna`. GPT-6 Sol is the managed OpenAI default. Production deploys require `HOSTED_ASSISTANT_REASONING_EFFORT=low`.
 - `HOSTED_ASSISTANT_APPROVAL_POLICY`
 - `HOSTED_ASSISTANT_REASONING_EFFORT`
 - `HOSTED_ASSISTANT_SANDBOX`
@@ -2114,7 +2320,7 @@ export HOSTED_R2_PRESIGN_BUCKET_NAME=hosted-execution-bundles-staging
 export HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID=cloudflare-automation:v1
 export HOSTED_CRYPTO_ENV=preview
 export HOSTED_ASSISTANT_PROVIDER=openai
-export HOSTED_ASSISTANT_MODEL=gpt-5.6-terra
+export HOSTED_ASSISTANT_MODEL=gpt-6-sol
 export HOSTED_ASSISTANT_REASONING_EFFORT=low
 
 # Set required secret-valued variables outside this snippet before running:
@@ -2143,12 +2349,40 @@ pnpm --dir apps/cloudflare runner:docker:base
 ```
 
 That image is prepared in the local Docker cache under the stable GHCR tag
-`ghcr.io/cobuildwithus/murph-cloudflare-runner-base:node24.14.1-codex0.153.4`,
+`ghcr.io/cobuildwithus/murph-cloudflare-runner-base:node24.14.1-codex0.156.1-live1`,
 which is also the final app-layer Dockerfile default. Using the pullable GHCR
 name avoids BuildKit treating the prepared base as a Docker Hub `library/*`
 image during local Wrangler container builds.
-Codex CLI 0.153.4 supplies the native Astra entry; the image no longer
-synthesizes Astra from Sol. The existing standard catalog and separately
+The base Dockerfile builds the CLI from the checksum-pinned Codex 0.156.1 source
+with `patches/codex-public-live.patch`. It keeps the same release's bundled
+Code Mode host and sandbox resources. The patch adds public API-key Live
+compatibility, owned-session shutdown, and opt-in app-server input ownership.
+Existing callers retain native routing by default. No separate package registry
+or release workflow is required.
+Both the Dockerfile and patch enter the source fingerprint, so a patch-only
+change cannot reuse an older published base. The package records its upstream
+revision and patch digest in `/usr/local/lib/murph-codex/murph-source-revision`.
+The permission-sandbox CI lane extracts this package from the built image and
+runs synthetic native voice and existing provider conformance checks against
+that exact binary before its final-image sandbox proof.
+
+To update the patch, retain the pinned release as its base, run the affected
+upstream tests, and run `pnpm --dir apps/cloudflare verify:codex-upstream-source`
+to verify applicability. Update the source revision and archive checksum
+together when upgrading Codex, keep the npm helper version aligned, and rerun
+the exact-image compatibility and sandbox lane. Remove the patch and build
+stage once a verified upstream release provides this behavior. Cold native
+builds take longer. A persistent trusted BuildKit cache lets application-only
+changes reuse the compiled layer while preserving production's source-build
+rule. The protected deployment workflow must provide that cache before this
+patch is considered operationally ready; its current fresh-runner forced
+build would otherwise recompile Codex for each deployment.
+
+Codex CLI 0.156.1 supplies native Sol, Luna and Astra entries. Its bundled
+Sol/Luna entries match the former pinned launch supplement, which is removed
+along with its bundle staging and fingerprint input. The native bundled catalog
+is the sole model-entry source.
+Terra is excluded from active catalogs; historical usage pricing remains readable. The existing standard catalog and separately
 authorized Astra catalog retain their model filtering, mixed Code Mode, Flex,
 and context-window validation. Missing product models fail the image build.
 The saved `portable-responses-v1` custom-inference verification identity remains
@@ -2165,13 +2399,24 @@ proof. After deployment, verify `codexVersion` in runner smoke and bounded
 provider-start/resume error aggregates. Production deployment and any rollback
 remain separately authorized operations.
 It contains Node, Python 3 exposed as both `python3` and `python`, pinned `@openai/codex` with its bundled Linux sandbox resources, `jq`, `ripgrep`, `ffmpeg`, and PDF tooling from Poppler plus `file` and `qpdf`, but no app bundle, worker secrets, or local speech models.
-The final app-layer image filters `codex debug models --bundled` to exactly `gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna`, adds OpenAI flex service-tier support to each, forces mixed `tool_mode: code_mode`, validates the exact catalog with `jq`, and exposes it through `MURPH_HOSTED_CODEX_MODEL_CATALOG_JSON`. Hosted app-server turns can therefore keep the code executor, expose native `tool_search` for deferred dynamic tools, and send OpenAI `service_tier: flex`; individual tool `deferLoading` flags still keep broad schemas out of the initial model-visible surface. The deploy smoke exercises Terra through that same model catalog, and native Codex validation rejects a non-product per-spawn model before provider traffic. Hosted Codex MultiAgent V2 is enabled through the generated `[features.multi_agent_v2]` config table, which also carries Murph's proactive-delegation tool and mode hints: delegate bounded background work that would otherwise block the immediate reply. Hosted launches must not pass a boolean `features.multi_agent_v2` override because that would replace the table and drop those hints. Per-spawn model selection stays disabled unless Web's existing assistant-configuration owner confirms that the current managed runtime is authorized for the full product-model catalog; Cloudflare forwards that one decision, and missing projection or custom inference disables only the optional selector. Deploy the Cloudflare/runtime consumer before the Web producer so mixed versions fail closed without blocking ordinary replies or inherited-model children. The Codex App Server stays warm for the container lifetime; catalog changes take effect through normal container or process replacement, not per-turn restart.
+The pinned Sol/Luna launch catalog travels inside the runner bundle, including
+bundle-only CI and hosted-local build contexts, and participates in the runner
+source fingerprint. A catalog edit therefore invalidates a prepared bundle.
+Deploy the model-capable runner and allowance reader before the Web producer
+activates new model preferences/defaults; old consumers reject the new IDs.
+Launch prices per million tokens are Sol $2 input / $10 output and Luna $0.10
+input / $0.50 output, with published cache and service-tier multipliers.
+Saved Terra preferences resolve to Sol; historical GPT-5.6 pricing stays readable.
+A rollback after new preferences are saved requires a reader that still accepts
+those IDs.
+
+The final app-layer image filters `codex debug models --bundled` to GPT-6 Sol/Luna, GPT-5.6 Sol/Luna, and the separately authorized GPT-6 Astra catalog, adds OpenAI flex service-tier support to each, forces mixed `tool_mode: code_mode`, validates the exact catalog with `jq`, and exposes it through `MURPH_HOSTED_CODEX_MODEL_CATALOG_JSON`. Hosted app-server turns can therefore keep the code executor, expose native `tool_search` for deferred dynamic tools, and send OpenAI `service_tier: flex`; individual tool `deferLoading` flags still keep broad schemas out of the initial model-visible surface. The deploy smoke exercises GPT-6 Sol through that same model catalog, and native Codex validation rejects a non-product per-spawn model before provider traffic. Hosted Codex MultiAgent V2 is enabled through the generated `[features.multi_agent_v2]` config table, which also carries Murph's proactive-delegation tool and mode hints: delegate bounded background work that would otherwise block the immediate reply. Hosted launches must not pass a boolean `features.multi_agent_v2` override because that would replace the table and drop those hints. Per-spawn model selection stays disabled unless Web's existing assistant-configuration owner confirms that the current managed runtime is authorized for the full product-model catalog; Cloudflare forwards that one decision, and missing projection or custom inference disables only the optional selector. Deploy the Cloudflare/runtime consumer before the Web producer so mixed versions fail closed without blocking ordinary replies or inherited-model children. The Codex App Server stays warm for the container lifetime; catalog changes take effect through normal container or process replacement, not per-turn restart.
 The runner bundle is root-owned and mode-normalized in an intermediate image
 stage, then copied once into a fresh final base stage. Keep that normalized-copy
 boundary instead of applying a recursive permission change after the final
 bundle copy: a post-copy `chmod` creates another application-content layer while
 the runtime still needs only one immutable `/app` tree.
-`runner:docker:base` first reuses a GHCR-published base image when its source-fingerprint label matches the checked-out `Dockerfile.cloudflare-hosted-runner-base`; otherwise it rebuilds locally. Pass `-- --force` to rebuild from the checked-out Dockerfile without adopting a GHCR base image; deploy-capable production paths use that forced path so GHCR stays a CI/local cache instead of production image authority. Pull-request hosted-local E2E does not authenticate to GHCR before running PR-controlled code, so the GHCR runner base package must be public for fast anonymous PR cache pulls. The protected-main `.github/workflows/cloudflare-runner-base-image.yml` workflow publishes the base image with `GITHUB_TOKEN`.
+`runner:docker:base` first reuses a GHCR-published base image when its source-fingerprint label matches the checked-out `Dockerfile.cloudflare-hosted-runner-base` and native patch; otherwise it rebuilds locally. Pass `-- --force` to rebuild from the checked-out Dockerfile without adopting a GHCR base image; deploy-capable production paths use that forced path so GHCR stays a CI/local cache instead of production image authority. Pull-request hosted-local E2E does not authenticate to GHCR before running PR-controlled code, so the GHCR runner base package must be public for fast anonymous PR cache pulls. The protected-main `.github/workflows/cloudflare-runner-base-image.yml` workflow publishes the base image with `GITHUB_TOKEN`.
 The base image build runs `python3 --version`, `python --version`, `jq --version`, `rg --version`, `zstd --version`, `codex --version`, `codex app-server --help`, and `codex doctor --help` under the runner user, and the Docker smoke repeats the Python and ripgrep checks inside the final image before deploy while also proving `file`, `pdfinfo`, `pdftotext`, `pdftoppm`, and `qpdf` against the restored smoke PDF fixture.
 Run `pnpm --dir apps/cloudflare test:e2e:runner-python:local` when you specifically want the actual final hosted-runner app image `PATH` proof for Python. It assembles the runner bundle, builds the same `linux/amd64` app-layer Dockerfile used by the Cloudflare container, starts the image with its normal entrypoint, waits for `/health`, then checks Python as the non-root `runner` user from immutable `/app` with the baked runner env. Run `pnpm --dir apps/cloudflare runner:docker:smoke` when you want the broader final-image native smoke. In addition to the existing command surface, that smoke restores a canonical synthetic memory document and invokes bundled `vault-cli memory show --format json` through Codex App Server from the restored vault working directory under the member-workspace permission profile. The disposable, networkless smoke relaxes the outer Docker seccomp profile so Codex can create its inner user namespace, matching the namespace capability available in Cloudflare's dedicated Linux VM. The nested Codex seccomp proof requires a native `linux/amd64` Docker host; AMD64 emulation on an ARM64 Docker daemon does not support that inner seccomp layer.
 
@@ -2255,9 +2500,31 @@ That command:
 - renders the deploy config and worker secrets payload
 - assembles the runner bundle, building and packing the runner workspace closure with bounded parallelism (`MURPH_RUNNER_BUNDLE_BUILD_CONCURRENCY` defaults to `1`; `MURPH_RUNNER_BUNDLE_PACK_CONCURRENCY` defaults to `4`); runner-specific CLI and Health Commons tarballs keep the deployed `murph` / `vault-cli`, compact protocol artifacts, compact biomarker desired-direction projection, and compact Goal index without the public npm package's nested bundled workspace payload or other web-only Health Commons artifacts
 - prepares the stable native runner base image with Docker's local cache; production deploy paths force that build from source, while hosted-local E2E lanes may reuse the GHCR-published runner base image when the source fingerprint matches the current checkout
-- deploys the Worker directly with Wrangler; production deploys currently default to immediate container rollout for the vault-share selector-scope migration, while non-production deploys default to gradual and build only the small app image layer from the prepared runner bundle
+- publishes the compatible Worker through Wrangler version commands, proves the isolated artifact behavior, and updates the serving image through native gradual rollout by default; explicit immediate and Worker-only releases use the same guarded owner
 
-The gradual container rollout keeps the production `RunnerContainer` and `StandbyRunnerContainer` `rollout_active_grace_period` at 300 seconds and rolls their instances through `10`, `25`, `50`, then `100` percent. Standby readiness is release-scoped, so a mixed rollout never advertises an old image for a new Worker release. The isolated `DeploySmokeRunnerContainer` uses zero active grace and a single 100 percent step: it carries no user work, and smoke probes must not defer the image replacement they are trying to verify. The manual workflow exposes a `container_rollout` input; its production default is currently `immediate` because selector-scoped vault-share deliveries are unsafe under gradual runner rollout. Selecting `immediate` passes Wrangler's `--containers-rollout=immediate` flag and can interrupt active runner containers.
+Fresh deployment configuration uses zero additional connection-age grace for
+runner containers, matching Cloudflare's default. Native 10/25/50/100 percentage
+targets and the separate SIGTERM checkpoint/drain path remain unchanged. A
+recently connected runner may therefore be selected for replacement sooner;
+connection age is not a checkpoint deadline. Pristine standby preparation remains
+enabled during the mixed-image window. The isolated `DeploySmokeRunnerContainer`
+uses zero grace and one 100-percent step. The private workflow's
+`container_rollout` input defaults to gradual; immediate targets 100 percent in
+one step. Both image modes can interrupt a selected process and require recovery.
+
+Apply changed grace only from a stable release: grace is part of the admitted
+execution identity, so an existing pending candidate must finish through its
+exact retry path before changing that target. Worker-only releases and retained
+applications preserve their observed native grace, image and resources.
+
+After an authorized full rollout, verify zero native grace on the serving and
+small applications, completed matching rollouts, and post-promotion smoke with
+the promoted Worker context and configured standby target. Measure standby loss
+through restored ready inventory, including refill after promotion; compare like
+rollout modes and observe checkpoint failures, shutdown rejections and recovery.
+Removing this optional wait does not establish a fixed deployment duration or a
+measured fourfold improvement.
+
 Worker replacement is checkpoint-safe at the runtime fence rather than through rollout timing alone. The snapshot-session handshake has one six-second total deadline; the runtime starts its first exact durable upload-session heartbeat immediately after that response, then keeps serialized attempts on a two-second start-to-start cadence throughout publication. `UserRunner` retains the fence and retries after one second only for that exact attempt and lease generation while its heartbeat is less than 10 seconds old and completion is absent. Successful foreground preemption bypasses this preservation and stops heartbeat liveness before detached cleanup. After Web accepts the checkpoint, the runtime stops heartbeating and best-effort marks completion; marker failure falls back to stale-heartbeat expiry. Other starts remain immediate; live snapshots have no artificial publication deadline, while a dead runtime can defer replacement for the 10-second liveness window plus at most one additional retry interval (one second) after its final heartbeat.
 
 A successful invocation also sends its exact result, attempt, and generation
@@ -2477,7 +2744,7 @@ Gradual deploys run managed-container smoke with a longer retry window so Cloudf
   intended root reads succeed while writes, `.runtime/**`, `.codex/**`, environment
   files, other roots, inherited shell secrets, and tool network are denied
 - if `HOSTED_EXECUTION_SMOKE_DIRECT_R2_PRESIGNED_PUT=true`, a managed-container smoke uploads a deterministic payload through a direct R2 presigned `PUT`, verifies it through the Worker R2 binding, and deletes the object
-- if `HOSTED_EXECUTION_SMOKE_LIVE_MODEL_TURN=true`, the managed-container smoke runs one real `gpt-5.6-terra` turn via `codex exec` inside the deployed container through the Worker OpenAI egress intercept
+- if `HOSTED_EXECUTION_SMOKE_LIVE_MODEL_TURN=true`, the managed-container smoke runs one real `gpt-6-luna` turn via `codex exec` inside the deployed container through the Worker OpenAI egress intercept
 - if `HOSTED_EXECUTION_SMOKE_USER_ID` is configured, one authenticated `GET /internal/users/:userId/status`
 
 The GitHub deploy workflow enables `HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER` for every Worker deploy and sets a longer managed-container retry window for gradual rollouts. It enables `HOSTED_EXECUTION_SMOKE_DIRECT_R2_PRESIGNED_PUT` only when `container_rollout=immediate`, and `HOSTED_EXECUTION_SMOKE_LIVE_MODEL_TURN` per the `live_model_turn` input (default on).
@@ -2494,9 +2761,14 @@ check because foreground traffic can consume a previously verified slot. This
 proves a ready inventory snapshot; the migration checks above still own failed
 preparation recovery, drain, foreground allocation and background exclusion.
 
-When ready inventory is disabled or targets zero slots, the initial smoke prepares
-and retires one synthetic unbound slot in the actual candidate namespace. A
-separate smoke application alone is not evidence that the candidate image is ready.
+Regardless of cached ready inventory, the initial smoke prepares and retires one
+synthetic unbound slot in the actual candidate namespace. Preparation returns its
+attested image pair; smoke requires the exact candidate pair (or active pair when
+stable), rejecting missing attestation from an older Worker. Retirement is awaited
+on success and failure. This fresh proof is independent of cached coordinator
+rows and the separate smoke application; neither proves the serving candidate
+image on its own. Artifact-only and live-model-only phases do not touch serving
+inventory.
 
 Optional smoke env:
 
@@ -2505,7 +2777,7 @@ Optional smoke env:
 - `HOSTED_EXECUTION_SMOKE_OIDC_TOKEN` or `VERCEL_OIDC_TOKEN` for authenticated status auth
 - `HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER=true` to run the deploy-signed managed-container health/fingerprint smoke
 - `HOSTED_EXECUTION_SMOKE_DIRECT_R2_PRESIGNED_PUT=true` to extend the managed-container smoke with the direct R2 presigned upload check; requires `HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER=true`
-- `HOSTED_EXECUTION_SMOKE_LIVE_MODEL_TURN=true` to extend the managed-container smoke with one real `gpt-5.6-terra` turn; requires `HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER=true`
+- `HOSTED_EXECUTION_SMOKE_LIVE_MODEL_TURN=true` to extend the managed-container smoke with one real `gpt-6-luna` turn; requires `HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER=true`
 - `HOSTED_EXECUTION_SMOKE_VERSION_ID` to pin smoke requests to a version in the active deployment; the deploy workflow passes the freshly deployed version
 - `HOSTED_EXECUTION_SMOKE_EXPECTED_STANDBY_MODE` to require `off`, `shadow`, or
   `allocate` from that exact Worker version; omission or mismatch fails the
@@ -2517,15 +2789,26 @@ Optional smoke env:
 
 If neither managed-container smoke nor `HOSTED_EXECUTION_SMOKE_USER_ID` is configured, smoke stops after the public banner and health checks.
 
-## Retiring member shell-prewarm producers
+## Retired member shell-prewarm transport
 
-Current Web removes the optional typing, message-routing, and instant-start
-shell-prewarm calls. The new Worker accepts the old authenticated receiver
-contract as a no-op. Either deployment order preserves authoritative mailbox
-signaling and the post-Temporal direct ensure; an older Worker may simply receive
-fewer optional hints. Historical latency fields remain readable, while current
-Web stops producing their per-hint correlation metadata. Container identity and
-state rollback constraints remain those of the unified fleet migration above.
+The supported rollout starts from the unified fleet cutover: Web has retired
+typing, message-routing, and instant-start shell hints, and Worker and container
+receivers already treat them as no-ops. Confirm deployed source ancestry and
+the existing unified fleet rollback floor through the normal release evidence;
+this source contract does not establish current deployment or rollback eligibility.
+
+The member-specific HTTP endpoint now returns 404, and the control client plus
+UserRunner and RunnerContainer prewarm RPC methods are removed. A delayed older
+Web request may fail, but its best-effort helper catches that optional failure
+without rejecting durable mailbox signaling or the post-Temporal direct ensure.
+No queued hint is replayed or converted into runtime work. Memberless standby
+preparation and normal admitted ensure-processing remain unchanged.
+
+Historical latency fields remain readable, and exact legacy stop targets retain
+their recovery and deletion paths. This deletion writes no new persistent format
+and introduces no additional persisted-state rollback floor. Container identity,
+namespace recovery, and rollback constraints remain those of the unified fleet
+migration above.
 
 ## Container Operator Access
 
@@ -2553,3 +2836,26 @@ namespaces, and removing the flag would change process topology and widen
 Use bounded structured runtime logs, Durable Object status, Container
 application and instance inventory, and the managed deploy smoke for production
 diagnosis. Do not add an operator shell or per-deploy SSH key escape hatch.
+
+## Retiring pre-v2 live workspace restore
+
+Deploy the runner removal only after the canonical workspace pointer inventory
+contains no pre-v2 refs and all current snapshot writers produce v2. These gates
+were checked before the removal; repeat them if the deployment baseline changes
+to a legacy writer. No migration, backfill, or object deletion accompanies this
+release. Current and older v2 writers can coexist during a gradual rollout; Web
+and Worker require no ordering change. A null pointer remains bootstrap state.
+
+This cleanup requires a v2-capable reader and v2-only writer at the rollback
+floor; all stricter existing fleet and receipt-format rollback floors still
+apply. This release does not permit a pre-v2 writer rollback or direct restoration of a
+pre-v2 backup pointer. Such a recovery requires a separately reviewed conversion
+path before publishing the pointer. Reverting this code removal alone adds the
+old reader without changing stored data.
+
+Keep legacy ref decoding, Durable Object orphan candidates, legacy object and
+artifact cleanup, canonical write receipt recovery, and the omitted
+`replacedSnapshotRef` fallback for older v2 snapshot-session producers. Canonical
+pointer drain does not prove those independent stores empty. After rollout,
+confirm normal managed-container smoke and supported v2 cold restore/checkpoint
+behavior; an unsupported-ref rejection means the pointer/writer gate failed.

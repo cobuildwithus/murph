@@ -1,3 +1,4 @@
+import { executeOperatorDiagnostic } from "@murphai/assistant-engine/assistant-ask";
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
@@ -51,6 +52,8 @@ import {
 } from "../src/hosted-runtime/launch-spec.ts";
 import {
   HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV,
+  resolveHostedOperatorModelProvider,
+  resolveHostedVoiceModelProvider,
 } from "../src/hosted-runtime/codex-runtime-env.ts";
 import {
   buildHostedRunnerExecutablePath,
@@ -60,7 +63,7 @@ import {
 import {
   buildHostedCodexConfigToml,
   HOSTED_CODEX_OPERATOR_MEMORY_DIAGNOSTICS,
-  HOSTED_CODEX_PROVIDER_TRANSPORT_DIAGNOSTICS,
+  hostedCodexProviderTransportDiagnostics,
   prepareHostedCodexRuntimeEnvironment,
   resolveHostedCodexModelCatalogPath,
 } from "../src/hosted-runtime/codex-config.ts";
@@ -103,11 +106,12 @@ const HOSTED_CODEX_AUTOCOMPACTION_SUMMARY_SENTINEL =
   "HOSTED_CODEX_AUTOCOMPACTION_SUMMARY_SENTINEL";
 const EXPECTED_MULTI_AGENT_USAGE_HINT = [
   "When the active route or skill contract permits delegation, proactively spawn a hosted child for genuinely bounded, self-contained background work whose result is not needed in the current reply, then reply without waiting.",
-  "Use the child to replace a later root pass, not duplicate work; skip tiny tasks whose assignment and readback cost exceeds doing them once in the root.",
+  "Use the child to replace a later root pass, not duplicate work; unless the user requests delegation, skip tiny tasks whose assignment and readback cost exceeds doing them once in the root.",
+  "For explicitly requested delegation needed to answer, use a bounded child and native wait_agent, then answer in the same turn. Keep independent onboarding saves nonblocking.",
   "Follow the active route or skill contract for the exact leaf assignment and completion proof.",
 ].join(" ");
 const EXPECTED_MULTI_AGENT_MODE_HINT =
-  "Murph bounded background delegation mode is active; reply-critical work stays in the root.";
+  "Murph bounded delegation mode is active; the root owns the final answer and waits for requested child results when needed.";
 const EXPECTED_SUBAGENT_USAGE_HINT = [
   "This hosted child is a one-shot leaf.",
   "Complete only the self-contained assignment and stop.",
@@ -119,14 +123,17 @@ const EXPECTED_SUBAGENT_USAGE_HINT = [
 // failures are hard failures. The optional path selects a freshly packaged CLI
 // in an ALREADY permitted location, never a source loader or an extra grant.
 testHostedCliTimingE2e("shared CLI timing: built entry uses hosted permissions and environment on cold and warm turns", {
-  timeout: 240_000,
+  timeout: 300_000,
 }, async () => {
   const repositoryRoot = fileURLToPath(new URL("../../../", import.meta.url));
   const cliBin = process.env.MURPH_HOSTED_CLI_TIMING_CLI_BIN ??
     path.join(repositoryRoot, "packages/cli/dist/bin.js");
   assert.ok(path.isAbsolute(cliBin), "MURPH_HOSTED_CLI_TIMING_CLI_BIN must be absolute.");
-  assert.equal(path.basename(cliBin), "bin.js", "Use the actual packaged dist/bin.js entry.");
-  assert.equal(path.basename(path.dirname(cliBin)), "dist");
+  assert.equal(path.basename(cliBin), "bin.js", "Use the actual packaged CLI entry.");
+  const entryDirectory = path.basename(path.dirname(cliBin));
+  assert.ok(entryDirectory === "dist" || entryDirectory === ".bundle",
+    "Use dist/bin.js or the assembled runner's .bundle/bin.js.");
+  const bundled = entryDirectory === ".bundle";
   assert.equal((await stat(cliBin)).isFile(), true, "Prepare the built CLI artifact before enabling this gate.");
   const cliPackage = parseJsonObject(await readFile(path.resolve(cliBin, "../../package.json"), "utf8"));
   assert.equal(cliPackage?.name, "@murphai/murph", "The entry must belong to the real CLI package.");
@@ -181,12 +188,12 @@ testHostedCliTimingE2e("shared CLI timing: built entry uses hosted permissions a
     ]) {
       command = buildCliTimingParityCommand([
         cliBin, ...route.args, "--vault", vaultRoot, "--format", "json",
-      ]);
+      ], bundled);
       const priorSessionId = resumeSessionId;
       const stages: string[] = [];
       const requestStart = requests.length;
       const result = await executeCodexAppServerTurn({
-        abortSignal: AbortSignal.timeout(60_000),
+        abortSignal: AbortSignal.timeout(bundled ? 90_000 : 60_000),
         approvalPolicy: "never", codexCommand, codexHome, env,
         permissions: MURPH_MEMBER_WORKSPACE_PERMISSION_PROFILE,
         sandbox: undefined,
@@ -211,7 +218,7 @@ testHostedCliTimingE2e("shared CLI timing: built entry uses hosted permissions a
       // a CLI launch. Do not assume nested tools emit commandExecution items.
       const output = readCliTimingShellOutput(requests[requestStart + 1]!,
         `call_resp_hosted_codex_config_${requestStart + 1}`);
-      assertCliTimingChildParity(output);
+      assertCliTimingChildParity(output, bundled);
       const diagnostic = result.jsonEvents.find((event) =>
         isJsonObject(event) && event.method === CLI_TIMING_EVENT_METHOD);
       assert.ok(isJsonObject(diagnostic) && isJsonObject(diagnostic.params));
@@ -246,18 +253,20 @@ function quoteCliTimingShellLiteral(value: string): string {
   return `'${value.replaceAll("'", "'\\''")}'`;
 }
 
-function buildCliTimingParityCommand(argv: readonly string[]): string {
-  // Fixture launcher only: run the ACTUAL built entry twice, under the SAME
+function buildCliTimingParityCommand(argv: readonly string[], bundled = false): string {
+  // Fixture launcher only: run the ACTUAL built entry under the SAME
   // hosted shell/profile. Packaging happens before the gate, not by copying a
   // source checkout into it. No source loader or extra runtime roots.
+  // Bundled mode also runs the installed dist entry with telemetry disabled.
+  // This proves bundled/unbundled parity without adding another timing report.
   // Base64 preserves each output stream's exact bytes, including empty output.
   const fixture = `
     const { spawnSync } = require("node:child_process");
     if (!process.env.MURPH_CLI_TIMING_ENDPOINT) throw Error("Missing diagnostic admission");
     const baselineEnv = { ...process.env };
     delete baselineEnv.MURPH_CLI_TIMING_ENDPOINT;
-    function run(env) {
-      const child = spawnSync(process.execPath, process.argv.slice(1), {
+    function run(env, argv = process.argv.slice(1)) {
+      const child = spawnSync(process.execPath, argv, {
         env, timeout: 25000, maxBuffer: 1024 * 1024,
       });
       return { status: child.status, signal: child.signal,
@@ -265,7 +274,14 @@ function buildCliTimingParityCommand(argv: readonly string[]): string {
         stdout: child.stdout?.toString("base64") ?? null,
         stderr: child.stderr?.toString("base64") ?? null };
     }
-    process.stdout.write(JSON.stringify({ baseline: run(baselineEnv), enabled: run(process.env) }) + "\\n");
+    const proof = { baseline: run(baselineEnv), enabled: run(process.env) };
+    if (${bundled}) {
+      const path = require("node:path");
+      const argv = process.argv.slice(1);
+      argv[0] = path.resolve(argv[0], "../../dist/bin.js");
+      proof.unbundled = run(baselineEnv, argv);
+    }
+    process.stdout.write(JSON.stringify(proof) + "\\n");
   `;
   return "OPENSSL_CONF=/dev/null " + [process.execPath, "-e", fixture, "--", ...argv]
     .map(quoteCliTimingShellLiteral).join(" ");
@@ -292,10 +308,19 @@ function readCliTimingShellOutput(request: string, callId: string): string {
   return result.output as string;
 }
 
-function assertCliTimingChildParity(output: string): void {
+function assertCliTimingChildParity(output: string, bundled = false): void {
   const proof = parseJsonObject(output);
   assert.ok(proof && isJsonObject(proof.baseline) && isJsonObject(proof.enabled), output);
-  for (const child of [proof.baseline, proof.enabled]) {
+  if (bundled) {
+    assert.ok(isJsonObject(proof.unbundled), "Require the assembled bundle's installed dist baseline.");
+    assert.equal(proof.unbundled.stdout, proof.baseline.stdout, "Bundled stdout bytes changed.");
+    assert.equal(proof.unbundled.stderr, proof.baseline.stderr, "Bundled stderr bytes changed.");
+  }
+  const children = bundled
+    ? [proof.baseline, proof.enabled, proof.unbundled]
+    : [proof.baseline, proof.enabled];
+  for (const child of children) {
+    assert.ok(isJsonObject(child));
     assert.equal(child.error, null, "The built child must launch, not just return a shell success.");
     assert.equal(child.signal, null);
     assert.equal(typeof child.stdout, "string");
@@ -313,6 +338,18 @@ function assertCliTimingChildParity(output: string): void {
 }
 
 // These deterministic source tests stay mandatory when the built gate is off.
+test("shared CLI timing bundled parity requires a successful matching installed baseline", () => {
+  const child = { status: 0, signal: null, error: null,
+    stdout: Buffer.from('{"summary":null}\n').toString("base64"), stderr: "" };
+  const proof = { baseline: child, enabled: child, unbundled: child };
+  assert.doesNotThrow(() => assertCliTimingChildParity(JSON.stringify(proof), true));
+  for (const unbundled of [undefined, { ...child, status: 1 },
+    { ...child, signal: "SIGTERM" }, { ...child, error: "synthetic launch failure" },
+    { ...child, stdout: "" }, { ...child, stderr: "c3ludGhldGlj" }]) {
+    assert.throws(() => assertCliTimingChildParity(JSON.stringify({ ...proof, unbundled }), true));
+  }
+});
+
 test("shared CLI timing fixture reads native framing and selects only the current call", () => {
   const output = "synthetic stdout\n";
   const line = CLI_TIMING_SHELL_RESULT_PREFIX + JSON.stringify({ exitCode: 0, output });
@@ -381,7 +418,7 @@ test("hosted Codex memory diagnostics expose only safe config metadata", () => {
 });
 
 test("hosted Codex provider transport diagnostics expose only safe config metadata", () => {
-  assert.deepEqual(HOSTED_CODEX_PROVIDER_TRANSPORT_DIAGNOSTICS, {
+  assert.deepEqual(hostedCodexProviderTransportDiagnostics("hosted-openai"), {
     codexProviderRequestMaxRetries: 4,
     codexProviderStreamIdleTimeoutMs: 90_000,
     codexProviderStreamMaxRetries: 0,
@@ -462,7 +499,10 @@ test("hosted Codex runtime config writes Venice Responses config without secret 
   assert.match(config, /base_url = "https:\/\/api\.venice\.ai\/api\/v1"/u);
   assert.match(config, /env_key = "VENICE_API_KEY"/u);
   assert.match(config, /wire_api = "responses"/u);
-  assert.doesNotMatch(config, /^supports_websockets = true$/mu);
+  assert.doesNotMatch(
+    readProviderConfigSection(config, "venice"),
+    /^supports_websockets = true$/mu,
+  );
   assert.doesNotMatch(config, /signed-venice-egress-credential/u);
   assert.match(config, /\[features\]\nplugins = false\nmemories = false/u);
   assert.match(config, /^expose_spawn_agent_model_overrides = false$/mu);
@@ -502,7 +542,10 @@ test("hosted Codex runtime config preserves capabilities with custom inference",
   assert.match(config, /^model_auto_compact_token_limit = 98304$/mu);
   assert.match(config, /^request_max_retries = 1$/mu);
   assert.match(config, /^stream_max_retries = 0$/mu);
-  assert.doesNotMatch(config, /^supports_websockets = true$/mu);
+  assert.doesNotMatch(
+    readProviderConfigSection(config, "hosted-custom-inference"),
+    /^supports_websockets = true$/mu,
+  );
   assert.doesNotMatch(config, /^model_reasoning_effort = /mu);
   assert.match(config, /\[features\]\nplugins = false\nmemories = false/u);
   assert.match(config, /\[features\.multi_agent_v2\]\nenabled = true/u);
@@ -955,8 +998,14 @@ test("hosted Codex runtime config uses ChatGPT subscription auth in local dev", 
   assert.match(config, /^cli_auth_credentials_store = "file"$/mu);
   assert.match(config, /^model_provider = "hosted-chatgpt-openai"$/mu);
   assert.match(config, /\[model_providers\."hosted-chatgpt-openai"\]/u);
-  assert.doesNotMatch(config, /base_url/u);
-  assert.doesNotMatch(config, /env_key/u);
+  const memberProvider = readProviderConfigSection(config, "hosted-chatgpt-openai");
+  assert.doesNotMatch(memberProvider, /base_url/u);
+  assert.doesNotMatch(memberProvider, /env_key/u);
+  const voiceProvider = resolveHostedVoiceModelProvider(result.runtimeEnv[HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV]);
+  assert.equal(voiceProvider, "hosted-openai");
+  const voiceConfig = readProviderConfigSection(config, voiceProvider);
+  assert.match(voiceConfig, /^env_key = "OPENAI_API_KEY"$/mu);
+  assert.match(voiceConfig, /^requires_openai_auth = false$/mu);
   assert.match(config, /^supports_websockets = true$/mu);
   assert.match(config, /^stream_idle_timeout_ms = 90000$/mu);
   assert.match(config, /^requires_openai_auth = true$/mu);
@@ -1140,8 +1189,10 @@ test("hosted Codex runtime config preserves managed ChatGPT auth", async () => {
   assert.match(config, /^cli_auth_credentials_store = "file"$/mu);
   assert.match(config, /^model_provider = "hosted-chatgpt-openai"$/mu);
   assert.match(config, /\[model_providers\."hosted-chatgpt-openai"\]/u);
-  assert.doesNotMatch(config, /base_url/u);
-  assert.doesNotMatch(config, /env_key/u);
+  const memberProvider = readProviderConfigSection(config, "hosted-chatgpt-openai");
+  assert.doesNotMatch(memberProvider, /base_url/u);
+  assert.doesNotMatch(memberProvider, /env_key/u);
+  assert.match(readProviderConfigSection(config, "hosted-openai"), /^env_key = "OPENAI_API_KEY"$/mu);
   assert.match(config, /^supports_websockets = true$/mu);
   assert.match(config, /^requires_openai_auth = true$/mu);
   assert.match(config, /^stream_idle_timeout_ms = 90000$/mu);
@@ -1290,6 +1341,90 @@ test("hosted Codex current-time proof ignores non-authoritative request content"
     1,
   );
 });
+
+test.each(["openai", "venice", "custom-inference"])(
+  "hosted %s config registers credential-based OpenAI for operator tasks",
+  async (provider) => {
+    const operatorHomeRoot = await createTemporaryDirectory();
+    const prepared = await prepareHostedCodexRuntimeEnvironment({
+      operatorHomeRoot,
+      runtimeEnv: {
+        HOSTED_ASSISTANT_PROVIDER: provider === "custom-inference" ? "hosted-custom-inference" : provider,
+        HOSTED_ASSISTANT_CONTEXT_WINDOW_TOKENS: "32000",
+        OPENAI_API_KEY: "synthetic-openai-credential",
+        VENICE_API_KEY: "synthetic-venice-credential",
+        MURPH_CUSTOM_INFERENCE_API_KEY: "synthetic-custom-credential",
+      },
+    });
+    const config = await readFile(prepared.codexConfigPath, "utf8");
+    const operatorProvider = resolveHostedOperatorModelProvider(
+      prepared.runtimeEnv[HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV],
+    );
+    assert.equal(operatorProvider, "hosted-openai");
+    assert.equal(resolveHostedVoiceModelProvider(prepared.runtimeEnv[HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV]), "hosted-openai");
+    const section = readProviderConfigSection(config, "hosted-openai");
+    assert.match(section, /^stream_idle_timeout_ms = 90000$/mu);
+    assert.match(section, /^stream_max_retries = 0$/mu);
+    const selectedProviderId = prepared.runtimeEnv[HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV]!;
+    const selectedSection = readProviderConfigSection(config, selectedProviderId);
+    const diagnostics = hostedCodexProviderTransportDiagnostics(selectedProviderId);
+    assert.equal(diagnostics.codexProviderStreamIdleTimeoutMs, 90_000);
+    assert.equal(diagnostics.codexProviderRequestMaxRetries, provider === "custom-inference" ? 1 : 4);
+    assert.match(selectedSection, new RegExp(`^stream_idle_timeout_ms = ${diagnostics.codexProviderStreamIdleTimeoutMs}$`, "mu"));
+    assert.match(selectedSection, new RegExp(`^request_max_retries = ${diagnostics.codexProviderRequestMaxRetries}$`, "mu"));
+    assert.match(section, /^env_key = "OPENAI_API_KEY"$/mu);
+    assert.match(section, /^requires_openai_auth = false$/mu);
+    assert.doesNotMatch(config, /synthetic-.*-credential/u);
+  },
+);
+
+for (const memberProvider of ["openai", "venice"]) {
+  testHostedCodexAuthE2e(`operator diagnostic authenticates through hosted config with ${memberProvider} member provider`, async () => {
+    const operatorHomeRoot = await createTemporaryDirectory();
+    const requests: string[] = [];
+    const authorizationHeaders: string[] = [];
+    const answer = { outcome: "answered", answer: "Synthetic retained error is unavailable." };
+    const server = await startResponsesStubServer({
+      requests, authorizationHeaders,
+      requiredAuthorization: "Bearer synthetic-operator-credential",
+      responseText: JSON.stringify(answer),
+    });
+    try {
+      const prepared = await prepareHostedCodexRuntimeEnvironment({
+        operatorHomeRoot,
+        runtimeEnv: {
+          HOSTED_ASSISTANT_PROVIDER: memberProvider,
+          [HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV]: `${readServerBaseUrl(server)}/v1`,
+          NODE_ENV: "test",
+          OPENAI_API_KEY: "synthetic-operator-credential",
+          VENICE_API_KEY: "synthetic-member-credential",
+          PATH: process.env.PATH ?? "",
+        },
+      });
+      const result = await executeOperatorDiagnostic({
+        codexHome: prepared.codexHome,
+        env: prepared.runtimeEnv,
+        model: "gpt-5.6-sol",
+        modelProvider: resolveHostedOperatorModelProvider(
+          prepared.runtimeEnv[HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV],
+        ),
+        question: "Report whether the synthetic retained error is available.",
+        workspaceRoot: operatorHomeRoot,
+        abortSignal: AbortSignal.timeout(60_000),
+      });
+      assert.deepEqual(result, answer);
+      // Native Codex may probe WebSockets before falling back to this HTTP stub.
+      // Every transport attempt must authenticate, with one actual model request.
+      assert.ok(authorizationHeaders.length > 0);
+      assert.ok(authorizationHeaders.every((header) => header === "Bearer synthetic-operator-credential"));
+      const modelRequests = requests.filter((body) => body.length > 0);
+      assert.equal(modelRequests.length, 1);
+      assert.equal(JSON.parse(modelRequests[0]!).model, "gpt-5.6-sol");
+    } finally {
+      await closeHttpServer(server);
+    }
+  }, 90_000);
+}
 
 testHostedCodexAuthE2e(
   "hosted Codex runtime authenticates, excludes native memory, and rejects legacy OpenAI config",
@@ -1642,8 +1777,21 @@ testHostedCodexAutocompactionE2e(
   150_000,
 );
 
+testHostedCodexAutocompactionE2e(
+  "hosted compaction survives a quiet response beyond the former thirty-second window",
+  async () => {
+    await assert.rejects(
+      runHostedCodexAutocompactionE2e("managed", { idleTimeoutMs: 30_000, firstCompactionDelayMs: 35_000 }),
+      /idle timeout waiting for SSE/u,
+    );
+    await runHostedCodexAutocompactionE2e("managed", { firstCompactionDelayMs: 35_000 });
+  },
+  180_000,
+);
+
 async function runHostedCodexAutocompactionE2e(
   providerKind: "custom" | "managed",
+  options: { idleTimeoutMs?: number; firstCompactionDelayMs?: number } = {},
 ): Promise<void> {
   const workspaceRoot = await createTemporaryDirectory();
   const operatorHomeRoot = path.join(workspaceRoot, "operator-home");
@@ -1670,6 +1818,9 @@ async function runHostedCodexAutocompactionE2e(
   let expectingManualCompaction = false;
   const server = await startResponsesStubServer({
     compactionOutputKind: providerKind === "managed" ? "compaction" : "message",
+    delayBeforeStreamMs: (_body, requestIndex) =>
+      requestIndex === Math.min(...compactionRequestIndexes)
+        ? options.firstCompactionDelayMs ?? 0 : 0,
     compactionRequestIndexes,
     requestUrls,
     requests,
@@ -1754,6 +1905,12 @@ async function runHostedCodexAutocompactionE2e(
       },
     });
     const preparedConfig = await readFile(prepared.codexConfigPath, "utf8");
+    if (options.idleTimeoutMs !== undefined) {
+      await writeFile(prepared.codexConfigPath, preparedConfig.replace(
+        /^stream_idle_timeout_ms = \d+$/gmu,
+        `stream_idle_timeout_ms = ${options.idleTimeoutMs}`,
+      ));
+    }
     assert.match(
       preparedConfig,
       new RegExp(
@@ -2237,7 +2394,7 @@ test("hosted Codex config TOML omits credential values and runtime authority hea
     exposeSpawnAgentModelOverrides: true,
     model: null,
     provider: {
-      id: "openai",
+      id: "hosted-openai",
       name: "OpenAI",
       baseUrl: "https://api.openai.com/v1",
       envKey: "OPENAI_API_KEY",
@@ -2249,7 +2406,7 @@ test("hosted Codex config TOML omits credential values and runtime authority hea
   assert.equal(
     config,
     [
-      'model_provider = "openai"',
+      'model_provider = "hosted-openai"',
       'model_reasoning_effort = "medium"',
       `model_auto_compact_token_limit = ${HOSTED_CODEX_EXPECTED_AUTO_COMPACT_TOKEN_LIMIT}`,
       'log_dir = "/tmp/murph-codex-log"',
@@ -2258,7 +2415,7 @@ test("hosted Codex config TOML omits credential values and runtime authority hea
       "check_for_update_on_startup = false",
       "allow_login_shell = false",
       "",
-      '[model_providers."openai"]',
+      '[model_providers."hosted-openai"]',
       'name = "OpenAI"',
       'base_url = "https://api.openai.com/v1"',
       'env_key = "OPENAI_API_KEY"',
@@ -2485,11 +2642,14 @@ test("hosted Codex config promotes permitted leaf delegation with native per-spa
     "When the active route or skill contract permits delegation, proactively spawn a hosted child for genuinely bounded, self-contained background work whose result is not needed in the current reply, then reply without waiting.",
   ));
   assert.ok(config.includes(
-    "Use the child to replace a later root pass, not duplicate work; skip tiny tasks",
+    "Use the child to replace a later root pass, not duplicate work; unless the user requests delegation, skip tiny tasks",
   ));
   assert.ok(config.includes(
     "Complete only the self-contained assignment and stop.",
   ));
+  assert.ok(config.includes("native wait_agent, then answer in the same turn"));
+  assert.ok(config.includes("Keep independent onboarding saves nonblocking"));
+  assert.doesNotMatch(config, /reply-critical work stays in the root/u);
   assert.match(config, /^expose_spawn_agent_model_overrides = true$/mu);
   assert.doesNotMatch(config, /^default_subagent_model/mu);
   assert.doesNotMatch(config, /^default_subagent_reasoning_effort/mu);
@@ -2643,6 +2803,7 @@ function isRetryableTemporaryCleanupError(error: unknown): boolean {
 }
 
 async function startResponsesStubServer(input: {
+  delayBeforeStreamMs?: (body: string, requestIndex: number) => number;
   customToolCallForRequest?: (
     body: string, requestIndex: number,
   ) => { name: string; input: string } | undefined;
@@ -2676,7 +2837,7 @@ async function startResponsesStubServer(input: {
     request.on("data", (chunk) => {
       chunks.push(Buffer.from(chunk));
     });
-    request.on("end", () => {
+    request.on("end", async () => {
       const body = Buffer.concat(chunks).toString("utf8");
       const requestIndex = input.requests.length + 1;
       input.requests.push(body);
@@ -2735,6 +2896,13 @@ async function startResponsesStubServer(input: {
       };
       const parsedBody = parseJsonObject(body);
       if (parsedBody?.stream === true) {
+        const delayMs = input.delayBeforeStreamMs?.(body, requestIndex) ?? 0;
+        if (delayMs > 0) {
+          response.setHeader("content-type", "text/event-stream");
+          response.flushHeaders();
+          await sleep(delayMs);
+          if (response.destroyed) return;
+        }
         writeResponsesStubStream({
           customToolCall: input.customToolCallForRequest?.(body, requestIndex),
           outputKind: input.compactionRequestIndexes?.has(requestIndex)
@@ -3008,9 +3176,11 @@ function writeResponsesStubStream(input: {
     usage: input.usage,
   };
 
-  input.response.statusCode = 200;
-  input.response.setHeader("cache-control", "no-cache");
-  input.response.setHeader("content-type", "text/event-stream; charset=utf-8");
+  if (!input.response.headersSent) {
+    input.response.statusCode = 200;
+    input.response.setHeader("cache-control", "no-cache");
+    input.response.setHeader("content-type", "text/event-stream; charset=utf-8");
+  }
   writeResponsesStubSseEvent(input.response, "response.created", {
     response: {
       ...completedResponse,
@@ -3128,4 +3298,10 @@ function assertHostedCodexAutoCompactTokenLimit(config: string): void {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function readProviderConfigSection(config: string, provider: string): string {
+  const section = config.split(`[model_providers."${provider}"]\n`)[1]?.split("\n[")[0];
+  assert.ok(section, `Expected provider configuration for ${provider}`);
+  return section;
 }

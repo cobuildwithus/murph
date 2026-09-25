@@ -33,9 +33,6 @@ const assistantCliSurfaceBootstrapIgnoredOptionNames = new Set([
   'requestId',
   'vault',
 ])
-const assistantCliSurfaceBootstrapIgnoredCommandFamilies = new Set([
-  'age',
-])
 const assistantCliSurfaceBootstrapIgnoredCommandNames = new Set([
   'assistant ask',
   'assistant chat',
@@ -330,9 +327,6 @@ function normalizeAssistantCliManifestCommands(
     if (
       name.length === 0 ||
       seenCommandNames.has(name) ||
-      assistantCliSurfaceBootstrapIgnoredCommandFamilies.has(
-        readAssistantCliCommandFamily(name),
-      ) ||
       assistantCliSurfaceBootstrapIgnoredCommandNames.has(name) ||
       assistantCliSurfaceRetiredCommandNames.has(name)
     ) {
@@ -374,8 +368,9 @@ function renderAssistantCliSurfaceContract(
     'Use `vault-cli` directly from the current runtime process.',
     'The compact index lists exact command tokens without replaying every description and schema on each model request.',
     'Hot commands include enough args/options to run directly.',
-    'For any other command, inspect `vault-cli <command> --schema --format json` before executing when its arguments or options are not already known.',
-    'Use `vault-cli <family> --schema --format json` to choose among commands in a family, or `vault-cli --schema --format json` for root commands.',
+    'When command syntax is not already known, read `vault-cli <command> --help` for positional arguments, flags, and examples. Reuse the loaded skill or a precise error hint instead of rediscovering known syntax.',
+    'Use `--schema --format json` only when help omits a needed structured input or output contract; it includes the complete output schema and can be large.',
+    'Use `vault-cli <family> --help` to choose among commands in a family, or `vault-cli --help` for root commands.',
   ]
 
   if (hotCommands.length > 0) {

@@ -59,7 +59,9 @@ permalink, and share-card contracts.
 A PR whose only user-facing hosted Web changes are authored files under
 `entries/**` plus optional `editions/**` does not need a branch preview solely
 for design proof. Review the changed JSON copy directly, run
-`pnpm --dir apps/web test -- changelog-page.test.tsx`, and use
+`pnpm --dir apps/web changelog:generate` followed by
+`pnpm exec vitest run --config apps/web/vitest.config.ts --no-coverage apps/web/test/changelog-page.test.tsx`
+from the repository root, and use
 `https://www.withmurph.ai/screenshots/ops#changelog-archive` as the
 repository-owned production presentation reference. The focused test loads every
 authored fragment and proves its visible copy and try-it affordance server-render

@@ -215,6 +215,42 @@ test("Junction ECG voltage admits only the complete summary source identity", as
   assert.equal((records[0] as Record<string, unknown>).value, 0.4);
 });
 
+test("Junction ECG empty pages do not hide a matching later page", async () => {
+  let calls = 0;
+  const client = createClient(async () => {
+    calls += 1;
+    return createJsonResponse(calls === 1 ? { groups: {}, next_cursor: "second-page" } : {
+      groups: { withings: [{
+        source: { provider: "withings", type: "watch" },
+        data: [{ timestamp: "2026-01-15T12:00:00.000Z", type: "lead_i", unit: "mV", value: 0.1 }],
+      }] },
+    });
+  });
+  const records = await client.listElectrocardiogramVoltage({
+    ...WINDOW, recordingId: "ecg-recording", sourceProviderSlug: "withings", sourceType: "watch",
+  });
+  assert.equal(records.length, 1);
+  assert.equal(calls, 2);
+});
+
+test("Junction ECG empty collection diagnostics include every traversed page", async () => {
+  let calls = 0;
+  const client = createClient(async () => {
+    calls += 1;
+    return createJsonResponse({ groups: {}, ...(calls < 2 ? { next_cursor: "second-page" } : {}) });
+  });
+  await assert.rejects(client.listElectrocardiogramVoltage({
+    ...WINDOW, recordingId: "ecg-recording", sourceProviderSlug: "withings",
+  }), (error: unknown) => {
+    assert.ok(error instanceof Error && "details" in error);
+    assert.deepEqual(error.details, {
+      reason: "voltage_collection_empty", pageCount: 2, groupCount: 0,
+      providerMatchGroupCount: 0, instanceMatchGroupCount: 0, matchedGroupCount: 0,
+    });
+    return true;
+  });
+});
+
 test("Junction ECG grouped fetch rejects responses above the explicit dense cap", async () => {
   const client = createClient(async () => createJsonResponse({
     groups: {

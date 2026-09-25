@@ -45,7 +45,6 @@ test("public entrypoints expose the expected symbols", () => {
   assert.equal(typeof exportPacksModule.readMaterializedExportPackReceipt, "function");
   assert.equal(typeof exportPacksModule.retireMaterializedExportPack, "function");
 
-  assert.equal(typeof recordsModule.renderAutoLoggedFoodMealNote, "function");
   assert.equal(typeof recordsModule.scaffoldProviderPayload, "function");
   assert.equal(typeof recordsModule.parseRecipePayload, "function");
 

@@ -3,10 +3,12 @@
 import {
   HOSTED_ASSISTANT_ASTRA_MODEL,
   HOSTED_ASSISTANT_DEFAULT_PROVIDER,
+  HOSTED_ASSISTANT_DEFAULT_MODEL,
+  HOSTED_ASSISTANT_GPT_6_SOL_MODEL,
+  HOSTED_ASSISTANT_GPT_6_LUNA_MODEL,
   HOSTED_ASSISTANT_LUNA_MODEL,
   HOSTED_ASSISTANT_OPENAI_PROVIDER,
   HOSTED_ASSISTANT_SOL_MODEL,
-  HOSTED_ASSISTANT_TERRA_MODEL,
   HOSTED_ASSISTANT_VENICE_PROVIDER,
   isHostedAssistantProductModel,
   isHostedAssistantProvider,
@@ -80,24 +82,31 @@ function isAssistantRoutingChoice(
 
 const MODEL_OPTIONS = [
   {
+    artwork: "sol",
+    description: "Health intelligence with GPT-6",
+    model: HOSTED_ASSISTANT_GPT_6_SOL_MODEL,
+    name: "GPT-6 Sol",
+    usage: "Balanced usage",
+  },
+  {
     artwork: "luna",
-    description: "Fast health intelligence",
-    model: HOSTED_ASSISTANT_LUNA_MODEL,
-    name: "Luna",
+    description: "An alternative GPT-6 model",
+    model: HOSTED_ASSISTANT_GPT_6_LUNA_MODEL,
+    name: "GPT-6 Luna",
     usage: "Low usage",
   },
   {
-    artwork: "terra",
-    description: "Advanced health intelligence",
-    model: HOSTED_ASSISTANT_TERRA_MODEL,
-    name: "Terra",
-    usage: "Balanced usage",
+    artwork: "luna",
+    description: "Fast health intelligence",
+    model: HOSTED_ASSISTANT_LUNA_MODEL,
+    name: "GPT-5.6 Luna",
+    usage: "Low usage",
   },
   {
     artwork: "sol",
     description: "Deep health intelligence",
     model: HOSTED_ASSISTANT_SOL_MODEL,
-    name: "Sol",
+    name: "GPT-5.6 Sol",
     usage: "High usage",
   },
   {
@@ -315,10 +324,10 @@ export function AssistantProviderDialog({
               onConnectionChange={(next) => onConnectionChange?.(next)}
               selected={connection?.selected === true}
             />
-            <div className="flex items-center justify-between gap-2 border-t border-border pt-4">
+            <div className="flex flex-col items-stretch justify-between sm:flex-row sm:items-center gap-2 border-t border-border pt-4">
               <Button
                 onClick={() => setPane("list")}
-                size="sm"
+                size="lg"
                 type="button"
                 variant="ghost"
               >
@@ -331,7 +340,7 @@ export function AssistantProviderDialog({
                     onRoutingChange(CUSTOM_INFERENCE_ROUTING);
                     changeOpen(false);
                   }}
-                  size="sm"
+                  size="lg"
                   type="button"
                   variant={
                     routing === CUSTOM_INFERENCE_ROUTING ? "outline" : "default"
@@ -660,7 +669,7 @@ function HostedAssistantModelSettingsForm(
         enteringCustom
           ? `Saved. Inference on your endpoint. ${readProductModelName(savedModel)} through ${readProviderName(savedProvider)} stays your managed default.`
           : (managed?.dormantSolPreference ?? dormantSolPreference)
-          ? `Saved. Inference on ${readProductModelName(savedModel)} through ${readProviderName(savedProvider)} while Edge is paused; Sol remains saved.`
+          ? `Saved. Inference on ${readProductModelName(savedModel)} through ${readProviderName(savedProvider)} while Edge is paused; GPT-5.6 Sol remains saved.`
           : `Saved. ${readProductModelName(savedModel)} through ${readProviderName(savedProvider)} is your default.`,
       );
     } catch (error) {
@@ -728,8 +737,8 @@ function HostedAssistantModelSettingsForm(
         {dormantSolPreference ? (
           <p className="w-full rounded-xl border border-border bg-muted/30 p-4 text-sm text-pretty text-muted-foreground">
             {props.customInferenceAvailable
-              ? "Terra is your managed default while Edge is paused. Sol is still saved and will return with Edge. Choose Luna or save Terra to replace it."
-              : "Terra is active while Edge is paused. Sol is still saved and will return with Edge. Choose Luna or save Terra to replace it."}
+              ? `${readModelName(currentModel)} is your managed default while Edge is paused. GPT-5.6 Sol is still saved and will return with Edge. Choose another model or save this default to replace it.`
+              : `${readModelName(currentModel)} is active while Edge is paused. GPT-5.6 Sol is still saved and will return with Edge. Choose another model or save this default to replace it.`}
           </p>
         ) : null}
 
@@ -762,13 +771,16 @@ function HostedAssistantModelSettingsForm(
           >
             {MODEL_OPTIONS.map((option) => {
               const selected = draftModel === option.model;
-              const unavailable =
+              const requiresOpenAi = (option.model === HOSTED_ASSISTANT_GPT_6_SOL_MODEL
+                || option.model === HOSTED_ASSISTANT_GPT_6_LUNA_MODEL)
+                && draftRouting !== HOSTED_ASSISTANT_OPENAI_PROVIDER;
+              const unavailable = requiresOpenAi ||
                 (option.model === HOSTED_ASSISTANT_SOL_MODEL && !solAvailable)
                 || (option.model === HOSTED_ASSISTANT_ASTRA_MODEL
                   && (!availableModels?.includes(HOSTED_ASSISTANT_ASTRA_MODEL)
                     || draftRouting !== HOSTED_ASSISTANT_OPENAI_PROVIDER));
               const current = option.model === currentModel;
-              const badge = readModelOptionBadge({
+              const badge = requiresOpenAi ? <ModelOptionBadge>OpenAI</ModelOptionBadge> : readModelOptionBadge({
                 current,
                 dormantSolPreference,
                 managedDefaultOnly: props.customInferenceAvailable === true,
@@ -792,7 +804,7 @@ function HostedAssistantModelSettingsForm(
                   key={option.model}
                   meta={
                     unavailable
-                      ? `${option.usage} · ${option.model === HOSTED_ASSISTANT_ASTRA_MODEL
+                      ? requiresOpenAi ? `${option.usage} · OpenAI required` : `${option.usage} · ${option.model === HOSTED_ASSISTANT_ASTRA_MODEL
                         ? availableModels?.includes(HOSTED_ASSISTANT_ASTRA_MODEL) ? "OpenAI required" : "Edge required"
                         : "Edge required"}`
                       : option.usage
@@ -917,7 +929,7 @@ function readModelOptionBadge(input: {
     return <ModelOptionBadge>Edge</ModelOptionBadge>;
   }
 
-  if (input.model === HOSTED_ASSISTANT_TERRA_MODEL) {
+  if (input.model === HOSTED_ASSISTANT_DEFAULT_MODEL) {
     return <ModelOptionBadge>Recommended</ModelOptionBadge>;
   }
 
@@ -936,15 +948,15 @@ function ModelOptionBadge({ children }: { children: React.ReactNode }) {
 }
 
 function readModelName(model: HostedAssistantProductModel): string {
-  return `${model === HOSTED_ASSISTANT_ASTRA_MODEL ? "GPT-6" : "GPT-5.6"} ${readProductModelName(model)}`;
+  return `${model.startsWith("gpt-6-") ? "GPT-6" : "GPT-5.6"} ${readProductModelName(model)}`;
 }
 
 function readProductModelName(model: HostedAssistantProductModel): string {
   if (model === HOSTED_ASSISTANT_ASTRA_MODEL) return "Astra";
-  if (model === HOSTED_ASSISTANT_LUNA_MODEL) {
+  if (model === HOSTED_ASSISTANT_LUNA_MODEL || model === HOSTED_ASSISTANT_GPT_6_LUNA_MODEL) {
     return "Luna";
   }
-  return model === HOSTED_ASSISTANT_SOL_MODEL ? "Sol" : "Terra";
+  return model === HOSTED_ASSISTANT_SOL_MODEL || model === HOSTED_ASSISTANT_GPT_6_SOL_MODEL ? "Sol" : "Murph";
 }
 
 function readProviderName(provider: HostedAssistantProvider): string {

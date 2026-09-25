@@ -1,3 +1,4 @@
+import { HOSTED_EXECUTION_DEFAULT_RUNNER_IDLE_TTL_MS } from "@murphai/hosted-execution/contracts";
 import {
   HOSTED_WORKSPACE_SNAPSHOT_DIRECT_UPLOAD_WINDOW_MS,
 } from "@murphai/hosted-execution/workspace-snapshot-v2";
@@ -8,7 +9,6 @@ import {
 } from "./idle-maintenance-limits.ts";
 import { readHostedRunnerCommitTimeoutMs } from "./timeouts.ts";
 
-const DEFAULT_HOSTED_RUNTIME_IDLE_CHECKPOINT_DELAY_MS = 180_000;
 const HOSTED_RUNTIME_MAX_TIMER_DELAY_MS = 2_147_483_647;
 const HOSTED_RUNTIME_CHECKPOINT_CONTROL_STEPS = 3;
 
@@ -19,7 +19,7 @@ export function resolveHostedRuntimeIdleCheckpointDelayMs(
     return Math.min(Math.trunc(value), HOSTED_RUNTIME_MAX_TIMER_DELAY_MS);
   }
 
-  return DEFAULT_HOSTED_RUNTIME_IDLE_CHECKPOINT_DELAY_MS;
+  return HOSTED_EXECUTION_DEFAULT_RUNNER_IDLE_TTL_MS;
 }
 
 export function resolveHostedRuntimeCheckpointPublicationExpectedByMs(input: {

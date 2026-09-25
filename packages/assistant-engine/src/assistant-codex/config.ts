@@ -67,7 +67,8 @@ export function withHostedCodexModelCatalogConfigOverride(input: {
   ]
 }
 
-export function hasHostedCodexModelCatalogFlexTier(input: {
+export function hasHostedCodexModelCatalogServiceTier(input: {
+  serviceTier: 'flex' | 'priority'
   env?: NodeJS.ProcessEnv
   model?: string | null
 }): boolean {
@@ -96,7 +97,7 @@ export function hasHostedCodexModelCatalogFlexTier(input: {
       : []
     return serviceTiers
       .map(readRecord)
-      .some((tier) => tier?.id === 'flex')
+      .some((tier) => tier?.id === input.serviceTier)
   } catch {
     return false
   }
@@ -170,8 +171,9 @@ function readRecord(value: unknown): Record<string, unknown> | null {
 async function assertAccessibleCodexHomeDirectory(
   resolvedHome: string,
 ): Promise<void> {
+  let resolvedStats: Awaited<ReturnType<typeof stat>>
   try {
-    await stat(resolvedHome)
+    resolvedStats = await stat(resolvedHome)
   } catch {
     throw new VaultCliError(
       'ASSISTANT_CODEX_HOME_INVALID',
@@ -179,13 +181,11 @@ async function assertAccessibleCodexHomeDirectory(
     )
   }
 
-  let resolvedStats
   try {
     await access(
       resolvedHome,
       fsConstants.R_OK | fsConstants.W_OK | fsConstants.X_OK,
     )
-    resolvedStats = await stat(resolvedHome)
   } catch {
     throw new VaultCliError(
       'ASSISTANT_CODEX_HOME_INVALID',

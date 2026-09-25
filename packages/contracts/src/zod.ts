@@ -1282,6 +1282,13 @@ const noteEventFieldsShape = {
   ...experimentLinkShape,
   note: boundedString(1, 4000),
   noteType: boundedString(1, 120).optional(),
+  plan: z.object({
+    endsAt: isoDateTimeString(),
+    status: z.enum(["planned", "tentative", "canceled"]),
+    lastVerifiedAt: isoDateTimeString(),
+    accountId: boundedString(1, 200).optional(),
+    category: patternedString(SLUG_PATTERN),
+  }).strict().optional(),
   authoredAt: isoDateTimeString().optional(),
   signedAt: isoDateTimeString().optional(),
   author: boundedString(1, 160).optional(),
@@ -1384,11 +1391,22 @@ const bodyMeasurementEventFieldsShape = {
   media: z.array(storedMediaSchema).max(10).optional(),
 } satisfies z.ZodRawShape;
 
+export const sleepSessionTypeSchema = z.enum(["main_sleep", "short_sleep", "nap", "unknown"]);
+export const sleepSessionStateSchema = z.enum(["tentative", "confirmed"]);
+
+/** Short or tentative sessions are partial sleep evidence, not a confirmed complete night. */
+export function isShortOrTentativeSleepSession(
+  session: Pick<SleepSessionEventRecord, "sleepType" | "sleepState">,
+): boolean {
+  return session.sleepType === "short_sleep" || session.sleepState === "tentative";
+}
+
 const sleepSessionEventFieldsShape = {
   startAt: isoDateTimeString(),
   endAt: isoDateTimeString(),
   durationMinutes: integerSchema(1),
-  sleepType: z.enum(["main_sleep", "nap"]).optional(),
+  sleepType: sleepSessionTypeSchema.optional(),
+  sleepState: sleepSessionStateSchema.optional(),
 } satisfies z.ZodRawShape;
 
 const interventionSessionEventFieldsShape = {
@@ -1540,6 +1558,8 @@ export const eventImportUpsertDecisionSchema = z
     action: z.literal("upsert"),
     payload: eventImportDecisionPayloadSchema,
     expectedLatest: expectedLatestEventSchema.optional(),
+    sourceParent: versionedExternalRefSchema.optional(),
+    invalidateFacetPrefixes: z.array(patternedString(SLUG_PATTERN)).min(1).max(8).optional(),
   })
   .strict();
 
@@ -1549,6 +1569,7 @@ export const eventImportRetractionDecisionSchema = z
     externalRef: versionedExternalRefSchema,
     reason: boundedString(1, 240),
     evidence: z.array(clinicalEvidenceRefSchema).max(50).optional(),
+    retractFacetPrefixes: z.array(patternedString(SLUG_PATTERN)).min(1).max(8).optional(),
   })
   .strict();
 

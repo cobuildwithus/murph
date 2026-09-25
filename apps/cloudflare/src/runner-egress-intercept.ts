@@ -1,4 +1,7 @@
+import { parseHostedRuntimeUsageRecordResponse } from "@murphai/hosted-execution/parsers";
+import { authorizePostgresRuntimeProvider } from "./runtime-provider-authorization.ts";
 import { Buffer } from "node:buffer";
+import { waitUntil } from "cloudflare:workers";
 
 import {
   buildExaResearchScoutBatchLaneRequest,
@@ -19,10 +22,6 @@ import {
   type HostedExecutionStructuredLogDetails,
 } from "@murphai/hosted-execution";
 import {
-  HOSTED_ASSISTANT_VENICE_PROVIDER_MODELS,
-} from "@murphai/hosted-execution/assistant-model";
-import {
-  buildHostedCodexMemoryUsageRecord,
   buildHostedElevenLabsMusicUsageRecord,
   buildHostedElevenLabsTtsUsageRecord,
   buildHostedGeminiVideoAnalysisUsageRecord,
@@ -31,15 +30,11 @@ import {
   type AssistantUsageRecord,
 } from "@murphai/hosted-execution/assistant-usage";
 import {
-  resolveHostedAiUsageTokenPricingBasis,
   type HostedRuntimeUsageRecordResponse,
 } from "@murphai/hosted-execution/runtime-control";
 
 import { readHostedExecutionEnvironment } from "./env.ts";
 import { asWorkerStringEnvironment } from "./worker-contracts.ts";
-import {
-  recordHostedRuntimeUsageRecord,
-} from "./runtime-platform/usage-record-port.ts";
 
 import {
   CLOUDFLARE_HOSTED_CONTAINER_FATAL_PATH,
@@ -63,9 +58,7 @@ import {
   HOSTED_RUNNER_WEB_CONTROL_ROUTES,
 } from "./runner-outbound/shared-web-control-policy.ts";
 import {
-  applyRunnerRuntimeUsageSettlement,
-  requireRunnerRuntimeWriteFenceWrite,
-  RunnerRuntimeWriteFenceError,
+  writeRunnerRuntimeWriteFenceHeaders,
 } from "./runner-outbound/write-fence.ts";
 import type {
   RunnerOutboundEnvironmentSource,
@@ -78,9 +71,6 @@ import {
   HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER,
   HOSTED_RUNNER_BOUND_USER_ID_HEADER,
 } from "./runner-outbound/headers.ts";
-export {
-  HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
-} from "./runner-injected-credential.ts";
 import {
   HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
 } from "./runner-injected-credential.ts";
@@ -105,20 +95,12 @@ import {
   buildHostedCustomInferenceUpstreamRequestBody,
   injectHostedCustomInferenceAuth,
 } from "./runner-egress-custom-inference.ts";
+import { readHostedOpenAiImageRequest } from "./runner-egress-openai-image-request.ts";
 import {
-  HOSTED_CODEX_MEMORY_MAX_MESSAGE_BYTES,
-  hasHostedCodexMemoryBillableUsage,
-  parseHostedCodexMemoryTerminalResponse,
-  parseHostedCodexMemoryRequestMetadata,
-  readHostedCodexNativeMemoryKind,
-  type HostedCodexMemoryProviderRequestOutcome,
-  type HostedCodexMemoryRequestMetadata,
-  type HostedCodexMemoryUsage,
-  type HostedCodexNativeMemoryKind,
-} from "./runner-egress-codex-memory.ts";
-import {
-  relayHostedCodexMemoryWebSocketUpgrade,
-} from "./runner-egress-codex-memory-websocket.ts";
+  HOSTED_OPENAI_LIVE_PATH, HOSTED_OPENAI_LIVE_BODY_LIMIT,
+  readHostedLiveAttachReference, isHostedLiveCreationBody,
+  createHostedLiveSessionReference, authorizeHostedLiveAttachment,
+} from "./runner-egress-openai-live.ts";
 import {
   DEFAULT_ELEVENLABS_API_BASE_URL,
   HOSTED_ELEVENLABS_MAX_BODY_BYTES,
@@ -132,6 +114,7 @@ import {
   parseHostedXaiRequestBody,
   readHostedXaiResponseMetadata,
 } from "./runner-egress-xai.ts";
+import { fetchHostedWebControlPlaneJson } from "./runtime-platform/web-control-transport.ts";
 import {
   DEFAULT_GEMINI_API_BASE_URL,
   HOSTED_GEMINI_VIDEO_ANALYSIS_MAX_BODY_BYTES,
@@ -147,8 +130,16 @@ import {
   isAllowedHostedVeniceRequest,
 } from "./runner-egress-venice.ts";
 import {
+  buildHostedOpenAiCacheDiagnostic,
+  type HostedOpenAiCacheDiagnosticEndpointKind,
+  type HostedRunnerDiagnosticJson,
+} from "./runner-egress-responses-diagnostics.ts";
+import {
   readDeployLiveModelTurnSmokeOpenAiModel,
 } from "./deploy-smoke-live-model.ts";
+export {
+  HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
+} from "./runner-injected-credential.ts";
 
 type HostedRunnerOutboundHandler = (
   request: Request,
@@ -164,6 +155,7 @@ const HOSTED_RUNTIME_AUTHORITY_HEADER_NAMES = [
 
 const DEFAULT_LINQ_API_BASE_URL = "https://api.linqapp.com/api/partner/v3";
 const DEFAULT_OPENAI_API_BASE_URL = "https://api.openai.com";
+const HOSTED_OPENAI_RESPONSES_MAX_BODY_BYTES = 32 * 1024 * 1024;
 const OPENAI_AUTHORIZATION_ALERT_SINGLETON_NAME = "production";
 const OPENAI_AUTHORIZATION_ALERT_REPORT_FAILURE_CODE =
   "openai_authorization_alert_report_failed";
@@ -250,121 +242,10 @@ const OPENAI_EGRESS_POLICY = [
     requiresWebSocketUpgrade: true,
   },
 ] as const;
-const OPENAI_CACHE_DIAGNOSTIC_MODEL_KINDS = new Set([
-  "gpt-4.1",
-  "gpt-4.1-mini",
-  "gpt-4.1-nano",
-  "gpt-5.2",
-  "gpt-5.3-codex",
-  "gpt-5.3-codex-spark",
-  "gpt-5.6-luna",
-  "gpt-5.6-sol",
-  "gpt-5.6-terra",
-  "o3",
-  "o3-mini",
-  "o4-mini",
-]);
-const VENICE_CACHE_DIAGNOSTIC_MODEL_KINDS: ReadonlySet<string> = new Set(
-  Object.values(HOSTED_ASSISTANT_VENICE_PROVIDER_MODELS),
-);
 export const HOSTED_OPENAI_CACHE_DIAGNOSTIC_EVENT_CODE =
   "runner.provider_egress_diagnostic";
-const HOSTED_OPENAI_CACHE_DIAGNOSTIC_VERSION = 3;
 const OPENAI_CACHE_DIAGNOSTIC_CODEX_TURN_METADATA_HEADER = "x-codex-turn-metadata";
-const OPENAI_CACHE_DIAGNOSTIC_MAX_JSON_BYTES = 6 * 1024 * 1024;
-const OPENAI_CACHE_DIAGNOSTIC_MAX_FULL_FINGERPRINT_BYTES = 256 * 1024;
-const OPENAI_CACHE_DIAGNOSTIC_MIN_DIGEST_BYTES = 4 * 1024;
-const OPENAI_CACHE_DIAGNOSTIC_PREFIX_WINDOWS = [8 * 1024, 32 * 1024, 128 * 1024] as const;
-const OPENAI_CACHE_NAMESPACE_MIN_DIGEST_CHARS = 12;
-const OPENAI_CACHE_DIAGNOSTIC_FINGERPRINT_CONTEXT =
-  "murph.hosted-openai-cache-diagnostic.v1";
-const OPENAI_CACHE_DIAGNOSTIC_TEXT_DECODER = new TextDecoder();
-const OPENAI_CACHE_DIAGNOSTIC_TEXT_ENCODER = new TextEncoder();
-const OPENAI_CACHE_DIAGNOSTIC_INPUT_SHAPE_MAX_DEPTH = 128;
-const OPENAI_CACHE_DIAGNOSTIC_INPUT_SHAPE_MAX_NODES = 50_000;
-const OPENAI_CACHE_DIAGNOSTIC_MAX_COUNT_BUCKETS = 16;
-const OPENAI_CACHE_DIAGNOSTIC_INPUT_TAIL_ITEM_COUNT = 8;
-const OPENAI_CACHE_DIAGNOSTIC_FUNCTION_NAME_MAX_CHARS = 96;
-const OPENAI_CACHE_DIAGNOSTIC_DUPLICATE_FUNCTION_NAME_KIND = "duplicate";
-const OPENAI_CACHE_DIAGNOSTIC_FUNCTION_OUTPUT_ACTION_KINDS = [
-  "command.execution",
-  "dynamic.tool.call",
-  "mcp.tool.call",
-  "other",
-] as const;
-type HostedOpenAiFunctionOutputActionKind =
-  (typeof OPENAI_CACHE_DIAGNOSTIC_FUNCTION_OUTPUT_ACTION_KINDS)[number];
-const OPENAI_CACHE_DIAGNOSTIC_FUNCTION_OUTPUT_ACTION_METRIC_KINDS: Readonly<
-  Record<HostedOpenAiFunctionOutputActionKind, string>
-> = {
-  "command.execution": "function_output.action.command.execution",
-  "dynamic.tool.call": "function_output.action.dynamic.tool.call",
-  "mcp.tool.call": "function_output.action.mcp.tool.call",
-  other: "function_output.action.other",
-};
-const OPENAI_CACHE_DIAGNOSTIC_FUNCTION_OUTPUT_REPEATED_METRIC_KIND =
-  "function_output.repeated";
-const OPENAI_CACHE_DIAGNOSTIC_FUNCTION_OUTPUT_EQUIVALENT_METRIC_KIND =
-  "function_output.equivalent";
-const OPENAI_CACHE_DIAGNOSTIC_COMMAND_FUNCTION_NAME_KINDS = new Set([
-  "exec_command",
-  "local_shell",
-]);
-const OPENAI_CACHE_DIAGNOSTIC_SAFE_FUNCTION_NAME_PATTERN =
-  /^[A-Za-z][A-Za-z0-9_.:-]{0,95}$/u;
-const OPENAI_CACHE_DIAGNOSTIC_UNSAFE_FUNCTION_NAME_PATTERN =
-  /authorization|bearer|cookie|password|secret|token|api_?key|(?:sk|pk|rk)_(?:live|test)_|whsec_/iu;
-const OPENAI_CACHE_DIAGNOSTIC_INPUT_ITEM_TYPE_KINDS = [
-  "computer_call",
-  "computer_call_output",
-  "file_search_call",
-  "function_call",
-  "function_call_output",
-  "image_generation_call",
-  "local_shell_call",
-  "local_shell_call_output",
-  "message",
-  "reasoning",
-  "web_search_call",
-] as const;
-const OPENAI_CACHE_DIAGNOSTIC_INPUT_ITEM_ROLE_KINDS = [
-  "assistant",
-  "developer",
-  "system",
-  "tool",
-  "user",
-] as const;
-const OPENAI_CACHE_DIAGNOSTIC_INPUT_SHAPE_KEYS = new Set(["content", "output"]);
-const OPENAI_CACHE_DIAGNOSTIC_INPUT_NESTED_METRIC_KINDS = [
-  "content",
-  "output",
-  "string",
-] as const;
-const OPENAI_CACHE_DIAGNOSTIC_CODEX_REQUEST_KINDS = new Set([
-  "compaction",
-  "memory",
-  "prewarm",
-  "turn",
-]);
-const OPENAI_CACHE_DIAGNOSTIC_CODEX_COMPACTION_TRIGGER_KINDS = new Set([
-  "auto",
-  "manual",
-]);
-const OPENAI_CACHE_DIAGNOSTIC_CODEX_COMPACTION_REASON_KINDS = new Set([
-  "context_limit",
-  "model_downshift",
-  "user_requested",
-]);
-const OPENAI_CACHE_DIAGNOSTIC_CODEX_COMPACTION_IMPLEMENTATION_KINDS = new Set([
-  "responses",
-  "responses_compact",
-  "responses_compaction_v2",
-]);
-const OPENAI_CACHE_DIAGNOSTIC_CODEX_COMPACTION_PHASE_KINDS = new Set([
-  "mid_turn",
-  "pre_turn",
-  "standalone_turn",
-]);
+const PROVIDER_REQUEST_TEXT_DECODER = new TextDecoder();
 
 const MAPBOX_EGRESS_POLICY = [
   {
@@ -423,38 +304,16 @@ type HostedProviderEgressValidationMode =
   | "missing_identity"
   | "provider_egress_credential"
   | "provider_egress_token";
-const HOSTED_PROVIDER_EGRESS_TOKEN_REJECT_REASONS = [
-  "missing_provider_egress_token",
-  "missing_runner_state",
-  "missing_write_fence",
-  "provider_egress_token_mismatch",
-  "write_fence_mismatch",
-] as const;
-const HOSTED_PROVIDER_EGRESS_CREDENTIAL_REJECT_REASONS = [
-  "missing_runner_state",
-  "missing_write_fence",
-  "provider_egress_not_allowed",
-  "runner_container_mismatch",
-  "write_fence_mismatch",
-] as const;
-type HostedProviderEgressTokenRejectReason =
-  typeof HOSTED_PROVIDER_EGRESS_TOKEN_REJECT_REASONS[number];
-type HostedProviderEgressCredentialRejectReason =
-  typeof HOSTED_PROVIDER_EGRESS_CREDENTIAL_REJECT_REASONS[number];
 type HostedProviderEgressRejectReason =
-  | HostedProviderEgressCredentialRejectReason
-  | HostedProviderEgressTokenRejectReason
+  | "write_fence_mismatch"
   | "bound_user_missing"
   | "exact_write_fence_rejected"
   | "provider_egress_credential_invalid"
   | "provider_egress_credential_provider_mismatch"
-  | "provider_egress_credential_rejected"
   | "provider_egress_credential_signature_mismatch"
   | "provider_egress_credential_validation_error"
   | "provider_egress_token_missing"
-  | "provider_egress_token_rejected"
-  | "provider_egress_token_validation_error"
-  | "validation_rpc_missing";
+  | "usage_settlement_pending";
 
 interface HostedProviderEgressAuthorization {
   authorized: boolean;
@@ -488,14 +347,6 @@ const HOSTED_PLATFORM_METERED_PROVIDER_KINDS = new Set([
   "venice",
   "xai",
 ]);
-
-export type HostedOpenAiCacheDiagnosticEndpointKind = "responses" | "responses_compact";
-type HostedResponsesDiagnosticProviderKind = "openai" | "venice";
-type HostedRunnerDiagnosticScalar = boolean | null | number | string;
-export type HostedRunnerDiagnosticJson = Record<
-  string,
-  HostedRunnerDiagnosticScalar | HostedRunnerDiagnosticScalar[]
->;
 
 export const HOSTED_RUNNER_OUTBOUND_BY_HOST: Record<string, HostedRunnerOutboundHandler> = {
   [HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.artifactStore]: handleHostedRunnerInternalOutbound,
@@ -1236,34 +1087,14 @@ async function recordHostedDirectRuntimeUsage(input: {
   record: AssistantUsageRecord;
   writeFence: HostedProviderEgressWriteFenceMetadata;
 }): Promise<HostedRuntimeUsageRecordResponse> {
-  let settlement: HostedRuntimeUsageRecordResponse | null = null;
-  try {
-    const environment = readHostedExecutionEnvironment(asWorkerStringEnvironment(input.env));
-    settlement = await recordHostedRuntimeUsageRecord({
-      boundUserId: input.writeFence.userId,
-      fetchImpl: fetch,
-      record: input.record,
-      timeoutMs: environment.webControlTimeoutMs,
-      transport: {
-        callbackSigning: environment.webCallbackSigning,
-        mode: "direct",
-        webControlBaseUrl: environment.hostedWebBaseUrl,
-        workspaceCheckpointBridge: null,
-      },
-    });
-    return settlement;
-  } finally {
-    await applyRunnerRuntimeUsageSettlement({
-      env: input.env,
-      settlement,
-      userId: input.writeFence.userId,
-      writeAuthority: {
-        attemptId: input.writeFence.attemptId,
-        generation: input.writeFence.leaseGeneration,
-        workspaceVersion: input.writeFence.workspaceVersion,
-      },
-    });
-  }
+  const headers = new Headers({ "content-type": "application/json" });
+  if (!input.writeFence.workspaceVersion) throw new Error("Runtime usage workspace identity is missing.");
+  writeRunnerRuntimeWriteFenceHeaders(headers, { attemptId: input.writeFence.attemptId, leaseGeneration: input.writeFence.leaseGeneration, workspaceVersion: input.writeFence.workspaceVersion });
+  const response = await handleRunnerOutboundRequest(new Request(`${CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.webControlPlane}${HOSTED_RUNNER_WEB_CONTROL_ROUTES.usageRecording.path}`, {
+    method: "POST", headers, body: JSON.stringify({ usage: input.record }),
+  }), input.env, input.writeFence.userId);
+  if (!response.ok) throw new Error(`Runtime usage recording returned HTTP ${response.status}.`);
+  return parseHostedRuntimeUsageRecordResponse(await response.json());
 }
 
 function requireHostedDirectUsageWriteFence(
@@ -1559,6 +1390,49 @@ function reportOpenAiAuthorizationFailureSafely(input: {
   }
 }
 
+async function readHostedOpenAiRequestBody(input: {
+  pathnameSuffix: string;
+  request: Request;
+}): Promise<Response | {
+  boundedBody: ArrayBuffer | undefined;
+  imageGenerationRequested: boolean;
+}> {
+  let boundedBody: ArrayBuffer | undefined;
+  let imageGenerationRequested = false;
+  if (
+    input.request.method === "POST"
+    && input.pathnameSuffix === "/v1/responses"
+  ) {
+    const body = await readBoundedRequestBody(
+      input.request,
+      HOSTED_OPENAI_RESPONSES_MAX_BODY_BYTES,
+    );
+    if (body === null) {
+      return new Response("Payload Too Large", { status: 413 });
+    }
+    const imageRequest = readHostedOpenAiImageRequest(body);
+    if (imageRequest === "invalid") {
+      return new Response("Invalid Responses request.", { status: 400 });
+    }
+    imageGenerationRequested = imageRequest === "image";
+    boundedBody = body;
+  } else if (
+    input.request.method === "POST"
+    && input.pathnameSuffix === "/v1/images/edits"
+  ) {
+    const body = await readBoundedRequestBody(
+      input.request,
+      HOSTED_OPENAI_IMAGES_EDITS_MAX_BODY_BYTES,
+    );
+    if (body === null) {
+      return new Response("Payload Too Large", { status: 413 });
+    }
+    boundedBody = body;
+  }
+
+  return { boundedBody, imageGenerationRequested };
+}
+
 async function maybeHandleOpenAiRequest(input: {
   ctx?: HostedRunnerOutboundContext;
   env: RunnerOutboundEnvironmentSource;
@@ -1576,6 +1450,9 @@ async function maybeHandleOpenAiRequest(input: {
     return null;
   }
   const { pathnameSuffix } = pathMatch;
+  const liveReference = readHostedLiveAttachReference(pathnameSuffix);
+  if (liveReference) return handleHostedLiveAttachment({ ...input, pathMatch, reference: liveReference });
+  if (pathnameSuffix === HOSTED_OPENAI_LIVE_PATH) return handleHostedLiveCreation({ ...input, pathMatch });
   if (!isAllowedOpenAiRequest(input.request, pathnameSuffix)) {
     return disallowedProviderEgress();
   }
@@ -1603,44 +1480,20 @@ async function maybeHandleOpenAiRequest(input: {
     });
   }
 
-  const nativeMemoryKind = authorization.platformAiUsageAllowed !== false
-    ? readHostedCodexNativeMemoryKind(input.request.headers)
-    : null;
   const token = readRequiredInterceptSecret(input.env.OPENAI_API_KEY, "OPENAI_API_KEY");
   const headers = stripHostedProviderUpstreamHeaders(input.request.headers);
   headers.set("authorization", "Bearer " + token);
-  let boundedBody: ArrayBuffer | undefined;
-  let memoryRequestMetadata: HostedCodexMemoryRequestMetadata | null = null;
-  if (
-    nativeMemoryKind
-    && input.request.method === "POST"
-    && pathnameSuffix === "/v1/responses"
-  ) {
-    const body = await readBoundedRequestBody(
-      input.request,
-      HOSTED_CODEX_MEMORY_MAX_MESSAGE_BYTES,
-    );
-    if (body === null) {
-      return new Response("Payload Too Large", { status: 413 });
-    }
-    memoryRequestMetadata = parseHostedCodexMemoryRequestMetadata(body);
-    if (!memoryRequestMetadata) {
-      return new Response("Invalid Codex memory request.", { status: 400 });
-    }
-    boundedBody = body;
-  } else if (
-    input.request.method === "POST"
-    && pathnameSuffix === "/v1/images/edits"
-  ) {
-    const body = await readBoundedRequestBody(
-      input.request,
-      HOSTED_OPENAI_IMAGES_EDITS_MAX_BODY_BYTES,
-    );
-    if (body === null) {
-      return new Response("Payload Too Large", { status: 413 });
-    }
-    boundedBody = body;
-  }
+  const bodyRead = await readHostedOpenAiRequestBody({
+    pathnameSuffix,
+    request: input.request,
+  });
+  if (bodyRead instanceof Response) return bodyRead;
+  const { boundedBody, imageGenerationRequested } = bodyRead;
+
+  const imageDenied = await checkHostedOpenAiImageRequestAccess({
+    request: input.request, env: input.env, authorization, pathnameSuffix, imageGenerationRequested,
+  });
+  if (imageDenied) return imageDenied;
 
   const upstreamRequest = await createHostedRunnerUpstreamRequest(
     input.request,
@@ -1691,54 +1544,103 @@ async function maybeHandleOpenAiRequest(input: {
     await diagnosticPromise;
   }
 
-  if (
-    nativeMemoryKind
-    && input.request.method === "GET"
-    && pathnameSuffix === "/v1/responses"
-  ) {
-    return relayHostedCodexMemoryWebSocketUpgrade({
-      ...(typeof input.ctx?.waitUntil === "function"
-        ? {
-            defer: (promise) => {
-              input.ctx?.waitUntil?.(promise);
-            },
-          }
-        : {}),
-      persistUsage: async (completion) => {
-        await recordHostedCodexMemoryUsage({
-          apiKeyEnv: "OPENAI_API_KEY",
-          authorization,
-          baseUrl: DEFAULT_OPENAI_API_BASE_URL + "/v1",
-          env: input.env,
-          providerName: "hosted-openai",
-          providerRequestOutcome: completion.providerRequestOutcome,
-          requestMetadata: completion.requestMetadata,
-          usage: completion.usage,
-        });
-      },
-      reportFailure: ({ phase }) => {
-        reportHostedCodexMemoryUsageFailure({
-          memoryKind: nativeMemoryKind,
-          providerName: "hosted-openai",
-          reason: "websocket_" + phase,
-        });
-      },
-      upstreamResponse: response,
-    });
-  }
+  // Return upgrades unaccepted: Cloudflare owns the byte forwarding and
+  // native Codex owns connection reuse/recovery. Accepting here would couple
+  // every subsequent frame to this Worker invocation's JavaScript lifetime.
+  return response;
+}
 
-  return memoryRequestMetadata && nativeMemoryKind
-    ? await handleHostedCodexMemoryUsageResponse({
-        apiKeyEnv: "OPENAI_API_KEY",
-        authorization,
-        baseUrl: DEFAULT_OPENAI_API_BASE_URL + "/v1",
-        env: input.env,
-        memoryKind: nativeMemoryKind,
-        providerName: "hosted-openai",
-        requestMetadata: memoryRequestMetadata,
-        response,
-      })
-    : response;
+async function checkHostedOpenAiImageRequestAccess(input: {
+  request: Request; env: RunnerOutboundEnvironmentSource; authorization: HostedProviderEgressAuthorization;
+  pathnameSuffix: string; imageGenerationRequested: boolean;
+}): Promise<Response | null> {
+  // An opaque Responses socket cannot inspect later image-tool requests.
+  if (input.request.method === "GET" && input.pathnameSuffix === "/v1/responses") {
+    const denied = await checkHostedImageGenerationAccess(input);
+    return denied ? new Response("Use HTTPS Responses for this account.", { status: 426 }) : null;
+  }
+  if (input.imageGenerationRequested || input.pathnameSuffix === "/v1/images/generations" || input.pathnameSuffix === "/v1/images/edits") {
+    return checkHostedImageGenerationAccess(input);
+  }
+  return null;
+}
+
+async function handleHostedLiveCreation(input: {
+  request: Request; url: URL; pathMatch: ProviderPathMatch; env: RunnerOutboundEnvironmentSource;
+  upstreamFetchImpl?: typeof fetch; userId: string | null; ctx?: HostedRunnerOutboundContext;
+}): Promise<Response> {
+  if (input.request.method !== "POST" || input.url.search) return disallowedProviderEgress();
+  const bearerCredential = readBearerCredential(input.request.headers);
+  if (!bearerCredential || !isHostedProviderEgressCredential(bearerCredential)) return disallowedProviderEgress();
+  const startedAt = Date.now();
+  const authorization = await authorizeHostedOpenAiProviderEgress({ ...input, bearerCredential });
+  if (!authorization?.authorized || !authorization.writeFence) return disallowedProviderEgress();
+  const body = await readBoundedRequestBody(input.request, HOSTED_OPENAI_LIVE_BODY_LIMIT);
+  if (body === null) return new Response("Payload Too Large", { status: 413 });
+  if (!isHostedLiveCreationBody(body)) return new Response("Invalid Live request.", { status: 400 });
+  const headers = stripHostedProviderUpstreamHeaders(input.request.headers);
+  headers.set("authorization", `Bearer ${readRequiredInterceptSecret(input.env.OPENAI_API_KEY, "OPENAI_API_KEY")}`);
+  const response = await fetchAuthorizedProviderUpstream({
+    authorization, providerKind: "openai", request: input.request, startedAt, url: input.url,
+    upstreamRequest: await createHostedRunnerUpstreamRequest(input.request, createProviderUpstreamUrl(input.url, input.pathMatch), headers, { body, redirect: "manual" }),
+    upstreamFetchImpl: input.upstreamFetchImpl,
+  });
+  if (response.status === 401 || response.status === 403) {
+    await reportOpenAiAuthorizationFailureSafely({ ctx: input.ctx, env: input.env, status: response.status });
+  }
+  return response.ok ? wrapHostedLiveCreationResponse(response, authorization.writeFence, input.env) : response;
+}
+
+async function handleHostedLiveAttachment(input: {
+  request: Request; url: URL; pathMatch: ProviderPathMatch; reference: string;
+  env: RunnerOutboundEnvironmentSource; upstreamFetchImpl?: typeof fetch; ctx?: HostedRunnerOutboundContext;
+}): Promise<Response> {
+  if (input.request.method !== "GET" || input.url.search || !isWebSocketUpgradeRequest(input.request.headers)) return disallowedProviderEgress();
+  const credential = readBearerCredential(input.request.headers);
+  if (!credential) return disallowedProviderEgress();
+  const startedAt = Date.now();
+  const resource = await authorizeHostedLiveAttachment({ credential, reference: input.reference, source: input.env });
+  if (!resource) return disallowedProviderEgress();
+  const url = new URL(createProviderUpstreamUrl(input.url, input.pathMatch));
+  url.pathname = url.pathname.replace(`/${input.reference}/attach`, `/${encodeURIComponent(resource.sessionId)}/attach`);
+  const headers = stripHostedProviderUpstreamHeaders(input.request.headers);
+  headers.set("authorization", `Bearer ${readRequiredInterceptSecret(input.env.OPENAI_API_KEY, "OPENAI_API_KEY")}`);
+  // This grants attachment only to an existing exact-owner resource, including
+  // closure after revocation. It cannot create another Live session.
+  const response = await fetchAuthorizedProviderUpstream({
+    authorization: { authorized: true, mode: "provider_egress_credential", durationMs: Date.now() - startedAt,
+      providerEgressTokenPresent: false, runtimeAuthorityHeadersPresent: false,
+      userId: resource.owner.userId, writeFence: { ...resource.owner, workspaceVersion: null } },
+    providerKind: "openai", request: input.request, startedAt, url: input.url,
+    upstreamRequest: await createHostedRunnerUpstreamRequest(input.request, url, headers, { redirect: "manual" }),
+    upstreamFetchImpl: input.upstreamFetchImpl,
+  });
+  if (response.status === 401 || response.status === 403) {
+    await reportOpenAiAuthorizationFailureSafely({ ctx: input.ctx, env: input.env, status: response.status });
+  }
+  // Leave the upgrade unaccepted; Cloudflare forwards bytes and native Codex owns frames.
+  return response;
+}
+
+async function wrapHostedLiveCreationResponse(
+  response: Response, owner: HostedProviderEgressWriteFenceMetadata, source: RunnerOutboundEnvironmentSource,
+): Promise<Response> {
+  const body = await readBoundedRequestBody(response, HOSTED_OPENAI_LIVE_BODY_LIMIT);
+  let value: unknown;
+  try { value = body === null ? null : JSON.parse(new TextDecoder().decode(body)); }
+  catch { return new Response("Live creation outcome unconfirmed.", { status: 502 }); }
+  if (!value || typeof value !== "object" || !("session" in value) || !("transport" in value)) return new Response("Live creation outcome unconfirmed.", { status: 502 });
+  const session = value.session;
+  const transport = value.transport;
+  if (!session || typeof session !== "object" || !("id" in session) || typeof session.id !== "string"
+    || session.id.length === 0 || session.id === "." || session.id === ".." || new TextEncoder().encode(session.id).byteLength > 1024
+    || !transport || typeof transport !== "object" || !("sdp" in transport) || typeof transport.sdp !== "string") {
+    return new Response("Live creation outcome unconfirmed.", { status: 502 });
+  }
+  return Response.json({
+    session: { id: await createHostedLiveSessionReference(session.id, owner, source) },
+    transport: { type: "webrtc", sdp: transport.sdp },
+  }, { status: response.status });
 }
 
 async function maybeHandleVeniceRequest(input: {
@@ -1787,21 +1689,12 @@ async function maybeHandleVeniceRequest(input: {
     });
   }
 
-  const nativeMemoryKind = authorization.platformAiUsageAllowed !== false
-    ? readHostedCodexNativeMemoryKind(input.request.headers)
-    : null;
   const body = await readBoundedRequestBody(
     input.request,
     HOSTED_VENICE_RESPONSES_MAX_BODY_BYTES,
   );
   if (body === null) {
     return new Response("Payload Too Large", { status: 413 });
-  }
-  const memoryRequestMetadata = nativeMemoryKind
-    ? parseHostedCodexMemoryRequestMetadata(body)
-    : null;
-  if (nativeMemoryKind && !memoryRequestMetadata) {
-    return new Response("Invalid Codex memory request.", { status: 400 });
   }
   const upstreamBody = buildHostedVeniceResponsesRequestBody({
     body,
@@ -1824,246 +1717,16 @@ async function maybeHandleVeniceRequest(input: {
     headers,
     { body: upstreamBody },
   );
-  const captureMemoryDiagnostic = nativeMemoryKind !== null;
-  const diagnosticBody = captureMemoryDiagnostic
-    ? upstreamRequest.clone()
-    : null;
-  const canonicalModelKind = captureMemoryDiagnostic
-    ? readHostedResponsesRequestModelKind(body)
-    : null;
-  const providerStartedAt = Date.now();
-  let response: Response;
-  try {
-    response = await fetchAuthorizedProviderUpstream({
-      authorization,
-      providerKind: "venice",
-      request: input.request,
-      startedAt,
-      upstreamRequest,
-      url: input.url,
-    });
-  } catch (error) {
-    if (diagnosticBody) {
-      const diagnosticPromise = emitHostedRunnerOpenAiCacheDiagnostic({
-        canonicalModelKind,
-        ctx: input.ctx ?? null,
-        endpointKind: readVeniceCacheDiagnosticEndpointKind(pathMatch.pathnameSuffix),
-        env: input.env,
-        providerKind: "venice",
-        providerTransportFailed: true,
-        request: input.request,
-        upstreamRequestBody: diagnosticBody,
-        userId: authorization.userId,
-        writeFence: authorization.writeFence,
-      });
-      scheduleHostedProviderDiagnostic({
-        ctx: input.ctx ?? null,
-        promise: diagnosticPromise,
-      });
-    }
-    throw error;
-  }
-
-  if (diagnosticBody) {
-    const diagnosticPromise = emitHostedRunnerOpenAiCacheDiagnostic({
-      canonicalModelKind,
-      ctx: input.ctx ?? null,
-      endpointKind: readVeniceCacheDiagnosticEndpointKind(pathMatch.pathnameSuffix),
-      env: input.env,
-      providerKind: "venice",
-      providerResponseTtfbMs: Date.now() - providerStartedAt,
-      request: input.request,
-      response,
-      upstreamRequestBody: diagnosticBody,
-      userId: authorization.userId,
-      writeFence: authorization.writeFence,
-    });
-    scheduleHostedProviderDiagnostic({
-      ctx: input.ctx ?? null,
-      promise: diagnosticPromise,
-    });
-  }
-  return memoryRequestMetadata && nativeMemoryKind
-    ? await handleHostedCodexMemoryUsageResponse({
-        apiKeyEnv: "VENICE_API_KEY",
-        authorization,
-        baseUrl: DEFAULT_VENICE_API_BASE_URL,
-        env: input.env,
-        memoryKind: nativeMemoryKind,
-        providerName: "venice",
-        requestMetadata: memoryRequestMetadata,
-        response,
-      })
-    : response;
-}
-
-async function handleHostedCodexMemoryUsageResponse(input: {
-  apiKeyEnv: string;
-  authorization: HostedProviderEgressAuthorization;
-  baseUrl: string;
-  env: RunnerOutboundEnvironmentSource;
-  memoryKind: HostedCodexNativeMemoryKind;
-  providerName: "hosted-openai" | "venice";
-  requestMetadata: HostedCodexMemoryRequestMetadata;
-  response: Response;
-}): Promise<Response> {
-  if (!input.response.ok) {
-    return input.response;
-  }
-
-  const responseBody = await readBoundedRequestBody(
-    input.response,
-    HOSTED_CODEX_MEMORY_MAX_MESSAGE_BYTES,
-  );
-  if (responseBody === null) {
-    reportHostedCodexMemoryUsageFailure({
-      memoryKind: input.memoryKind,
-      providerName: input.providerName,
-      reason: "response_too_large",
-    });
-    return new Response("Hosted Codex memory response too large.", {
-      status: 502,
-    });
-  }
-
-  const terminal = parseHostedCodexMemoryTerminalResponse(responseBody);
-  if (
-    input.requestMetadata.usageRequired
-    && (
-      terminal === null
-      || (
-        terminal.usage === null
-        && terminal.providerRequestOutcome === "succeeded"
-      )
-    )
-  ) {
-    reportHostedCodexMemoryUsageFailure({
-      memoryKind: input.memoryKind,
-      providerName: input.providerName,
-      reason: "terminal_usage_missing",
-    });
-    return new Response("Hosted Codex memory usage was unavailable.", {
-      status: 502,
-    });
-  }
-
-  if (
-    terminal?.usage
-    && hasHostedCodexMemoryBillableUsage(terminal.usage)
-  ) {
-    try {
-      await recordHostedCodexMemoryUsage({
-        apiKeyEnv: input.apiKeyEnv,
-        authorization: input.authorization,
-        baseUrl: input.baseUrl,
-        env: input.env,
-        providerName: input.providerName,
-        providerRequestOutcome: terminal.providerRequestOutcome,
-        requestMetadata: input.requestMetadata,
-        usage: terminal.usage,
-      });
-    } catch (error) {
-      reportHostedCodexMemoryUsageFailure({
-        error,
-        memoryKind: input.memoryKind,
-        providerName: input.providerName,
-        reason: "persistence_failed",
-      });
-      // The provider work has already completed. Preserve its terminal
-      // response so Codex does not retry an irreversible, billable request.
-    }
-  }
-
-  return rebuildBufferedProviderResponse(input.response, responseBody);
-}
-
-async function recordHostedCodexMemoryUsage(input: {
-  apiKeyEnv: string;
-  authorization: HostedProviderEgressAuthorization;
-  baseUrl: string;
-  env: RunnerOutboundEnvironmentSource;
-  providerName: "hosted-openai" | "venice";
-  providerRequestOutcome: HostedCodexMemoryProviderRequestOutcome;
-  requestMetadata: HostedCodexMemoryRequestMetadata;
-  usage: HostedCodexMemoryUsage;
-}): Promise<void> {
-  const writeFence = requireHostedDirectUsageWriteFence(input.authorization);
-  const record = buildHostedCodexMemoryUsageRecord({
-    apiKeyEnv: input.apiKeyEnv,
-    baseUrl: input.baseUrl,
-    cacheWriteTokens: input.usage.cacheWriteTokens,
-    cachedInputTokens: input.usage.cachedInputTokens,
-    inputTokens: input.usage.inputTokens,
-    memberId: writeFence.userId,
-    occurredAt: input.usage.occurredAt,
-    outputTokens: input.usage.outputTokens,
-    providerName: input.providerName,
-    providerRequestId: input.usage.providerRequestId,
-    providerRequestOutcome: input.providerRequestOutcome,
-    rawUsageJson: input.usage.rawUsageJson,
-    reasoningTokens: input.usage.reasoningTokens,
-    requestedModel: input.requestMetadata.requestedModel,
-    // Venice exposes its translated provider id. The canonical request model
-    // remains the priceable identity for that provider.
-    servedModel: input.providerName === "venice"
-      ? null
-      : input.usage.servedModel,
-    tokenPricingBasis: resolveHostedAiUsageTokenPricingBasis({
-      model: input.requestMetadata.requestedModel,
-      providerName: input.providerName,
-      serviceTier: input.usage.serviceTier
-        ?? input.requestMetadata.serviceTier,
-    }),
-    totalTokens: input.usage.totalTokens,
-  });
-  await recordHostedDirectRuntimeUsage({
-    env: input.env,
-    record,
-    writeFence,
+  return await fetchAuthorizedProviderUpstream({
+    authorization,
+    providerKind: "venice",
+    request: input.request,
+    startedAt,
+    upstreamRequest,
+    url: input.url,
   });
 }
 
-function rebuildBufferedProviderResponse(
-  response: Response,
-  body: ArrayBuffer,
-): Response {
-  const headers = new Headers(response.headers);
-  headers.delete("content-encoding");
-  headers.delete("content-length");
-  return new Response(body, {
-    headers,
-    status: response.status,
-    statusText: response.statusText,
-  });
-}
-
-function reportHostedCodexMemoryUsageFailure(input: {
-  error?: unknown;
-  memoryKind: HostedCodexNativeMemoryKind;
-  providerName: "hosted-openai" | "venice";
-  reason: string;
-}): void {
-  const errorName = input.error === undefined
-    ? null
-    : readHostedExecutionSafeErrorName(input.error);
-  emitHostedExecutionStructuredLog({
-    component: "runner",
-    details: {
-      ...(input.error === undefined
-        ? {}
-        : {
-            errorCode: deriveHostedExecutionErrorCode(input.error),
-            ...(errorName ? { errorName } : {}),
-          }),
-      memoryKind: input.memoryKind,
-      providerKind: input.providerName + "_codex_memory",
-      reason: input.reason,
-    },
-    level: "warn",
-    message: "Hosted Codex memory usage accounting failed.",
-    phase: "wake.running",
-  });
-}
 
 async function maybeHandleElevenLabsRequest(input: {
   ctx?: HostedRunnerOutboundContext;
@@ -2596,25 +2259,6 @@ function readOpenAiCacheDiagnosticEndpointKind(
   return null;
 }
 
-function readVeniceCacheDiagnosticEndpointKind(
-  pathnameSuffix: string,
-): HostedOpenAiCacheDiagnosticEndpointKind {
-  return pathnameSuffix === "/responses/compact"
-    ? "responses_compact"
-    : "responses";
-}
-
-function readHostedResponsesRequestModelKind(body: ArrayBuffer): string | null {
-  try {
-    const parsed = JSON.parse(OPENAI_CACHE_DIAGNOSTIC_TEXT_DECODER.decode(body));
-    return isHostedOpenAiDiagnosticRecord(parsed)
-      ? readStringRecordProperty(parsed, "model")
-      : null;
-  } catch {
-    return null;
-  }
-}
-
 async function readDeploySmokeLiveModelTurnOpenAiModel(input: {
   pathnameSuffix: string;
   request: Request;
@@ -2631,48 +2275,15 @@ async function readDeploySmokeLiveModelTurnOpenAiModel(input: {
   }
 
   return readDeployLiveModelTurnSmokeOpenAiModel(
-    OPENAI_CACHE_DIAGNOSTIC_TEXT_DECODER.decode(body),
+    PROVIDER_REQUEST_TEXT_DECODER.decode(body),
   );
 }
 
-function scheduleHostedProviderDiagnostic(input: {
-  ctx: HostedRunnerOutboundContext | null;
-  promise: Promise<void>;
-}): void {
-  if (typeof input.ctx?.waitUntil === "function") {
-    try {
-      input.ctx.waitUntil(input.promise);
-      return;
-    } catch {
-      // Production container interception has no lifecycle owner. If an
-      // optional scheduler rejects synchronously, use the same best-effort
-      // detached fallback without extending the provider-response budget.
-    }
-  }
-  void input.promise.catch((error: unknown) => {
-    emitHostedExecutionStructuredLog({
-      component: "runner",
-      details: {
-        ...buildHostedExecutionSafeErrorDetails(error),
-        providerKind: "venice",
-      },
-      level: "warn",
-      message: "Hosted runner provider request diagnostic detached task failed.",
-      phase: "wake.running",
-    });
-  });
-}
-
 async function emitHostedRunnerOpenAiCacheDiagnostic(input: {
-  canonicalModelKind?: string | null;
   ctx: HostedRunnerOutboundContext | null;
   endpointKind: HostedOpenAiCacheDiagnosticEndpointKind;
   env: RunnerOutboundEnvironmentSource;
-  providerKind?: HostedResponsesDiagnosticProviderKind;
-  providerResponseTtfbMs?: number;
-  providerTransportFailed?: boolean;
   request: Request;
-  response?: Response;
   upstreamRequestBody: HostedRunnerDiagnosticBodySource;
   userId: string | null;
   writeFence: HostedProviderEgressWriteFenceMetadata | null;
@@ -2681,22 +2292,14 @@ async function emitHostedRunnerOpenAiCacheDiagnostic(input: {
   try {
     const requestBytes = new Uint8Array(await input.upstreamRequestBody.arrayBuffer());
     diagnostic = await buildHostedOpenAiCacheDiagnostic({
-      canonicalModelKind: input.canonicalModelKind ?? null,
       endpointKind: input.endpointKind,
       fingerprintSecret: readOpenAiCacheDiagnosticFingerprintSecret(input.env),
       method: input.request.method,
-      providerKind: input.providerKind ?? "openai",
+      providerKind: "openai",
       requestBytes,
       turnMetadataHeader: input.request.headers.get(
         OPENAI_CACHE_DIAGNOSTIC_CODEX_TURN_METADATA_HEADER,
       ),
-    });
-    appendProviderResponseDiagnostics({
-      diagnostic,
-      providerKind: input.providerKind ?? "openai",
-      providerResponseTtfbMs: input.providerResponseTtfbMs,
-      providerTransportFailed: input.providerTransportFailed ?? false,
-      response: input.response,
     });
   } catch (error) {
     emitHostedExecutionStructuredLog({
@@ -2704,7 +2307,7 @@ async function emitHostedRunnerOpenAiCacheDiagnostic(input: {
       details: {
         diagnosticCaptured: false,
         endpointKind: input.endpointKind,
-        providerKind: input.providerKind ?? "openai",
+        providerKind: "openai",
       },
       error,
       level: "warn",
@@ -2742,7 +2345,7 @@ async function emitHostedRunnerOpenAiCacheDiagnostic(input: {
       component: "runner",
       details: {
         endpointKind: input.endpointKind,
-        providerKind: input.providerKind ?? "openai",
+        providerKind: "openai",
         runtimeLogScheduled,
       },
       error,
@@ -2751,182 +2354,6 @@ async function emitHostedRunnerOpenAiCacheDiagnostic(input: {
       phase: "wake.running",
     });
   });
-}
-
-export async function buildHostedOpenAiCacheDiagnostic(input: {
-  canonicalModelKind?: string | null;
-  endpointKind: HostedOpenAiCacheDiagnosticEndpointKind;
-  fingerprintSecret?: string | null;
-  method: string;
-  providerKind?: HostedResponsesDiagnosticProviderKind;
-  requestBytes: Uint8Array;
-  turnMetadataHeader?: string | null;
-}): Promise<HostedRunnerDiagnosticJson> {
-  const fingerprintKey = await createOpenAiCacheDiagnosticFingerprintKey(
-    input.fingerprintSecret ?? null,
-  );
-  const diagnostic: HostedRunnerDiagnosticJson = {
-    diagnosticVersion: HOSTED_OPENAI_CACHE_DIAGNOSTIC_VERSION,
-    endpointKind: input.endpointKind,
-    fingerprintKind: fingerprintKey ? "hmac-sha256" : "none",
-    jsonType: "unknown",
-    jsonValid: false,
-    methodKind: readOpenAiDiagnosticMethodKind(input.method),
-    providerKind: input.providerKind ?? "openai",
-    requestBytes: input.requestBytes.byteLength,
-  };
-  await appendCodexTurnMetadataDiagnostics({
-    diagnostic,
-    fingerprintKey,
-    turnMetadataHeader: input.turnMetadataHeader ?? null,
-  });
-
-  await appendFingerprintDiagnostics({
-    bytes: input.requestBytes,
-    fieldPrefix: "request",
-    fingerprintKey,
-    output: diagnostic,
-  });
-
-  if (input.requestBytes.byteLength > OPENAI_CACHE_DIAGNOSTIC_MAX_JSON_BYTES) {
-    diagnostic.jsonSkippedReasonKind = "too_large";
-    return diagnostic;
-  }
-
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(OPENAI_CACHE_DIAGNOSTIC_TEXT_DECODER.decode(input.requestBytes));
-  } catch {
-    diagnostic.jsonType = "invalid";
-    return diagnostic;
-  }
-
-  diagnostic.jsonValid = true;
-  diagnostic.jsonType = readOpenAiDiagnosticJsonType(parsed);
-  if (!isHostedOpenAiDiagnosticRecord(parsed)) {
-    return diagnostic;
-  }
-
-  diagnostic.requestFieldCount = Object.keys(parsed).length;
-  const requestModel = readStringRecordProperty(parsed, "model");
-  diagnostic.modelKind = readOpenAiDiagnosticModelKind(
-    input.canonicalModelKind ?? requestModel,
-  );
-  if ((input.providerKind ?? "openai") === "venice") {
-    diagnostic.upstreamModelKind = readVeniceDiagnosticModelKind(requestModel);
-  }
-  diagnostic.cacheRetentionKind = readOpenAiCacheRetentionKind(parsed.prompt_cache_retention);
-
-  const cacheNamespace = readStringRecordProperty(parsed, "prompt_cache_key");
-  diagnostic.cacheNamespacePresent = cacheNamespace !== null;
-  if (cacheNamespace) {
-    await appendSensitiveIdentifierFingerprint({
-      fieldPrefix: "cacheNamespace",
-      fingerprintKey,
-      output: diagnostic,
-      value: cacheNamespace,
-    });
-  }
-
-  const previousResponseId = readStringRecordProperty(parsed, "previous_response_id");
-  diagnostic.previousResponsePresent = previousResponseId !== null;
-  if (previousResponseId) {
-    await appendSensitiveIdentifierFingerprint({
-      fieldPrefix: "previousResponse",
-      fingerprintKey,
-      output: diagnostic,
-      value: previousResponseId,
-    });
-  }
-
-  const instructions = readStringRecordProperty(parsed, "instructions");
-  diagnostic.instructionsPresent = instructions !== null;
-  if (instructions) {
-    diagnostic.instructionsBytes = byteLengthOfDiagnosticText(instructions);
-  }
-
-  const inputValue = parsed.input;
-  diagnostic.inputPresent = Object.hasOwn(parsed, "input");
-  diagnostic.inputType = readOpenAiDiagnosticJsonType(inputValue);
-  diagnostic.inputCount = readOpenAiInputCount(inputValue);
-  const inputBytes = encodeOpenAiDiagnosticJsonValue(inputValue);
-  if (inputBytes) {
-    diagnostic.inputBytes = inputBytes.byteLength;
-    await appendFingerprintDiagnostics({
-      bytes: inputBytes,
-      fieldPrefix: "input",
-      fingerprintKey,
-      output: diagnostic,
-    });
-  }
-  await appendOpenAiInputShapeDiagnostics({
-    diagnostic,
-    fingerprintKey,
-    inputValue,
-  });
-
-  diagnostic.toolCount = Array.isArray(parsed.tools) ? parsed.tools.length : 0;
-  diagnostic.includeCount = Array.isArray(parsed.include) ? parsed.include.length : 0;
-  diagnostic.storePresent = Object.hasOwn(parsed, "store");
-  diagnostic.streamPresent = Object.hasOwn(parsed, "stream");
-
-  return diagnostic;
-}
-
-function appendProviderResponseDiagnostics(input: {
-  diagnostic: HostedRunnerDiagnosticJson;
-  providerKind: HostedResponsesDiagnosticProviderKind;
-  providerResponseTtfbMs?: number;
-  providerTransportFailed: boolean;
-  response?: Response;
-}): void {
-  if (input.providerResponseTtfbMs !== undefined) {
-    input.diagnostic.providerResponseTtfbMs = Math.max(
-      0,
-      Math.trunc(input.providerResponseTtfbMs),
-    );
-  }
-  if (input.providerTransportFailed) {
-    input.diagnostic.providerResponseOutcomeKind = "transport_error";
-    return;
-  }
-  if (!input.response) {
-    return;
-  }
-
-  input.diagnostic.providerResponseOk = input.response.ok;
-  input.diagnostic.providerResponseOutcomeKind = input.response.ok
-    ? "accepted"
-    : "rejected";
-  input.diagnostic.providerResponseStatus = input.response.status;
-  input.diagnostic.providerResponseContentKind = readResponseContentKind(
-    input.response.headers.get("content-type"),
-  );
-
-  if (input.providerKind !== "venice") {
-    return;
-  }
-  const cloudflareRay = readSafeCloudflareRay(input.response.headers.get("cf-ray"));
-  if (cloudflareRay) {
-    input.diagnostic.providerResponseCloudflareRay = cloudflareRay;
-  }
-  const responseModelKind = readVeniceDiagnosticModelKind(
-    input.response.headers.get("x-venice-model-id"),
-  );
-  input.diagnostic.providerResponseModelKind = responseModelKind;
-  const requestModelKind = input.diagnostic.upstreamModelKind;
-  input.diagnostic.providerResponseModelMatchesRequest =
-    typeof requestModelKind === "string"
-    && requestModelKind !== "missing"
-    && requestModelKind !== "other"
-    && responseModelKind === requestModelKind;
-
-  const retryCount = readBoundedProviderRetryCount(
-    input.response.headers.get("x-retry-count"),
-  );
-  if (retryCount !== null) {
-    input.diagnostic.providerResponseRetryCount = retryCount;
-  }
 }
 
 async function writeHostedRunnerOpenAiCacheDiagnosticRuntimeLog(input: {
@@ -2950,11 +2377,7 @@ async function writeHostedRunnerOpenAiCacheDiagnosticRuntimeLog(input: {
           component: "runner",
           eventCode: HOSTED_OPENAI_CACHE_DIAGNOSTIC_EVENT_CODE,
           ...(writeFence ? { leaseGeneration: writeFence.leaseGeneration } : {}),
-          level:
-            input.diagnostic.providerResponseOutcomeKind === "rejected"
-              || input.diagnostic.providerResponseOutcomeKind === "transport_error"
-              ? "warn"
-              : "debug",
+          level: "debug",
           phase: "fetch",
           redactedJson: input.diagnostic,
           ...(writeFence?.workspaceVersion ? { workspaceVersion: writeFence.workspaceVersion } : {}),
@@ -2982,947 +2405,6 @@ async function writeHostedRunnerOpenAiCacheDiagnosticRuntimeLog(input: {
     throw new Error(`Hosted provider request diagnostic runtime-log write returned HTTP ${response.status}.`);
   }
   await drainHostedRunnerMetadataResponse(response);
-}
-
-async function appendFingerprintDiagnostics(input: {
-  bytes: Uint8Array;
-  fieldPrefix: "input" | "request";
-  fingerprintKey: CryptoKey | null;
-  output: HostedRunnerDiagnosticJson;
-}): Promise<void> {
-  const fingerprintKey = input.fingerprintKey;
-  const fingerprintPresentKey = `${input.fieldPrefix}FingerprintPresent`;
-  const prefixFingerprintEligible =
-    Boolean(fingerprintKey)
-    && input.bytes.byteLength >= OPENAI_CACHE_DIAGNOSTIC_MIN_DIGEST_BYTES;
-  const fullFingerprintEligible =
-    prefixFingerprintEligible
-    && input.bytes.byteLength <= OPENAI_CACHE_DIAGNOSTIC_MAX_FULL_FINGERPRINT_BYTES;
-  input.output[fingerprintPresentKey] = fullFingerprintEligible;
-  if (
-    !fingerprintKey
-    || input.bytes.byteLength < OPENAI_CACHE_DIAGNOSTIC_MIN_DIGEST_BYTES
-  ) {
-    return;
-  }
-  const activeFingerprintKey = fingerprintKey;
-
-  if (fullFingerprintEligible) {
-    input.output[`${input.fieldPrefix}Fingerprint`] = await hmacDiagnosticFingerprint({
-      bytes: input.bytes,
-      fieldPrefix: input.fieldPrefix,
-      fingerprintKey: activeFingerprintKey,
-    });
-  } else {
-    input.output[`${input.fieldPrefix}FullFingerprintSkipped`] = true;
-  }
-  const prefixLengths = readOpenAiCacheDiagnosticPrefixLengths(input.bytes.byteLength);
-  input.output[`${input.fieldPrefix}PrefixLengths`] = prefixLengths;
-  input.output[`${input.fieldPrefix}PrefixFingerprints`] = await Promise.all(
-    prefixLengths.map((length) =>
-      hmacDiagnosticFingerprint({
-        bytes: input.bytes.subarray(0, length),
-        fieldPrefix: `${input.fieldPrefix}:prefix:${length}`,
-        fingerprintKey: activeFingerprintKey,
-      })),
-  );
-}
-
-async function appendSensitiveIdentifierFingerprint(input: {
-  fieldPrefix:
-    | "cacheNamespace"
-    | "codexSession"
-    | "codexThread"
-    | "codexTurn"
-    | "codexWindow"
-    | "previousResponse";
-  fingerprintKey: CryptoKey | null;
-  output: HostedRunnerDiagnosticJson;
-  value: string;
-}): Promise<void> {
-  const fingerprintKey = input.fingerprintKey;
-  input.output[`${input.fieldPrefix}FingerprintPresent`] =
-    Boolean(fingerprintKey)
-    && input.value.length >= OPENAI_CACHE_NAMESPACE_MIN_DIGEST_CHARS;
-  if (
-    !fingerprintKey
-    || input.value.length < OPENAI_CACHE_NAMESPACE_MIN_DIGEST_CHARS
-  ) {
-    return;
-  }
-  const activeFingerprintKey = fingerprintKey;
-
-  input.output[`${input.fieldPrefix}Fingerprint`] = await hmacDiagnosticFingerprint({
-    bytes: OPENAI_CACHE_DIAGNOSTIC_TEXT_ENCODER.encode(input.value),
-    fieldPrefix: input.fieldPrefix,
-    fingerprintKey: activeFingerprintKey,
-  });
-}
-
-function readOpenAiCacheDiagnosticPrefixLengths(byteLength: number): number[] {
-  return Array.from(new Set(
-    OPENAI_CACHE_DIAGNOSTIC_PREFIX_WINDOWS
-      .map((limit) => Math.min(limit, byteLength))
-      .filter((length) => length > 0),
-  ));
-}
-
-function readOpenAiDiagnosticMethodKind(method: string): string {
-  return method === "POST" ? "POST" : "other";
-}
-
-function readOpenAiDiagnosticModelKind(value: string | null): string {
-  const normalized = value?.trim() ?? "";
-  if (!normalized) {
-    return "missing";
-  }
-  return OPENAI_CACHE_DIAGNOSTIC_MODEL_KINDS.has(normalized) ? normalized : "other";
-}
-
-function readVeniceDiagnosticModelKind(value: string | null): string {
-  const normalized = value?.split(":", 1)[0]?.trim() ?? "";
-  if (!normalized) {
-    return "missing";
-  }
-  return VENICE_CACHE_DIAGNOSTIC_MODEL_KINDS.has(normalized)
-    ? normalized
-    : "other";
-}
-
-function readBoundedProviderRetryCount(value: string | null): number | null {
-  const normalized = value?.trim() ?? "";
-  if (!/^\d{1,3}$/u.test(normalized)) {
-    return null;
-  }
-  const parsed = Number(normalized);
-  return parsed <= 100 ? parsed : null;
-}
-
-function readOpenAiCacheRetentionKind(value: unknown): string {
-  if (value === undefined || value === null) {
-    return "default";
-  }
-  if (value === "24h" || value === "in_memory") {
-    return value;
-  }
-  return "other";
-}
-
-function readOpenAiDiagnosticJsonType(value: unknown): string {
-  if (value === undefined) {
-    return "missing";
-  }
-  if (value === null) {
-    return "null";
-  }
-  if (Array.isArray(value)) {
-    return "array";
-  }
-  switch (typeof value) {
-    case "boolean":
-    case "number":
-    case "string":
-      return typeof value;
-    case "object":
-      return "object";
-    default:
-      return "other";
-  }
-}
-
-function readOpenAiInputCount(value: unknown): number {
-  if (Array.isArray(value)) {
-    return value.length;
-  }
-  if (value === undefined || value === null) {
-    return 0;
-  }
-  return typeof value === "string" && value.length === 0 ? 0 : 1;
-}
-
-function readStringRecordProperty(record: Record<string, unknown>, key: string): string | null {
-  const value = record[key];
-  const normalized = typeof value === "string" ? value.trim() : "";
-  return normalized.length > 0 ? normalized : null;
-}
-
-async function appendCodexTurnMetadataDiagnostics(input: {
-  diagnostic: HostedRunnerDiagnosticJson;
-  fingerprintKey: CryptoKey | null;
-  turnMetadataHeader: string | null;
-}): Promise<void> {
-  const header = input.turnMetadataHeader?.trim();
-  if (!header) {
-    return;
-  }
-
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(header);
-  } catch {
-    input.diagnostic.codexTurnMetadataStatus = "invalid";
-    return;
-  }
-  if (!isHostedOpenAiDiagnosticRecord(parsed)) {
-    input.diagnostic.codexTurnMetadataStatus = "invalid";
-    return;
-  }
-
-  input.diagnostic.codexTurnMetadataStatus = "valid";
-  appendAllowedStringDiagnosticKind({
-    allowed: OPENAI_CACHE_DIAGNOSTIC_CODEX_REQUEST_KINDS,
-    field: "codexRequestKind",
-    output: input.diagnostic,
-    value: parsed.request_kind,
-  });
-
-  const sessionId = readStringRecordProperty(parsed, "session_id");
-  if (sessionId) {
-    await appendSensitiveIdentifierFingerprint({
-      fieldPrefix: "codexSession",
-      fingerprintKey: input.fingerprintKey,
-      output: input.diagnostic,
-      value: sessionId,
-    });
-  }
-  const threadId = readStringRecordProperty(parsed, "thread_id");
-  if (threadId) {
-    await appendSensitiveIdentifierFingerprint({
-      fieldPrefix: "codexThread",
-      fingerprintKey: input.fingerprintKey,
-      output: input.diagnostic,
-      value: threadId,
-    });
-  }
-  const turnId = readStringRecordProperty(parsed, "turn_id");
-  if (turnId) {
-    await appendSensitiveIdentifierFingerprint({
-      fieldPrefix: "codexTurn",
-      fingerprintKey: input.fingerprintKey,
-      output: input.diagnostic,
-      value: turnId,
-    });
-  }
-  const windowId = readStringRecordProperty(parsed, "window_id");
-  if (windowId) {
-    await appendSensitiveIdentifierFingerprint({
-      fieldPrefix: "codexWindow",
-      fingerprintKey: input.fingerprintKey,
-      output: input.diagnostic,
-      value: windowId,
-    });
-  }
-
-  const compaction = parsed.compaction;
-  if (!isHostedOpenAiDiagnosticRecord(compaction)) {
-    return;
-  }
-
-  appendAllowedStringDiagnosticKind({
-    allowed: OPENAI_CACHE_DIAGNOSTIC_CODEX_COMPACTION_TRIGGER_KINDS,
-    field: "codexCompactionTriggerKind",
-    output: input.diagnostic,
-    value: compaction.trigger,
-  });
-  appendAllowedStringDiagnosticKind({
-    allowed: OPENAI_CACHE_DIAGNOSTIC_CODEX_COMPACTION_REASON_KINDS,
-    field: "codexCompactionReasonKind",
-    output: input.diagnostic,
-    value: compaction.reason,
-  });
-  appendAllowedStringDiagnosticKind({
-    allowed: OPENAI_CACHE_DIAGNOSTIC_CODEX_COMPACTION_IMPLEMENTATION_KINDS,
-    field: "codexCompactionImplementationKind",
-    output: input.diagnostic,
-    value: compaction.implementation,
-  });
-  appendAllowedStringDiagnosticKind({
-    allowed: OPENAI_CACHE_DIAGNOSTIC_CODEX_COMPACTION_PHASE_KINDS,
-    field: "codexCompactionPhaseKind",
-    output: input.diagnostic,
-    value: compaction.phase,
-  });
-}
-
-function appendAllowedStringDiagnosticKind(input: {
-  allowed: ReadonlySet<string>;
-  field: string;
-  output: HostedRunnerDiagnosticJson;
-  value: unknown;
-}): void {
-  const normalized = typeof input.value === "string" ? input.value.trim() : "";
-  if (!normalized) {
-    return;
-  }
-  input.output[input.field] = input.allowed.has(normalized) ? normalized : "other";
-}
-
-function encodeOpenAiDiagnosticJsonValue(value: unknown): Uint8Array | null {
-  return serializeOpenAiDiagnosticJsonValue(value)?.bytes ?? null;
-}
-
-function serializeOpenAiDiagnosticJsonValue(value: unknown): {
-  bytes: Uint8Array;
-  serialized: string;
-} | null {
-  if (value === undefined) {
-    return null;
-  }
-  try {
-    const serialized = JSON.stringify(value);
-    return typeof serialized === "string"
-      ? {
-          bytes: OPENAI_CACHE_DIAGNOSTIC_TEXT_ENCODER.encode(serialized),
-          serialized,
-        }
-      : null;
-  } catch {
-    return null;
-  }
-}
-
-async function appendOpenAiInputShapeDiagnostics(input: {
-  diagnostic: HostedRunnerDiagnosticJson;
-  fingerprintKey: CryptoKey | null;
-  inputValue: unknown;
-}): Promise<void> {
-  const diagnostic = input.diagnostic;
-  const inputValue = input.inputValue;
-  if (!Array.isArray(inputValue)) {
-    return;
-  }
-
-  const functionCallNamesById = readOpenAiInputFunctionCallNamesById(inputValue);
-  const typeCounts = new Map<string, number>();
-  const typeBytes = new Map<string, number>();
-  const roleCounts = new Map<string, number>();
-  const functionCallNameCounts = new Map<string, number>();
-  const functionCallBytes = new Map<string, number>();
-  const functionOutputNameCounts = new Map<string, number>();
-  const functionOutputBytes = new Map<string, number>();
-  const functionOutputActionCounts = new Map<string, number>();
-  const functionOutputActionBytes = new Map<string, number>();
-  const seenFunctionOutputCallIds = new Set<string>();
-  const functionOutputEquivalenceBySerializedValue = new Map<
-    string,
-    { differentCallIdSeen: boolean; firstCallId: string }
-  >();
-  let repeatedFunctionOutputCount = 0;
-  let repeatedFunctionOutputBytes = 0;
-  let equivalentFunctionOutputCount = 0;
-  let equivalentFunctionOutputBytes = 0;
-  let largestItemBytes = 0;
-  let largestItemIndex = -1;
-  let largestItemKinds = ["type:missing", "role:missing"];
-  let largestFunctionOutputBytes = 0;
-  let largestFunctionOutputIndex = -1;
-  let largestFunctionOutputNameKind = "missing";
-
-  for (const [index, item] of inputValue.entries()) {
-    const typeKind = readOpenAiInputItemTypeKind(item);
-    const roleKind = readOpenAiInputItemRoleKind(item);
-    const itemBytes = encodeOpenAiDiagnosticJsonValue(item)?.byteLength ?? 0;
-    incrementDiagnosticCount(typeCounts, typeKind);
-    addDiagnosticBytes(typeBytes, typeKind, itemBytes);
-    incrementDiagnosticCount(roleCounts, roleKind);
-
-    if (itemBytes > largestItemBytes) {
-      largestItemBytes = itemBytes;
-      largestItemIndex = index;
-      largestItemKinds = [`type:${typeKind}`, `role:${roleKind}`];
-    }
-
-    if (typeKind === "function_call") {
-      const functionNameKind = readOpenAiInputFunctionCallNameKind(item, functionCallNamesById);
-      incrementDiagnosticCount(functionCallNameCounts, functionNameKind);
-      addDiagnosticBytes(functionCallBytes, functionNameKind, itemBytes);
-    } else if (typeKind === "function_call_output") {
-      const functionNameKind = readOpenAiInputFunctionOutputNameKind(
-        item,
-        functionCallNamesById,
-      );
-      const actionKind = readOpenAiInputFunctionOutputActionKind(functionNameKind);
-      const output = readOpenAiInputFunctionOutputDiagnosticValue(item);
-      const outputBytes = output?.bytes.byteLength ?? 0;
-      incrementDiagnosticCount(functionOutputNameCounts, functionNameKind);
-      addDiagnosticBytes(functionOutputBytes, functionNameKind, outputBytes);
-      incrementDiagnosticCount(functionOutputActionCounts, actionKind);
-      addDiagnosticBytes(functionOutputActionBytes, actionKind, outputBytes);
-
-      const callId = readOpenAiInputFunctionOutputLookupId(item);
-      const repeatedCallId = callId !== null && seenFunctionOutputCallIds.has(callId);
-      if (callId !== null) {
-        seenFunctionOutputCallIds.add(callId);
-      }
-      if (repeatedCallId) {
-        repeatedFunctionOutputCount += 1;
-        repeatedFunctionOutputBytes += outputBytes;
-      }
-      if (callId !== null && output !== null) {
-        const equivalenceState = functionOutputEquivalenceBySerializedValue.get(
-          output.serialized,
-        );
-        if (equivalenceState === undefined) {
-          functionOutputEquivalenceBySerializedValue.set(output.serialized, {
-            differentCallIdSeen: false,
-            firstCallId: callId,
-          });
-        } else {
-          const differsFromFirst = equivalenceState.firstCallId !== callId;
-          if (differsFromFirst || equivalenceState.differentCallIdSeen) {
-            equivalentFunctionOutputCount += 1;
-            equivalentFunctionOutputBytes += outputBytes;
-          }
-          if (differsFromFirst) {
-            equivalenceState.differentCallIdSeen = true;
-          }
-        }
-      }
-      if (outputBytes > largestFunctionOutputBytes) {
-        largestFunctionOutputBytes = outputBytes;
-        largestFunctionOutputIndex = index;
-        largestFunctionOutputNameKind = functionNameKind;
-      }
-    }
-  }
-
-  const nestedShape = summarizeOpenAiInputNestedShape(inputValue);
-  const inputMetricKinds: string[] = [
-    ...OPENAI_CACHE_DIAGNOSTIC_INPUT_NESTED_METRIC_KINDS,
-  ];
-  const inputMetricCounts = [
-    nestedShape.contentCount,
-    nestedShape.outputCount,
-    nestedShape.stringCount,
-  ];
-  const inputMetricBytes = [
-    nestedShape.contentBytes,
-    nestedShape.outputBytes,
-    nestedShape.stringBytes,
-  ];
-  const typeSummary = summarizeOpenAiDiagnosticCountsAndBytes(typeCounts, typeBytes);
-  const roleSummary = summarizeOpenAiDiagnosticCounts(roleCounts);
-  const functionCallNameSummary = summarizeOpenAiDiagnosticCountsAndBytes(
-    functionCallNameCounts,
-    functionCallBytes,
-  );
-  const functionOutputNameSummary = summarizeOpenAiDiagnosticCountsAndBytes(
-    functionOutputNameCounts,
-    functionOutputBytes,
-  );
-  diagnostic.inputItemTypeKinds = typeSummary.kinds;
-  diagnostic.inputItemTypeCounts = typeSummary.counts;
-  diagnostic.inputItemTypeBytes = typeSummary.bytes;
-  diagnostic.inputItemRoleKinds = roleSummary.kinds;
-  diagnostic.inputItemRoleCounts = roleSummary.counts;
-  diagnostic.inputLargestItemBytes = largestItemBytes;
-  diagnostic.inputLargestItemIndex = largestItemIndex;
-  diagnostic.inputLargestItemReverseIndex =
-    largestItemIndex >= 0 ? inputValue.length - 1 - largestItemIndex : -1;
-  diagnostic.inputLargestItemKinds = largestItemKinds;
-  diagnostic.inputNestedMetricKinds = inputMetricKinds;
-  diagnostic.inputNestedMetricCounts = inputMetricCounts;
-  diagnostic.inputNestedMetricBytes = inputMetricBytes;
-  if (nestedShape.truncated) {
-    diagnostic.inputShapeTraversalTruncated = true;
-  }
-  if (functionCallNameSummary.kinds.length > 0) {
-    diagnostic.inputFunctionCallNameKinds = functionCallNameSummary.kinds;
-    diagnostic.inputFunctionCallNameCounts = functionCallNameSummary.counts;
-    diagnostic.inputFunctionCallBytes = functionCallNameSummary.bytes;
-  }
-  if (functionOutputNameSummary.kinds.length > 0) {
-    diagnostic.inputFunctionOutputNameKinds = functionOutputNameSummary.kinds;
-    diagnostic.inputFunctionOutputNameCounts = functionOutputNameSummary.counts;
-    diagnostic.inputFunctionOutputBytes = functionOutputNameSummary.bytes;
-    diagnostic.inputLargestFunctionOutputBytes = largestFunctionOutputBytes;
-    diagnostic.inputLargestFunctionOutputIndex = largestFunctionOutputIndex;
-    diagnostic.inputLargestFunctionOutputReverseIndex =
-      largestFunctionOutputIndex >= 0 ? inputValue.length - 1 - largestFunctionOutputIndex : -1;
-    diagnostic.inputLargestFunctionOutputNameKind = largestFunctionOutputNameKind;
-    for (const actionKind of OPENAI_CACHE_DIAGNOSTIC_FUNCTION_OUTPUT_ACTION_KINDS) {
-      const actionCount = functionOutputActionCounts.get(actionKind) ?? 0;
-      if (actionCount === 0) {
-        continue;
-      }
-      inputMetricKinds.push(
-        OPENAI_CACHE_DIAGNOSTIC_FUNCTION_OUTPUT_ACTION_METRIC_KINDS[actionKind],
-      );
-      inputMetricCounts.push(actionCount);
-      inputMetricBytes.push(functionOutputActionBytes.get(actionKind) ?? 0);
-    }
-    if (repeatedFunctionOutputCount > 0) {
-      inputMetricKinds.push(
-        OPENAI_CACHE_DIAGNOSTIC_FUNCTION_OUTPUT_REPEATED_METRIC_KIND,
-      );
-      inputMetricCounts.push(repeatedFunctionOutputCount);
-      inputMetricBytes.push(repeatedFunctionOutputBytes);
-    }
-    if (equivalentFunctionOutputCount > 0) {
-      inputMetricKinds.push(
-        OPENAI_CACHE_DIAGNOSTIC_FUNCTION_OUTPUT_EQUIVALENT_METRIC_KIND,
-      );
-      inputMetricCounts.push(equivalentFunctionOutputCount);
-      inputMetricBytes.push(equivalentFunctionOutputBytes);
-    }
-  }
-
-  // Equality comparison is request-local only. Release its serialized-value
-  // keys before the asynchronous tail-fingerprint work and never persist them.
-  functionOutputEquivalenceBySerializedValue.clear();
-  seenFunctionOutputCallIds.clear();
-
-  await appendOpenAiInputTailItemDiagnostics({
-    diagnostic,
-    fingerprintKey: input.fingerprintKey,
-    functionCallNamesById,
-    inputValue,
-  });
-}
-
-async function appendOpenAiInputTailItemDiagnostics(input: {
-  diagnostic: HostedRunnerDiagnosticJson;
-  fingerprintKey: CryptoKey | null;
-  functionCallNamesById: ReadonlyMap<string, string>;
-  inputValue: readonly unknown[];
-}): Promise<void> {
-  const tailItems = input.inputValue.slice(-OPENAI_CACHE_DIAGNOSTIC_INPUT_TAIL_ITEM_COUNT);
-  if (tailItems.length === 0) {
-    return;
-  }
-
-  const startIndex = input.inputValue.length - tailItems.length;
-  const indexes: number[] = [];
-  const reverseIndexes: number[] = [];
-  const typeKinds: string[] = [];
-  const roleKinds: string[] = [];
-  const itemBytes: number[] = [];
-  const contentBytes: number[] = [];
-  const outputBytes: number[] = [];
-  const stringBytes: number[] = [];
-  const functionNameKinds: string[] = [];
-  const fingerprints: string[] = [];
-  let traversalTruncated = false;
-  let functionNameDiagnosticsPresent = false;
-
-  for (const [offset, item] of tailItems.entries()) {
-    const index = startIndex + offset;
-    const encodedItem = encodeOpenAiDiagnosticJsonValue(item);
-    const nestedShape = summarizeOpenAiInputNestedShape(item);
-    const typeKind = readOpenAiInputItemTypeKind(item);
-
-    indexes.push(index);
-    reverseIndexes.push(input.inputValue.length - 1 - index);
-    typeKinds.push(typeKind);
-    roleKinds.push(readOpenAiInputItemRoleKind(item));
-    itemBytes.push(encodedItem?.byteLength ?? 0);
-    contentBytes.push(nestedShape.contentBytes);
-    outputBytes.push(nestedShape.outputBytes);
-    stringBytes.push(nestedShape.stringBytes);
-    traversalTruncated = traversalTruncated || nestedShape.truncated;
-    if (typeKind === "function_call") {
-      functionNameKinds.push(readOpenAiInputFunctionCallNameKind(
-        item,
-        input.functionCallNamesById,
-      ));
-      functionNameDiagnosticsPresent = true;
-    } else if (typeKind === "function_call_output") {
-      functionNameKinds.push(readOpenAiInputFunctionOutputNameKind(
-        item,
-        input.functionCallNamesById,
-      ));
-      functionNameDiagnosticsPresent = true;
-    } else {
-      functionNameKinds.push("none");
-    }
-
-    if (input.fingerprintKey && encodedItem) {
-      fingerprints.push(await hmacDiagnosticFingerprint({
-        bytes: encodedItem,
-        fieldPrefix: "input:item",
-        fingerprintKey: input.fingerprintKey,
-      }));
-    }
-  }
-
-  input.diagnostic.inputTailItemCount = tailItems.length;
-  input.diagnostic.inputTailItemIndexes = indexes;
-  input.diagnostic.inputTailItemReverseIndexes = reverseIndexes;
-  input.diagnostic.inputTailItemTypeKinds = typeKinds;
-  input.diagnostic.inputTailItemRoleKinds = roleKinds;
-  input.diagnostic.inputTailItemBytes = itemBytes;
-  input.diagnostic.inputTailItemContentBytes = contentBytes;
-  input.diagnostic.inputTailItemOutputBytes = outputBytes;
-  input.diagnostic.inputTailItemStringBytes = stringBytes;
-  if (functionNameDiagnosticsPresent) {
-    input.diagnostic.inputTailItemFunctionNameKinds = functionNameKinds;
-  }
-  input.diagnostic.inputTailItemFingerprintPresent = fingerprints.length > 0;
-  if (fingerprints.length > 0) {
-    input.diagnostic.inputTailItemFingerprints = fingerprints;
-  }
-  if (traversalTruncated) {
-    input.diagnostic.inputTailItemShapeTraversalTruncated = true;
-  }
-}
-
-function readOpenAiInputItemTypeKind(value: unknown): string {
-  return readOpenAiInputItemAllowedKind(
-    value,
-    "type",
-    OPENAI_CACHE_DIAGNOSTIC_INPUT_ITEM_TYPE_KINDS,
-  );
-}
-
-function readOpenAiInputItemRoleKind(value: unknown): string {
-  return readOpenAiInputItemAllowedKind(
-    value,
-    "role",
-    OPENAI_CACHE_DIAGNOSTIC_INPUT_ITEM_ROLE_KINDS,
-  );
-}
-
-function readOpenAiInputItemAllowedKind(
-  value: unknown,
-  field: "role" | "type",
-  allowed: readonly string[],
-): string {
-  if (!isHostedOpenAiDiagnosticRecord(value)) {
-    return "missing";
-  }
-
-  const raw = value[field];
-  if (typeof raw !== "string") {
-    return "missing";
-  }
-
-  const normalized = raw.trim();
-  if (normalized.length === 0) {
-    return "missing";
-  }
-  return allowed.includes(normalized) ? normalized : "other";
-}
-
-function readOpenAiInputFunctionNameKind(value: unknown): string {
-  if (!isHostedOpenAiDiagnosticRecord(value)) {
-    return "unknown";
-  }
-  return normalizeOpenAiInputFunctionNameKind(readStringRecordProperty(value, "name"));
-}
-
-function readOpenAiInputFunctionCallNamesById(inputValue: readonly unknown[]): ReadonlyMap<string, string> {
-  const functionCallNamesById = new Map<string, string>();
-  for (const item of inputValue) {
-    if (readOpenAiInputItemTypeKind(item) !== "function_call") {
-      continue;
-    }
-
-    const callId = readOpenAiInputFunctionCallLookupId(item);
-    if (!callId) {
-      continue;
-    }
-
-    if (functionCallNamesById.has(callId)) {
-      functionCallNamesById.set(callId, OPENAI_CACHE_DIAGNOSTIC_DUPLICATE_FUNCTION_NAME_KIND);
-    } else {
-      functionCallNamesById.set(callId, readOpenAiInputFunctionNameKind(item));
-    }
-  }
-  return functionCallNamesById;
-}
-
-function readOpenAiInputFunctionCallNameKind(
-  value: unknown,
-  functionCallNamesById: ReadonlyMap<string, string>,
-): string {
-  const callId = readOpenAiInputFunctionCallLookupId(value);
-  if (
-    callId
-    && functionCallNamesById.get(callId) === OPENAI_CACHE_DIAGNOSTIC_DUPLICATE_FUNCTION_NAME_KIND
-  ) {
-    return OPENAI_CACHE_DIAGNOSTIC_DUPLICATE_FUNCTION_NAME_KIND;
-  }
-  return readOpenAiInputFunctionNameKind(value);
-}
-
-function readOpenAiInputFunctionOutputNameKind(
-  value: unknown,
-  functionCallNamesById: ReadonlyMap<string, string>,
-): string {
-  const callId = readOpenAiInputFunctionOutputLookupId(value);
-  return callId ? functionCallNamesById.get(callId) ?? "unknown" : "unknown";
-}
-
-function normalizeOpenAiInputFunctionNameKind(value: string | null): string {
-  if (!value) {
-    return "unknown";
-  }
-  if (value.length > OPENAI_CACHE_DIAGNOSTIC_FUNCTION_NAME_MAX_CHARS) {
-    return "other";
-  }
-  if (
-    !OPENAI_CACHE_DIAGNOSTIC_SAFE_FUNCTION_NAME_PATTERN.test(value)
-    || OPENAI_CACHE_DIAGNOSTIC_UNSAFE_FUNCTION_NAME_PATTERN.test(value)
-  ) {
-    return "other";
-  }
-  return value;
-}
-
-function readOpenAiInputFunctionCallLookupId(value: unknown): string | null {
-  if (!isHostedOpenAiDiagnosticRecord(value)) {
-    return null;
-  }
-  return readStringRecordProperty(value, "call_id") ?? readStringRecordProperty(value, "id");
-}
-
-function readOpenAiInputFunctionOutputLookupId(value: unknown): string | null {
-  if (!isHostedOpenAiDiagnosticRecord(value)) {
-    return null;
-  }
-  return readStringRecordProperty(value, "call_id");
-}
-
-function readOpenAiInputFunctionOutputActionKind(
-  functionNameKind: string,
-): HostedOpenAiFunctionOutputActionKind {
-  if (OPENAI_CACHE_DIAGNOSTIC_COMMAND_FUNCTION_NAME_KINDS.has(functionNameKind)) {
-    return "command.execution";
-  }
-  if (functionNameKind.startsWith("mcp__")) {
-    return "mcp.tool.call";
-  }
-  if (
-    functionNameKind === "duplicate"
-    || functionNameKind === "other"
-    || functionNameKind === "unknown"
-  ) {
-    return "other";
-  }
-  return "dynamic.tool.call";
-}
-
-function readOpenAiInputFunctionOutputDiagnosticValue(value: unknown): {
-  bytes: Uint8Array;
-  serialized: string;
-} | null {
-  if (!isHostedOpenAiDiagnosticRecord(value)) {
-    return null;
-  }
-  return serializeOpenAiDiagnosticJsonValue(value.output);
-}
-
-function summarizeOpenAiInputNestedShape(value: unknown): {
-  contentBytes: number;
-  contentCount: number;
-  outputBytes: number;
-  outputCount: number;
-  stringCount: number;
-  stringBytes: number;
-  truncated: boolean;
-} {
-  const summary = {
-    contentBytes: 0,
-    contentCount: 0,
-    outputBytes: 0,
-    outputCount: 0,
-    stringCount: 0,
-    stringBytes: 0,
-    truncated: false,
-  };
-
-  const stack: Array<{ depth: number; value: unknown }> = [{ depth: 0, value }];
-  let visitedNodes = 0;
-  while (stack.length > 0) {
-    if (visitedNodes >= OPENAI_CACHE_DIAGNOSTIC_INPUT_SHAPE_MAX_NODES) {
-      summary.truncated = true;
-      break;
-    }
-    visitedNodes += 1;
-
-    const current = stack.pop();
-    if (!current) {
-      continue;
-    }
-
-    if (typeof current.value === "string") {
-      summary.stringCount += 1;
-      summary.stringBytes += byteLengthOfDiagnosticText(current.value);
-      continue;
-    }
-
-    if (!current.value || typeof current.value !== "object") {
-      continue;
-    }
-
-    if (current.depth >= OPENAI_CACHE_DIAGNOSTIC_INPUT_SHAPE_MAX_DEPTH) {
-      summary.truncated = true;
-      continue;
-    }
-
-    if (Array.isArray(current.value)) {
-      for (const entry of current.value) {
-        if (visitedNodes + stack.length >= OPENAI_CACHE_DIAGNOSTIC_INPUT_SHAPE_MAX_NODES) {
-          summary.truncated = true;
-          break;
-        }
-        stack.push({ depth: current.depth + 1, value: entry });
-      }
-      continue;
-    }
-
-    for (const [key, entry] of Object.entries(current.value)) {
-      if (OPENAI_CACHE_DIAGNOSTIC_INPUT_SHAPE_KEYS.has(key)) {
-        const entryBytes = encodeOpenAiDiagnosticJsonValue(entry)?.byteLength ?? 0;
-        if (key === "content") {
-          summary.contentCount += 1;
-          summary.contentBytes += entryBytes;
-        } else {
-          summary.outputCount += 1;
-          summary.outputBytes += entryBytes;
-        }
-      }
-      if (visitedNodes + stack.length >= OPENAI_CACHE_DIAGNOSTIC_INPUT_SHAPE_MAX_NODES) {
-        summary.truncated = true;
-        break;
-      }
-      stack.push({ depth: current.depth + 1, value: entry });
-    }
-  }
-
-  return summary;
-}
-
-function incrementDiagnosticCount(counts: Map<string, number>, key: string): void {
-  counts.set(key, (counts.get(key) ?? 0) + 1);
-}
-
-function addDiagnosticBytes(bytesByKind: Map<string, number>, key: string, bytes: number): void {
-  bytesByKind.set(key, (bytesByKind.get(key) ?? 0) + bytes);
-}
-
-function summarizeOpenAiDiagnosticCounts(counts: Map<string, number>): {
-  counts: number[];
-  kinds: string[];
-} {
-  const entries = [...counts.entries()].sort(([left], [right]) =>
-    left.localeCompare(right)
-  );
-  if (entries.length > OPENAI_CACHE_DIAGNOSTIC_MAX_COUNT_BUCKETS) {
-    const visible = entries.slice(0, OPENAI_CACHE_DIAGNOSTIC_MAX_COUNT_BUCKETS - 1);
-    const overflowCount = entries
-      .slice(OPENAI_CACHE_DIAGNOSTIC_MAX_COUNT_BUCKETS - 1)
-      .reduce((total, [, count]) => total + count, 0);
-    const otherIndex = visible.findIndex(([kind]) => kind === "other");
-    if (otherIndex >= 0) {
-      const [kind, count] = visible[otherIndex] ?? ["other", 0];
-      visible[otherIndex] = [kind, count + overflowCount];
-    } else {
-      visible.push(["other", overflowCount]);
-    }
-    return {
-      counts: visible.map(([, count]) => count),
-      kinds: visible.map(([kind]) => kind),
-    };
-  }
-  return {
-    counts: entries.map(([, count]) => count),
-    kinds: entries.map(([kind]) => kind),
-  };
-}
-
-function summarizeOpenAiDiagnosticCountsAndBytes(
-  counts: Map<string, number>,
-  bytesByKind: Map<string, number>,
-): {
-  bytes: number[];
-  counts: number[];
-  kinds: string[];
-} {
-  const entries = [...counts.entries()].sort(([left], [right]) =>
-    left.localeCompare(right)
-  );
-  const readBytes = (kind: string) => bytesByKind.get(kind) ?? 0;
-  const summaryEntries: Array<[string, number, number]> = entries.map(([kind, count]) => [
-    kind,
-    count,
-    readBytes(kind),
-  ]);
-  if (entries.length > OPENAI_CACHE_DIAGNOSTIC_MAX_COUNT_BUCKETS) {
-    const visible = summaryEntries.slice(0, OPENAI_CACHE_DIAGNOSTIC_MAX_COUNT_BUCKETS - 1);
-    const overflow = summaryEntries.slice(OPENAI_CACHE_DIAGNOSTIC_MAX_COUNT_BUCKETS - 1);
-    const overflowCount = overflow.reduce((total, [, count]) => total + count, 0);
-    const overflowBytes = overflow.reduce((total, [, , bytes]) => total + bytes, 0);
-    const otherIndex = visible.findIndex(([kind]) => kind === "other");
-    if (otherIndex >= 0) {
-      const [kind, count, bytes] = visible[otherIndex] ?? ["other", 0, 0];
-      visible[otherIndex] = [kind, count + overflowCount, bytes + overflowBytes];
-    } else {
-      visible.push(["other", overflowCount, overflowBytes]);
-    }
-    return {
-      bytes: visible.map(([, , bytes]) => bytes),
-      counts: visible.map(([, count]) => count),
-      kinds: visible.map(([kind]) => kind),
-    };
-  }
-  return {
-    bytes: summaryEntries.map(([, , bytes]) => bytes),
-    counts: summaryEntries.map(([, count]) => count),
-    kinds: summaryEntries.map(([kind]) => kind),
-  };
-}
-
-function byteLengthOfDiagnosticText(value: string): number {
-  return OPENAI_CACHE_DIAGNOSTIC_TEXT_ENCODER.encode(value).byteLength;
-}
-
-async function createOpenAiCacheDiagnosticFingerprintKey(
-  secret: string | null,
-): Promise<CryptoKey | null> {
-  const normalized = secret?.trim() ?? "";
-  if (!normalized) {
-    return null;
-  }
-  return await crypto.subtle.importKey(
-    "raw",
-    OPENAI_CACHE_DIAGNOSTIC_TEXT_ENCODER.encode(normalized),
-    { hash: "SHA-256", name: "HMAC" },
-    false,
-    ["sign"],
-  );
-}
-
-async function hmacDiagnosticFingerprint(input: {
-  bytes: Uint8Array;
-  fieldPrefix: string;
-  fingerprintKey: CryptoKey;
-}): Promise<string> {
-  const context = OPENAI_CACHE_DIAGNOSTIC_TEXT_ENCODER.encode(
-    `${OPENAI_CACHE_DIAGNOSTIC_FINGERPRINT_CONTEXT}\0${input.fieldPrefix}\0`,
-  );
-  const payload = new Uint8Array(context.byteLength + input.bytes.byteLength);
-  payload.set(context);
-  payload.set(input.bytes, context.byteLength);
-  const digestInput = payload.buffer instanceof ArrayBuffer
-    ? payload.buffer.slice(payload.byteOffset, payload.byteOffset + payload.byteLength)
-    : copyDiagnosticBytesToArrayBuffer(payload);
-  const digest = new Uint8Array(await crypto.subtle.sign(
-    "HMAC",
-    input.fingerprintKey,
-    digestInput,
-  ));
-  return `hmac-sha256:${[...digest].map((byte) => byte.toString(16).padStart(2, "0")).join("")}`;
-}
-
-function copyDiagnosticBytesToArrayBuffer(bytes: Uint8Array): ArrayBuffer {
-  const copy = new Uint8Array(bytes.byteLength);
-  copy.set(bytes);
-  return copy.buffer;
-}
-
-function isHostedOpenAiDiagnosticRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function readOpenAiCacheDiagnosticFingerprintSecret(
@@ -4474,42 +2956,30 @@ async function authorizeHostedProviderEgress(input: {
       headers: input.request.headers,
       userId: input.userId,
     });
-    try {
-      await requireRunnerRuntimeWriteFenceWrite({
-        env: input.env,
-        request: input.request,
-        userId: input.userId,
+    if (writeFence) {
+      const validation = await authorizePostgresRuntimeProvider({ env: input.env, userId: input.userId,
+        command: { operation: "authorize_effect", attemptId: writeFence.attemptId, generation: writeFence.leaseGeneration, runnerContainerName: null, managedAi: false },
+        managed: HOSTED_PLATFORM_METERED_PROVIDER_KINDS.has(input.providerKind) || input.providerKind === "workers_ai_transcribe",
       });
-      return {
-        authorized: true,
-        durationMs: Date.now() - startedAt,
-        mode: "exact_headers",
-        providerEgressTokenPresent: false,
-        runtimeAuthorityHeadersPresent,
-        userId: input.userId,
-        writeFence,
-      };
-    } catch (error) {
-      if (error instanceof RunnerRuntimeWriteFenceError) {
-        return {
-          authorized: false,
-          durationMs: Date.now() - startedAt,
-          mode: "exact_headers",
-          providerEgressTokenPresent: false,
-          rejectReason: "exact_write_fence_rejected",
-          runtimeAuthorityHeadersPresent,
-          userId: input.userId,
-          writeFence,
-        };
-      }
-      throw error;
+      return postgresProviderAuthorization(validation, { startedAt, userId: input.userId, mode: "exact_headers", runtimeAuthorityHeadersPresent, providerEgressTokenPresent: false });
     }
+    return {
+      authorized: false,
+      durationMs: Date.now() - startedAt,
+      mode: "exact_headers",
+      providerEgressTokenPresent: false,
+      rejectReason: "exact_write_fence_rejected",
+      runtimeAuthorityHeadersPresent,
+      userId: input.userId,
+      writeFence: null,
+    };
   }
 
   const providerEgressToken = readHostedProviderEgressToken(input.request);
   if (input.userId && providerEgressToken) {
     return await authorizeHostedProviderEgressToken({
       activeUserId: input.userId,
+      providerKind: input.providerKind,
       env: input.env,
       providerEgressToken,
       providerEgressTokenPresent: true,
@@ -4749,61 +3219,15 @@ async function authorizeHostedProviderEgressCredential(input: {
     };
   }
 
-  const runner = input.env.USER_RUNNER.getByName(verification.claims.userId);
-  if (typeof runner.validateRuntimeProviderEgressCredential !== "function") {
-    return {
-      authorized: false,
-      durationMs: Date.now() - startedAt,
-      mode: "provider_egress_credential",
-      providerEgressTokenPresent,
-      rejectReason: "validation_rpc_missing",
-      runtimeAuthorityHeadersPresent,
-      userId: verification.claims.userId,
-      writeFence: null,
-    };
-  }
-
-  let rawValidation: unknown;
-  try {
-    rawValidation = await runner.validateRuntimeProviderEgressCredential({
-      providerKind: verification.claims.providerKind,
-      runnerContainerName: verification.claims.runnerContainerName,
-      userId: verification.claims.userId,
-    });
-  } catch (error) {
-    const validationErrorName = readHostedExecutionSafeErrorName(error);
-    return {
-      authorized: false,
-      durationMs: Date.now() - startedAt,
-      mode: "provider_egress_credential",
-      providerEgressTokenPresent,
-      rejectReason: "provider_egress_credential_validation_error",
-      runtimeAuthorityHeadersPresent,
-      userId: verification.claims.userId,
-      validationError: error,
-      validationErrorCode: deriveHostedExecutionErrorCode(error),
-      ...(validationErrorName ? { validationErrorName } : {}),
-      writeFence: null,
-    };
-  }
-
-  const validation = normalizeProviderEgressCredentialValidationResult(rawValidation);
-  return {
-    authorized: validation.owns,
-    durationMs: Date.now() - startedAt,
-    mode: "provider_egress_credential",
-    providerEgressTokenPresent,
-    ...(validation.platformAiUsageAllowed === undefined
-      ? {}
-      : { platformAiUsageAllowed: validation.platformAiUsageAllowed }),
-    ...(validation.rejectReason ? { rejectReason: validation.rejectReason } : {}),
-    runtimeAuthorityHeadersPresent,
-    userId: verification.claims.userId,
-    writeFence: validation.writeFence,
-  };
+  const validation = await authorizePostgresRuntimeProvider({ env: input.env, userId: verification.claims.userId,
+    command: { operation: "authorize_provider", runnerContainerName: verification.claims.runnerContainerName, providerEgressTokenHash: null, providerKind: input.providerKind },
+    managed: HOSTED_PLATFORM_METERED_PROVIDER_KINDS.has(input.providerKind) || input.providerKind === "workers_ai_transcribe",
+  });
+  return postgresProviderAuthorization(validation, { startedAt, userId: verification.claims.userId, mode: "provider_egress_credential", runtimeAuthorityHeadersPresent, providerEgressTokenPresent });
 }
 
 async function authorizeHostedProviderEgressToken(input: {
+  providerKind: string;
   activeUserId: string;
   env: RunnerOutboundEnvironmentSource;
   providerEgressToken: string;
@@ -4811,213 +3235,13 @@ async function authorizeHostedProviderEgressToken(input: {
   runtimeAuthorityHeadersPresent: boolean;
   startedAt: number;
 }): Promise<HostedProviderEgressAuthorization> {
-  const runner = input.env.USER_RUNNER.getByName(input.activeUserId);
-  if (typeof runner.validateRuntimeProviderEgressToken !== "function") {
-    return {
-      authorized: false,
-      durationMs: Date.now() - input.startedAt,
-      mode: "provider_egress_token",
-      providerEgressTokenPresent: input.providerEgressTokenPresent,
-      rejectReason: "validation_rpc_missing",
-      runtimeAuthorityHeadersPresent: input.runtimeAuthorityHeadersPresent,
-      userId: input.activeUserId,
-      writeFence: null,
-    };
-  }
-
-  let rawValidation: unknown;
-  try {
-    rawValidation = await runner.validateRuntimeProviderEgressToken({
-      providerEgressToken: input.providerEgressToken,
-      userId: input.activeUserId,
-    });
-  } catch (error) {
-    const validationErrorName = readHostedExecutionSafeErrorName(error);
-    return {
-      authorized: false,
-      durationMs: Date.now() - input.startedAt,
-      mode: "provider_egress_token",
-      providerEgressTokenPresent: input.providerEgressTokenPresent,
-      rejectReason: "provider_egress_token_validation_error",
-      runtimeAuthorityHeadersPresent: input.runtimeAuthorityHeadersPresent,
-      userId: input.activeUserId,
-      validationErrorCode: deriveHostedExecutionErrorCode(error),
-      ...(validationErrorName ? { validationErrorName } : {}),
-      writeFence: null,
-    };
-  }
-
-  const validation = normalizeProviderEgressTokenValidationResult(rawValidation);
-  return {
-    authorized: validation.owns,
-    ...(validation.customInferenceEnvelope
-      ? { customInferenceEnvelope: validation.customInferenceEnvelope }
-      : {}),
-    durationMs: Date.now() - input.startedAt,
-    mode: "provider_egress_token",
-    providerEgressTokenPresent: input.providerEgressTokenPresent,
-    ...(validation.platformAiUsageAllowed === undefined
-      ? {}
-      : { platformAiUsageAllowed: validation.platformAiUsageAllowed }),
-    ...(validation.rejectReason ? { rejectReason: validation.rejectReason } : {}),
-    runtimeAuthorityHeadersPresent: input.runtimeAuthorityHeadersPresent,
-    userId: input.activeUserId,
-    writeFence: validation.writeFence,
-  };
-}
-
-function normalizeProviderEgressCredentialValidationResult(value: unknown): {
-  owns: boolean;
-  platformAiUsageAllowed?: boolean;
-  rejectReason: HostedProviderEgressRejectReason | null;
-  writeFence: HostedProviderEgressWriteFenceMetadata | null;
-} {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return {
-      owns: false,
-      rejectReason: "provider_egress_credential_rejected",
-      writeFence: null,
-    };
-  }
-
-  const record = value as Record<string, unknown>;
-  if (record.owns !== true) {
-    return {
-      owns: false,
-      rejectReason: readProviderEgressCredentialRejectReason(record.reason)
-        ?? "provider_egress_credential_rejected",
-      writeFence: null,
-    };
-  }
-  if (
-    typeof record.attemptId !== "string"
-    || typeof record.leaseGeneration !== "string"
-    || typeof record.userId !== "string"
-    || (
-      record.workspaceVersion !== null
-      && record.workspaceVersion !== undefined
-      && typeof record.workspaceVersion !== "string"
-    )
-  ) {
-    return {
-      owns: false,
-      rejectReason: "provider_egress_credential_rejected",
-      writeFence: null,
-    };
-  }
-
-  return {
-    owns: true,
-    ...(typeof record.platformAiUsageAllowed === "boolean"
-      ? { platformAiUsageAllowed: record.platformAiUsageAllowed }
-      : {}),
-    rejectReason: null,
-    writeFence: {
-      attemptId: record.attemptId,
-      leaseGeneration: record.leaseGeneration,
-      userId: record.userId,
-      workspaceVersion: typeof record.workspaceVersion === "string"
-        ? record.workspaceVersion
-        : null,
-    },
-  };
-}
-
-function normalizeProviderEgressTokenValidationResult(value: unknown): {
-  customInferenceEnvelope?: string;
-  owns: boolean;
-  platformAiUsageAllowed?: boolean;
-  rejectReason: HostedProviderEgressRejectReason | null;
-  writeFence: HostedProviderEgressWriteFenceMetadata | null;
-} {
-  if (typeof value === "boolean") {
-    return {
-      owns: false,
-      rejectReason: "provider_egress_token_rejected",
-      writeFence: null,
-    };
-  }
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return {
-      owns: false,
-      rejectReason: "provider_egress_token_rejected",
-      writeFence: null,
-    };
-  }
-
-  const record = value as Record<string, unknown>;
-  if (record.owns !== true) {
-    return {
-      owns: false,
-      rejectReason: readProviderEgressTokenRejectReason(record.reason)
-        ?? "provider_egress_token_rejected",
-      writeFence: null,
-    };
-  }
-  if (
-    typeof record.attemptId !== "string"
-    || typeof record.leaseGeneration !== "string"
-    || typeof record.userId !== "string"
-    || (
-      record.workspaceVersion !== null
-      && record.workspaceVersion !== undefined
-      && typeof record.workspaceVersion !== "string"
-    )
-  ) {
-    return {
-      owns: false,
-      rejectReason: "provider_egress_token_rejected",
-      writeFence: null,
-    };
-  }
-
-  return {
-    ...(typeof record.customInferenceEnvelope === "string"
-        && record.customInferenceEnvelope.length > 0
-      ? { customInferenceEnvelope: record.customInferenceEnvelope }
-      : {}),
-    owns: true,
-    ...(typeof record.platformAiUsageAllowed === "boolean"
-      ? { platformAiUsageAllowed: record.platformAiUsageAllowed }
-      : {}),
-    rejectReason: null,
-    writeFence: {
-      attemptId: record.attemptId,
-      leaseGeneration: record.leaseGeneration,
-      userId: record.userId,
-      workspaceVersion: typeof record.workspaceVersion === "string"
-        ? record.workspaceVersion
-        : null,
-    },
-  };
-}
-
-function readProviderEgressCredentialRejectReason(
-  value: unknown,
-): HostedProviderEgressCredentialRejectReason | null {
-  if (typeof value !== "string") {
-    return null;
-  }
-  for (const reason of HOSTED_PROVIDER_EGRESS_CREDENTIAL_REJECT_REASONS) {
-    if (value === reason) {
-      return reason;
-    }
-  }
-  return null;
-}
-
-function readProviderEgressTokenRejectReason(
-  value: unknown,
-): HostedProviderEgressTokenRejectReason | null {
-  if (typeof value !== "string") {
-    return null;
-  }
-  for (const reason of HOSTED_PROVIDER_EGRESS_TOKEN_REJECT_REASONS) {
-    if (value === reason) {
-      return reason;
-    }
-  }
-  return null;
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(input.providerEgressToken)));
+  const providerEgressTokenHash = Array.from(digest, value => value.toString(16).padStart(2, "0")).join("");
+  const validation = await authorizePostgresRuntimeProvider({ env: input.env, userId: input.activeUserId,
+    command: { operation: "authorize_provider", runnerContainerName: null, providerEgressTokenHash, providerKind: input.providerKind },
+    managed: HOSTED_PLATFORM_METERED_PROVIDER_KINDS.has(input.providerKind) || input.providerKind === "workers_ai_transcribe",
+  });
+  return postgresProviderAuthorization(validation, { ...input, userId: input.activeUserId, mode: "provider_egress_token" });
 }
 
 function unauthorizedProviderEgress(input: {
@@ -5027,7 +3251,9 @@ function unauthorizedProviderEgress(input: {
   startedAt: number;
   url: URL;
 }): Response {
-  const response = new Response("Unauthorized", { status: 401 });
+  const response = input.authorization.rejectReason === "usage_settlement_pending"
+    ? new Response("Usage settlement pending.", { status: 503, headers: { "retry-after": "1" } })
+    : new Response("Unauthorized", { status: 401 });
   emitHostedProviderEgressDiagnostic({
     authorization: input.authorization,
     providerKind: input.providerKind,
@@ -5664,4 +3890,59 @@ async function authorizeNativeHostedProviderCredential(input: {
     request: input.request,
     userId: readHostedRunnerBoundUserId(input.request),
   });
+}
+
+async function checkHostedImageGenerationAccess(input: {
+  authorization: HostedProviderEgressAuthorization;
+  env: RunnerOutboundEnvironmentSource;
+}): Promise<Response | null> {
+  try {
+    const fence = requireHostedDirectUsageWriteFence(input.authorization);
+    const environment = readHostedExecutionEnvironment(asWorkerStringEnvironment(input.env));
+    const result = await fetchHostedWebControlPlaneJson({
+      body: {},
+      boundUserId: fence.userId,
+      description: "Hosted image generation access",
+      fetchImpl: fetch,
+      route: HOSTED_RUNNER_WEB_CONTROL_ROUTES.imageGenerationAccess,
+      timeoutMs: environment.webControlTimeoutMs,
+      transport: {
+        callbackSigning: environment.webCallbackSigning,
+        mode: "direct",
+        webControlBaseUrl: environment.hostedWebBaseUrl,
+        workspaceCheckpointBridge: null,
+      },
+    });
+    if (result && typeof result === "object" && "allowed" in result && "reason" in result) {
+      if (result.allowed === true && result.reason === "allowed") return null;
+      if (result.allowed === false && result.reason === "subscription_required") {
+        return Response.json({ error: {
+          code: "MURPH_IMAGE_SUBSCRIPTION_REQUIRED",
+          message: "Image generation requires a subscription. Start Pulse or, if eligible, Group at https://www.withmurph.ai/settings#subscription, then ask for the image again.",
+        } }, { status: 403 });
+      }
+    }
+  } catch {
+    // An unavailable or old Web deployment cannot grant paid image access.
+  }
+  return Response.json({ error: {
+    code: "MURPH_IMAGE_ACCESS_UNAVAILABLE",
+    message: "Image generation access could not be confirmed. Try again later.",
+  } }, { status: 503 });
+}
+
+function postgresProviderAuthorization(
+  validation: Awaited<ReturnType<typeof authorizePostgresRuntimeProvider>>,
+  input: { startedAt: number; userId: string; mode: HostedProviderEgressValidationMode; providerEgressTokenPresent: boolean; runtimeAuthorityHeadersPresent: boolean },
+): HostedProviderEgressAuthorization {
+  const owner = validation?.owner;
+  return {
+    authorized: Boolean(owner) && !validation?.settlementPending,
+    durationMs: Date.now() - input.startedAt, mode: input.mode,
+    providerEgressTokenPresent: input.providerEgressTokenPresent, runtimeAuthorityHeadersPresent: input.runtimeAuthorityHeadersPresent,
+    userId: input.userId,
+    ...(owner ? { platformAiUsageAllowed: owner.platformAiUsageAllowed, customInferenceEnvelope: owner.customInferenceEnvelope } : {}),
+    ...(validation?.settlementPending ? { rejectReason: "usage_settlement_pending" as const } : !owner ? { rejectReason: "write_fence_mismatch" as const } : {}),
+    writeFence: owner?.attemptId ? { attemptId: owner.attemptId, leaseGeneration: owner.generation, workspaceVersion: owner.workspaceVersion, userId: input.userId } : null,
+  };
 }

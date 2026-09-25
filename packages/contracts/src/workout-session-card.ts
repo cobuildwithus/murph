@@ -259,14 +259,14 @@ export type WorkoutSessionAppCardEnvelopeV6 = {
     v: 1;
     t: string;
     u: string | null;
-    s: "a";
+    s: "a" | "c";
     e: Array<
       [
         name: string,
         exerciseUnit: "l" | "k" | null,
         sets: Array<
           [
-            status: "p" | "c",
+            status: "p" | "c" | "s",
             target: string | null,
             result: WorkoutSessionEditorResultWireV1 | null,
           ]
@@ -321,10 +321,9 @@ export function buildWorkoutSessionAppCardEnvelopeV6(input: {
 }): WorkoutSessionAppCardEnvelopeV6 {
   const editor = workoutSessionEditorProjectionV1Schema.parse(input.editor);
   if (
-    input.workout.state !== "active"
-    || editor.exercises.length !== input.workout.exercises.length
+    editor.exercises.length !== input.workout.exercises.length
   ) {
-    throw new TypeError("Workout editor projection does not match the active card.");
+    throw new TypeError("Workout editor projection does not match the card.");
   }
   return {
     schemaVersion: 6,
@@ -333,7 +332,7 @@ export function buildWorkoutSessionAppCardEnvelopeV6(input: {
       v: 1,
       t: input.title,
       u: input.subtitle,
-      s: "a",
+      s: input.workout.state === "active" ? "a" : "c",
       e: input.workout.exercises.map((exercise, exerciseIndex) => {
         const editorExercise = editor.exercises[exerciseIndex];
         if (
@@ -354,7 +353,7 @@ export function buildWorkoutSessionAppCardEnvelopeV6(input: {
               throw new TypeError("Workout editor projection does not match set state.");
             }
             return [
-              set.status === "completed" ? "c" : "p",
+              set.status === "completed" ? "c" : set.status === "skipped" ? "s" : "p",
               set.target,
               editorSet.result === null
                 ? null
@@ -391,100 +390,17 @@ export function parseWorkoutSessionAppCardEnvelopeV4(
     return null;
   }
   const card = value.card;
-  if (
-    card.k !== "w"
-    || card.v !== 1
-    || !isSingleLineText(card.t, workoutSessionCardV1Bounds.title)
-    || !isNullableSingleLineText(
-      card.u,
-      workoutSessionCardV1Bounds.subtitle,
-    )
-    || (card.s !== "a" && card.s !== "c")
-    || !Array.isArray(card.e)
-    || !isNullableSingleLineText(card.f, workoutSessionCardV1Bounds.footer)
-    || (value.schemaVersion === 6 && !isWorkoutActionBinding(card.b))
-    || (value.schemaVersion === 6 && !isWorkoutActionBinding(card.d))
-    || (value.schemaVersion === 6 && card.s !== "a")
-  ) {
+  if (!isWorkoutSessionWireHeader(card, value)) {
     return null;
   }
 
   const exercises: WorkoutSessionDetailV1["exercises"] = [];
   for (const exercise of card.e) {
-    if (
-      !Array.isArray(exercise)
-      || exercise.length !== (value.schemaVersion === 6 ? 3 : 2)
-      || !isSingleLineText(
-        exercise[0],
-        workoutSessionCardV1Bounds.exerciseName,
-      )
-      || (value.schemaVersion === 6
-        && !isEncodedWorkoutWeightUnit(exercise[1]))
-      || !Array.isArray(exercise[value.schemaVersion === 6 ? 2 : 1])
-    ) {
+    const parsedExercise = parseWorkoutSessionWireExercise(exercise, value);
+    if (!parsedExercise) {
       return null;
     }
-    const encodedExerciseUnit = value.schemaVersion === 6
-      ? exercise[1]
-      : null;
-    const encodedSets = exercise[value.schemaVersion === 6 ? 2 : 1];
-    if (!Array.isArray(encodedSets)) {
-      return null;
-    }
-    const sets: WorkoutSessionSetV1[] = [];
-    for (const set of encodedSets) {
-      if (
-        !Array.isArray(set)
-        || set.length !== 3
-        || (value.schemaVersion === 6
-          ? set[0] !== "p" && set[0] !== "c"
-          : set[0] !== "p" && set[0] !== "c" && set[0] !== "s")
-        || !isNullableSingleLineText(
-          set[1],
-          workoutSessionCardV1Bounds.setValue,
-        )
-      ) {
-        return null;
-      }
-      if (
-        value.schemaVersion === 6
-        && set[0] === "p"
-        && set[2] !== null
-      ) {
-        return null;
-      }
-      const renderedEditorActual = value.schemaVersion === 6
-        ? set[0] === "p" && set[2] === null
-          ? null
-          : renderWorkoutSessionEditorResultV1(
-              set[2],
-              decodeWorkoutWeightUnit(encodedExerciseUnit),
-            )
-        : isNullableSingleLineText(
-            set[2],
-            workoutSessionCardV1Bounds.setValue,
-          )
-          ? set[2]
-          : undefined;
-      if (
-        renderedEditorActual === undefined
-        || (set[0] === "c" && renderedEditorActual === null)
-      ) {
-        return null;
-      }
-      const actual = set[0] === "c" ? renderedEditorActual : null;
-      sets.push({
-        status:
-          set[0] === "p"
-            ? "pending"
-            : set[0] === "c"
-              ? "completed"
-              : "skipped",
-        target: set[1],
-        actual,
-      });
-    }
-    exercises.push({ name: exercise[0], sets });
+    exercises.push(parsedExercise);
   }
 
   const workout = workoutSessionDetailV1Schema.safeParse({
@@ -502,6 +418,133 @@ export function parseWorkoutSessionAppCardEnvelopeV4(
     footer: card.f,
     workout: workout.data,
   };
+}
+
+function isWorkoutSessionWireHeader(
+  card: Record<string, unknown>,
+  value: Record<string, unknown>,
+): card is Record<string, unknown> & {
+  t: string;
+  u: string | null;
+  f: string | null;
+  e: unknown[];
+} {
+  return !(
+    card.k !== "w"
+    || card.v !== 1
+    || !isSingleLineText(card.t, workoutSessionCardV1Bounds.title)
+    || !isNullableSingleLineText(
+      card.u,
+      workoutSessionCardV1Bounds.subtitle,
+    )
+    || (card.s !== "a" && card.s !== "c")
+    || !Array.isArray(card.e)
+    || !isNullableSingleLineText(card.f, workoutSessionCardV1Bounds.footer)
+    || (value.schemaVersion === 6 && !isWorkoutActionBinding(card.b))
+    || (value.schemaVersion === 6 && !isWorkoutActionBinding(card.d))
+  );
+}
+
+function parseWorkoutSessionWireExercise(
+  exercise: unknown,
+  value: Record<string, unknown>,
+): WorkoutSessionDetailV1["exercises"][number] | null {
+  if (
+    !Array.isArray(exercise)
+    || exercise.length !== (value.schemaVersion === 6 ? 3 : 2)
+    || !isSingleLineText(
+      exercise[0],
+      workoutSessionCardV1Bounds.exerciseName,
+    )
+    || (value.schemaVersion === 6
+      && !isEncodedWorkoutWeightUnit(exercise[1]))
+    || !Array.isArray(exercise[value.schemaVersion === 6 ? 2 : 1])
+  ) {
+    return null;
+  }
+  const encodedExerciseUnit = value.schemaVersion === 6
+    ? exercise[1]
+    : null;
+  const encodedSets = exercise[value.schemaVersion === 6 ? 2 : 1];
+  if (!Array.isArray(encodedSets)) {
+    return null;
+  }
+  const sets: WorkoutSessionSetV1[] = [];
+  for (const set of encodedSets) {
+    const parsedSet = parseWorkoutSessionWireSet(set, value, encodedExerciseUnit);
+    if (!parsedSet) {
+      return null;
+    }
+    sets.push(parsedSet);
+  }
+  return { name: exercise[0], sets };
+}
+
+function parseWorkoutSessionWireSet(
+  set: unknown,
+  value: Record<string, unknown>,
+  encodedExerciseUnit: unknown,
+): WorkoutSessionSetV1 | null {
+  if (
+    !Array.isArray(set)
+    || set.length !== 3
+    || (set[0] !== "p" && set[0] !== "c" && set[0] !== "s")
+    || !isNullableSingleLineText(
+      set[1],
+      workoutSessionCardV1Bounds.setValue,
+    )
+  ) {
+    return null;
+  }
+  const renderedEditorActual = parseWorkoutSessionWireActual(
+    set,
+    value,
+    encodedExerciseUnit,
+  );
+  if (
+    renderedEditorActual === undefined
+    || (set[0] === "c" && renderedEditorActual === null)
+  ) {
+    return null;
+  }
+  const actual = set[0] === "c" ? renderedEditorActual : null;
+  return {
+    status:
+      set[0] === "p"
+        ? "pending"
+        : set[0] === "c"
+          ? "completed"
+          : "skipped",
+    target: set[1],
+    actual,
+  };
+}
+
+function parseWorkoutSessionWireActual(
+  set: unknown[],
+  value: Record<string, unknown>,
+  encodedExerciseUnit: unknown,
+): string | null | undefined {
+  if (
+    value.schemaVersion === 6
+    && set[0] !== "c"
+    && set[2] !== null
+  ) {
+    return undefined;
+  }
+  return value.schemaVersion === 6
+    ? set[0] !== "c" && set[2] === null
+      ? null
+      : renderWorkoutSessionEditorResultV1(
+          set[2],
+          decodeWorkoutWeightUnit(encodedExerciseUnit),
+        )
+    : isNullableSingleLineText(
+        set[2],
+        workoutSessionCardV1Bounds.setValue,
+      )
+      ? set[2]
+      : undefined;
 }
 
 function encodeWorkoutEditorResult(

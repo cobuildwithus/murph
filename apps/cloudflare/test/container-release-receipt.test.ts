@@ -591,7 +591,7 @@ describe("container release receipt", () => {
       })).toThrow("Container release evidence did not form an exact provider transition.");
     });
 
-    it("rejects a prior rollout completing without a new active rollout identity", () => {
+    it("records completion of the exact pending rollout on a resumed deployment", () => {
       const modifiedAction = [
         { action: "modified", applicationName: "app", className: "Container" },
       ] as const;
@@ -603,11 +603,11 @@ describe("container release receipt", () => {
         "intermediate-image",
       );
 
-      expect(() => buildContainerReleaseEntries({
+      expect(buildContainerReleaseEntries({
         actions: modifiedAction,
         after: [identity("app", "id", 3, "intermediate-image")],
         before: [{ ...identity("app", "id", 2, "old-image"), activeRollout: priorRollout }],
-      })).toThrow("Container release evidence did not form an exact provider transition.");
+      })).toEqual([expect.objectContaining({ disposition: "updated", version: 3 })]);
     });
 
     it("fails closed when modified application detail never exposes a transition", async () => {

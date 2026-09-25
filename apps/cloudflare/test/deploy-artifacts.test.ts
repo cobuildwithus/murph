@@ -1410,6 +1410,21 @@ export function getGeneratedHealthCommonsProtocolIndexReader() {
     });
   });
 
+  it("rejects a prepared runner bundle after only the native Codex patch changes", async () => {
+    const sourceFixture = await createDeployArtifactSourceFixture();
+    const fixture = await createDeployArtifactFixture(sourceFixture);
+    await mkdir(path.join(sourceFixture.repoRoot, "patches"), { recursive: true });
+    await writeFile(
+      path.join(sourceFixture.repoRoot, "patches", "codex-public-live.patch"),
+      "synthetic native compatibility patch\n",
+      "utf8",
+    );
+
+    await expect(assertPreparedRunnerBundle(fixture)).rejects.toThrow(
+      "Prepared runner bundle source fingerprint is stale",
+    );
+  });
+
   it("accepts worker secrets rendered after the runner bundle", async () => {
     const fixture = await createDeployArtifactFixture();
     const future = new Date(Date.parse(fixture.manifest.generatedAt) + 10_000);

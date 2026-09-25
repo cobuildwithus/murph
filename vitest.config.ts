@@ -1,7 +1,6 @@
 import assistantEngineProject from "./packages/assistant-engine/vitest.config.ts";
 import assistantCliProject from "./packages/assistant-cli/vitest.config.ts";
 import assistantRuntimeProject from "./packages/assistant-runtime/vitest.config.ts";
-import assistantdProject from "./packages/assistantd/vitest.config.ts";
 import cloudflareHostedControlProject from "./packages/cloudflare-hosted-control/vitest.config.ts";
 import clinicalRecordsProject from "./packages/clinical-records/vitest.config.ts";
 import contractsProject from "./packages/contracts/vitest.config.ts";
@@ -67,11 +66,6 @@ const ROOT_REPO_PROJECTS: RootRepoProject[] = [
   {
     config: assistantRuntimeProject,
     root: "packages/assistant-runtime",
-    include: ["test/**/*.test.ts"],
-  },
-  {
-    config: assistantdProject,
-    root: "packages/assistantd",
     include: ["test/**/*.test.ts"],
   },
   {

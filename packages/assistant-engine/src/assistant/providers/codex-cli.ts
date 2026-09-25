@@ -4,6 +4,7 @@ import {
 import {
   executeCodexAppServerTurn,
   preinitializeCodexAppServer,
+  startCodexAppServerRealtime,
   readCodexAppServerTurnFailureContext,
 } from '../../assistant-codex.js'
 import {
@@ -22,9 +23,6 @@ import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
   HOSTED_GEMINI_VIDEO_ANALYSIS_API_KEY_ENV,
 } from '@murphai/hosted-execution/assistant-capabilities'
-import {
-  DEFAULT_CODEX_MODELS,
-} from './catalog.js'
 import {
   getAssistantBindingContextLines,
 } from '../bindings.js'
@@ -56,6 +54,8 @@ import type {
   CodexAppServerTurnInput,
   CodexAppServerTurnFailureContext,
   CodexAppServerLiveTurn,
+  CodexRealtimeOptions,
+  CodexRealtimeSession,
 } from '../../assistant-codex.js'
 import { extractCodexAppServerUserMessageImages } from '../../assistant-codex/images.js'
 
@@ -185,6 +185,26 @@ export async function preinitializeCodexAssistantProcess(
   })
 }
 
+export async function startCodexAssistantVoice(
+  input: CodexAssistantProcessPreparationInput & CodexRealtimeOptions & {
+    mediaModel: string
+    mediaModelProvider: string
+  },
+): Promise<CodexRealtimeSession> {
+  return await startCodexAppServerRealtime({
+    ...resolveCodexAssistantProcessLaunchInput(input),
+    model: input.mediaModel,
+    modelProvider: input.mediaModelProvider,
+    sessionId: input.sessionId,
+    sdp: input.sdp,
+    prompt: input.prompt,
+    voice: input.voice,
+    signal: input.signal,
+    onInput: input.onInput,
+    onUsage: input.onUsage,
+  })
+}
+
 export async function executeCodexAssistantTurnAttempt(
   input: AssistantProviderTurnExecutionInput,
 ): Promise<AssistantProviderTurnAttemptResult> {
@@ -310,7 +330,6 @@ export async function executeCodexAssistantTurnAttempt(
     requireHostedPrivateImageDelivery:
       input.requireHostedPrivateImageDelivery ?? false,
     images: extractCodexAppServerUserMessageImages(input.userMessageContent),
-    excludeResumeTurns: true,
     reasoningEffort: providerConfig.policy.reasoningEffort ?? undefined,
     runtimeWorkspaceRoots: input.runtimeWorkspaceRoots ?? null,
     sandbox: input.permissions
@@ -1381,8 +1400,4 @@ export function resolveCodexAssistantLabel(
   config: AssistantProviderTurnExecutionInput['providerConfig'],
 ): string {
   return config.target.oss ? 'Codex OSS app-server' : 'Codex app-server'
-}
-
-export function resolveCodexStaticModels(): typeof DEFAULT_CODEX_MODELS {
-  return DEFAULT_CODEX_MODELS
 }

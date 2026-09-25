@@ -1,4 +1,7 @@
+import { normalizeWearableQueryProviderSlug } from "@murphai/health-metrics";
+import { formatProviderName } from "./wearables/provider-policy.ts";
 import { readJournalTiming, type JournalTiming } from "@murphai/contracts/journal-presentation";
+import { clinicalJournalIsExtraction, clinicalJournalPresentation, clinicalJournalSourceKey, prepareClinicalJournalEvents } from "./journal-clinical.ts";
 import {
   isValidIanaTimeZone,
   toLocalDayKey,
@@ -120,6 +123,7 @@ interface JournalCandidate extends JournalRecord {
   metricKey: string | null;
   metricValue: number | null;
   relatedIds: string[];
+  sessionWindow?: { start: number; end: number } | null;
   sleepType: "main_sleep" | "nap" | "unknown" | null;
   timing: JournalEventTiming;
 }
@@ -137,7 +141,7 @@ export function buildJournalView(
   const windowDays = normalizeWindowDays(options.windowDays);
   const fromDate = addDays(asOfDate, -(windowDays - 1));
   const candidates = normalizeJournalCandidates([
-    ...vault.events.flatMap((event) =>
+    ...prepareClinicalJournalEvents(vault.events).flatMap((event) =>
       journalCandidateFromEvent(event, fromDate, asOfDate, options.vocabulary),
     ),
     ...journalCandidatesFromExperiments(
@@ -196,14 +200,14 @@ function journalCandidateFromEvent(
     event.kind === "sleep_session"
       ? readSleepType(event.attributes.sleepType)
       : null;
-  const groupHint =
+  const groupHint = clinicalGroupHint(event, date) ?? (
     event.kind === "experiment_context"
       ? experimentJournalGroupHint(label, date)
       : activityKey
       ? `activity:${date}:${activityKey.toLowerCase()}`
       : observationMetric
       ? `${observationMetric.group}:${date}`
-      : null;
+      : null);
   return [
     {
       activityKey,
@@ -224,16 +228,27 @@ function journalCandidateFromEvent(
           ...event.links.map((link) => link.targetId),
         ]),
       ],
+      sessionWindow: journalSessionWindow(event, durationMinutes),
       sleepType,
       source: readEventSource(event),
       summary: eventSummary(event),
-      tags: event.tags.slice(),
-      timing: event.kind === "note"
-        ? readJournalTiming(event.tags) ?? (event.occurredAt ? "timed" : "unknown")
-        : event.occurredAt ? "timed" : "all_day",
+      tags: clinicalJournalIsExtraction(event) ? [...event.tags, "journal-clinical-extraction"] : event.tags.slice(),
+      timing: journalEventTiming(event),
       timeZone: readEventTimeZone(event),
     },
   ];
+}
+
+function clinicalGroupHint(event: CanonicalEntity, date: string): string | null {
+  const key = clinicalJournalSourceKey(event);
+  return key && (event.kind === "note" || event.kind === "test") ? `clinical:${key}:${date}` : null;
+}
+
+function journalEventTiming(event: CanonicalEntity): JournalEventTiming {
+  const tagged = event.kind === "note" ? readJournalTiming(event.tags) : null;
+  if (tagged) return tagged;
+  if (!event.occurredAt) return event.kind === "note" ? "unknown" : "all_day";
+  return /^\d{4}-\d{2}-\d{2}$/u.test(event.occurredAt) ? "all_day" : "timed";
 }
 
 function isHiddenJournalEvent(event: CanonicalEntity): boolean {
@@ -655,8 +670,9 @@ function groupJournalCandidates(
 
   return [...groups.values()].map((records) => {
     const sorted = records.sort(compareCandidates);
-    const lead = selectLeadRecord(sorted);
-    const presentation = buildEventPresentation(sorted, lead);
+    const displayRecords = collapseMirroredJournalSessions(sorted);
+    const lead = selectLeadRecord(displayRecords);
+    const presentation = buildEventPresentation(displayRecords, lead);
     return {
       date: lead.date,
       details: presentation.details,
@@ -667,7 +683,7 @@ function groupJournalCandidates(
       kind: eventGroupKind(sorted),
       metrics: presentation.metrics,
       occurredAt: lead.occurredAt,
-      records: sorted.map(
+      records: displayRecords.map(
         ({
           activityKey: _activityKey,
           date: _date,
@@ -678,6 +694,7 @@ function groupJournalCandidates(
           metricKey: _metricKey,
           metricValue: _metricValue,
           relatedIds: _related,
+          sessionWindow: _sessionWindow,
           sleepType: _sleepType,
           timing: _timing,
           ...record
@@ -724,6 +741,8 @@ function resolveEventDate(event: CanonicalEntity): string | null {
 }
 
 function eventLabel(event: CanonicalEntity): string {
+  const clinical = clinicalJournalPresentation(event);
+  if (clinical) return clinical.title;
   if (event.kind === "activity_session") {
     return humanize(
       resolveAdherenceObservationActivityKind({
@@ -765,6 +784,8 @@ function captureEventLabel(title: string | null): string {
 }
 
 function eventSummary(event: CanonicalEntity): string | null {
+  const clinical = clinicalJournalPresentation(event);
+  if (clinical) return clinical.summary;
   const summary = readString(event.attributes.summary);
   if (event.kind === "experiment_context") {
     return experimentJournalSummary(event, summary);
@@ -825,6 +846,8 @@ function mealSummary(
 }
 
 function journalEventDetailItems(event: CanonicalEntity): string[] {
+  const clinical = clinicalJournalPresentation(event);
+  if (clinical) return clinical.details;
   if (event.kind === "activity_session") {
     return activityDetailItems(event.attributes, eventLabel(event));
   }
@@ -1071,6 +1094,7 @@ function formatDetailNumber(value: number): string {
 }
 
 function readEventSource(event: CanonicalEntity): string | null {
+  if (clinicalJournalSourceKey(event)) return "Hospital records";
   const dataOrigin = readRecord(event.attributes.dataOrigin);
   const externalRef = readRecord(event.attributes.externalRef);
   return (
@@ -1090,6 +1114,7 @@ function selectLeadRecord(
   records: readonly JournalCandidate[],
 ): JournalCandidate {
   return (
+    records.find((record) => record.groupHint?.startsWith("clinical:") && record.kind === "note" && record.tags.includes("journal-clinical-extraction")) ??
     records.find((record) => record.kind === "activity_session") ??
     records.find((record) => record.kind === "sleep_session") ??
     records.find((record) => record.kind === "test") ??
@@ -1119,6 +1144,80 @@ function eventGroupTitle(
   return lead.label;
 }
 
+// Session evidence remains canonical. Only the derived presentation collapses
+// cross-provider mirrors, before both metric aggregation and record rendering.
+function journalSessionWindow(
+  event: CanonicalEntity,
+  duration: number | null,
+): JournalCandidate["sessionWindow"] {
+  if (duration === null || duration <= 0) return null;
+  const workout = readRecord(event.attributes.workout);
+  const start = event.kind === "sleep_session"
+    ? readString(event.attributes.startAt)
+    : event.kind === "activity_session"
+    ? readString(workout?.startedAt) ?? event.occurredAt
+    : null;
+  const end = event.kind === "sleep_session"
+    ? readString(event.attributes.endAt)
+    : readString(workout?.endedAt);
+  if (event.kind === "sleep_session" && !end) return null;
+  // A date or floating clock cannot establish that two providers saw one session.
+  const instant = (value: string | null | undefined) =>
+    value && /T.*(?:Z|[+-]\d{2}:\d{2})$/iu.test(value) ? Date.parse(value) : NaN;
+  const startMs = instant(start);
+  const endMs = end ? instant(end) : startMs + duration * 60_000;
+  return Number.isFinite(startMs) && Number.isFinite(endMs) && endMs > startMs
+    ? { start: startMs, end: endMs }
+    : null;
+}
+
+function collapseMirroredJournalSessions(records: readonly JournalCandidate[]): JournalCandidate[] {
+  const groups: JournalCandidate[][] = [];
+  for (const record of records) {
+    const group = groups.find((members) => members.every((other) => mirroredJournalSession(other, record)));
+    if (group) group.push(record);
+    else groups.push([record]);
+  }
+  return groups.map((members) => {
+    if (members.length === 1) return members[0]!;
+    // Prefer the original provider over an Apple Health relay. Stable IDs break ties.
+    const ordered = members.slice().sort((left, right) =>
+      Number(journalSessionProvider(left) === "apple-health-kit")
+      - Number(journalSessionProvider(right) === "apple-health-kit")
+      || left.id.localeCompare(right.id));
+    return {
+      ...ordered[0]!,
+      source: uniqueStrings(ordered.map((record) => {
+        const provider = journalSessionProvider(record)!;
+        return provider === "apple-health-kit" ? "Apple Health" : formatProviderName(provider);
+      })).join(" · "),
+      exerciseNames: uniqueStrings(ordered.flatMap((record) => record.exerciseNames)),
+    };
+  });
+}
+
+function journalSessionProvider(record: JournalCandidate): string | null {
+  const provider = record.source ? normalizeWearableQueryProviderSlug(record.source) : null;
+  return provider && !["device", "manual", "murph", "unknown"].includes(provider) ? provider : null;
+}
+
+function mirroredJournalSession(left: JournalCandidate, right: JournalCandidate): boolean {
+  const provider = journalSessionProvider(left);
+  const otherProvider = journalSessionProvider(right);
+  return provider !== null && otherProvider !== null && provider !== otherProvider
+    && left.kind === right.kind && left.activityKey === right.activityKey
+    && left.groupHint === right.groupHint
+    && left.sessionWindow != null && right.sessionWindow != null
+    && left.durationMinutes !== null && right.durationMinutes !== null
+    && Math.abs(left.durationMinutes - right.durationMinutes) <= 1
+    && Math.abs(left.sessionWindow.start - right.sessionWindow.start) <= 60_000
+    && Math.abs(left.sessionWindow.end - right.sessionWindow.end) <= 60_000
+    && Math.min(left.sessionWindow.end, right.sessionWindow.end)
+      - Math.max(left.sessionWindow.start, right.sessionWindow.start)
+      >= 0.9 * Math.max(left.sessionWindow.end - left.sessionWindow.start,
+        right.sessionWindow.end - right.sessionWindow.start);
+}
+
 function buildEventPresentation(
   records: readonly JournalCandidate[],
   lead: JournalCandidate,
@@ -1128,6 +1227,15 @@ function buildEventPresentation(
   summary: string | null;
   timing: JournalEventTiming;
 } {
+  if (lead.groupHint?.startsWith("clinical:")) {
+    return {
+      details: uniqueStrings(records.flatMap((record) => [
+        ...record.detailItems,
+        ...(record !== lead && record.tags.includes("journal-clinical-extraction") ? [record.summary] : []),
+      ])).filter((detail) => detail !== lead.summary),
+      metrics: emptyJournalEventMetrics(), summary: lead.summary, timing: lead.timing,
+    };
+  }
   const activitySessions = records.filter(
     (record) => record.kind === "activity_session",
   );

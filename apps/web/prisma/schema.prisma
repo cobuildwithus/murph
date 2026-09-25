@@ -1,5 +1,6 @@
 generator client {
   provider = "prisma-client-js"
+  previewFeatures = ["relationJoins"]
 }
 
 datasource db {
@@ -17,8 +18,6 @@ model DeviceConnection {
   metadataJson               Json?                    @map("metadata_json")
   credentialKind             String                   @default("oauth_tokens") @map("credential_kind")
   providerConfigKey          String?                  @map("provider_config_key")
-  providerApplicationId      String?                  @map("provider_application_id")
-  providerApplicationRevision Int?                    @map("provider_application_revision")
   credentialMetadataJson     Json?                    @map("credential_metadata_json")
   setupPhase                 String?                  @map("setup_phase")
   setupExpiresAt             DateTime?                @map("setup_expires_at")
@@ -47,10 +46,8 @@ model DeviceConnection {
   dirtyState                 DeviceSyncDirtyConnection?
   dirtyPayloads              DeviceSyncDirtyPayload[]
   companionCaptureReceipts   DeviceSyncCompanionCaptureReceipt[]
-  providerApplication        DeviceProviderApplication? @relation(fields: [providerApplicationId], references: [id], onDelete: Restrict)
 
   @@unique([provider, providerAccountBlindIndex])
-  @@index([providerApplicationId])
   @@index([status, nextReconcileAt, updatedAt, id], map: "device_connection_due_reconcile_sweep_idx")
   @@index([userId, provider])
   @@index([setupPhase, setupExpiresAt])
@@ -118,35 +115,15 @@ model DeviceOauthSession {
   state                       String    @id
   userId                      String?   @map("user_id")
   provider                    String
-  providerApplicationId       String?   @map("provider_application_id")
-  providerApplicationRevision Int?      @map("provider_application_revision")
   returnTo                    String?   @map("return_to")
   metadataJson                Json?     @map("metadata_json")
   createdAt                   DateTime  @map("created_at")
   expiresAt                   DateTime  @map("expires_at")
   consumedAt                  DateTime? @map("consumed_at")
-  providerApplication         DeviceProviderApplication? @relation(fields: [providerApplicationId], references: [id], onDelete: Cascade)
 
   @@index([expiresAt])
   @@index([userId, provider])
-  @@index([providerApplicationId])
   @@map("device_oauth_session")
-}
-
-model DeviceProviderApplication {
-  id                    String    @id
-  memberId              String    @map("member_id")
-  provider              String
-  revision              Int       @default(1)
-  configEncrypted       String    @map("config_encrypted")
-  createdAt             DateTime  @default(now()) @map("created_at")
-  updatedAt             DateTime  @updatedAt @map("updated_at")
-  member                HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
-  connections           DeviceConnection[]
-  oauthSessions         DeviceOauthSession[]
-
-  @@unique([memberId, provider])
-  @@map("device_provider_application")
 }
 
 model DeviceConnectIntent {
@@ -243,7 +220,7 @@ model DeviceSyncDirtyPayload {
   provider              String
   dirtyRevision         BigInt           @map("dirty_revision")
   resourceEncrypted     String           @map("resource_encrypted")
-  credentialIndependent Boolean?         @map("credential_independent")
+  credentialIndependent Boolean          @map("credential_independent")
   createdAt             DateTime         @default(now()) @map("created_at")
   connection    DeviceConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
 
@@ -351,6 +328,11 @@ model ClinicalRecordConnection {
   patientIdEncrypted       String?                          @map("patient_id_encrypted")
   accessTokenEncrypted     String?                          @map("access_token_encrypted")
   accessTokenExpiresAt     DateTime?                        @map("access_token_expires_at")
+  refreshTokenEncrypted    String?                          @map("persistent_token_encrypted")
+  refreshLeaseId           String?                          @map("refresh_lease_id")
+  refreshLeaseExpiresAt    DateTime?                        @map("refresh_lease_expires_at")
+  nextSyncAt               DateTime?                        @map("next_sync_at")
+  lastCheckedAt            DateTime?                        @map("last_checked_at")
   requestedScopesJson      Json                             @map("requested_scopes_json")
   tokenVersion             Int                              @default(1) @map("token_version")
   retrievalGeneration      Int                              @default(0) @map("retrieval_generation")
@@ -367,6 +349,7 @@ model ClinicalRecordConnection {
   @@unique([memberId, providerDirectoryEntryId])
   @@index([memberId, status, updatedAt])
   @@index([fhirBaseHash])
+  @@index([status, nextSyncAt])
   @@map("clinical_record_connection")
 }
 
@@ -590,6 +573,7 @@ enum HostedPhysicalNoteFailureReason {
 }
 
 model HostedMember {
+  authRecords                    HostedAuthRecord[]
   id                             String                          @id
   billingStatus                  HostedBillingStatus             @default(not_started) @map("billing_status")
   usageCreditBalanceUsdMicros    BigInt?                         @default(0) @map("usage_credit_balance_usd_micros")
@@ -664,7 +648,6 @@ model HostedMember {
   hostedGroupMemberships         HostedGroupMember[]             @relation("HostedGroupMember")
   hostedGroupRuntime             HostedGroup?                    @relation("HostedGroupRuntimeMember")
   hostedCryptoEnvelopes          HostedUserCryptoEnvelope[]
-  deviceProviderApplications     DeviceProviderApplication[]
   hostedCryptoAudits             HostedUserCryptoAudit[]
   webSessions                    HostedWebSession[]
   mealPhotoCaptureEnrollments    HostedMealPhotoCaptureEnrollment[]
@@ -680,11 +663,13 @@ model HostedMember {
   inferenceConnection            HostedInferenceConnection?
   computerRuns                   HostedComputerRun[]
   computerHandoffs               HostedComputerHandoff[]
+  conversationPolls              HostedConversationPoll[]
   phoneCalls                     HostedPhoneCall[]
   physicalNotes                  HostedPhysicalNote[]
   physicalNoteRecoveries         HostedPhysicalNoteRecovery[]
   productFeedback                HostedProductFeedback[]
   sensitiveActionChallenges      HostedSensitiveActionChallenge[]
+  approvalCredentials            HostedMemberApprovalCredentials?
   threadContainer                HostedThreadContainer?          @relation("HostedThreadContainerMember")
   ownedThreadContainers          HostedThreadContainer[]         @relation("HostedThreadContainerOwner")
   threadContainerParticipations  HostedThreadContainerParticipant[] @relation("HostedThreadContainerParticipantMember")
@@ -816,6 +801,19 @@ model HostedAddressBookContact {
   @@id([memberId, phoneTokenVersion, phoneToken])
   @@index([phoneTokenVersion])
   @@map("hosted_address_book_contact")
+}
+
+/// Bounded, member-bound encrypted WebAuthn credentials for action approvals.
+/// Login and credential recovery remain separate policy owners.
+model HostedMemberApprovalCredentials {
+  memberId             String       @id @map("member_id")
+  credentialsEncrypted String       @map("credentials_encrypted")
+  recoveryHashEncrypted String?     @map("recovery_hash_encrypted")
+  createdAt            DateTime     @default(now()) @map("created_at")
+  updatedAt            DateTime     @updatedAt @map("updated_at")
+  member               HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@map("hosted_member_approval_credentials")
 }
 
 model HostedSensitiveActionChallenge {
@@ -1181,7 +1179,6 @@ model HostedMailboxItem {
   updatedAt               DateTime              @updatedAt @map("updated_at")
   member                  HostedMember          @relation(fields: [userId], references: [id], onDelete: Cascade)
   payload                 HostedMailboxPayload?
-  latencyTrace            HostedIngressLatencyTrace?
 
   @@unique([userId, id])
   @@unique([userId, lane, laneSeq])
@@ -1249,6 +1246,8 @@ model HostedIngressLatencyTrace {
   runtimeAttemptId         String?           @map("runtime_attempt_id")
   replyRuntimeAttemptId    String?           @map("reply_runtime_attempt_id")
   linqDeliveryId           String?           @map("linq_delivery_id")
+  webhookReceivedAt        DateTime?         @map("webhook_received_at")
+  ingressTypingAcceptedAt  DateTime?         @map("ingress_typing_accepted_at")
   acceptedAt               DateTime          @map("accepted_at")
   temporalSignalAcceptedAt DateTime?         @map("temporal_signal_accepted_at")
   runnerJobAcceptedAt      DateTime?         @map("runner_job_accepted_at")
@@ -1261,7 +1260,6 @@ model HostedIngressLatencyTrace {
   phaseBreakdownJson       Json?             @map("phase_breakdown_json")
   createdAt                DateTime          @default(now()) @map("created_at")
   updatedAt                DateTime          @updatedAt @map("updated_at")
-  mailboxItem              HostedMailboxItem @relation(fields: [userId, mailboxItemId], references: [userId, id], onDelete: Cascade)
   linqDelivery             HostedLinqDelivery? @relation(fields: [linqDeliveryId], references: [id], onDelete: SetNull)
 
   @@unique([userId, mailboxItemId])
@@ -1328,6 +1326,155 @@ model HostedUserCryptoAudit {
   @@map("hosted_user_crypto_audit")
 }
 
+/// Runtime authority and exact cleanup target survive canonical member deletion.
+/// No expiry grants replacement authority; retirement requires adapter proof.
+model HostedRuntimeOwner {
+  userId                    String   @id @map("user_id")
+  // Temporary backend selection. An imported idle owner is not yet runnable.
+  migrationPhase            String   @default("legacy") @map("migration_phase")
+  migrationId               String?  @map("migration_id")
+  generation                BigInt   @default(0)
+  attemptId                 String?  @map("attempt_id")
+  phase                     String   @default("idle")
+  processingMode            String?  @map("processing_mode")
+  allocationId              String?  @map("allocation_id")
+  runnerContainerName       String?  @map("runner_container_name")
+  workspaceVersion          BigInt?  @map("workspace_version")
+  providerEgressTokenHash    String?  @map("provider_egress_token_hash")
+  customInferenceEnvelope   String?  @map("custom_inference_envelope")
+  platformAiUsageAllowed    Boolean  @default(false) @map("platform_ai_usage_allowed")
+  startedAt                 DateTime? @map("started_at")
+  acceptedAt                DateTime? @map("accepted_at")
+  completedAt               DateTime? @map("completed_at")
+  failureCount              Int      @default(0) @map("failure_count")
+  lastErrorCode             String?  @map("last_error_code")
+  updatedAt                 DateTime @updatedAt @map("updated_at")
+
+  @@index([migrationPhase, userId])
+  @@map("hosted_runtime_owner")
+}
+
+/// Finite migration gate. A shared row lock fences legacy publication and
+/// admission against the exclusive legacy -> draining -> postgres transition.
+model HostedRuntimeCutover {
+  id              String    @id
+  phase           String    @default("legacy")
+  namespaceId     String?   @map("namespace_id")
+  workerVersion   String?   @map("worker_version")
+  inventoryAfter  String    @default("") @map("inventory_after")
+  inventoryHash   String?   @map("inventory_hash")
+  inventoryCount Int       @default(0) @map("inventory_count")
+  inventorySealedAt DateTime? @map("inventory_sealed_at")
+  selectedObjectId String? @map("selected_object_id")
+  namespaceProbeId String? @map("namespace_probe_id")
+  discoveryCompletedAt DateTime? @map("discovery_completed_at")
+  creationClosedAt DateTime? @map("creation_closed_at")
+  activatedAt     DateTime? @map("activated_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  @@map("hosted_runtime_cutover")
+}
+
+/// Temporary inventory and exact-page receipt, retained through the rollback
+/// window. No member FK: dormant and deleted-member objects must be covered.
+model HostedRuntimeLegacyImport {
+  objectId     String    @id @map("object_id")
+  inventoryClass String @default("baseline") @map("inventory_class")
+  admittedUserId String? @unique @map("admitted_user_id")
+  userId       String?   @unique @map("user_id")
+  generation   BigInt?
+  nextCursor   Json      @map("next_cursor")
+  lastCursor   Json?     @map("last_cursor")
+  lastHash     String?   @map("last_hash")
+  completedAt  DateTime? @map("completed_at")
+
+  @@index([completedAt, objectId])
+  @@index([inventoryClass, objectId])
+  @@map("hosted_runtime_legacy_import")
+}
+
+// Runtime resource obligations outlive member deletion until physical cleanup.
+model HostedRuntimeSnapshotUpload {
+  userId                   String    @id @map("user_id")
+  snapshotId               String    @map("snapshot_id")
+  attemptId                String    @map("attempt_id")
+  generation               BigInt
+  expectedWorkspaceVersion BigInt    @map("expected_workspace_version")
+  workspaceVersion         BigInt    @map("workspace_version")
+  objectKey                String    @map("object_key")
+  encryption               Json
+  replacedSnapshotRef      Json?     @map("replaced_snapshot_ref")
+  createdAt                DateTime  @map("created_at")
+  expiresAt                DateTime  @map("expires_at")
+  heartbeatAt              DateTime  @map("heartbeat_at")
+  completedAt              DateTime? @map("completed_at")
+  putExpiresAt             DateTime? @map("put_expires_at")
+  putDrainUntil            DateTime? @map("put_drain_until")
+
+  @@index([expiresAt, userId])
+  @@map("hosted_runtime_snapshot_upload")
+}
+
+model HostedRuntimePutDrain {
+  userId      String    @map("user_id")
+  writeId     String    @map("write_id")
+  kind        String
+  attemptId   String    @map("attempt_id")
+  generation  BigInt
+  admittedAt  DateTime  @map("admitted_at")
+  drainUntil  DateTime? @map("drain_until")
+  objectKey   String?   @map("object_key")
+  uploadId    String?   @map("upload_id")
+  encryptedByteSize BigInt? @map("encrypted_byte_size")
+  encryptedSha256 String? @map("encrypted_sha256")
+  encryptedMd5 String? @map("encrypted_md5")
+  verifiedAt DateTime? @map("verified_at")
+  reconcileAfter DateTime? @map("reconcile_after")
+  completedAt DateTime? @map("completed_at")
+
+  @@index([completedAt, reconcileAfter])
+  @@id([userId, writeId])
+  @@index([drainUntil, userId])
+  @@map("hosted_runtime_put_drain")
+}
+
+model HostedRuntimeOrphan {
+  userId      String    @map("user_id")
+  resourceId  String    @map("resource_id")
+  kind        String
+  objectKey   String?   @map("object_key")
+  snapshotRef Json?     @map("snapshot_ref")
+  createdAt   DateTime  @map("created_at")
+  cleanupAt   DateTime  @map("cleanup_at")
+  recoveryUntil DateTime? @map("recovery_until")
+  retiredAt   DateTime? @map("retired_at")
+  purgedAt    DateTime? @map("purged_at")
+  revision    BigInt    @default(1)
+
+  @@id([userId, kind, resourceId])
+  @@index([purgedAt, cleanupAt, userId])
+  @@map("hosted_runtime_orphan")
+}
+
+model HostedRuntimeMedia {
+  userId    String    @map("user_id")
+  mediaId   String    @map("media_id")
+  mediaKind String    @map("media_kind")
+  byteSize  BigInt    @map("byte_size")
+  sha256    String
+  objectKey String    @map("object_key")
+  registered Boolean @default(true)
+  expiresAt DateTime? @map("expires_at")
+  retiredAt DateTime? @map("retired_at")
+  purgedAt  DateTime? @map("purged_at")
+  revision  BigInt    @default(1)
+  updatedAt DateTime  @updatedAt @map("updated_at")
+
+  @@id([userId, mediaId])
+  @@index([purgedAt, expiresAt, userId])
+  @@map("hosted_runtime_media")
+}
+
 model HostedWorkspace {
   userId                 String       @id @map("user_id")
   version                BigInt       @default(0)
@@ -1340,6 +1487,7 @@ model HostedWorkspace {
   systemMailboxProgressGeneration BigInt? @map("system_mailbox_progress_generation")
   inboxMediaRetentionWakeAt DateTime? @map("inbox_media_retention_wake_at")
   inboxMediaRetentionSignalAttemptedAt DateTime? @map("inbox_media_retention_signal_attempted_at")
+  runtimeRecheckSignaledVersion BigInt? @map("runtime_recheck_signaled_version")
   acceptedAttemptFailureRecheckClaimedAt DateTime? @map("accepted_attempt_failure_recheck_claimed_at")
   redactedStatusJson     Json?        @map("redacted_status_json")
   checkpointedAt         DateTime?    @map("checkpointed_at")
@@ -1632,6 +1780,7 @@ model HostedAccountDeletionCleanup {
   runtimeLogsCompletedAt DateTime? @map("runtime_logs_completed_at")
   temporalCompletedAt   DateTime? @map("temporal_completed_at")
   temporalNextRuntimeIndex Int     @default(0) @map("temporal_next_runtime_index")
+  runtimeMigrationNextIndex Int?   @default(0) @map("runtime_migration_next_index")
   attemptCount          Int       @default(0) @map("attempt_count")
   nextAttemptAt         DateTime  @map("next_attempt_at")
   lastAttemptedAt       DateTime? @map("last_attempted_at")
@@ -1643,6 +1792,7 @@ model HostedAccountDeletionCleanup {
 
   @@index([nextAttemptAt, leaseExpiresAt])
   @@index([privyUserLookupKey, privyCompletedAt])
+  @@index([runtimeMigrationNextIndex, id], map: "hosted_cleanup_runtime_enrollment_idx")
   @@map("hosted_account_deletion_cleanup")
 }
 
@@ -2147,9 +2297,6 @@ model HostedLinqLine {
   totalDeliveredCount        Int       @default(0) @map("total_delivered_count")
   totalFailedCount           Int       @default(0) @map("total_failed_count")
   totalInboundCount          Int       @default(0) @map("total_inbound_count")
-  /// Deprecated rollout compatibility for builds predating weighted planning.
-  /// Current assignment does not read this column.
-  activeMemberLimit          Int?      @map("active_member_limit")
   maxNewConversationsPerDay  Int?      @map("max_new_conversations_per_day")
   proactiveConversationDayUtc DateTime? @db.Date @map("proactive_conversation_day_utc")
   proactiveConversationCount  Int?      @map("proactive_conversation_count")
@@ -2512,4 +2659,69 @@ model HostedLinqContactCardShare {
   @@index([memberId])
   @@index([lastContactCardShareAttemptedAt])
   @@map("hosted_linq_contact_card_share")
+}
+
+/// Closed storage for the four enabled Better Auth models. Member truth remains
+/// in the canonical member/contact owners; selectors contain only blinded values.
+enum HostedAuthModel {
+  user
+  session
+  account
+  verification
+}
+
+model HostedAuthRecord {
+  model              HostedAuthModel
+  id                 String
+  memberId           String?         @map("member_id")
+  lookupKey          String?         @map("lookup_key")
+  secondaryLookupKey String?         @map("secondary_lookup_key")
+  payloadEncrypted   String          @map("payload_encrypted")
+  expiresAt          DateTime?       @map("expires_at")
+  createdAt          DateTime        @map("created_at")
+  updatedAt          DateTime        @map("updated_at")
+  member             HostedMember?   @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@id([model, id])
+  @@unique([model, lookupKey])
+  @@unique([model, secondaryLookupKey])
+  @@index([model, memberId, id])
+  @@index([model, expiresAt, id])
+  @@map("hosted_auth_record")
+}
+
+model HostedConversationPoll {
+  resultNotifiedAt      DateTime?    @map("result_notified_at")
+  id                    String       @id
+  memberId              String       @map("member_id")
+  channel               String
+  conversationKey       String       @map("conversation_key")
+  providerPollKey       String?      @unique @map("provider_poll_key")
+  definitionEncrypted   String       @map("definition_encrypted")
+  resultEncrypted       String?      @map("result_encrypted")
+  dispatchedAt          DateTime?    @map("dispatched_at")
+  lastUpdateId          BigInt?      @map("last_update_id")
+  closedAt              DateTime?    @map("closed_at")
+  createdAt             DateTime     @default(now()) @map("created_at")
+  updatedAt             DateTime     @updatedAt @map("updated_at")
+  member                HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  votes                 HostedConversationPollVote[]
+
+  @@index([memberId, conversationKey, createdAt], map: "hosted_conversation_poll_conversation_idx")
+  @@index([channel, dispatchedAt])
+  @@map("hosted_conversation_poll")
+}
+
+model HostedConversationPollVote {
+  pollId                String       @map("poll_id")
+  voterKey              String       @map("voter_key")
+  voteEncrypted         String       @map("vote_encrypted")
+  lastUpdateId          BigInt       @map("last_update_id")
+  hasVote               Boolean      @map("has_vote")
+  poll                  HostedConversationPoll @relation(fields: [pollId], references: [id], onDelete: Cascade)
+
+  @@id([pollId, voterKey])
+  @@index([pollId, hasVote, voterKey], map: "hosted_conversation_poll_vote_page_idx")
+  @@map("hosted_conversation_poll_vote")
 }

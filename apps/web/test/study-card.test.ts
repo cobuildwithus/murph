@@ -2,7 +2,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
-import { resolveHealthCommonsExperimentProtocol } from "@/src/lib/health-commons/experiment-detail";
+import { resolveHealthCommonsExperimentResearchTab } from "@/src/lib/health-commons/experiment-projections";
 import { StudyCard } from "@/src/components/experiments/experiment-detail/study-card";
 
 describe("StudyCard", () => {
@@ -73,7 +73,7 @@ describe("StudyCard", () => {
   });
 
   it("resolves the fallback study copy when a source has no Findings block", () => {
-    const protocol = resolveHealthCommonsExperimentProtocol("walking-after-every-meal");
+    const protocol = resolveHealthCommonsExperimentResearchTab("walking-after-every-meal");
     expect(protocol).toBeTruthy();
 
     const study = protocol?.studies.find(

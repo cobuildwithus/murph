@@ -20,6 +20,17 @@ Member private phone fields remain encrypted through the hosted member secure-bo
 
 The provider inventory client intentionally stays on the existing web-owned Linq HTTP boundary instead of adding a second SDK/client surface for one read-only operation. Its parser is pinned to the documented `phone_numbers[].phone_number`, `phone_numbers[].id`, and `phone_numbers[].reputation.status` / `reputation.reason` shape, with `health_status` accepted only as the documented deprecated status alias.
 
+Inventory replacement prepares at most 250 lines once, before opening any
+database transaction. The existing Serializable owner attempts the complete
+atomic replacement at most three times, recognizing both Prisma-wrapped
+statement conflicts and direct adapter SQLSTATE conflicts at commit. A retry
+waits 50–250 milliseconds after rollback, outside the transaction, so the two
+possible waits add at most 500 milliseconds without changing the default
+transaction timeout. Cancellation interrupts the wait and is checked before
+each new attempt. Unrecognized errors remain terminal; retries do not refetch
+the provider snapshot or repeat crypto preparation. Callers supplying their own
+transaction retain responsibility for retrying that entire transaction.
+
 ## Deploy Order
 
 1. Stop before any production migration, deployment, rollback freeze, dry run,
@@ -99,7 +110,31 @@ WHERE provider_phone_number_id = '<LINQ_PROVIDER_PHONE_NUMBER_ID>';
 
 Keep new lines below 50 net-new conversations per day unless current provider health and delivery evidence supports a higher cap. Prefer gradual ramps such as 10-20 per day for the first week. This pacing value is not the weighted line-planning score and is not the provider's 7,000-message guideline.
 
-`active_member_limit` and `HOSTED_ONBOARDING_LINQ_MAX_ACTIVE_MEMBERS_PER_PHONE_NUMBER` are retained only as an additive-rollout compatibility seam for an older rollback build. Current assignment neither reads nor treats them as policy. Remove the env seam and column only in a later contract cleanup after no production or rollback function can execute the old direct-member decision.
+Current application code no longer parses
+`HOSTED_ONBOARDING_LINQ_MAX_ACTIVE_MEMBERS_PER_PHONE_NUMBER`, writes
+`active_member_limit`, or includes the field in its generated Prisma client.
+Weighted planning and the separate proactive new-conversation quota retain their
+existing owners and behavior.
+
+The nullable physical `hosted_linq_line.active_member_limit` column remains
+until a separate postdeploy contract cleanup. Keeping it makes the code release
+compatible with older Web builds and operator scripts, including Prisma
+whole-row upserts that still select the field implicitly. The removal condition
+is all of the following:
+
+1. The replacement Web build and Prisma client are deployed, and the production
+   alias is proven before and after the configured prior-function drain.
+2. Older operator invocations, including line sync and provider-inventory
+   scripts, have finished and cannot restart from a pre-cleanup checkout.
+3. Any deployment-pinned Workflow capable of reaching an old line-store read
+   or write has settled; elapsed HTTP route lifetime alone is insufficient.
+4. Rollback admission excludes every Web build or CLI artifact that still
+   references the column. The postdeploy contract lane may then apply the
+   physical drop without changing weighted planning or proactive quotas.
+
+Before the physical drop, the code release can be reverted while retaining the
+column. After the drop, recovery is a forward deployment of the replacement or
+later compatible code; restoring an older generated Prisma client is unsafe.
 
 ## Contact Cards
 

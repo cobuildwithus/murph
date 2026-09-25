@@ -3,9 +3,12 @@ import { describe, expect, it, vi } from "vitest";
 import {
   discoverSmartConfiguration,
   exchangeSmartAuthorizationCode,
+  refreshSmartAccessToken,
   readGrantedSmartResourceTypes,
   selectSmartRequestedScopes,
 } from "@/src/lib/clinical-records/smart";
+
+import { epicBinaryReadIsGranted, epicMediaReadIsGranted } from "@/src/lib/clinical-records/epic-policy";
 
 const baseScopes = ["openid", "fhirUser", "launch/patient"];
 const resourceTypes = ["Patient", "Observation", "DiagnosticReport"];
@@ -37,6 +40,8 @@ describe("Clinical Records SMART negotiation", () => {
       "patient/Patient.r",
       "patient/Observation.s",
       "patient/DiagnosticReport.s",
+      "patient/Binary.r",
+      "patient/Media.r",
     ]);
     expect(configuration.requestedResourceTypes).toEqual(resourceTypes);
   });
@@ -51,6 +56,8 @@ describe("Clinical Records SMART negotiation", () => {
       "patient/Patient.read",
       "patient/Observation.read",
       "patient/DiagnosticReport.read",
+      "patient/Binary.read",
+      "patient/Media.read",
     ]);
 
     expect(() => selectSmartRequestedScopes({
@@ -100,6 +107,34 @@ describe("Clinical Records SMART negotiation", () => {
       ],
       resourceTypes,
     )).toEqual(["DiagnosticReport"]);
+  });
+
+  it("retains primary document access when the provider withholds Binary read permission", async () => {
+    const selection = selectSmartRequestedScopes({
+      capabilities: ["permission-v2", "context-standalone-patient"],
+      requestedBaseScopes: baseScopes,
+      resourceTypes: ["Patient", "DocumentReference"],
+    });
+    expect(selection.scopes).toContain("patient/Binary.r");
+    const token = await exchangeSmartAuthorizationCode({
+      clientId: "client-id", code: "authorization-code", verifier: "verifier",
+      redirectUri: "https://app.example.test/api/clinical-records/oauth/callback",
+      tokenEndpoint: "https://fhir.example.test/oauth2/token",
+      requestedScopes: selection.scopes,
+      fetchImpl: vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({
+        access_token: "access-token", expires_in: 3600, patient: "patient-1", token_type: "Bearer",
+        scope: [...baseScopes, "patient/Patient.r", "patient/DocumentReference.s"].join(" "),
+      })),
+    });
+    expect(readGrantedSmartResourceTypes(token.grantedScopes, selection.resourceTypes))
+      .toEqual(["Patient", "DocumentReference"]);
+    expect(epicBinaryReadIsGranted(token.grantedScopes)).toBe(false);
+    expect(epicMediaReadIsGranted(token.grantedScopes)).toBe(false);
+    expect(selection.scopes).not.toContain("patient/Media.r");
+    expect(selectSmartRequestedScopes({
+      capabilities: ["permission-v2", "context-standalone-patient"],
+      requestedBaseScopes: baseScopes, resourceTypes: ["Patient", "Observation"],
+    }).scopes).not.toContain("patient/Binary.r");
   });
 
   it("normalizes a FHIR Patient reference and rejects invalid patient launch context", async () => {
@@ -210,3 +245,40 @@ function oversizedJsonResponse(chunkSizes: number[], declaredLength: string | nu
   });
   return { response, wasCanceled: () => canceled };
 }
+
+
+describe("persistent SMART access", () => {
+  it("requests offline access only for explicit consent and a capable portal", () => {
+    const input = { capabilities: ["permission-v2", "context-standalone-patient", "permission-offline"], requestedBaseScopes: baseScopes, resourceTypes };
+    expect(selectSmartRequestedScopes(input).scopes).not.toContain("offline_access");
+    expect(selectSmartRequestedScopes({ ...input, requestOfflineAccess: true }).scopes).toContain("offline_access");
+    expect(selectSmartRequestedScopes({ ...input, requestOfflineAccess: true, capabilities: input.capabilities.slice(0, 2) }).scopes).not.toContain("offline_access");
+  });
+
+  it("rotates refresh tokens with confidential Basic authentication and retains omitted scope", async () => {
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({
+      access_token: "new-access", refresh_token: "rotated-refresh", expires_in: 300, token_type: "Bearer",
+    }));
+    const result = await refreshSmartAccessToken({ clientId: "client:one", clientSecret: "secret space", refreshToken: "old-refresh",
+      tokenEndpoint: "https://portal.example.test/token", grantedScopes: ["offline_access", "patient/Patient.r", "patient/Observation.s"], fetchImpl });
+    expect(result).toMatchObject({ accessToken: "new-access", refreshToken: "rotated-refresh", grantedScopes: ["offline_access", "patient/Patient.r", "patient/Observation.s"] });
+    const init = fetchImpl.mock.calls[0]![1]!;
+    expect(new Headers(init.headers).get("Authorization")).toBe(`Basic ${Buffer.from("client%3Aone:secret+space").toString("base64")}`);
+    expect(String(init.body)).toBe("grant_type=refresh_token&refresh_token=old-refresh");
+    expect(init.redirect).toBe("manual");
+  });
+
+  it.each([400, 401, 429, 503])("classifies a refresh HTTP %s without exposing its body", async (status) => {
+    await expect(refreshSmartAccessToken({ clientId: "client", clientSecret: "secret", refreshToken: "refresh",
+      tokenEndpoint: "https://portal.example.test/token", grantedScopes: ["patient/Patient.r", "patient/Observation.s"],
+      fetchImpl: vi.fn<typeof fetch>().mockResolvedValue(new Response("private provider response", { status })) }))
+      .rejects.toMatchObject({ retryable: status === 429 || status === 503 });
+  });
+
+  it("requires reconnecting when renewal narrows the patient grant", async () => {
+    await expect(refreshSmartAccessToken({ clientId: "client", clientSecret: "secret", refreshToken: "refresh",
+      tokenEndpoint: "https://portal.example.test/token", grantedScopes: ["patient/Patient.r", "patient/Observation.s", "patient/DocumentReference.s"],
+      fetchImpl: vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({ access_token: "new", expires_in: 300,
+        token_type: "Bearer", scope: "patient/Patient.r patient/Observation.s" })) })).rejects.toMatchObject({ code: "CLINICAL_RECORD_SMART_GRANT_CHANGED" });
+  });
+});

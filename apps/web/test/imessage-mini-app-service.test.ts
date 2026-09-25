@@ -1,6 +1,9 @@
 import { createHash } from "node:crypto";
 
 import { describe, expect, it, vi } from "vitest";
+import { memberActionRequestV1Schema } from "@murphai/contracts";
+
+import nativeWorkoutRequest from "./fixtures/imessage-workout-native-request.json";
 
 import { HostedAgentSessionService } from "../src/lib/hosted-agent-sessions";
 import {
@@ -199,6 +202,91 @@ describe("iMessage mini-app service", () => {
       httpStatus: 401,
     });
     expect(store.authenticateAgentSessionByTokenHash).not.toHaveBeenCalled();
+  });
+
+  it("normalizes the sparse presentation emitted by the native Swift workout encoder", () => {
+    // Synthetic output from WorkoutEntryDraft and MessagesMiniAppAPIClient.makeEncoder.
+    const request = structuredClone(nativeWorkoutRequest);
+    const before = structuredClone(request);
+    const now = new Date(request.requestedAt);
+    expect(memberActionRequestV1Schema.safeParse(request).success).toBe(false);
+
+    const normalized = validateIMessageMiniAppMemberAction(request, now);
+
+    expect(normalized.action).toMatchObject({
+      presentation: {
+        subtitle: null,
+        footer: null,
+        workout: {
+          exercises: [{
+            sets: [
+              { status: "completed", actual: "80 lb × 10", target: null },
+              { status: "pending", actual: null, target: null },
+            ],
+          }],
+        },
+      },
+    });
+    expect(memberActionRequestV1Schema.safeParse(normalized).success).toBe(true);
+    expect(validateIMessageMiniAppMemberAction(normalized, now)).toEqual(normalized);
+    expect(request).toEqual(before);
+  });
+
+  it("normalizes the same native presentation for live snapshot reads", () => {
+    const request = {
+      ...nativeWorkoutRequest,
+      action: {
+        kind: "workout.live.snapshot",
+        version: 1,
+        workoutBinding: nativeWorkoutRequest.action.expectedWorkout.actionBinding,
+        presentation: nativeWorkoutRequest.action.presentation,
+      },
+    };
+    const normalized = validateIMessageMiniAppMemberAction(request, new Date(request.requestedAt));
+    expect(normalized.action).toMatchObject({
+      kind: "workout.live.snapshot",
+      presentation: { subtitle: null, footer: null },
+    });
+    expect(memberActionRequestV1Schema.safeParse(normalized).success).toBe(true);
+  });
+
+  it.each([
+    { ...nativeWorkoutRequest.action.presentation, subtitle: 7 },
+    { ...nativeWorkoutRequest.action.presentation, memberId: "untrusted-member" },
+    { ...nativeWorkoutRequest.action.presentation, workout: null },
+    { ...nativeWorkoutRequest.action.presentation, workout: { exercises: "invalid" } },
+    {
+      ...nativeWorkoutRequest.action.presentation,
+      workout: {
+        ...nativeWorkoutRequest.action.presentation.workout,
+        exercises: [{ name: "Cable Row", sets: [{ status: "completed" }] }],
+      },
+    },
+    {
+      ...nativeWorkoutRequest.action.presentation,
+      workout: {
+        ...nativeWorkoutRequest.action.presentation.workout,
+        exercises: [{ name: "Cable Row", sets: [{ status: "pending", actual: "10 reps" }] }],
+      },
+    },
+  ])("keeps malformed native presentation fail-closed: %#", (presentation) => {
+    expect(() => validateIMessageMiniAppMemberAction({
+      ...nativeWorkoutRequest,
+      action: { ...nativeWorkoutRequest.action, presentation },
+    }, new Date(nativeWorkoutRequest.requestedAt))).toThrowError(/request is invalid/iu);
+  });
+
+  it("does not fill missing mutation preconditions or accept unknown authority fields", () => {
+    const now = new Date(nativeWorkoutRequest.requestedAt);
+    const mutations = nativeWorkoutRequest.action.mutations.map(({ expectedResult: _expected, ...mutation }) => mutation);
+    expect(() => validateIMessageMiniAppMemberAction({
+      ...nativeWorkoutRequest,
+      action: { ...nativeWorkoutRequest.action, mutations },
+    }, now)).toThrowError(/request is invalid/iu);
+    expect(() => validateIMessageMiniAppMemberAction({
+      ...nativeWorkoutRequest,
+      action: { ...nativeWorkoutRequest.action, memberId: "untrusted-member" },
+    }, now)).toThrowError(/request is invalid/iu);
   });
 
   it("validates closed, versioned enrollment and member-action envelopes", () => {

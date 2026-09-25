@@ -696,7 +696,7 @@ test.each([
   const sharedPlan = createSharedPlan()
   sharedPlan.conversationPolicy.audience.channel = 'telegram'
   sharedPlan.conversationPolicy.audience.threadIsDirect = threadIsDirect
-  sharedPlan.conversationPolicy.audience.effectiveThreadIsDirect = threadIsDirect === true
+  sharedPlan.conversationPolicy.audience.threadIsDirect = threadIsDirect === true
   const session = createAssistantSession()
   session.binding.threadIsDirect = threadIsDirect
   const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({

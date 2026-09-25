@@ -1,9 +1,5 @@
-import { getHostedDashboardPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
+import { permanentRedirect } from "next/navigation";
 
-import OverviewPageClient from "./overview-page-client";
-
-export default async function OverviewPage() {
-  await getHostedDashboardPageAuthSnapshot();
-
-  return <OverviewPageClient />;
+export default function RetiredOverviewPage(): never {
+  permanentRedirect("/home");
 }

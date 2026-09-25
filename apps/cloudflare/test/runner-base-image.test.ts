@@ -26,11 +26,12 @@ const dockerfileText = [
   "RUN codex app-server --help",
   "",
 ].join("\n");
+const codexPatchText = "synthetic native compatibility patch\n";
 
 describe("runner base image preparation", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(readFile).mockImplementation(async (_path, options) => {
+    vi.mocked(readFile).mockImplementation(async (sourcePath, options) => {
       const encoding =
         typeof options === "string"
           ? options
@@ -38,13 +39,40 @@ describe("runner base image preparation", () => {
             ? options.encoding
             : null;
 
-      return encoding ? dockerfileText : Buffer.from(dockerfileText);
+      const content = String(sourcePath).endsWith("codex-public-live.patch")
+        ? codexPatchText
+        : dockerfileText;
+      return encoding ? content : Buffer.from(content);
     });
     vi.mocked(spawn).mockImplementation(() => {
       const child = new EventEmitter();
       setImmediate(() => child.emit("exit", 0, null));
       return child as ReturnType<typeof spawn>;
     });
+  });
+
+  it("invalidates a prepared image when only the native patch changes", async () => {
+    const { computeRunnerBaseImageSourceFingerprint } = await import("../scripts/runner-base-image.ts");
+    const before = await computeRunnerBaseImageSourceFingerprint();
+    vi.mocked(readFile).mockImplementation(async (sourcePath) => Buffer.from(
+      String(sourcePath).endsWith("codex-public-live.patch")
+        ? `${codexPatchText}new shutdown fix\n`
+        : dockerfileText,
+    ));
+    expect(await computeRunnerBaseImageSourceFingerprint()).not.toBe(before);
+  });
+
+  it("cannot reuse an image when the pinned native patch is missing", async () => {
+    const { prepareRunnerBaseImage } = await import("../scripts/runner-base-image.ts");
+    vi.mocked(readFile).mockImplementation(async (sourcePath) => {
+      if (String(sourcePath).endsWith("codex-public-live.patch")) {
+        throw new Error("native patch missing");
+      }
+      return Buffer.from(dockerfileText);
+    });
+    await expect(prepareRunnerBaseImage()).rejects.toThrow("native patch missing");
+    expect(spawnSync).not.toHaveBeenCalled();
+    expect(spawn).not.toHaveBeenCalled();
   });
 
   it("skips the Docker build when the prepared image fingerprint is current", async () => {
@@ -226,7 +254,9 @@ function mockDockerSyncResults(results: Array<Partial<ReturnType<typeof spawnSyn
 
 function expectedFingerprint(): string {
   return createHash("sha256")
-    .update("Dockerfile.cloudflare-hosted-runner-base\0")
+    .update(`Dockerfile.cloudflare-hosted-runner-base\0${Buffer.byteLength(dockerfileText)}\0`)
     .update(Buffer.from(dockerfileText))
+    .update(`patches/codex-public-live.patch\0${Buffer.byteLength(codexPatchText)}\0`)
+    .update(Buffer.from(codexPatchText))
     .digest("hex");
 }

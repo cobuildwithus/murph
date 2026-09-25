@@ -6,6 +6,7 @@ import {
 import {
   requireHostedCloudflareCallbackRequest,
 } from "@/src/lib/hosted-execution/cloudflare-callback-auth";
+import { buildHostedThreadRouteAuthorityResponse } from "@/src/lib/hosted-execution/runtime-protocol";
 import {
   hostedOnboardingError,
 } from "@/src/lib/hosted-onboarding/errors";
@@ -85,26 +86,24 @@ export const POST = withJsonError(async (request: Request) => {
     });
   }
 
-  const assertion = await getPrisma().$transaction(async (tx) => {
-    await assertHostedAssistantNotificationRouteAuthority({
+  const result = await getPrisma().$transaction(async (tx) => {
+    const threadIsDirect = await assertHostedAssistantNotificationRouteAuthority({
       authority,
       prisma: tx,
     });
-    if (!assistantAskCompletion) {
-      return;
-    }
-    return await assertHostedAssistantAskCompletionDeliveryAuthorityTx({
-      ...assistantAskCompletion,
-      boundRuntimeMemberId: memberId,
-      tx,
-    });
+    const assertion = assistantAskCompletion
+      ? await assertHostedAssistantAskCompletionDeliveryAuthorityTx({
+          ...assistantAskCompletion,
+          boundRuntimeMemberId: memberId,
+          tx,
+        })
+      : undefined;
+    return { threadIsDirect, assertion };
   });
-  return jsonOk({
-    authorized: true,
-    ...(assertion?.assistantAskFallbackRequired
-      ? { assistantAskFallbackRequired: true }
-      : {}),
-  });
+  return jsonOk(buildHostedThreadRouteAuthorityResponse(
+    result.threadIsDirect,
+    result.assertion?.assistantAskFallbackRequired,
+  ));
 });
 
 interface AssistantAskCompletionAuthority {

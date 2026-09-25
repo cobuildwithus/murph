@@ -40,3 +40,4 @@ apps/cloudflare/.deploy/*
 !apps/cloudflare/.deploy/runner-bundle/**
 *.zip
 *.patch
+!patches/codex-public-live.patch

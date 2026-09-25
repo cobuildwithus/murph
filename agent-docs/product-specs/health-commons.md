@@ -203,6 +203,8 @@ Generated entities carry:
 The full catalog is a build-time generator structure, not a runtime artifact.
 Runtime surfaces should consume scoped generated artifacts instead of a monolith:
 web route bundles/projections for public pages, the compact Goal browse index,
+the v4 biomarker browse index (including device metric bindings and display
+precision so dashboard lists do not read every detail projection),
 compact protocol index/run-spec/
 family-graph artifacts for CLI and hosted protocol reads, the compact
 `biomarker-desired-directions.json` projection for progress-card sentiment, and

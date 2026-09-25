@@ -325,12 +325,12 @@ test('buildAssistantCliSurfaceContract normalizes commands into a compact index 
         },
       },
       {
-        description: 'Murph Age readiness',
-        name: 'age inputs',
+        description: 'Assistant configuration diagnostics',
+        name: 'assistant doctor',
       },
       {
-        description: 'Murph Age report',
-        name: 'age report',
+        description: 'Stop the assistant runtime',
+        name: 'assistant stop',
       },
       {
         description: 'Mark onboarding complete',
@@ -390,7 +390,6 @@ test('buildAssistantCliSurfaceContract normalizes commands into a compact index 
     /- `assistant`: `onboarding complete`, `onboarding resume-context`\./u,
   )
   assert.match(contract, /- `document`: `import`\./u)
-  assert.doesNotMatch(contract, /- `age`:/u)
   assert.match(
     contract,
     /- `assistant onboarding resume-context`: Read compact setup context for onboarding resume; options --limit=number\./u,
@@ -414,8 +413,8 @@ test('buildAssistantCliSurfaceContract normalizes commands into a compact index 
   assert.doesNotMatch(contract, /`assistant session list`/u)
   assert.doesNotMatch(contract, /`assistant self-target set`/u)
   assert.doesNotMatch(contract, /`assistant onboarding status`/u)
-  assert.doesNotMatch(contract, /`age inputs`/u)
-  assert.doesNotMatch(contract, /`age report`/u)
+  assert.doesNotMatch(contract, /`assistant doctor`/u)
+  assert.doesNotMatch(contract, /`assistant stop`/u)
   assert.doesNotMatch(contract, /`status`/u)
   assert.doesNotMatch(contract, /`doctor`/u)
   assert.doesNotMatch(contract, /`model`/u)
@@ -554,166 +553,9 @@ test('buildAssistantCliProcessEnv keeps manifest subprocess env credential-free'
   assert.equal(env.TELEGRAM_BOT_TOKEN, undefined)
 })
 
-test('readAssistantCliLlmsManifest launches workspace CLI source with base tsconfig', async () => {
-  vi.resetModules()
-
-  const fakeTsxBinary = path.join(path.sep, 'tmp', 'murph-test-bin', 'tsx')
-  const spawnCalls: Array<{
-    args: string[]
-    command: string
-    cwd?: string
-    env?: NodeJS.ProcessEnv
-  }> = []
-
-  vi.doMock('node:fs/promises', async () => {
-    const actual =
-      await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises')
-    return {
-      ...actual,
-      access: vi.fn(async (targetPath: string) => {
-        if (
-          targetPath === fakeTsxBinary ||
-          targetPath.endsWith('tsconfig.base.json') ||
-          targetPath.endsWith(path.join('packages', 'cli', 'src', 'bin.ts'))
-        ) {
-          return
-        }
-
-        throw new Error(`missing test executable: ${targetPath}`)
-      }),
-    }
-  })
-  vi.doMock('node:child_process', () => ({
-    spawn: vi.fn((
-      command: string,
-      args: string[],
-      options: {
-        cwd?: string
-        env?: NodeJS.ProcessEnv
-      },
-    ) => {
-      spawnCalls.push({
-        args: [...args],
-        command,
-        cwd: options.cwd,
-        env: options.env,
-      })
-
-      return createManifestCommandChildProcess({
-        commands: [
-          {
-            name: 'memory show',
-          },
-        ],
-        version: 'incur.v1',
-      })
-    }),
-  }))
-
-  const {
-    readAssistantCliLlmsManifest,
-  } = await import('../src/assistant/cli-surface-manifest.ts')
-
-  const manifest = await readAssistantCliLlmsManifest({
-    cliEnv: {
-      HOME: path.join(path.sep, 'tmp', 'murph-test-home'),
-      PATH: path.dirname(fakeTsxBinary),
-    },
-    workingDirectory: path.join(path.sep, 'tmp', 'murph-workspace'),
-  })
-
-  assert.equal(manifest.commands[0]?.name, 'memory show')
-  assert.equal(spawnCalls.length, 1)
-
-  const spawnCall = spawnCalls[0]
-  assert.ok(spawnCall)
-  assert.equal(spawnCall.command, fakeTsxBinary)
-  assert.equal(spawnCall.args[0], '--tsconfig')
-  assert.match(spawnCall.args[1] ?? '', /tsconfig\.base\.json$/u)
-  assert.match(spawnCall.args[2] ?? '', /packages[\\/]cli[\\/]src[\\/]bin\.ts$/u)
-  assert.deepEqual(spawnCall.args.slice(3), ['--llms', '--format', 'json'])
-  assert.equal(spawnCall.cwd, path.join(path.sep, 'tmp', 'murph-workspace'))
-})
-
-test('readAssistantCliLlmsFullManifest keeps adaptive source discovery and supports an owner-defined runtime timeout', async () => {
-  vi.resetModules()
-
-  const fakeTsxBinary = path.join(path.sep, 'tmp', 'murph-test-bin', 'tsx')
-  const timeoutSpy = vi.spyOn(globalThis, 'setTimeout')
-  const spawnCalls: Array<{
-    args: string[]
-    command: string
-  }> = []
-
-  vi.doMock('node:fs/promises', async () => {
-    const actual =
-      await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises')
-    return {
-      ...actual,
-      access: vi.fn(async (targetPath: string) => {
-        if (
-          targetPath === fakeTsxBinary ||
-          targetPath.endsWith('tsconfig.base.json') ||
-          targetPath.endsWith(path.join('packages', 'cli', 'src', 'bin.ts'))
-        ) {
-          return
-        }
-
-        throw new Error(`missing test executable: ${targetPath}`)
-      }),
-    }
-  })
-  vi.doMock('node:child_process', () => ({
-    spawn: vi.fn((command: string, args: string[]) => {
-      spawnCalls.push({
-        args: [...args],
-        command,
-      })
-
-      return createManifestCommandChildProcess({
-        commands: [
-          {
-            name: 'goal save',
-            schema: {
-              args: {
-                properties: {
-                  title: {
-                    type: 'string',
-                  },
-                },
-              },
-            },
-          },
-        ],
-      })
-    }),
-  }))
-
-  const {
-    readAssistantCliLlmsFullManifest,
-  } = await import('../src/assistant/cli-surface-manifest.ts')
-
-  const manifest = await readAssistantCliLlmsFullManifest({
-    cliEnv: {
-      PATH: path.dirname(fakeTsxBinary),
-    },
-    timeoutMs: 5 * 60_000,
-  })
-
-  assert.equal(manifest.commands[0]?.name, 'goal save')
-  assert.equal(spawnCalls.length, 1)
-
-  const spawnCall = spawnCalls[0]
-  assert.ok(spawnCall)
-  assert.equal(spawnCall.command, fakeTsxBinary)
-  assert.deepEqual(spawnCall.args.slice(3), ['--llms-full', '--format', 'json'])
-  assert.ok(timeoutSpy.mock.calls.some(([, delay]) => delay === 5 * 60_000))
-})
-
 test('readAssistantCliLlmsFullManifestFromCliEntry requires the explicit built CLI with an owner-defined timeout', async () => {
   vi.resetModules()
 
-  const fakeTsxBinary = path.join(path.sep, 'tmp', 'murph-test-bin', 'tsx')
   const timeoutSpy = vi.spyOn(globalThis, 'setTimeout')
   const spawnCalls: Array<{
     args: string[]
@@ -727,9 +569,6 @@ test('readAssistantCliLlmsFullManifestFromCliEntry requires the explicit built C
       ...actual,
       access: vi.fn(async (targetPath: string) => {
         if (
-          targetPath === fakeTsxBinary ||
-          targetPath.endsWith('tsconfig.base.json') ||
-          targetPath.endsWith(path.join('packages', 'cli', 'src', 'bin.ts')) ||
           targetPath.endsWith(path.join('packages', 'cli', 'dist', 'bin.js'))
         ) {
           return
@@ -905,71 +744,6 @@ test('generateAssistantCliSurfaceContract preserves the artifact schema and seri
     artifact.contract,
     /- `goal save`: Create or update one goal from typed command fields\.; args \[title\]; options --horizon=short_term\|medium_term\|long_term\|ongoing, --status=active\|paused\|completed\|abandoned\./u,
   )
-})
-
-test('readAssistantCliLlmsManifest skips workspace CLI source when base tsconfig is missing', async () => {
-  vi.resetModules()
-
-  const fakeBinDirectory = path.join(path.sep, 'tmp', 'murph-test-bin')
-  const fakeVaultCliBinary = path.join(fakeBinDirectory, 'vault-cli')
-  const fakeTsxBinary = path.join(fakeBinDirectory, 'tsx')
-  const spawnCalls: Array<{
-    args: string[]
-    command: string
-  }> = []
-
-  vi.doMock('node:fs/promises', async () => {
-    const actual =
-      await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises')
-    return {
-      ...actual,
-      access: vi.fn(async (targetPath: string) => {
-        if (
-          targetPath === fakeVaultCliBinary ||
-          targetPath === fakeTsxBinary ||
-          targetPath.endsWith(path.join('packages', 'cli', 'src', 'bin.ts'))
-        ) {
-          return
-        }
-
-        throw new Error(`missing test path: ${targetPath}`)
-      }),
-    }
-  })
-  vi.doMock('node:child_process', () => ({
-    spawn: vi.fn((command: string, args: string[]) => {
-      spawnCalls.push({
-        args: [...args],
-        command,
-      })
-
-      return createManifestCommandChildProcess({
-        commands: [
-          {
-            name: 'memory show',
-          },
-        ],
-      })
-    }),
-  }))
-
-  const {
-    readAssistantCliLlmsManifest,
-  } = await import('../src/assistant/cli-surface-manifest.ts')
-
-  const manifest = await readAssistantCliLlmsManifest({
-    cliEnv: {
-      PATH: fakeBinDirectory,
-    },
-  })
-
-  assert.equal(manifest.commands[0]?.name, 'memory show')
-  assert.equal(spawnCalls.length, 1)
-
-  const spawnCall = spawnCalls[0]
-  assert.ok(spawnCall)
-  assert.equal(spawnCall.command, fakeVaultCliBinary)
-  assert.deepEqual(spawnCall.args, ['--llms', '--format', 'json'])
 })
 
 test('buildAssistantCliSurfaceContract renders optional string option signatures for hot commands', async () => {
@@ -1340,7 +1114,7 @@ test('buildAssistantCliSurfaceContract keeps every normalized command reconstruc
         name: 'search docs',
       },
       {
-        name: 'age report',
+        name: 'assistant stop',
       },
       {
         name: 'assistant status',
@@ -1452,4 +1226,17 @@ test('buildAssistantCliSurfaceContract keeps hot-path option signatures beside a
   assert.match(goalSaveLine, /--status=active\|paused\|completed\|abandoned/u)
   assert.match(goalSaveLine, /--horizon=short_term\|medium_term\|long_term\|ongoing/u)
   assert.match(goalSaveLine, /--priority=integer/u)
+})
+
+
+test('CLI discovery uses concise help for syntax and reserves schemas for structured contracts', async () => {
+  const { buildAssistantCliSurfaceContract } = await import('../src/assistant/cli-surface-bootstrap.ts')
+  const contract = buildAssistantCliSurfaceContract({
+    commands: [{ name: 'food search-labels', description: 'Look up food labels.' }],
+  })
+  assert.ok(contract)
+  assert.match(contract, /read `vault-cli <command> --help` for positional arguments, flags, and examples/u)
+  assert.match(contract, /Reuse the loaded skill or a precise error hint/u)
+  assert.match(contract, /--schema --format json` only when help omits a needed structured input or output contract/u)
+  assert.doesNotMatch(contract, /Before running.*--schema/u)
 })

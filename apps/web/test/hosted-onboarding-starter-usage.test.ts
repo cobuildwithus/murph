@@ -1,9 +1,7 @@
-import { HostedBillingStatus } from "@prisma/client";
 import { describe, expect, it } from "vitest";
 
 import {
   buildHostedStarterUsageLifetimePeriod,
-  canGrantHostedStarterUsageForLegacyTrial,
 } from "@/src/lib/hosted-onboarding/starter-usage";
 
 describe("hosted Starter usage policy", () => {
@@ -23,33 +21,4 @@ describe("hosted Starter usage policy", () => {
     expect(second.periodStart).toEqual(new Date(0));
   });
 
-  it.each([
-    HostedBillingStatus.not_started,
-    HostedBillingStatus.incomplete,
-    HostedBillingStatus.active,
-    HostedBillingStatus.paused,
-  ])("allows eligible unsuspended legacy %s members", (billingStatus) => {
-    expect(canGrantHostedStarterUsageForLegacyTrial({
-      billingStatus,
-      suspendedAt: null,
-    })).toBe(true);
-  });
-
-  it.each([
-    HostedBillingStatus.canceled,
-    HostedBillingStatus.unpaid,
-    HostedBillingStatus.past_due,
-  ])("does not reactivate terminal legacy %s members", (billingStatus) => {
-    expect(canGrantHostedStarterUsageForLegacyTrial({
-      billingStatus,
-      suspendedAt: null,
-    })).toBe(false);
-  });
-
-  it("never grants Starter capacity to a suspended member", () => {
-    expect(canGrantHostedStarterUsageForLegacyTrial({
-      billingStatus: HostedBillingStatus.active,
-      suspendedAt: new Date("2026-08-09T00:00:00.000Z"),
-    })).toBe(false);
-  });
 });

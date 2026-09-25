@@ -1,0 +1,24 @@
+{
+  "publishedOn": "2026-09-15",
+  "order": 100,
+  "item": {
+    "id": "home-account-check-latency",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Less waiting across your dashboard",
+    "summary": "Dashboard pages skip unnecessary account setup recovery. Biomarkers loads its list from a compact index, and Settings, Connect, and Records skip unused health-data downloads.",
+    "details": "Newly verified phone numbers keep their setup recovery. Health-data pages check your current access when you return.",
+    "relevanceTags": [
+      "home",
+      "dashboard",
+      "performance"
+    ],
+    "sourcePullRequests": [
+      3489
+    ],
+    "tryIt": {
+      "label": "Open Home",
+      "href": "/home"
+    }
+  }
+}

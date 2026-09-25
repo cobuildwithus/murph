@@ -96,7 +96,6 @@ describeRealCodex('real Codex progress channel contract e2e', () => {
       approvalPolicy: 'never',
       codexHome,
       env,
-      excludeResumeTurns: true,
       model: 'gpt-5.6-terra',
       modelProvider: 'openai-env',
       onProgress(event) {
@@ -154,7 +153,6 @@ describeRealCodex('real Codex progress channel contract e2e', () => {
         profile: 'gpt5-agentic',
       }),
       env,
-      excludeResumeTurns: true,
       model: 'gpt-5.6-terra',
       modelProvider: 'openai-env',
       progressDelivery,

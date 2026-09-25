@@ -42,7 +42,7 @@
     },
     {
       "path": "/api/internal/hosted-execution/retention/external/cron",
-      "schedule": "35 * * * *"
+      "schedule": "2-59/5 * * * *"
     },
     {
       "path": "/api/internal/hosted-execution/retention/runtime/cron",

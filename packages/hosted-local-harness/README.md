@@ -17,6 +17,7 @@ pnpm hosted-local e2e linq-delivery temporal-orchestration --no-bundle
 pnpm hosted-local e2e linq-scheduled-reminder
 pnpm hosted-local e2e codex-gateway-prefix --profile e2e:live
 pnpm hosted-local e2e vault-persistence --profile e2e:live
+MURPH_E2E_VOICE_AUDIO_PATH=/tmp/synthetic-voice.wav pnpm hosted-local e2e native-voice --profile e2e:live
 pnpm hosted-local e2e --list
 pnpm hosted-local profiles
 pnpm hosted-local doctor
@@ -24,6 +25,14 @@ pnpm hosted-local run -- pnpm --dir apps/cloudflare test:workers
 ```
 
 Root `pnpm dev` is a thin alias for `pnpm hosted-local up`.
+
+The manual `native-voice` scenario needs a development OpenAI key entitled to
+GPT Live and a synthetic WAV saying “Read notes/synthetic-code.txt in my vault
+and tell me the code.” It seeds an isolated member and encrypted vault, then
+uses the real authenticated Voice page, Worker egress, native CLI, mailbox,
+and usage ledger. Only the physical microphone is replaced. The browser
+receives no provider credential. Missing audio skips this opt-in scenario;
+it is not part of `all` or ordinary credential-free CI.
 
 Runner readiness smoke polls every second locally, while retaining the canonical
 smoke client's attempt and wall-clock budgets. Standby preparation includes
@@ -43,6 +52,11 @@ Standalone `up` keeps its normal runner-bundle preparation. Direct callers
 setting the internal `MURPH_DEV_SKIP_RUNNER_BUNDLE=1` flag supply both an existing
 runner bundle and prepared workspace artifacts; the public `--no-bundle` E2E
 command owns the workspace preparation described above.
+
+`src/dev-hosted-local/cloudflare-source-snapshot.ts` owns the temporary Worker
+source copy and built workspace dependency materialization. `stack.ts` prepares
+the runner bundle first, then supplies the resulting snapshot paths to Wrangler;
+startup, readiness, and teardown remain with the stack.
 
 `doctor` reports Docker daemon and Buildx prerequisites separately. Isolated
 Docker configuration selects the first candidate plugin directory containing an
@@ -188,6 +202,12 @@ key/token/password/JWK/database URL-shaped values, provider/user/contact
 identifiers, payload-like env values, and sensitive command args are redacted.
 
 ## Design rules
+
+On a child exit before readiness, port-collision classification strips terminal
+controls from the retained child output before producing the existing plain
+address-in-use marker. Diagnostic redaction and retention stay unchanged. The
+full-stack scenario helper consumes that marker through its existing three-attempt
+startup limit, with fresh port reservations and owned cleanup for each attempt.
 
 1. Root `pnpm hosted-local ...` is the canonical developer and CI entrypoint.
 2. `apps/*/package.json` may expose broad aliases, but not one-off hosted-local

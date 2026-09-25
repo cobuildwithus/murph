@@ -67,7 +67,6 @@ const mocks = vi.hoisted(() => {
       linqApiToken: "<REDACTED_SECRET>",
       linqConversationPhoneNumbers: [],
       linqLocalAllowedInboundPhoneNumbers: undefined as readonly string[] | undefined,
-      linqMaxActiveMembersPerConversationPhone: null,
       linqWebhookSecret: null,
       linqWebhookTimestampToleranceMs: 5 * 60_000,
       publicBaseUrl: "https://join.example.test",
@@ -597,6 +596,7 @@ describe("hosted Linq usage reset e2e", () => {
       tx: usage.prisma,
     });
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      onSignalStarted: expect.any(Function),
       abortSignal: expect.any(AbortSignal),
       expectedUserId: MEMBER_ID,
       mailboxItemId: "mailbox_evt_before_reset",
@@ -676,6 +676,7 @@ describe("hosted Linq usage reset e2e", () => {
     });
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      onSignalStarted: expect.any(Function),
       abortSignal: expect.any(AbortSignal),
       expectedUserId: MEMBER_ID,
       mailboxItemId: "mailbox_evt_after_reset",
@@ -866,7 +867,6 @@ function createUsageResetPrismaFixture(input: {
           return [];
         }
         return [{
-          activeMemberLimit: null,
           assignmentWeight: 1,
           maxNewConversationsPerDay: null,
           phoneNumberEncrypted: encryptHostedLinqLinePhoneNumber(OWNER_PHONE),

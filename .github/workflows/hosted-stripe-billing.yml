@@ -1,6 +1,8 @@
 name: Hosted Stripe Billing
 
 on:
+  schedule:
+    - cron: "23 8 * * *"
   pull_request:
     types: [opened, reopened, ready_for_review]
   push:
@@ -11,7 +13,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || 'main-push' }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: false
 
 jobs:
@@ -122,17 +124,29 @@ jobs:
           pnpm exec vitest run --config scripts/vitest.config.ts --no-coverage
           scripts/check-hosted-stripe-billing-ci.test.ts
 
+      - name: Install Playwright Chromium
+        timeout-minutes: 14
+        run: scripts/install-playwright-chromium.sh
+
+      - name: Test billing controls through real React hydration
+        env:
+          MURPH_E2E_BILLING_BROWSER_SMOKE: "1"
+        run: >-
+          pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage
+          apps/web/test/hosted-billing-browser-hydration.test.ts
+
   live-stripe-browser:
     name: Live hosted-local Stripe browser matrix
     needs:
       - billing-hermetic
-    if: ${{ always() && !cancelled() && github.event_name == 'push' && needs.billing-hermetic.result == 'success' }}
+    if: ${{ always() && !cancelled() && github.event_name == 'schedule' && github.ref == 'refs/heads/main' && github.ref_protected && needs.billing-hermetic.result == 'success' }}
     environment: hosted-stripe-billing-sandbox
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     concurrency:
       group: hosted-stripe-billing-sandbox
       cancel-in-progress: false
+      queue: max
     services:
       postgres:
         image: public.ecr.aws/docker/library/postgres:17
@@ -259,12 +273,19 @@ jobs:
         run: |
           set -euo pipefail
           case "$EVENT_NAME" in
-            push)
+            schedule)
               if [[ "$HERMETIC_RESULT" != "success" || "$LIVE_RESULT" != "success" ]]; then
-                echo "Main merges require the live hosted-local Stripe matrix; missing or malformed sandbox configuration fails closed." >&2
+                echo "Scheduled runs require the live hosted-local Stripe matrix; missing or malformed sandbox configuration fails closed." >&2
                 exit 1
               fi
-              echo "Hosted Stripe billing boundary satisfied by full main-push proof."
+              echo "Hosted Stripe billing boundary satisfied by full scheduled proof."
+              ;;
+            push)
+              if [[ "$HERMETIC_RESULT" != "success" || "$LIVE_RESULT" != "skipped" ]]; then
+                echo "Main pushes require hermetic proof; live Stripe proof runs on its daily schedule." >&2
+                exit 1
+              fi
+              echo "Hosted Stripe billing boundary satisfied by hermetic main-push proof."
               ;;
             pull_request)
               if [[ "$SCOPE_RESULT" == "success" && "$MARKDOWN_ONLY" == "true" ]]; then

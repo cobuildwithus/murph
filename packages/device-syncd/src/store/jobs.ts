@@ -18,6 +18,11 @@ import {
   isDeviceSyncCredentialIndependentImportJob,
   type DeviceSyncCredentialIndependentImportJobClassifier,
 } from "../hosted-runtime.ts";
+import { canonicalizeJunctionProviderSlug } from "../connect-config.ts";
+import {
+  buildJunctionScheduleTimeHistoryDedupeKey,
+  resolveJunctionExtendedTimeseriesHistoryBackfillVersion,
+} from "../junction-historical-backfill-progress.ts";
 import { isJunctionRetainedAcceptedWorkJob } from "../junction-resources.ts";
 import {
   DEVICE_SYNC_CANONICAL_IMPORT_RECEIPT_LIMIT,
@@ -59,6 +64,16 @@ interface StoredJobRow {
 
 const EXPIRED_JOB_LEASE_ERROR_CODE = "LEASE_EXPIRED";
 const EXPIRED_JOB_LEASE_ERROR_MESSAGE = "Device sync job lease expired before completion.";
+// Lease recovery and dedupe share the retained validation predicate. This does
+// not grant the credential-independent authority of accepted companion work.
+const RETAINED_JUNCTION_VALIDATION_SQL = `
+  provider = 'junction' and kind = 'resource' and (
+    (coalesce(json_extract(payload_json, '$.resource'), '') = 'blood_oxygen'
+      and coalesce(last_error_code, '') = 'JUNCTION_CALENDAR_REFRESH_INCOMPLETE_NORMALIZATION')
+    or (coalesce(json_extract(payload_json, '$.resource'), '') = 'electrocardiogram_voltage'
+      and coalesce(last_error_code, '') = 'JUNCTION_ECG_RECORDING_BINDING_INCOMPLETE')
+  )
+`;
 export const DEVICE_SYNC_ACTIVE_DEDUPE_KEY_LOOKUP_LIMIT = 396;
 
 function readCanonicalImportReceipts(value: string): DeviceSyncCanonicalImportReceipt[] {
@@ -189,12 +204,13 @@ function deadLetterExpiredExhaustedDeviceSyncJobs(database: DatabaseSync, now: s
       and lease_expires_at is not null
       and lease_expires_at <= ?
       and attempts >= max_attempts
+      and not (${RETAINED_JUNCTION_VALIDATION_SQL})
       and not (
         provider = 'junction'
         and kind = 'resource'
         and (
           coalesce(json_extract(payload_json, '$.resource'), '') = ?
-          or json_type(payload_json, '$.calendarRefreshDay') = 'text'
+          or coalesce(json_type(payload_json, '$.calendarRefreshDay'), '') = 'text'
         )
       )
   `).run(
@@ -379,12 +395,13 @@ export function claimDueDeviceSyncJob(
           and candidate.lease_expires_at <= ?
           and (
             candidate.attempts < candidate.max_attempts
+            or (${RETAINED_JUNCTION_VALIDATION_SQL})
             or (
               candidate.provider = 'junction'
               and candidate.kind = 'resource'
               and (
                 coalesce(json_extract(candidate.payload_json, '$.resource'), '') = ?
-                or json_type(candidate.payload_json, '$.calendarRefreshDay') = 'text'
+                or coalesce(json_type(candidate.payload_json, '$.calendarRefreshDay'), '') = 'text'
               )
             )
           )
@@ -420,7 +437,8 @@ export function claimDueDeviceSyncJob(
       set status = 'running',
           lease_owner = ?,
           lease_expires_at = ?,
-          max_attempts = case when ? = 1 then max(max_attempts, attempts + 1) else max_attempts end,
+          max_attempts = case when ? = 1 or (${RETAINED_JUNCTION_VALIDATION_SQL})
+            then max(max_attempts, attempts + 1) else max_attempts end,
           attempts = attempts + 1,
           started_at = coalesce(started_at, ?),
           updated_at = ?
@@ -746,7 +764,7 @@ export function wakeRetainedDeviceSyncJobsForAccount(
       and kind = 'resource'
       and (
         json_extract(payload_json, '$.resource') = ?
-        or json_type(payload_json, '$.calendarRefreshDay') = 'text'
+        or coalesce(json_type(payload_json, '$.calendarRefreshDay'), '') = 'text'
       )
   `).run(
     input.now,
@@ -937,8 +955,8 @@ export function markPendingDeviceSyncJobsDeadForAccount(
         provider = 'junction'
         and kind = 'resource'
         and (
-          json_extract(payload_json, '$.resource') = ?
-          or json_type(payload_json, '$.calendarRefreshDay') = 'text'
+          coalesce(json_extract(payload_json, '$.resource'), '') = ?
+          or coalesce(json_type(payload_json, '$.calendarRefreshDay'), '') = 'text'
         )
       )
   `).run(
@@ -1042,8 +1060,8 @@ export function markPendingDeviceSyncJobsDeadForAccountIfCurrent(
         provider = 'junction'
         and kind = 'resource'
         and (
-          json_extract(payload_json, '$.resource') = ?
-          or json_type(payload_json, '$.calendarRefreshDay') = 'text'
+          coalesce(json_extract(payload_json, '$.resource'), '') = ?
+          or coalesce(json_type(payload_json, '$.calendarRefreshDay'), '') = 'text'
         )
       )
       and exists (
@@ -1069,11 +1087,102 @@ export function markPendingDeviceSyncJobsDeadForAccountIfCurrent(
   return result.changes ?? 0;
 }
 
+const EMPTY_WEIGHT_HISTORY_ROOT_FIELDS = new Set([
+  "resource", "resourceCategory", "historicalBackfill", "historicalBackfillVersion",
+  "sourceProviderSlug", "sourceLifecycleEpoch", "historicalWindowStart", "windowStart", "windowEnd",
+  "historicalPullPending", "historicalRecordsSeen", "historicalProviderRecordsSeen", "emptyBackfillAttempts",
+  "historicalUnresolvedProviderRecordCount", "historicalUnresolvedProviderRecordIdentitiesJson",
+]);
+
+function hasEmptyHistoricalUnresolvedEvidence(payload: Record<string, unknown>): boolean {
+  const count = payload.historicalUnresolvedProviderRecordCount;
+  if (count !== undefined && count !== 0) return false;
+  const encoded = payload.historicalUnresolvedProviderRecordIdentitiesJson;
+  if (encoded === undefined) return true;
+  if (typeof encoded !== "string") return false;
+  try {
+    const evidence = maybeParseJsonObject(encoded);
+    return evidence.v === 1 && Array.isArray(evidence.i) && evidence.i.length === 0
+      && (evidence.u === undefined || evidence.u === false)
+      && Object.keys(evidence).every((key) => key === "v" || key === "i" || key === "u");
+  } catch {
+    return false;
+  }
+}
+
+function isCompleteHistoryRootWindow(payload: Record<string, unknown>): boolean {
+  const start = payload.windowStart;
+  const end = payload.windowEnd;
+  return typeof start === "string" && typeof end === "string"
+    && Number.isFinite(Date.parse(start)) && Number.isFinite(Date.parse(end))
+    && new Date(start).toISOString() === start && new Date(end).toISOString() === end && start < end;
+}
+
+// Only untouched weight retry roots can converge here. Partially consumed
+// windows and roots carrying unresolved/accepted evidence retain their owner.
+function readEmptyWeightHistoryRootKey(input: Pick<DeviceSyncJobInput, "kind" | "payload"> & { provider: string }): string | null {
+  const payload = input.payload;
+  if (input.provider !== "junction" || input.kind !== "resource" || !payload
+    || payload.resource !== "weight" || payload.resourceCategory !== "timeseries"
+    || payload.historicalBackfill !== true
+    || payload.historicalBackfillVersion !== resolveJunctionExtendedTimeseriesHistoryBackfillVersion("weight")
+    || payload.historicalRecordsSeen === true || payload.historicalProviderRecordsSeen === true
+    || !hasEmptyHistoricalUnresolvedEvidence(payload)
+    || payload.windowStart !== payload.historicalWindowStart
+    || Object.keys(payload).some((key) => !EMPTY_WEIGHT_HISTORY_ROOT_FIELDS.has(key))) return null;
+  const epoch = payload.sourceLifecycleEpoch;
+  const source = canonicalizeJunctionProviderSlug(payload.sourceProviderSlug);
+  if (!isCompleteHistoryRootWindow(payload)
+    || typeof epoch !== "number" || !Number.isSafeInteger(epoch) || epoch < 1 || !source) return null;
+  return buildJunctionScheduleTimeHistoryDedupeKey({
+    sourceProviderSlug: source, resource: "weight", sourceLifecycleEpoch: epoch,
+    coverageVersion: Number(payload.historicalBackfillVersion),
+  });
+}
+
+function convergeEmptyWeightHistoryRoot(
+  database: DatabaseSync, input: DeviceSyncEnqueueJobInput, now: string,
+): { input: DeviceSyncEnqueueJobInput; existing?: DeviceSyncJobRecord } {
+  const key = readEmptyWeightHistoryRootKey(input);
+  if (!key) return { input };
+  const row = database.prepare(`
+    select * from device_job
+    where account_id = ? and provider = ? and dedupe_key = ?
+      and status in ('queued', 'running')
+    order by created_at desc, id desc limit 1
+  `).get(input.accountId, input.provider, key);
+  if (!row) return { input: { ...input, dedupeKey: key } };
+  const existing = mapJobRow(decodeStoredJobRow(row));
+  if (!existing || existing.status !== "queued" || readEmptyWeightHistoryRootKey(existing) !== key) {
+    return { input };
+  }
+  const payload = { ...existing.payload };
+  // Both roots start at their original history boundary. Union their windows
+  // before sharing one retry so an older accepted day can never disappear.
+  payload.windowStart = [String(existing.payload.windowStart), String(input.payload!.windowStart)].sort()[0]!;
+  payload.historicalWindowStart = payload.windowStart;
+  payload.windowEnd = [String(existing.payload.windowEnd), String(input.payload!.windowEnd)].sort().at(-1)!;
+  if (input.payload!.historicalPullPending === true) payload.historicalPullPending = true;
+  const attempts = Math.max(Number(existing.payload.emptyBackfillAttempts) || 0,
+    Number(input.payload!.emptyBackfillAttempts) || 0);
+  if (attempts > 0) payload.emptyBackfillAttempts = attempts;
+  database.prepare(`
+    update device_job set payload_json = ?, available_at = min(available_at, ?),
+      priority = max(priority, ?), max_attempts = max(max_attempts, ?), updated_at = ?
+    where id = ? and status = 'queued'
+  `).run(stringifyJson(payload), input.availableAt ?? now, input.priority ?? 0,
+    input.maxAttempts ?? existing.maxAttempts, now, existing.id);
+  return { input, existing: getDeviceSyncJobById(database, existing.id)! };
+}
+
 export function enqueueDeviceSyncJobInTransaction(
   database: DatabaseSync,
   input: DeviceSyncEnqueueJobInput,
 ): DeviceSyncJobRecord {
   const now = toIsoTimestamp(new Date());
+  const converged = convergeEmptyWeightHistoryRoot(database, input, now);
+  if (converged.existing) return converged.existing;
+  input = converged.input;
 
   if (input.dedupeKey) {
     const existing = database.prepare(`
@@ -1088,12 +1197,13 @@ export function enqueueDeviceSyncJobInTransaction(
           and lease_expires_at is not null
           and lease_expires_at <= ?
           and attempts >= max_attempts
+          and not (${RETAINED_JUNCTION_VALIDATION_SQL})
           and not (
             provider = 'junction'
             and kind = 'resource'
             and (
               coalesce(json_extract(payload_json, '$.resource'), '') = ?
-              or json_type(payload_json, '$.calendarRefreshDay') = 'text'
+              or coalesce(json_type(payload_json, '$.calendarRefreshDay'), '') = 'text'
             )
           )
         )

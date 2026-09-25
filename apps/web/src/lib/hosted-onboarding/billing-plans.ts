@@ -15,6 +15,8 @@ export {
   type HostedPlanCode,
 };
 
+export const HOSTED_FAMILY_BILLING_PLAN_CODE = "launch_family_monthly" as const;
+
 export const HOSTED_BILLING_PLAN_CODES = [
   "launch_monthly",
   "launch_edge_monthly",
@@ -152,34 +154,12 @@ const HOSTED_BILLING_PLAN_DEFINITIONS = {
   },
 } as const satisfies Record<HostedBillingPlanCode, HostedBillingPlanDefinition>;
 
-const HOSTED_DEFAULT_BILLING_PLAN_CODE_BY_PLAN = {
-  edge: "launch_edge_monthly",
-  pulse: "launch_monthly",
-} as const satisfies Record<HostedPlanCode, HostedBillingPlanCode>;
-
 const HOSTED_DIRECT_BILLING_PLAN_RANK = {
   launch_group_monthly: 0,
   launch_monthly: 1,
   launch_edge_monthly: 2,
   launch_max_monthly: 3,
 } as const satisfies Record<HostedBillingPlanCode, number>;
-
-export interface HostedPlanDefinition {
-  readonly code: HostedPlanCode;
-  readonly displayName: string;
-}
-
-const HOSTED_PLAN_DEFINITIONS = {
-  pulse: {
-    displayName: "Pulse",
-  },
-  edge: {
-    displayName: "Edge",
-  },
-} as const satisfies Record<
-  HostedPlanCode,
-  Omit<HostedPlanDefinition, "code">
->;
 
 export interface HostedFamilyBillingOfferDefinition {
   readonly billingPlanCode: HostedBillingPlanCode;
@@ -234,13 +214,6 @@ export const HOSTED_FAMILY_PLAN_DISPLAY = {
   })),
 } as const;
 
-export function getHostedPlanDefinition(code: HostedPlanCode): HostedPlanDefinition {
-  return {
-    ...HOSTED_PLAN_DEFINITIONS[code],
-    code,
-  };
-}
-
 export function getHostedFamilyBillingOfferDefinition(
   code: HostedFamilyPlanCode,
 ): HostedFamilyBillingOfferDefinition {
@@ -266,12 +239,6 @@ export function getHostedPlanCodeForBillingPlan(
   code: HostedBillingPlanCode,
 ): HostedPlanCode {
   return HOSTED_BILLING_PLAN_DEFINITIONS[code].planCode;
-}
-
-export function getHostedBillingPlanCodeForPlan(
-  planCode: HostedPlanCode,
-): HostedBillingPlanCode {
-  return HOSTED_DEFAULT_BILLING_PLAN_CODE_BY_PLAN[planCode];
 }
 
 export function getHostedDirectBillingPlanRank(

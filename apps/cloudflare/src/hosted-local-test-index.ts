@@ -1,3 +1,4 @@
+export { SmallRunnerContainer } from "./standby-runner-container.ts";
 export { ContainerProxy } from "@cloudflare/containers";
 export {
   DeploySmokeRunnerContainer,
@@ -9,9 +10,6 @@ export {
 export {
   HostedLocalTestStandbyRunnerContainer as StandbyRunnerContainer,
 } from "./hosted-local-test/standby-runner-container.ts";
-export {
-  HostedLocalTestUserRunnerDurableObject as UserRunnerDurableObject,
-} from "./worker/hosted-local-test-user-runner-durable-object.ts";
 export {
   DatabaseHealthDurableObject,
 } from "./worker/database-health-durable-object.ts";

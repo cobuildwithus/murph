@@ -363,6 +363,25 @@ describe('assistant store persistence seams', () => {
     ).toBe(false)
   })
 
+  it('rejects a symlinked secret directory before session persistence or legacy cleanup', async () => {
+    const paths = await createAssistantPaths('assistant-store-secret-boundary-')
+    const session = createSession()
+    await ensureAssistantState(paths)
+    const outside = path.join(paths.absoluteVaultRoot, 'outside-secrets')
+    await mkdir(outside)
+    const outsideSidecar = path.join(outside, path.basename(
+      resolveAssistantSessionSecretsPath(paths, session.sessionId),
+    ))
+    await writeFile(outsideSidecar, 'synthetic legacy sidecar')
+    await rm(paths.sessionSecretsDirectory, { recursive: true })
+    await symlink(outside, paths.sessionSecretsDirectory)
+
+    await expect(writeAssistantSession(paths, session)).rejects.toThrow(/symlinks/u)
+    expect(await readFile(outsideSidecar, 'utf8')).toBe('synthetic legacy sidecar')
+    await expect(readFile(resolveAssistantSessionPath(paths, session.sessionId)))
+      .rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
   it('leaves a stale legacy secret sidecar committed when a Codex session write fails', async () => {
     const paths = await createAssistantPaths('assistant-store-persistence-sidecar-stage-')
     const session = createSession({

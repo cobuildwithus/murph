@@ -236,6 +236,15 @@ export function buildHealthCommonsWebBiomarkerShell(
   };
 }
 
+export function resolveHealthCommonsWebBiomarkerMetricFields(
+  biomarker: HealthCommonsCatalogEntity,
+): Pick<HealthCommonsWebBiomarkerOverview, "privateMetricBindings" | "valuePrecision"> {
+  return {
+    privateMetricBindings: biomarker.biomarker?.privateMetricBindings ?? [],
+    valuePrecision: biomarker.biomarker?.valuePrecision ?? 0,
+  };
+}
+
 export function buildHealthCommonsWebBiomarkerOverview(
   input: BuildHealthCommonsWebBiomarkerProjectionInput,
 ): HealthCommonsWebBiomarkerOverview {
@@ -249,7 +258,7 @@ export function buildHealthCommonsWebBiomarkerOverview(
     },
     key: input.biomarker.key,
     pageRevisionId: input.biomarker.revision.pageRevisionId,
-    privateMetricBindings: biomarkerSpec?.privateMetricBindings ?? [],
+    ...resolveHealthCommonsWebBiomarkerMetricFields(input.biomarker),
     protocolRankingFormula: "signalProminence + testPlanBiomarker + relationBiomarker + signalEvidence + estimatedChangeClarity + quality - burdenPenalty - safetyCautionPenalty",
     protocolRankingVersion: "expected-signal-v1",
     protocolRankings: buildProtocolRankings(input),
@@ -263,7 +272,6 @@ export function buildHealthCommonsWebBiomarkerOverview(
     title: biomarkerSpec?.displayName ?? input.biomarker.title,
     trendDefaults: biomarkerSpec?.trendDefaults ?? DEFAULT_TREND_DEFAULTS,
     unit: biomarkerSpec?.unit ?? input.biomarker.unit ?? "value",
-    valuePrecision: biomarkerSpec?.valuePrecision ?? 0,
   };
 }
 

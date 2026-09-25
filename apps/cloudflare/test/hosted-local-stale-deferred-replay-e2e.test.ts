@@ -10,7 +10,6 @@ import {
 import {
   HOSTED_EXECUTION_USER_ID_HEADER,
   type HostedBrowserVaultReplicaRef,
-  type HostedExecutionSnapshotRef,
 } from "@murphai/hosted-execution/contracts";
 import {
   parseHostedRunnerStatusResponse,
@@ -19,14 +18,11 @@ import type {
   HostedRunnerStatusResponse,
 } from "@murphai/hosted-execution/runtime-control";
 import {
-  sha256HostedBundleHex,
-  snapshotHostedExecutionContext,
-} from "@murphai/runtime-state/node";
-import {
   createIntegratedVaultServices,
 } from "@murphai/vault-usecases/vault-services";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
+import { uploadHostedLocalWorkspaceSnapshot } from "./helpers/hosted-local-workspace-snapshot.ts";
 import {
   startHostedLocalFullStackScenario,
   type HostedLocalFullStackScenario,
@@ -153,10 +149,9 @@ async function startScenario(): Promise<void> {
     additionalEnv: {
       HOSTED_ASSISTANT_MODEL: productionLikeAssistantModel,
       HOSTED_ASSISTANT_PROVIDER: "openai",
-      HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: "30000",
+      HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "30000",
       HOSTED_EXECUTION_RETRY_DELAY_MS: "1000",
-      HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS: "35000",
-      HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "2000",
+
       HOSTED_EXECUTION_RUNNER_READY_TIMEOUT_MS: "60000",
       HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS:
         buildLinqRecipientPhoneNumber(userId),
@@ -215,11 +210,14 @@ async function seedActivatedWorkspaceCheckpoint(): Promise<void> {
     vault: vaultRoot,
   });
 
-  const snapshot = await snapshotHostedExecutionContext({
+  const snapshotRef = await uploadHostedLocalWorkspaceSnapshot({
+    environment: requireScenario().runtimeEnv,
+    harness: requireScenario().harness,
     operatorHomeRoot,
+    userId,
     vaultRoot,
   });
-  const hash = sha256HostedBundleHex(snapshot.bundle);
+  const hash = snapshotRef.archive.encryptedObjectSha256;
   const checkpoint = await seedHostedWorkspaceCheckpointForTest({
     browserVaultReplicaRef: createBrowserVaultReplicaRef(hash),
     environment: requireScenario().runtimeEnv,
@@ -228,47 +226,12 @@ async function seedActivatedWorkspaceCheckpoint(): Promise<void> {
     redactedStatusJson: {
       seeded: true,
     },
-    snapshotRef: createSnapshotBundleRef({
-      hash,
-      size: snapshot.bundle.byteLength,
-    }),
+    snapshotRef,
     userId,
   });
   expect(checkpoint.status).toBe("updated");
-
-  await uploadHostedSnapshotArtifact({
-    bytes: snapshot.bundle,
-    hash,
-  });
 }
 
-async function uploadHostedSnapshotArtifact(input: {
-  bytes: Uint8Array;
-  hash: string;
-}): Promise<void> {
-  await requireScenario().harness.request(
-    `/__test/artifacts?userId=${encodeURIComponent(userId)}&sha256=${input.hash}`,
-    {
-      body: new Blob([new Uint8Array(input.bytes)]),
-      headers: {
-        [HOSTED_EXECUTION_USER_ID_HEADER]: userId,
-      },
-      method: "PUT",
-    },
-  );
-}
-
-function createSnapshotBundleRef(input: {
-  hash: string;
-  size: number;
-}): HostedExecutionSnapshotRef {
-  return {
-    hash: input.hash,
-    key: `cloudflare-workspace-snapshots/${input.hash}.bundle`,
-    size: input.size,
-    updatedAt: new Date().toISOString(),
-  };
-}
 
 function createBrowserVaultReplicaRef(
   sourceBundleHash: string,
@@ -336,7 +299,7 @@ async function waitForConversationImportAtLeast(
 
   while (Date.now() - startedAt < input.timeoutMs) {
     const status = await readHostedRunnerStatusWithLogLimit(100);
-    const importedSeq = readLatestImportedConversationSeq(status);
+    const importedSeq = status.mailboxLag.find((lane) => lane.lane === "conversation")?.importedSeq ?? null;
     if (importedSeq !== null && compareSeq(importedSeq, seq) >= 0) {
       return status;
     }
@@ -352,28 +315,6 @@ function readConversationMaxSeq(status: HostedRunnerStatusResponse): string {
     throw new Error("Status did not include conversation mailbox lag.");
   }
   return lane.maxSeq;
-}
-
-function readLatestImportedConversationSeq(
-  status: Pick<HostedRunnerStatusResponse, "recentLogs">,
-): string | null {
-  const logs = status.recentLogs ?? [];
-  let latest: string | null = null;
-
-  for (const log of logs) {
-    if (log.eventCode !== "mailbox.imported") {
-      continue;
-    }
-    const seq = log.redactedJson?.conversationSeqEnd;
-    if (typeof seq !== "string" || seq.trim().length === 0) {
-      continue;
-    }
-    if (latest === null || compareSeq(seq, latest) > 0) {
-      latest = seq;
-    }
-  }
-
-  return latest;
 }
 
 function compareSeq(left: string, right: string): number {

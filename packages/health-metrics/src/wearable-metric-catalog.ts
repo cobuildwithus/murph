@@ -433,6 +433,7 @@ function normalizeDistanceKilometers(value: number, unit: string | null): number
 
 function normalizeTemperatureCelsius(value: number, unit: string | null): number {
   switch (unit) {
+    case "degf":
     case "f":
     case "fahrenheit":
       return Number((((value - 32) * 5) / 9).toFixed(4));

@@ -479,24 +479,26 @@ export async function persistCanonicalInboxCapture({
     stored: prepared.stored,
   });
 
-  await applyCanonicalWriteBatch({
-    vaultRoot,
-    operationType: "inbox_capture_persist",
-    summary: `Persist inbox capture ${captureId}`,
-    occurredAt: prepared.stored.storedAt,
-    audit: {
-      action: "inbox_capture_persist",
-      commandName: "inboxd.persistCanonicalInboxCapture",
-      summary: `Persisted inbox capture ${captureId}.`,
-      targetIds: [captureId, eventId],
-    },
-    rawContents: [...prepared.rawContents, ...preparedRecord.rawContents],
-    jsonlAppends: [
-      {
-        relativePath: capturePath,
-        record: preparedRecord.record,
+  await withCanonicalWriteLockScope(vaultRoot, async () => {
+    await applyCanonicalWriteBatch({
+      vaultRoot,
+      operationType: "inbox_capture_persist",
+      summary: `Persist inbox capture ${captureId}`,
+      occurredAt: prepared.stored.storedAt,
+      audit: {
+        action: "inbox_capture_persist",
+        commandName: "inboxd.persistCanonicalInboxCapture",
+        summary: `Persisted inbox capture ${captureId}.`,
+        targetIds: [captureId, eventId],
       },
-    ],
+      rawContents: [...prepared.rawContents, ...preparedRecord.rawContents],
+      jsonlAppends: [
+        {
+          relativePath: capturePath,
+          record: preparedRecord.record,
+        },
+      ],
+    });
   });
 
   return {

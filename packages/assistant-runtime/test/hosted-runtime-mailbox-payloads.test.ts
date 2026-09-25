@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 
+import { buildHostedExecutionLinqConversationMessageWake } from "@murphai/hosted-execution";
+
 import { test } from "vitest";
 
 import type {
@@ -48,6 +50,22 @@ test("returns inline mailbox ciphertext without fetching a sidecar payload", asy
     source: "inline",
     status: "resolved",
   });
+});
+
+test("carries Worker-decoded inline wake to import without a payload fetch", async () => {
+  const wake = buildHostedExecutionLinqConversationMessageWake({
+    eventId: "synthetic-event", userId: TEST_USER_ID, occurredAt: TEST_NOW,
+    phoneLookupKey: "synthetic-lookup",
+    linqMessage: { chatId: "synthetic-chat", from: "+15550100000", isFromMe: false,
+      messageId: "synthetic-message", parts: [{ type: "text", value: "Hello" }] },
+  });
+  const { mailboxPort, payloadFetchRequests } = createMailboxPort({ fetchedAt: TEST_NOW, payload: null });
+  const result = await resolveHostedMailboxItemPayload({ mailboxPort, item: createMailboxItem({
+    decodedWake: wake, payloadInlineCiphertext: "synthetic-ciphertext", payloadRef: null,
+  }) });
+  assert.equal(result.status, "resolved");
+  if (result.status === "resolved") assert.deepEqual(result.decodedWake, wake);
+  assert.deepEqual(payloadFetchRequests, []);
 });
 
 test("fetches sidecar mailbox ciphertext with a generated request id and item id", async () => {

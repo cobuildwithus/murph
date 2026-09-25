@@ -28,6 +28,23 @@ const privyManagementMocks = vi.hoisted(() => ({
   setCustomMetadata: vi.fn(),
 }));
 
+const phoneWelcomeMocks = vi.hoisted(() => ({ ensure: vi.fn() }));
+// The row fixtures do not execute Prisma relation filters. Preserve their
+// state-based access decisions; the PostgreSQL proof covers the boolean query.
+vi.mock("@/src/lib/hosted-onboarding/member-access", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/src/lib/hosted-onboarding/member-access")>();
+  return {
+    ...actual,
+    readActiveHostedMemberAccess: async (
+      input: Parameters<typeof actual.readActiveHostedMemberAccess>[0],
+    ) => await actual.readActiveHostedMemberAccessState(input) !== null,
+  };
+});
+
+vi.mock("@/src/lib/hosted-onboarding/phone-welcome", () => ({
+  ensureHostedMemberPhoneWelcome: phoneWelcomeMocks.ensure,
+}));
+
 const phoneCallResultRecoveryMocks = vi.hoisted(() => ({
   rearmRequired: vi.fn(),
 }));
@@ -1669,6 +1686,7 @@ describe("completeHostedPrivyVerification", () => {
     });
 
     expect(prisma.hostedMember.create).not.toHaveBeenCalled();
+    expect(phoneWelcomeMocks.ensure).toHaveBeenCalledWith({ memberId: existingMember.id, prisma });
   });
 
   it("resolves a texted-first member by phone on first web auth without creating a duplicate", async () => {
@@ -3058,6 +3076,9 @@ function asCompleteHostedPrivyVerificationPrisma<T extends Record<string, unknow
   prisma: T,
 ): T & CompleteHostedPrivyVerificationPrisma {
   const prismaWithQueryRaw = prisma as T & CompleteHostedPrivyVerificationPrisma;
+  if (!("hostedAuthRecord" in prismaWithQueryRaw)) Object.defineProperty(prismaWithQueryRaw, "hostedAuthRecord", {
+    configurable: true, value: { findUnique: vi.fn().mockResolvedValue(null) },
+  });
   const routingRecordsByMemberId = new Map<string, Record<string, unknown>>();
   const hostedInvite = readHostedInviteDelegate(prismaWithQueryRaw.hostedInvite);
   const hostedMember = readHostedMemberDelegate(prismaWithQueryRaw.hostedMember);
@@ -3516,7 +3537,8 @@ function asCompleteHostedPrivyVerificationPrisma<T extends Record<string, unknow
   if (!("$queryRaw" in prismaWithQueryRaw)) {
     Object.defineProperty(prismaWithQueryRaw, "$queryRaw", {
       configurable: true,
-      value: vi.fn(async () => []),
+      value: vi.fn(async (query: TemplateStringsArray) =>
+        query.join("").includes("hosted_runtime_cutover") ? [{ phase: "legacy" }] : []),
     });
   }
   if (!("hostedAccountGroupMembership" in prismaWithQueryRaw)) {

@@ -418,22 +418,22 @@
                           "minLength": 1
                         },
                         "codexHome": {
-                          "description": "Optional Codex home directory used by local assistant chat.",
+                          "description": "Optional Codex home directory used by local assistant turns.",
                           "type": "string",
                           "minLength": 1
                         },
                         "model": {
-                          "description": "Optional Codex model override for local chat turns.",
+                          "description": "Optional Codex model override for local turns.",
                           "type": "string",
                           "minLength": 1
                         },
                         "modelProvider": {
-                          "description": "Optional Codex model provider id for local chat turns.",
+                          "description": "Optional Codex model provider id for local turns.",
                           "type": "string",
                           "minLength": 1
                         },
                         "reasoningEffort": {
-                          "description": "Optional Codex reasoning effort for local assistant chat turns.",
+                          "description": "Optional Codex reasoning effort for local assistant turns.",
                           "type": "string",
                           "enum": [
                             "low",
@@ -443,7 +443,7 @@
                           ]
                         },
                         "sandbox": {
-                          "description": "Codex sandbox mode for local assistant chat. Codex runs as a privileged local adapter by default, so leaving this unset keeps its normal unsandboxed behavior.",
+                          "description": "Codex sandbox mode for local assistant turns. Codex runs as a privileged local adapter by default, so leaving this unset keeps its normal unsandboxed behavior.",
                           "type": "string",
                           "enum": [
                             "read-only",
@@ -452,7 +452,7 @@
                           ]
                         },
                         "approvalPolicy": {
-                          "description": "Codex approval policy for local assistant chat. Murph noninteractive assistant turns accept only never; interactive approval modes are rejected before provider launch.",
+                          "description": "Codex approval policy for local assistant turns. Murph noninteractive assistant turns accept only never; interactive approval modes are rejected before provider launch.",
                           "type": "string",
                           "const": "never"
                         },
@@ -467,103 +467,6 @@
                         },
                         "deliveryTarget": {
                           "description": "Optional one-send Telegram destination as a chat id or `<chatId>:topic:<messageThreadId>`. Reply-in-place sessions can often omit this and reuse the saved thread.",
-                          "type": "string",
-                          "minLength": 1
-                        }
-                      }
-                    }
-                  }
-                },
-                "chat": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "properties": {
-                    "options": {
-                      "type": "object",
-                      "additionalProperties": false,
-                      "properties": {
-                        "requestId": {
-                          "description": "Optional caller-supplied request id for audit correlation.",
-                          "type": "string",
-                          "minLength": 1,
-                          "maxLength": 128
-                        },
-                        "session": {
-                          "description": "Existing Murph assistant session id to resume.",
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "alias": {
-                          "description": "Optional stable alias used to map an external conversation onto one assistant session.",
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "channel": {
-                          "description": "Optional local channel label: telegram.",
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "identity": {
-                          "description": "Optional local assistant identity id for multi-user routing.",
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "participant": {
-                          "description": "Optional remote participant identifier when the transport addresses a person directly; thread-addressed transports may rely on --thread instead.",
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "thread": {
-                          "description": "Optional upstream thread identifier when the transport routes by thread/chat. Use the transport-native thread value, such as a Telegram chat id or `<chatId>:topic:<messageThreadId>` topic route; direct-recipient routes can often leave this unset.",
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "codexCommand": {
-                          "description": "Optional Codex executable path used to launch `codex app-server`. Defaults to `codex`.",
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "codexHome": {
-                          "description": "Optional Codex home directory used by local assistant chat.",
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "model": {
-                          "description": "Optional Codex model override for local chat turns.",
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "modelProvider": {
-                          "description": "Optional Codex model provider id for local chat turns.",
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "reasoningEffort": {
-                          "description": "Optional Codex reasoning effort for local assistant chat turns.",
-                          "type": "string",
-                          "enum": [
-                            "low",
-                            "medium",
-                            "high",
-                            "xhigh"
-                          ]
-                        },
-                        "sandbox": {
-                          "description": "Codex sandbox mode for local assistant chat. Codex runs as a privileged local adapter by default, so leaving this unset keeps its normal unsandboxed behavior.",
-                          "type": "string",
-                          "enum": [
-                            "read-only",
-                            "workspace-write",
-                            "danger-full-access"
-                          ]
-                        },
-                        "approvalPolicy": {
-                          "description": "Codex approval policy for local assistant chat. Murph noninteractive assistant turns accept only never; interactive approval modes are rejected before provider launch.",
-                          "type": "string",
-                          "const": "never"
-                        },
-                        "profile": {
-                          "description": "Optional Codex config profile name.",
                           "type": "string",
                           "minLength": 1
                         }
@@ -992,103 +895,6 @@
                       }
                     }
                   }
-                }
-              }
-            }
-          }
-        },
-        "chat": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "options": {
-              "type": "object",
-              "additionalProperties": false,
-              "properties": {
-                "requestId": {
-                  "description": "Optional caller-supplied request id for audit correlation.",
-                  "type": "string",
-                  "minLength": 1,
-                  "maxLength": 128
-                },
-                "session": {
-                  "description": "Existing Murph assistant session id to resume.",
-                  "type": "string",
-                  "minLength": 1
-                },
-                "alias": {
-                  "description": "Optional stable alias used to map an external conversation onto one assistant session.",
-                  "type": "string",
-                  "minLength": 1
-                },
-                "channel": {
-                  "description": "Optional local channel label: telegram.",
-                  "type": "string",
-                  "minLength": 1
-                },
-                "identity": {
-                  "description": "Optional local assistant identity id for multi-user routing.",
-                  "type": "string",
-                  "minLength": 1
-                },
-                "participant": {
-                  "description": "Optional remote participant identifier when the transport addresses a person directly; thread-addressed transports may rely on --thread instead.",
-                  "type": "string",
-                  "minLength": 1
-                },
-                "thread": {
-                  "description": "Optional upstream thread identifier when the transport routes by thread/chat. Use the transport-native thread value, such as a Telegram chat id or `<chatId>:topic:<messageThreadId>` topic route; direct-recipient routes can often leave this unset.",
-                  "type": "string",
-                  "minLength": 1
-                },
-                "codexCommand": {
-                  "description": "Optional Codex executable path used to launch `codex app-server`. Defaults to `codex`.",
-                  "type": "string",
-                  "minLength": 1
-                },
-                "codexHome": {
-                  "description": "Optional Codex home directory used by local assistant chat.",
-                  "type": "string",
-                  "minLength": 1
-                },
-                "model": {
-                  "description": "Optional Codex model override for local chat turns.",
-                  "type": "string",
-                  "minLength": 1
-                },
-                "modelProvider": {
-                  "description": "Optional Codex model provider id for local chat turns.",
-                  "type": "string",
-                  "minLength": 1
-                },
-                "reasoningEffort": {
-                  "description": "Optional Codex reasoning effort for local assistant chat turns.",
-                  "type": "string",
-                  "enum": [
-                    "low",
-                    "medium",
-                    "high",
-                    "xhigh"
-                  ]
-                },
-                "sandbox": {
-                  "description": "Codex sandbox mode for local assistant chat. Codex runs as a privileged local adapter by default, so leaving this unset keeps its normal unsandboxed behavior.",
-                  "type": "string",
-                  "enum": [
-                    "read-only",
-                    "workspace-write",
-                    "danger-full-access"
-                  ]
-                },
-                "approvalPolicy": {
-                  "description": "Codex approval policy for local assistant chat. Murph noninteractive assistant turns accept only never; interactive approval modes are rejected before provider launch.",
-                  "type": "string",
-                  "const": "never"
-                },
-                "profile": {
-                  "description": "Optional Codex config profile name.",
-                  "type": "string",
-                  "minLength": 1
                 }
               }
             }
@@ -1833,7 +1639,7 @@
                         },
                         "compact": {
                           "default": false,
-                          "description": "Return identifiers and basic lifecycle and schedule state only; use automation show for complete details.",
+                          "description": "Return identifiers, current updatedAt, and basic lifecycle and schedule state; use automation show for complete details.",
                           "type": "boolean"
                         },
                         "limit": {
@@ -3141,6 +2947,24 @@
               "type": "object",
               "additionalProperties": false,
               "properties": {
+                "receipt": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "options": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "requestId": {
+                          "description": "Optional caller-supplied request id for audit correlation.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128
+                        }
+                      }
+                    }
+                  }
+                },
                 "show": {
                   "type": "object",
                   "additionalProperties": false,
@@ -4595,261 +4419,6 @@
             }
           }
         },
-        "age": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "commands": {
-              "type": "object",
-              "additionalProperties": false,
-              "properties": {
-                "report": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "properties": {
-                    "options": {
-                      "type": "object",
-                      "additionalProperties": false,
-                      "properties": {
-                        "requestId": {
-                          "description": "Optional caller-supplied request id for audit correlation.",
-                          "type": "string",
-                          "minLength": 1,
-                          "maxLength": 128
-                        },
-                        "asOf": {
-                          "type": "string",
-                          "format": "date-time",
-                          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
-                          "description": "UTC timestamp for the calculation cutoff, such as 2026-05-10T00:00:00.000Z."
-                        },
-                        "chronologicalAgeYears": {
-                          "type": "number",
-                          "minimum": 0,
-                          "maximum": 130,
-                          "description": "Current chronological age in years."
-                        },
-                        "sex": {
-                          "type": "string",
-                          "enum": [
-                            "female",
-                            "male"
-                          ],
-                          "description": "Sex value used by the current mortality-risk model."
-                        },
-                        "mode": {
-                          "default": "product",
-                          "description": "Use product for normal safe display, or explicit research for local research-only model-card artifacts.",
-                          "type": "string",
-                          "enum": [
-                            "product",
-                            "research"
-                          ]
-                        },
-                        "cardId": {
-                          "description": "Explicit research card override for local research model-card artifacts.",
-                          "type": "string",
-                          "enum": [
-                            "l1b_glycemia_body_10y_acm_research",
-                            "l1_tiny_glycemia_10y_acm_research",
-                            "lab5_bp_bmi_transport_research",
-                            "lab9_bp_body_10y_acm_research",
-                            "r399_nhis_proxy_10y_acm_research"
-                          ]
-                        },
-                        "modelCardArtifactRoot": {
-                          "description": "Optional local/server model-card artifact root for explicit research mode. Output remains metadata-only and never echoes this path.",
-                          "type": "string",
-                          "minLength": 1
-                        }
-                      }
-                    }
-                  }
-                },
-                "scaffold": {
-                  "type": "object",
-                  "additionalProperties": false
-                },
-                "preview": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "properties": {
-                    "options": {
-                      "type": "object",
-                      "additionalProperties": false,
-                      "properties": {
-                        "input": {
-                          "type": "string",
-                          "description": "Submitted Murph Age payload in @file.json form or - for stdin."
-                        },
-                        "modelCardArtifactRoot": {
-                          "description": "Optional local/server model-card artifact root for explicit research mode. Output remains metadata-only and never echoes this path.",
-                          "type": "string",
-                          "minLength": 1
-                        }
-                      }
-                    }
-                  }
-                },
-                "preview-view": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "properties": {
-                    "options": {
-                      "type": "object",
-                      "additionalProperties": false,
-                      "properties": {
-                        "input": {
-                          "type": "string",
-                          "description": "Submitted Murph Age payload in @file.json form or - for stdin."
-                        },
-                        "modelCardArtifactRoot": {
-                          "description": "Optional local/server model-card artifact root for explicit research mode. Output remains metadata-only and never echoes this path.",
-                          "type": "string",
-                          "minLength": 1
-                        }
-                      }
-                    }
-                  }
-                },
-                "calculate": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "properties": {
-                    "options": {
-                      "type": "object",
-                      "additionalProperties": false,
-                      "properties": {
-                        "input": {
-                          "type": "string",
-                          "description": "Submitted Murph Age payload in @file.json form or - for stdin."
-                        },
-                        "mode": {
-                          "default": "product",
-                          "description": "Use product for normal safe display, or explicit research for local research-only age/risk output.",
-                          "type": "string",
-                          "enum": [
-                            "product",
-                            "research"
-                          ]
-                        },
-                        "modelCardArtifactRoot": {
-                          "description": "Optional local/server model-card artifact root for explicit research mode. Output remains metadata-only and never echoes this path.",
-                          "type": "string",
-                          "minLength": 1
-                        }
-                      }
-                    }
-                  }
-                },
-                "calculate-bundle": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "properties": {
-                    "options": {
-                      "type": "object",
-                      "additionalProperties": false,
-                      "properties": {
-                        "input": {
-                          "type": "string",
-                          "description": "Submitted Murph Age payload in @file.json form or - for stdin."
-                        },
-                        "includeResearchPreview": {
-                          "default": false,
-                          "description": "Include the internal research-only age/risk preview alongside the product-safe calculator view.",
-                          "type": "boolean"
-                        },
-                        "modelCardArtifactRoot": {
-                          "description": "Optional local/server model-card artifact root for explicit research mode. Output remains metadata-only and never echoes this path.",
-                          "type": "string",
-                          "minLength": 1
-                        }
-                      }
-                    }
-                  }
-                },
-                "inputs": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "properties": {
-                    "options": {
-                      "type": "object",
-                      "additionalProperties": false,
-                      "properties": {
-                        "requestId": {
-                          "description": "Optional caller-supplied request id for audit correlation.",
-                          "type": "string",
-                          "minLength": 1,
-                          "maxLength": 128
-                        },
-                        "asOf": {
-                          "type": "string",
-                          "format": "date-time",
-                          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
-                          "description": "UTC timestamp for the readiness cutoff, such as 2026-05-10T00:00:00.000Z."
-                        }
-                      }
-                    }
-                  }
-                },
-                "model-cards": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "properties": {
-                    "options": {
-                      "type": "object",
-                      "additionalProperties": false,
-                      "properties": {
-                        "requestId": {
-                          "description": "Optional caller-supplied request id for audit correlation.",
-                          "type": "string",
-                          "minLength": 1,
-                          "maxLength": 128
-                        },
-                        "modelCardArtifactRoot": {
-                          "description": "Optional local/server model-card artifact root for explicit research mode. Output remains metadata-only and never echoes this path.",
-                          "type": "string",
-                          "minLength": 1
-                        }
-                      }
-                    }
-                  }
-                },
-                "evidence": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "properties": {
-                    "options": {
-                      "type": "object",
-                      "additionalProperties": false,
-                      "properties": {
-                        "input": {
-                          "description": "Aggregate evidence receipt payload in @file.json form or - for stdin.",
-                          "type": "string"
-                        },
-                        "includeTemplates": {
-                          "default": false,
-                          "description": "Include safe route-slot templates for the next aggregate receipts to collect.",
-                          "type": "boolean"
-                        },
-                        "includeBenchmarkCards": {
-                          "default": false,
-                          "description": "Include locked aggregate-only public benchmark cards for local evaluator setup.",
-                          "type": "boolean"
-                        },
-                        "includeNsrrRequests": {
-                          "default": false,
-                          "description": "Include the safe NSRR dataset-request checklist needed to unblock wearable/sleep validation.",
-                          "type": "boolean"
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          }
-        },
         "route": {
           "type": "object",
           "additionalProperties": false,
@@ -5058,6 +4627,10 @@
                           "type": "string",
                           "minLength": 1,
                           "maxLength": 128
+                        },
+                        "withDailyTotals": {
+                          "description": "After saving, return fresh totals and goal context for the saved meal local date. Replaces a separate meal totals --resolve-goals read; does not attach a card or approve numeric suitability. If the read fails the meal is still saved: retry only meal totals, never meal add.",
+                          "type": "boolean"
                         },
                         "photo": {
                           "description": "Optional meal photo path.",
@@ -5289,6 +4862,10 @@
                         "input": {
                           "type": "string",
                           "description": "Structured meal payload in @file.json form or - for stdin. Structured payload object keys: `photo` or `photoPath` for an optional meal photo path; `audio` or `audioPath` for an optional audio note path; `note`, `occurredAt`, and `source` for the saved event fields; `ingredients` as a string array; `nutrition` as `{ totals?: { calories?, proteinGrams?, carbsGrams?, fatGrams?, fiberGrams?, waterGrams? }, micros?: { <supported bounded nutrient keys> }, provenance?: { source, confidence?, sourceDetail? } }`."
+                        },
+                        "withDailyTotals": {
+                          "description": "After saving, return fresh totals and goal context for the saved meal local date. Replaces a separate meal totals --resolve-goals read; does not attach a card or approve numeric suitability. If the read fails the meal is still saved: retry only meal totals, never meal add.",
+                          "type": "boolean"
                         },
                         "photo": {
                           "description": "Optional meal photo path.",
@@ -6220,6 +5797,47 @@
                                   "type": "integer",
                                   "exclusiveMinimum": 0,
                                   "maximum": 150
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "remove": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "options": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "properties": {
+                                "requestId": {
+                                  "description": "Optional caller-supplied request id for audit correlation.",
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 128
+                                },
+                                "workoutId": {
+                                  "type": "string",
+                                  "pattern": "^evt_[0-9A-Za-z]+$",
+                                  "description": "Canonical workout id returned by workout start or workout show."
+                                },
+                                "exerciseId": {
+                                  "description": "Optional stable source exercise id, such as an exercise catalog id.",
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 200
+                                },
+                                "exerciseOrder": {
+                                  "description": "Optional one-based exercise order within the exact workout.",
+                                  "type": "integer",
+                                  "exclusiveMinimum": 0,
+                                  "maximum": 9007199254740991
+                                },
+                                "expectedRevision": {
+                                  "type": "integer",
+                                  "exclusiveMinimum": 0,
+                                  "maximum": 9007199254740991,
+                                  "description": "Exact lifecycle revision from the workout read approved for this removal."
                                 }
                               }
                             }
@@ -8581,6 +8199,12 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
+                        "query": {
+                          "description": "Alternative to the positional query. Supply exactly one form; use search-labels-batch for several foods.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 256
+                        },
                         "limit": {
                           "description": "Maximum label matches to return. Defaults to 1.",
                           "type": "integer",
@@ -9405,6 +9029,43 @@
                             "recompute"
                           ],
                           "description": "Required for event-backed edits when occurredAt or timeZone changes and dayKey is not patched directly. `keep` preserves the saved dayKey; `recompute` drops it so core recalculates from the explicit event timeZone."
+                        },
+                        "planEndsAt": {
+                          "description": "Journal plan end instant, with explicit offset. All-day plans use the exclusive local date boundary.",
+                          "type": "string",
+                          "format": "date-time",
+                          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                        },
+                        "planStatus": {
+                          "type": "string",
+                          "enum": [
+                            "planned",
+                            "tentative",
+                            "canceled"
+                          ]
+                        },
+                        "planVerifiedAt": {
+                          "description": "Actual successful source verification instant; never advance after a failed read.",
+                          "type": "string",
+                          "format": "date-time",
+                          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                        },
+                        "planCategory": {
+                          "type": "string",
+                          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+                          "description": "Stable lowercase kebab-case identifier."
+                        },
+                        "planAccountId": {
+                          "description": "Connected account owning an automatically captured plan; omit for a directly supplied member plan.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 200
+                        },
+                        "expectedRevision": {
+                          "description": "Require the revision returned by event show; reject if the event changed since that read.",
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "maximum": 9007199254740991
                         }
                       }
                     }
@@ -10001,6 +9662,47 @@
                                   "description": "Optional structured note type, such as journal-factor or journal-outcome.",
                                   "type": "string",
                                   "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+                                },
+                                "timeZone": {
+                                  "description": "Event IANA timezone; defaults to the saved vault timezone for Journal notes.",
+                                  "type": "string"
+                                },
+                                "planEndsAt": {
+                                  "description": "Journal plan end instant, with explicit offset. All-day plans use the exclusive local date boundary.",
+                                  "type": "string",
+                                  "format": "date-time",
+                                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                                },
+                                "planStatus": {
+                                  "type": "string",
+                                  "enum": [
+                                    "planned",
+                                    "tentative",
+                                    "canceled"
+                                  ]
+                                },
+                                "planVerifiedAt": {
+                                  "description": "Actual successful source verification instant; never advance after a failed read.",
+                                  "type": "string",
+                                  "format": "date-time",
+                                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                                },
+                                "planCategory": {
+                                  "type": "string",
+                                  "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+                                  "description": "Stable lowercase kebab-case identifier."
+                                },
+                                "planAccountId": {
+                                  "description": "Connected account owning an automatically captured plan; omit for a directly supplied member plan.",
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 200
+                                },
+                                "planSourceId": {
+                                  "description": "Stable account/calendar/provider-occurrence identity. A repeated add returns the saved plan; update that exact event id for changes.",
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 500
                                 },
                                 "relatedId": {
                                   "description": "Optional related event ids. Repeat --related-id for multiple events.",

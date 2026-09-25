@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => {
     findMany: vi.fn(),
   };
   const transactionClient = {
+    hostedAuthRecord: { findUnique: vi.fn().mockResolvedValue(null) },
     $queryRaw: vi.fn(),
     hostedWebSession,
   };
@@ -82,8 +83,9 @@ describe("hosted app session production cookie", () => {
     expect(result.cookie).toContain("HttpOnly");
     expect(result.cookie).toContain("SameSite=Lax");
     expect(result.cookie).toContain("Secure");
-    expect(clearCookie).toBe(
+    expect(clearCookie).toEqual([
       "__Host-murph-session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0; Secure",
-    );
+      "__Host-murph-auth-session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0; Secure",
+    ]);
   });
 });

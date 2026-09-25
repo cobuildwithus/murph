@@ -10,6 +10,7 @@ import { createUnwiredMethod } from "./usecases/runtime.js"
 import type {
   CoreWriteServices,
   ImporterServices,
+  IntegratedVaultServiceDependencies,
   QueryServices,
   VaultServices,
 } from "./usecases/types.js"
@@ -18,6 +19,7 @@ export type { CommandContext } from "./usecases/types.js"
 export type {
   CoreWriteServices,
   ImporterServices,
+  IntegratedVaultServiceDependencies,
   QueryServices,
   VaultServices,
 } from "./usecases/types.js"
@@ -27,7 +29,6 @@ type AsyncMethodKeys<TServiceGroup> = {
   [TKey in keyof TServiceGroup]-?:
     TServiceGroup[TKey] extends AsyncServiceMethod ? TKey : never
 }[keyof TServiceGroup] & string
-type IntegratedVaultServiceDependencies = Record<string, unknown>
 
 const coreServiceMethodNames = [
   "init",
@@ -196,12 +197,14 @@ function createUnwiredServiceGroup<
   return services
 }
 
-function createIntegratedServicesLoader(): () => Promise<VaultServices> {
+function createIntegratedServicesLoader(
+  dependencies: IntegratedVaultServiceDependencies,
+): () => Promise<VaultServices> {
   let servicesPromise: Promise<VaultServices> | null = null
 
   return async () => {
     servicesPromise ??= import("./usecases/integrated-services.js")
-      .then(({ createIntegratedVaultServices }) => createIntegratedVaultServices())
+      .then(({ createIntegratedVaultServices }) => createIntegratedVaultServices(dependencies))
       .catch((error) => {
         servicesPromise = null
         throw error
@@ -212,9 +215,9 @@ function createIntegratedServicesLoader(): () => Promise<VaultServices> {
 }
 
 export function createIntegratedVaultServices(
-  _dependencies: IntegratedVaultServiceDependencies = {},
+  dependencies: IntegratedVaultServiceDependencies = {},
 ): VaultServices {
-  const loadServices = createIntegratedServicesLoader()
+  const loadServices = createIntegratedServicesLoader(dependencies)
 
   return {
     core: createLoaderBackedServiceGroup<CoreWriteServices, keyof CoreWriteServices & string>(

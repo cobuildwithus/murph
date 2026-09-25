@@ -419,3 +419,63 @@ import {
     expect(failure).toContain("apps/cloudflare must depend on @murphai/assistant-runtime");
   });
 });
+
+
+describe("binding restriction dispatch", () => {
+  it("keeps empty-import diagnostics ahead of a matching named restriction", () => {
+    expect(verifyWorkspaceImportPolicy({
+      filePath: path.join(repoRoot, "apps/cloudflare/src/example.ts"),
+      sourceMember: "apps/cloudflare",
+      specifier: "@murphai/hosted-execution",
+      source: `import {} from "@murphai/hosted-execution";
+import { parseHostedExecutionEvent } from "@murphai/hosted-execution";`,
+    })).toContain("uses empty import");
+  });
+
+  it("keeps the first matching restriction when one declaration crosses several surfaces", () => {
+    expect(verifyWorkspaceImportPolicy({
+      filePath: path.join(repoRoot, "apps/cloudflare/src/example.ts"),
+      sourceMember: "apps/cloudflare",
+      specifier: "@murphai/hosted-execution",
+      source: `import {
+  parseHostedExecutionEvent,
+  readHostedEmailCapabilities,
+  encodeHostedExecutionSignedRequestPayload,
+} from "@murphai/hosted-execution";`,
+    })).toContain("imports hosted email helpers");
+  });
+
+  it.each([
+    ["apps/cloudflare", "src/example.ts", true],
+    ["apps/cloudflare", "test/example.test.ts", false],
+    ["apps/web", "src/example.ts", false],
+  ])("preserves invocation binding restrictions for %s/%s", (sourceMember, suffix, rejected) => {
+    const failure = verifyWorkspaceImportPolicy({
+      filePath: path.join(repoRoot, sourceMember, suffix),
+      sourceMember,
+      specifier: "@murphai/assistant-runtime",
+      source: 'import { runHostedWorkspaceRuntimeJobInProcess } from "@murphai/assistant-runtime";',
+    });
+    if (rejected) {
+      expect(failure).toContain("@murphai/assistant-runtime/hosted-invocation");
+    } else {
+      expect(failure).toBeNull();
+    }
+  });
+
+  it.each(["packages/importers", "packages/core"])(
+    "preserves provider descriptor ownership for %s", (sourceMember) => {
+      const failure = verifyWorkspaceImportPolicy({
+        filePath: path.join(repoRoot, sourceMember, "src/example.ts"),
+        sourceMember,
+        specifier: "@murphai/importers",
+        source: 'import { defaultDeviceProviderDescriptors } from "@murphai/importers";',
+      });
+      if (sourceMember === "packages/importers") {
+        expect(failure).toBeNull();
+      } else {
+        expect(failure).toContain("@murphai/importers/device-providers/provider-descriptors");
+      }
+    },
+  );
+});

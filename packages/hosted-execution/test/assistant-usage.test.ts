@@ -1435,3 +1435,34 @@ test("assistant usage credential source treats blank effective env overrides as 
     "member",
   );
 });
+
+test("optional finite CLI failures survive both profile versions and malformed details preserve timing and usage", async () => {
+  const { emptyCliTiming } = await import("@murphai/runtime-state/cli-timing");
+  const timing = { ...emptyCliTiming(), reportCount: 1, commands: [{ command: "experiment session log",
+    outcome: "error", calls: 3, phases: [], failures: [
+      { code: "invalid_payload", stage: "validation", count: 2, message: "PRIVATE_SENTINEL" },
+      { code: "PRIVATE_SENTINEL", stage: "PRIVATE_SENTINEL", count: 1 },
+    ] }] };
+  const clean = { ...timing, commands: [{ ...timing.commands[0], failures: [
+    { code: "invalid_payload", stage: "validation", count: 2 }, { code: "unknown", stage: "unknown", count: 1 },
+  ] }] };
+  for (const schema of ["murph.assistant-turn-profile.v1", "murph.assistant-turn-profile.v2"]) {
+    const profile = { schema, modelContextWindow: null, requestCount: 0, requests: [],
+      requestsTruncated: false, tools: [], toolsTruncated: false };
+    const input = { schema: ASSISTANT_USAGE_SCHEMA, provider: "codex-cli", credentialSource: "platform",
+      occurredAt: "2026-09-10T12:00:00.000Z", sessionId: "synthetic-session", turnId: "synthetic-turn",
+      usageId: "synthetic-turn.attempt-1", attemptCount: 1, inputTokens: 17, outputTokens: 11,
+      turnProfileJson: profile };
+    const baseline = parseAssistantUsageRecord(input);
+    const parsed = parseAssistantUsageRecord({ ...input, turnProfileJson: { ...profile, cliTiming: timing } });
+    assert.deepEqual(parsed, { ...baseline, turnProfileJson: { ...profile, cliTiming: clean } });
+    assert.equal(JSON.stringify(parsed).includes("PRIVATE_SENTINEL"), false);
+    const legacyTiming = { ...timing, commands: [{ command: "experiment session log", outcome: "error", calls: 3, phases: [] }] };
+    for (const failures of ["PRIVATE_SENTINEL", [{ code: "conflict", stage: "write", count: 4 }]]) {
+      const malformed = { ...legacyTiming, commands: [{ ...legacyTiming.commands[0], failures }] };
+      assert.deepEqual(parseAssistantUsageRecord({ ...input, turnProfileJson: { ...profile, cliTiming: malformed } }),
+        { ...baseline, turnProfileJson: { ...profile, cliTiming: legacyTiming } });
+    }
+    assert.deepEqual(parseAssistantUsageRecord(baseline), baseline);
+  }
+});

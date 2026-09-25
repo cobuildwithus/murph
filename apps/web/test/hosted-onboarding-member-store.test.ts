@@ -1,3 +1,4 @@
+import { createHostedBillingRefFixture, EMPTY_BILLING_REF_SNAPSHOT_FIELDS } from "./support/hosted-billing-ref-fixture";
 import {
   Prisma,
   type HostedMember,
@@ -45,6 +46,7 @@ import {
   lookupHostedMemberStripeBillingRefByStripeSubscriptionId,
   readHostedMemberBillingEligibilityState,
   readHostedMemberStripeBillingRef,
+  projectHostedMemberStripeBillingRefSnapshot,
   type HostedMemberStripeBillingRefSnapshot,
   writeHostedMemberStripeBillingRefTx,
 } from "@/src/lib/hosted-onboarding/hosted-member-billing-store";
@@ -156,7 +158,8 @@ describe("hosted-member-store", () => {
     await createHostedMemberStore({
       billingStatus: HostedBillingStatus.incomplete,
       memberId: "member_new_onboarding",
-      prisma: { hostedMember: { create } } as never,
+      prisma: { hostedMember: { create }, $queryRaw: vi.fn().mockResolvedValue([{ phase: "legacy" }]),
+        hostedRuntimeOwner: { create: vi.fn().mockResolvedValue({}) } } as never,
     });
 
     expect(create).toHaveBeenCalledWith(expect.objectContaining({
@@ -3563,6 +3566,7 @@ describe("hosted-member-store", () => {
     const prisma = {
       hostedMemberBillingRef: {
         findUnique: vi.fn().mockResolvedValue({
+          ...createHostedBillingRefFixture(),
           memberId: "member_123",
           stripeCustomerIdEncrypted: await encryptHostedWebNullableString({
             field: "hosted-member-billing-ref.stripe-customer-id",
@@ -3586,6 +3590,7 @@ describe("hosted-member-store", () => {
         prisma,
       }),
     ).resolves.toEqual({
+      ...EMPTY_BILLING_REF_SNAPSHOT_FIELDS,
       memberId: "member_123",
       stripeCustomerId: "cus_123",
       stripeSubscriptionId: "sub_123",
@@ -3641,10 +3646,34 @@ describe("hosted-member-store", () => {
     });
   });
 
+  it("projects full nullable billing rows while omitting absent schedule fields", async () => {
+    const row = createHostedBillingRefFixture();
+    await expect(projectHostedMemberStripeBillingRefSnapshot(row)).resolves.toEqual({
+      ...EMPTY_BILLING_REF_SNAPSHOT_FIELDS,
+      memberId: row.memberId,
+      stripeCustomerId: null,
+      stripeSubscriptionId: null,
+    });
+    const effectiveAt = new Date("2026-10-01T00:00:00.000Z");
+    await expect(projectHostedMemberStripeBillingRefSnapshot({
+      ...row,
+      scheduledBillingEffectiveAt: effectiveAt,
+      scheduledBillingPlanCode: "launch_monthly",
+    })).resolves.toEqual({
+      ...EMPTY_BILLING_REF_SNAPSHOT_FIELDS,
+      memberId: row.memberId,
+      stripeCustomerId: null,
+      stripeSubscriptionId: null,
+      scheduledBillingEffectiveAt: effectiveAt,
+      scheduledBillingPlanCode: "launch_monthly",
+    });
+  });
+
   it("looks up Stripe billing refs with the matched billing slice intact", async () => {
     const member = createHostedMember();
     const findMany = vi.fn()
       .mockResolvedValueOnce([{
+        ...createHostedBillingRefFixture(),
         member,
         memberId: member.id,
         stripeCustomerIdEncrypted: await encryptHostedWebNullableString({
@@ -3657,6 +3686,7 @@ describe("hosted-member-store", () => {
         stripeSubscriptionLookupKey: null,
       }])
       .mockResolvedValueOnce([{
+        ...createHostedBillingRefFixture(),
         member,
         memberId: member.id,
         stripeCustomerIdEncrypted: null,
@@ -3681,6 +3711,7 @@ describe("hosted-member-store", () => {
       }),
     ).resolves.toEqual({
       billingRef: {
+        ...EMPTY_BILLING_REF_SNAPSHOT_FIELDS,
         memberId: member.id,
         stripeCustomerId: "cus_123",
         stripeSubscriptionId: null,
@@ -3695,6 +3726,7 @@ describe("hosted-member-store", () => {
       }),
     ).resolves.toEqual({
       billingRef: {
+        ...EMPTY_BILLING_REF_SNAPSHOT_FIELDS,
         memberId: member.id,
         stripeCustomerId: null,
         stripeSubscriptionId: "sub_123",
@@ -3736,6 +3768,7 @@ describe("hosted-member-store", () => {
 
     const findMany = vi.fn().mockResolvedValue([
       {
+        ...createHostedBillingRefFixture(),
         member: createHostedMember({
           id: "member_v1",
         }),
@@ -3750,6 +3783,7 @@ describe("hosted-member-store", () => {
         stripeSubscriptionLookupKey: null,
       },
       {
+        ...createHostedBillingRefFixture(),
         member: createHostedMember({
           id: "member_v2",
         }),
@@ -3801,6 +3835,7 @@ describe("hosted-member-store", () => {
     const findMany = vi.fn().mockResolvedValue([]);
     const executeRaw = vi.fn().mockResolvedValue(0);
     const upsert = vi.fn().mockResolvedValue({
+      ...createHostedBillingRefFixture(),
       memberId: "member_123",
       pulseTrialStartSource: "web_onboarding",
       stripeCustomerIdEncrypted: await encryptHostedWebNullableString({
@@ -3837,6 +3872,7 @@ describe("hosted-member-store", () => {
         tx: prisma,
       }),
     ).resolves.toEqual({
+      ...EMPTY_BILLING_REF_SNAPSHOT_FIELDS,
       memberId: "member_123",
       pulseTrialStartSource: "web_onboarding",
       stripeCustomerId: "cus_123",
@@ -3995,6 +4031,7 @@ describe("hosted-member-store", () => {
     const freshnessAt = new Date("2026-04-12T00:00:00.000Z");
     const findMany = vi.fn().mockResolvedValue([]);
     const upsert = vi.fn().mockResolvedValue({
+      ...createHostedBillingRefFixture(),
       lastStripeEventCreatedAt: freshnessAt,
       memberId: "member_123",
       stripeCustomerIdEncrypted: await encryptHostedWebNullableString({
@@ -4031,6 +4068,7 @@ describe("hosted-member-store", () => {
         tx: prisma,
       }),
     ).resolves.toEqual({
+      ...EMPTY_BILLING_REF_SNAPSHOT_FIELDS,
       lastStripeEventCreatedAt: freshnessAt,
       memberId: "member_123",
       stripeCustomerId: "cus_123",
@@ -4119,6 +4157,7 @@ describe("hosted-member-store", () => {
     });
     const findMany = vi.fn().mockResolvedValue([]);
     const upsert = vi.fn().mockResolvedValue({
+      ...createHostedBillingRefFixture(),
       checkoutAttemptId: "attempt_A",
       checkoutCreatedAt,
       checkoutIntentHash: "intent_A",
@@ -4198,6 +4237,7 @@ describe("hosted-member-store", () => {
     const currentPeriodEnd = new Date("2026-05-01T00:00:00.000Z");
     const findMany = vi.fn().mockResolvedValue([]);
     const upsert = vi.fn().mockResolvedValue({
+      ...createHostedBillingRefFixture(),
       currentBillingPlanCode,
       currentPeriodEnd,
       currentPeriodStart,
@@ -4266,6 +4306,7 @@ describe("hosted-member-store", () => {
 
   it("binds Stripe customer ids without mutating the member row", async () => {
     const upsert = vi.fn().mockResolvedValue({
+      ...createHostedBillingRefFixture(),
       memberId: "member_123",
       stripeCustomerIdEncrypted: await encryptHostedWebNullableString({
         field: "hosted-member-billing-ref.stripe-customer-id",
@@ -4297,6 +4338,7 @@ describe("hosted-member-store", () => {
         tx: prisma,
       }),
     ).resolves.toEqual({
+      ...EMPTY_BILLING_REF_SNAPSHOT_FIELDS,
       memberId: "member_123",
       stripeCustomerId: "cus_123",
       stripeSubscriptionId: null,
@@ -4333,6 +4375,7 @@ describe("hosted-member-store", () => {
 
   it("binds Stripe customer ids without clearing existing encrypted billing fields", async () => {
     const upsert = vi.fn().mockResolvedValue({
+      ...createHostedBillingRefFixture(),
       memberId: "member_123",
       stripeCustomerIdEncrypted: await encryptHostedWebNullableString({
         field: "hosted-member-billing-ref.stripe-customer-id",
@@ -4357,6 +4400,7 @@ describe("hosted-member-store", () => {
       hostedMemberBillingRef: {
         findMany,
         findUnique: vi.fn().mockResolvedValue({
+          ...createHostedBillingRefFixture(),
           memberId: "member_123",
           stripeCustomerIdEncrypted: null,
           stripeCustomerLookupKey: null,
@@ -4378,6 +4422,7 @@ describe("hosted-member-store", () => {
         tx: prisma,
       }),
     ).resolves.toEqual({
+      ...EMPTY_BILLING_REF_SNAPSHOT_FIELDS,
       memberId: "member_123",
       stripeCustomerId: "cus_123",
       stripeSubscriptionId: "sub_existing",
@@ -4414,6 +4459,7 @@ describe("hosted-member-store", () => {
       hostedMemberBillingRef: {
         findMany,
         findUnique: vi.fn().mockResolvedValue({
+          ...createHostedBillingRefFixture(),
           memberId: "member_123",
           stripeCustomerIdEncrypted: await encryptHostedWebNullableString({
             field: "hosted-member-billing-ref.stripe-customer-id",
@@ -4435,6 +4481,7 @@ describe("hosted-member-store", () => {
         tx: prisma,
       }),
     ).resolves.toEqual({
+      ...EMPTY_BILLING_REF_SNAPSHOT_FIELDS,
       memberId: "member_123",
       stripeCustomerId: "cus_existing",
       stripeSubscriptionId: null,
@@ -4459,6 +4506,7 @@ describe("hosted-member-store", () => {
         findUnique: vi.fn().mockResolvedValue({
           ...createHostedMember(),
           billingRef: {
+            ...createHostedBillingRefFixture(),
             memberId: "member_123",
             stripeCustomerIdEncrypted: await encryptHostedWebNullableString({
               field: "hosted-member-billing-ref.stripe-customer-id",
@@ -4523,6 +4571,7 @@ describe("hosted-member-store", () => {
       }),
     ).resolves.toEqual({
       billingRef: {
+        ...EMPTY_BILLING_REF_SNAPSHOT_FIELDS,
         memberId: "member_123",
         stripeCustomerId: "cus_123",
         stripeSubscriptionId: "sub_123",

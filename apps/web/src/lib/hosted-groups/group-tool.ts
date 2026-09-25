@@ -1,5 +1,7 @@
 import "server-only";
 
+import { readHostedGroupSharedDataWithFreshness } from "./shared-freshness";
+
 import { Prisma, type PrismaClient } from "@prisma/client";
 import type {
   HostedExecutionAcceptedGroupMessageParticipant,
@@ -29,8 +31,6 @@ import type {
 import {
   buildHostedVaultShareProjectionScopeKey,
   getHostedVaultShareDailyMetricProjectionSpec,
-  HOSTED_VAULT_SHARE_ACTIVITY_DISTANCE_PROJECTION_KIND,
-  HOSTED_VAULT_SHARE_ACTIVITY_SESSION_COUNT_PROJECTION_KIND,
   isHostedVaultShareRecentDateProjectionKind,
 } from "@murphai/hosted-execution/vault-share";
 
@@ -141,7 +141,6 @@ import {
   readHostedGroupJoinOfferSnapshotForOwnedThreadContainerTx,
   readHostedGroupMembershipsForMember,
   readHostedGroupParticipantDisplayNameCandidatesByRuntimeMemberId,
-  readHostedGroupSharedDataByRuntimeMemberId,
   recordHostedGroupJoinOfferTx,
   revokeHostedGroupMemberEmailShareTx,
   type HostedGroupSummary,
@@ -661,9 +660,12 @@ export async function handleHostedRuntimeGroupTool(
     try {
       return {
         action: "read_shared",
-        result: await readHostedGroupSharedDataByRuntimeMemberId({
+        result: await readHostedGroupSharedDataWithFreshness({
           linqSenderHandles: input.request.linqSenderHandles ?? [],
           projectionScopes: input.request.projectionScopes,
+          participantId: input.request.participantId,
+          history: input.request.history,
+          freshness: input.request.freshness,
           telegramSenderHandles: input.request.telegramSenderHandles ?? [],
           runtimeMemberId: input.memberId,
         }),
@@ -1640,23 +1642,27 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
     if (ownerAccess.status !== "ok") {
       return { kind: ownerAccess.unavailableReason };
     }
-    const result = newProjectionScopes !== null
-      ? await createHostedGroupJoinLinkForOwnedThreadContainerTx({
-          additiveOnly: true,
+    const priorOffer = newProjectionScopes === null
+      ? await readHostedGroupJoinOfferSnapshotForOwnedThreadContainerTx({
           actorMemberId: ownerAccess.ownerMemberId,
           containerMemberId: input.memberId,
-          displayName: input.joinOffer?.displayName ?? null,
-          now,
-          requestedVaultShareProjectionScopes: newProjectionScopes,
           tx,
         })
-      : await readHostedGroupJoinOfferSnapshotForOwnedThreadContainerTx({
-          actorMemberId: ownerAccess.ownerMemberId,
-          containerMemberId: input.memberId,
-          tx,
-        });
+      : null;
+    if (newProjectionScopes === null && !priorOffer) {
+      throw new Error("The existing group offer is unavailable.");
+    }
     const projectionScopes = newProjectionScopes
-      ?? result.group.requestedVaultShareProjectionScopes;
+      ?? priorOffer?.group.requestedVaultShareProjectionScopes ?? [];
+    const result = await createHostedGroupJoinLinkForOwnedThreadContainerTx({
+      additiveOnly: true,
+      actorMemberId: ownerAccess.ownerMemberId,
+      containerMemberId: input.memberId,
+      displayName: input.joinOffer?.displayName ?? null,
+      now,
+      requestedVaultShareProjectionScopes: projectionScopes,
+      tx,
+    });
     const offerPost = await prepareHostedGroupJoinOfferPostTx({
       groupId: result.group.id,
       now,
@@ -2056,9 +2062,6 @@ function renderHostedGroupJoinOfferScopeSentence(
           ),
         ];
   const sentence = `your ${formatHumanList(shareScopeLabels)}`;
-  if (useCategories) {
-    return sentence;
-  }
   const disclosures: string[] = [];
   if (projectionScopes.some((scope) =>
     isHostedVaultShareRecentDateProjectionKind(scope.projectionKind)
@@ -2077,36 +2080,10 @@ function renderHostedGroupJoinOfferScopeSentence(
       "nutrition totals come from your meals in Murph, including meals imported from connected apps",
     );
   }
-  const recentSleepLabels = [
-    ...(projectionScopes.some((scope) => scope.projectionKind === "sleep-times.v0")
-      ? ["sleep timing"]
-      : []),
-    ...(projectionScopes.some(
-      (scope) => scope.projectionKind === "sleep-duration-days.v0",
-    )
-      ? ["sleep duration"]
-      : []),
-  ];
-  if (recentSleepLabels.length > 0) {
-    disclosures.push(
-      `${formatHumanList(recentSleepLabels)} ${recentSleepLabels.length === 1 ? "covers" : "cover"} the last 7 days`,
-    );
-  }
-  const recentActivityLabels = projectionScopes.flatMap((scope) => {
-    if (scope.projectionKind === HOSTED_VAULT_SHARE_ACTIVITY_DISTANCE_PROJECTION_KIND) {
-      const activity = scope.selector.activityKind.replace(/-/gu, " ");
-      return [`${activity} distance and session count`];
-    }
-    if (scope.projectionKind === HOSTED_VAULT_SHARE_ACTIVITY_SESSION_COUNT_PROJECTION_KIND) {
-      const activity = scope.selector.activityKind.replace(/-/gu, " ");
-      return [`${activity} session count`];
-    }
-    return [];
-  });
-  if (recentActivityLabels.length > 0) {
-    disclosures.push(
-      `${formatHumanList(recentActivityLabels)} ${recentActivityLabels.length === 1 ? "covers" : "cover"} the last 7 days`,
-    );
+
+  if (projectionScopes.some((scope) => isHostedVaultShareRecentDateProjectionKind(scope.projectionKind))) {
+    disclosures.push("health sharing covers 90 days, including today and the previous 89 days");
+    disclosures.push("only available data is shared; older provider history is not fetched");
   }
   return disclosures.length > 0
     ? `${sentence} (${disclosures.join("; ")})`

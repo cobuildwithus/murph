@@ -15,6 +15,42 @@ const mailboxRequest = {
 };
 
 describe("createHostedWebMailboxPort", () => {
+  it("replays exactly one immutable voice input after a retryable response", async () => {
+    const requests: Array<{ body: string; path: string }> = [];
+    const fetchImpl = vi.fn(async (request: RequestInfo | URL, init?: RequestInit) => {
+      requests.push({
+        body: String(init?.body),
+        path: new URL(request instanceof Request ? request.url : String(request)).pathname,
+      });
+      return requests.length === 1
+        ? Response.json({ error: { code: "TEMPORARY", retryable: true } }, { status: 503 })
+        : Response.json({ mailboxItemId: "mailbox-voice-synthetic" });
+    });
+    const port = createHostedWebMailboxPort({
+      boundUserId: "member-voice-synthetic", fetchImpl: fetchImpl as typeof fetch,
+      timeoutMs: 1_000, transport: { mode: "proxy" },
+    });
+    const input = { callId: "call-synthetic", inputId: "input-synthetic", text: "Hello.",
+      occurredAt: "2026-09-21T12:00:00.000Z" };
+    await expect(port.admitVoiceInput(input)).resolves.toEqual({ mailboxItemId: "mailbox-voice-synthetic" });
+    expect(requests).toEqual(Array(2).fill({
+      body: JSON.stringify(input), path: "/api/internal/hosted-mailbox/voice-input",
+    }));
+  });
+
+  it.each([403, 409])("does not replay rejected voice admission (%s)", async (status) => {
+    const fetchImpl = vi.fn(async () => Response.json({ error: { code: "DENIED" } }, { status }));
+    const port = createHostedWebMailboxPort({
+      boundUserId: "member-voice-synthetic", fetchImpl: fetchImpl as typeof fetch,
+      timeoutMs: 1_000, transport: { mode: "proxy" },
+    });
+    await expect(port.admitVoiceInput({
+      callId: "call-synthetic", inputId: "input-synthetic", text: "Hello.",
+      occurredAt: "2026-09-21T12:00:00.000Z",
+    })).rejects.toMatchObject({ status });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
   it("records a typed member-action outcome through the existing control plane", async () => {
     const requests: Array<{ body: string; path: string }> = [];
     const fetchImpl = vi.fn(async (request: RequestInfo | URL, init?: RequestInit) => {

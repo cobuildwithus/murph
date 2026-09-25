@@ -9,10 +9,12 @@ import {
   drainHostedAccountDeletionCleanupBatch,
   type HostedAccountDeletionCleanupBatchResult,
 } from "../hosted-privacy/account-deletion-cleanup";
+import { runHostedRuntimeResourceCleanup } from "../hosted-execution/runtime-resource-cleanup";
 import { normalizeHostedRetentionDate } from "./cleanup";
 
 export interface HostedExternalRetentionCleanupResult {
   accountDeletionCleanup: HostedAccountDeletionCleanupBatchResult;
+  runtimeResourceCleanup: Awaited<ReturnType<typeof runHostedRuntimeResourceCleanup>>;
   expiredComputerRunsCleanedUp: number;
 }
 
@@ -31,7 +33,10 @@ export async function runHostedExternalRetentionCleanup(input: {
     store: new PrismaComputerUseStore(prisma),
   }).cleanupExpiredRuns({ now }).then((result) => result.expiredRuns);
 
+  const runtimeResourceCleanup = await runHostedRuntimeResourceCleanup({ now, prisma });
+
   return {
+    runtimeResourceCleanup,
     accountDeletionCleanup,
     expiredComputerRunsCleanedUp,
   };

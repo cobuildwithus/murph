@@ -72,14 +72,7 @@ export function dedupeSleepWindowCandidates(
     existing.evidenceOmittedExactDuplicateCount =
       (existing.evidenceOmittedExactDuplicateCount ?? 0)
       + (candidate.evidenceOmittedExactDuplicateCount ?? 0);
-    if (
-      (existing.sleepType === undefined || existing.sleepType === "unknown")
-      && candidate.sleepType !== undefined
-      && candidate.sleepType !== "unknown"
-    ) {
-      existing.sleepType = candidate.sleepType;
-      existing.nap = candidate.sleepType === "nap";
-    }
+    mergeSleepWindowClassification(existing, candidate);
     if (!existing.timeZone && candidate.timeZone) {
       existing.timeZone = candidate.timeZone;
     }
@@ -89,6 +82,24 @@ export function dedupeSleepWindowCandidates(
   }
 
   return [...deduped.values()];
+}
+
+/** For one identical window, a classified type beats unknown and a confirmed state beats tentative. */
+function mergeSleepWindowClassification(
+  existing: WearableSleepWindowCandidate,
+  candidate: WearableSleepWindowCandidate,
+): void {
+  if (
+    (existing.sleepType === undefined || existing.sleepType === "unknown")
+    && candidate.sleepType !== undefined
+    && candidate.sleepType !== "unknown"
+  ) {
+    existing.sleepType = candidate.sleepType;
+    existing.nap = candidate.sleepType === "nap";
+  }
+  if (candidate.sleepState !== undefined && existing.sleepState !== "confirmed") {
+    existing.sleepState = candidate.sleepState;
+  }
 }
 
 export function buildCandidateExactKey(candidate: WearableMetricCandidate): string {

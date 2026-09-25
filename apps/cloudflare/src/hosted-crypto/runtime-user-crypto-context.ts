@@ -88,6 +88,42 @@ export function clearHostedRuntimeCryptoContextEnvelopeCacheForTests(): void {
   hostedRuntimeCryptoContextEnvelopeCacheTotalBytes = 0;
 }
 
+export function hasCachedHostedUserCryptoContextEnvelope(input: {
+  domain: HostedWorkerRuntimeDomain;
+  environment: HostedExecutionEnvironment;
+  userId: string;
+}): boolean {
+  if (!input.environment.hostedCrypto) return false;
+  return readHostedRuntimeCryptoContextEnvelopeCacheEntry({
+    ...input,
+    cryptoEnv: input.environment.hostedCrypto,
+    nowMs: Date.now(),
+  }) !== null;
+}
+
+/** Verify a signed control-plane response before using or caching its envelope. */
+export async function requireHostedUserCryptoContextFromResponse(input: {
+  context: unknown;
+  domain: HostedWorkerRuntimeDomain;
+  environment: HostedExecutionEnvironment;
+  fetchImpl?: typeof fetch;
+  userId: string;
+}): Promise<HostedUserCryptoContext> {
+  return buildHostedUserCryptoContextFromLoadResult({
+    ...input,
+    cryptoEnv: hostedWorkerCryptoEnvFromExecutionEnvironment({
+      env: input.environment,
+      userId: input.userId,
+    }),
+    loaded: {
+      cacheHit: false,
+      context: normalizeHostedRuntimeCryptoContextForCache(
+        parseHostedRuntimeCryptoContextResponse(input.context, input.userId, input.domain),
+      ),
+    },
+  });
+}
+
 export async function requireHostedUserCryptoContextFromEnvironment(input: {
   bucket?: R2BucketLike;
   domain?: HostedWorkerRuntimeDomain;

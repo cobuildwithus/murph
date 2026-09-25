@@ -868,6 +868,114 @@ test("experiment progress summarizes adherence, coverage, confounders, and remin
   });
 });
 
+test.each([
+  ["active", "2026-04-20", "intervention", "sufficient_for_progress"],
+  ["active", "2026-04-22", "review_due", "ready_for_review"],
+  ["completed", "2026-04-20", "completed", "ready_for_review"],
+] as const)("numeric coverage preserves asymmetric thresholds for %s on %s", (
+  experimentStatus,
+  asOf,
+  phase,
+  threeByThreeStatus,
+) => {
+  const vault = createVaultReadModel({
+    vaultRoot: "synthetic/experiment-coverage-thresholds",
+    metadata: { timezone: "UTC" },
+    entities: [makeExperiment(experimentStatus)],
+  });
+
+  for (const [baselineDays, interventionDays, status] of [
+    [3, 2, "sufficient_for_progress"],
+    [2, 3, "partial"],
+    [3, 3, threeByThreeStatus],
+  ] as const) {
+    const metricPoints = [
+      ...["2026-04-01", "2026-04-02", "2026-04-03"].slice(0, baselineDays),
+      ...["2026-04-08", "2026-04-09", "2026-04-10"].slice(0, interventionDays),
+    ].map((date) => makeProjectedMetricPoint({
+      biomarkerKey: "biomarker:resting-heart-rate",
+      date,
+      metricKey: "resting-heart-rate",
+      sourceKind: "wearable-summary",
+      sourceLabel: "Wearable summary",
+      sourceRecordId: `evt_coverage_${date}`,
+      unit: "bpm",
+      value: 60,
+    }));
+    const progress = summarizeExperimentProgress(vault, "sauna-rhr", { asOf, metricPoints });
+
+    assert.equal(progress.phase, phase);
+    assert.deepEqual(progress.dataCoverage, {
+      activityProviders: [],
+      baselineDaysAvailable: baselineDays,
+      interventionDaysAvailable: interventionDays,
+      primaryBiomarkerKey: "biomarker:resting-heart-rate",
+      primaryMetricDaysAvailable: baselineDays + interventionDays,
+      status,
+      wearableProviders: [],
+    });
+  }
+});
+
+test.each([
+  ["legacy", "no_wearable_data"],
+  ["explicit", "insufficient"],
+  ["missing", "insufficient"],
+] as const)("numeric coverage distinguishes missing and supporting-only data for a %s primary", (
+  primaryKind,
+  emptyStatus,
+) => {
+  const primaryKey = "biomarker:resting-heart-rate";
+  const secondaryKey = "biomarker:hrv-rmssd";
+  const analysisPlan = {
+    ...(primaryKind === "legacy"
+      ? { primaryBiomarkerKey: primaryKey }
+      : primaryKind === "explicit"
+        ? { primaryOutcome: { kind: "metric", key: primaryKey } }
+        : {}),
+    secondaryBiomarkerKeys: [secondaryKey],
+  };
+  const vault = createVaultReadModel({
+    vaultRoot: "synthetic/experiment-coverage-missing-data",
+    metadata: { timezone: "UTC" },
+    entities: [makeExperiment("completed", { analysisPlan })],
+  });
+
+  for (const hasSupportingData of [false, true]) {
+    const metricPoints = hasSupportingData
+      ? [
+          "2026-04-01", "2026-04-02", "2026-04-03",
+          "2026-04-08", "2026-04-09", "2026-04-10",
+        ].map((date) => makeProjectedMetricPoint({
+          biomarkerKey: secondaryKey,
+          date,
+          metricKey: "hrv-rmssd",
+          sourceKind: "wearable-summary",
+          sourceLabel: "Wearable summary",
+          sourceRecordId: `evt_supporting_coverage_${date}`,
+          unit: "ms",
+          value: 45,
+        }))
+      : [];
+    const progress = summarizeExperimentProgress(vault, "sauna-rhr", {
+      asOf: "2026-04-22",
+      metricPoints,
+    });
+
+    assert.equal(progress.phase, "completed");
+    assert.equal(progress.signals.length, primaryKind === "missing" ? 1 : 2);
+    assert.deepEqual(progress.dataCoverage, {
+      activityProviders: [],
+      baselineDaysAvailable: hasSupportingData ? 3 : 0,
+      interventionDaysAvailable: hasSupportingData ? 3 : 0,
+      primaryBiomarkerKey: primaryKind === "missing" ? null : primaryKey,
+      primaryMetricDaysAvailable: 0,
+      status: hasSupportingData ? "partial" : emptyStatus,
+      wearableProviders: [],
+    });
+  }
+});
+
 test("experiment data coverage keeps wearable summaries separate from activity capability", () => {
   const vault = createVaultReadModel({
     vaultRoot: "/virtual/experiment-analysis-sleep-recovery-only-coverage",
@@ -4491,4 +4599,120 @@ test("experiment outcome reports sparse primary data as medium-confidence incomp
   );
   assert.match(outcome.conclusion.plainLanguage, /not enough primary biomarker data/u);
   assert.equal(outcome.protocolRef, null);
+});
+
+test("experiment adherence selects one count source while preserving evidence and ambiguity", () => {
+  const experimentId = "exp_01JNV4458HYPP53JDQCBP1QJFM";
+  const slug = "count-source-selection";
+  const completedId = "evt_01JNV45RHN0TQ9ZXE0A7YSE5A1";
+  const partialId = "evt_01JNV45RHN0TQ9ZXE0A7YSE5A2";
+  const offCalendarId = "evt_01JNV45RHN0TQ9ZXE0A7YSE5A3";
+  const target: ExperimentAdherenceTarget = {
+    targetId: "sessions",
+    label: "Sessions",
+    phase: "intervention",
+    evidence: {
+      kind: "linkedEventCount",
+      eventKind: "intervention_session",
+      missing: "unknown",
+    },
+    rollup: { targetCompletions: 2, minimumUsefulCompletions: 1 },
+  };
+  const calendar = {
+    kind: "explicitDates",
+    timeZone: "UTC",
+    dates: [{ localDate: "2026-06-01" }, { localDate: "2026-06-02" }],
+  } as const;
+  const sessions = [
+    makeSession({
+      entityId: completedId,
+      experimentId,
+      experimentSlug: slug,
+      occurredAt: "2026-06-01T12:00:00.000Z",
+    }),
+    makeSession({
+      entityId: partialId,
+      experimentId,
+      experimentSlug: slug,
+      occurredAt: "2026-06-02T12:00:00.000Z",
+      sessionStatus: "partial",
+    }),
+    makeSession({
+      entityId: offCalendarId,
+      experimentId,
+      experimentSlug: slug,
+      occurredAt: "2026-06-03T12:00:00.000Z",
+    }),
+  ];
+  const summarize = (adherenceTargets: readonly ExperimentAdherenceTarget[]) => {
+    const vault = createVaultReadModel({
+      vaultRoot: "/virtual/experiment-count-source-selection",
+      metadata: { timezone: "UTC" },
+      entities: [
+        makeExperiment("active", {
+          experimentId,
+          slug,
+          commonsProtocolRef: null,
+          effectiveProtocolSnapshot: null,
+          runPlan: {
+            baselineStart: "2026-05-31",
+            baselineEnd: "2026-05-31",
+            interventionStart: "2026-06-01",
+            interventionEnd: "2026-06-03",
+            targetSessions: 9,
+            minimumUsefulSessions: 7,
+            adherenceTargets,
+          },
+        }),
+        ...sessions,
+      ],
+    });
+    return summarizeExperimentProgress(vault, slug, { asOf: "2026-06-03" }).adherence;
+  };
+  const calendarTarget: ExperimentAdherenceTarget = {
+    ...target,
+    calendar: { ...calendar, dates: [...calendar.dates] },
+  };
+  const secondaryTarget: ExperimentAdherenceTarget = {
+    ...calendarTarget,
+    targetId: "secondary",
+    rollup: undefined,
+    calendar: {
+      kind: "explicitDates",
+      timeZone: "UTC",
+      dates: [{ localDate: "2026-06-03" }],
+    },
+  };
+
+  assert.deepEqual(summarize([calendarTarget, secondaryTarget]), {
+    completedSessions: 1,
+    partialSessions: 1,
+    evidence: { eventKind: "intervention_session" },
+    expectedSessionsByNow: 2,
+    loggedSessions: 2,
+    minimumUsefulSessions: 1,
+    sessionEventIds: [completedId, partialId],
+    status: "met_target",
+    targetSessions: 2,
+  });
+  assert.deepEqual(summarize([target]), {
+    completedSessions: 2,
+    partialSessions: 1,
+    evidence: { eventKind: "intervention_session" },
+    expectedSessionsByNow: 2,
+    loggedSessions: 3,
+    minimumUsefulSessions: 1,
+    sessionEventIds: [completedId, partialId, offCalendarId],
+    status: "met_target",
+    targetSessions: 2,
+  });
+  assert.deepEqual(summarize([{ ...calendarTarget, rollup: undefined }, secondaryTarget]), {
+    completedSessions: 0,
+    expectedSessionsByNow: null,
+    loggedSessions: 0,
+    minimumUsefulSessions: null,
+    sessionEventIds: [completedId, partialId, offCalendarId],
+    status: "unknown",
+    targetSessions: null,
+  });
 });

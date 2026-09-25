@@ -53,10 +53,7 @@ export async function runHostedDeviceSyncRecoverySweep(input: {
 
   if (
     dueReconcileSweep !== null
-    && (
-      dueReconcileSweep.wakeFailed > 0
-      || dueReconcileSweep.wakeNotAccepted > 0
-    )
+    && dueReconcileSweep.wakeFailed > 0
   ) {
     logger.warn("Hosted device-sync scheduled wake sweep failed.", {
       dueReconcileWakeFailed: dueReconcileSweep.wakeFailed,

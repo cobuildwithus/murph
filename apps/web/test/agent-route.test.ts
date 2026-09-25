@@ -9,7 +9,6 @@ import { createBearerRequest, createJsonPostRequest, createRouteContext } from "
 const mocks = vi.hoisted(() => ({
   createHostedDeviceSyncAgentSessionContext: vi.fn(),
   createHostedDeviceSyncAgentSessionService: vi.fn(),
-  createHostedDeviceSyncProviderAuthorityAgentSessionService: vi.fn(),
   assertBrowserMutationOrigin: vi.fn(),
   createHostedDeviceSyncProviderAgentSessionService: vi.fn(),
   createHostedDeviceSyncControlPlane: vi.fn(),
@@ -45,10 +44,6 @@ vi.mock("@/src/lib/device-sync/agent-session-service", () => ({
 }));
 vi.mock("@/src/lib/device-sync/agent-session-provider-service", () => ({
   createHostedDeviceSyncProviderAgentSessionService: mocks.createHostedDeviceSyncProviderAgentSessionService,
-}));
-vi.mock("@/src/lib/device-sync/agent-session-provider-authority-service", () => ({
-  createHostedDeviceSyncProviderAuthorityAgentSessionService:
-    mocks.createHostedDeviceSyncProviderAuthorityAgentSessionService,
 }));
 vi.mock("@/src/lib/device-sync/auth", () => ({
   assertBrowserMutationOrigin: mocks.assertBrowserMutationOrigin,
@@ -93,11 +88,6 @@ describe("hosted device-sync agent and webhook routes", () => {
       requireAgentSession: mocks.requireAgentSession,
     });
     mocks.createHostedDeviceSyncProviderAgentSessionService.mockReturnValue({
-      exportTokenBundle: mocks.exportTokenBundle,
-      refreshTokenBundle: mocks.refreshTokenBundle,
-      requireAgentSession: mocks.requireAgentSession,
-    });
-    mocks.createHostedDeviceSyncProviderAuthorityAgentSessionService.mockReturnValue({
       exportTokenBundle: mocks.exportTokenBundle,
       refreshTokenBundle: mocks.refreshTokenBundle,
       requireAgentSession: mocks.requireAgentSession,
@@ -248,7 +238,7 @@ describe("hosted device-sync agent and webhook routes", () => {
     expect(mocks.exportTokenBundle).not.toHaveBeenCalled();
   });
 
-  it("exports token bundles through the provider-application authority adapter", async () => {
+  it("exports token bundles through the authenticated session owner", async () => {
     mocks.exportTokenBundle.mockResolvedValueOnce({
       connection: {
         id: "dsc_123",
@@ -271,8 +261,7 @@ describe("hosted device-sync agent and webhook routes", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(mocks.createHostedDeviceSyncProviderAuthorityAgentSessionService).toHaveBeenCalledTimes(1);
-    expect(mocks.createHostedDeviceSyncAgentSessionService).not.toHaveBeenCalled();
+    expect(mocks.createHostedDeviceSyncAgentSessionService).toHaveBeenCalledTimes(1);
     expect(mocks.createHostedDeviceSyncProviderAgentSessionService).not.toHaveBeenCalled();
     expect(mocks.exportTokenBundle).toHaveBeenCalledWith({
       id: "dsa_current",

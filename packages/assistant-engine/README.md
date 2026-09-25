@@ -26,6 +26,14 @@ runtime/container. A turn is an RPC into that process rather than a per-turn
 app-server subprocess. Overlapping turns fail busy instead of spawning parallel
 app-server processes.
 
+Cancelling an active turn uses native `turn/interrupt`. An acknowledged
+interruption drains host-owned effects, releases the turn, and reports cancellation
+without retiring the resident process or its independent realtime media session.
+A normal completion racing cancellation also leaves the process reusable. Missing
+terminal acknowledgement retains the bounded interruption timeout and process
+cleanup; cancellation before a turn has an addressable native ID still uses
+process shutdown. Workspace shutdown remains the owner of closing live media.
+
 Process launch identity contains only process-stable settings such as the
 command, args, stable working directory, Codex home, and sanitized stable env.
 Prompts, session/thread/turn ids, delivery routes, invocation credentials, and
@@ -179,6 +187,43 @@ provider payloads enter these new fields. Existing numeric exit code, saturated
 turn-local ordinal and finite family attribution are unchanged. Bare `rg` or
 `grep` exit 1 remains expected no-match; recovery remains family-level only.
 
+Shell completion details additionally carry optional `commandAttribution`:
+`recognized`, `missing_command`, `oversized_command`, `shell_syntax`,
+`unrecognized_executable` or `unrecognized_cli_path`. It explains the existing
+fallback instead of changing the family or failure predicate. `shell_syntax`
+means compound/unsupported shell syntax or malformed quoting, **not** which
+pipeline/subcommand failed. The existing 4,096-character lexical bound and
+single known-shell-wrapper rule still apply. `vaultCliCommand` is present only
+when literal leading command words match the existing runtime-state CLI timing
+catalog (including three-word paths). Quoted or option-first command paths
+remain unattributed; whitespace-split option values are never treated as argv.
+
+A recognized executable may also carry `vaultCliErrorAttribution`: `recognized`,
+`unknown_code`, `missing_output`, `oversized_output` or `unstructured_output`.
+This concerns the existing bounded JSON envelope, not arbitrary shell stderr.
+Optional `vaultCliErrorCode` and `vaultCliErrorStage` use the timing owner's exact
+code/stage vocabularies; each unknown scalar is omitted independently. A known
+coarse category can coexist with `unknown_code` when its code is outside that
+narrower catalog. No new provider-code catalog is introduced. The existing
+exercise codes distinguish `exercise_not_found` (missing item),
+`exercise_catalog_unavailable` (missing/unreadable artifacts), and
+`exercise_catalog_invalid` (invalid artifacts); validation remains invalid
+input. No source error, hint, tool result, RPC or canonical contract changes.
+
+For the next shell-failure aggregate, filter the existing
+`CODEX_COMMAND_EXIT_NONZERO` completion rows over one bounded deployment/time
+cohort. Group by the finite attribution reason first, then catalog-normalized
+`vaultCliCommand`, `vaultCliErrorAttribution`, `vaultCliErrorCode` and
+`vaultCliErrorStage`. This separates missing/compound/oversized commands from
+recognized CLI calls with missing, unstructured or unmapped error output, and
+separates input rejection, missing exercise items and missing artifacts without
+reading commands or outputs. Apply source-owned allowlists before grouping;
+map absent old fields to `missing_evidence`, never to success or `recognized`.
+These fields are optional metadata accepted by the existing issue parser and
+24-key sanitizer; older readers may ignore them. No issue schema bump or
+additional event is needed. Existing started/completed ordinal correlation,
+completion deduplication and search recovery remain unchanged.
+
 These are **classifications, not another call denominator**.
 `diagnosticRole=classification` marks dynamic-tool/branch/intake rows and
 `diagnosticRole=completion` marks generic failed-action rows. A failed dynamic
@@ -315,6 +360,11 @@ native function, while code-mode-only models receive its schema in `exec`
 guidance without a search step. Murph must not add a second discovery action,
 execution envelope, or compatibility namespace.
 
+Authorized full group conversations expose `group_data` eagerly because shared
+reads are routine and namespace discovery expands unrelated schemas. Its input
+schema and authorization remain identical; private conversations keep the group
+family deferred, and read-only scheduled group turns keep their narrower tool.
+
 Response-card, exercise-routine, Telegram rich-content, and group-challenge
 card tools follow the same deferred contract. Resident messaging guidance
 provides the discovery trigger; the discovered tool remains the sole owner of
@@ -411,3 +461,7 @@ harness tests exercise actual `zsh -lc` selection when zsh is installed; that
 integration case explicitly skips when the executable is absent. Portable
 profile quoting, provider-key exclusion, and caller-profile ownership remain
 covered without zsh. These tests do not start Codex or make a model request.
+
+Session preflight validates routing under the existing runtime write lock without
+preparing secret storage. Session persistence owns that directory's permission
+and symlink checks before writing a session or removing its legacy sidecar.

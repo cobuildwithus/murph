@@ -1,0 +1,19 @@
+{
+  "publishedOn": "2026-09-17",
+  "order": 200,
+  "item": {
+    "id": "conversation-quiet-window",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Smoother follow-ups after a short pause",
+    "summary": "Murph keeps your conversation ready longer, reducing restart delays when you send a follow-up a few minutes later.",
+    "details": "A normal conversation stays ready for ten quiet minutes. Pending time-sensitive requests can still trigger earlier processing.",
+    "relevanceTags": [
+      "messaging",
+      "performance"
+    ],
+    "sourcePullRequests": [
+      3536
+    ]
+  }
+}

@@ -21,6 +21,7 @@ import {
   collectSummaryProviders,
   inferDaySummaryConfidence,
   summarizeMetricsConfidence,
+  qualifySleepSummaryConfidence,
 } from "./wearables/confidence.ts";
 import {
   formatMetricLabel,
@@ -851,7 +852,7 @@ function listWearableSleepNightsFromDataset(dataset: WearableDataset): WearableS
     const spo2 = resolveMetric("spo2", selectSleepMetricCandidates(dateCandidates, "spo2", selectedWindow, sleepWindows), {
       metricFamily: "sleep",
     });
-    const summaryConfidence = summarizeMetricsConfidence([
+    const summaryConfidence = qualifySleepSummaryConfidence(summarizeMetricsConfidence([
       ["sessionMinutes", sessionMinutes],
       ["totalSleepMinutes", totalSleepMinutes],
       ["timeInBedMinutes", timeInBedMinutes],
@@ -869,7 +870,7 @@ function listWearableSleepNightsFromDataset(dataset: WearableDataset): WearableS
     ], {
       missingSummaryNote: "No sleep metrics were available for this date.",
       extraNotes: buildPublicSleepWindowConflictNotes(sleepWindows, selectedWindow),
-    });
+    }), selectedWindow);
     const notes = summarizeSleepNotes({
       summaryConfidence,
       timeInBedMinutes,
@@ -899,6 +900,7 @@ function listWearableSleepNightsFromDataset(dataset: WearableDataset): WearableS
       sleepScore,
       sleepStartAt: windowSelection.selection?.startAt ?? null,
       sleepType: windowSelection.selection?.sleepType ?? (windowSelection.selection?.nap ? "nap" : "unknown"),
+      sleepState: selectedWindow?.sleepState,
       sleepWindowEvidence: sleepWindowEvidence.windows,
       sleepWindowEvidenceOmittedCount: sleepWindowEvidence.omittedCount,
       sleepWindowEvidenceOmittedExactDuplicateCount: sleepWindowEvidence.omittedExactDuplicateCount,
@@ -949,6 +951,7 @@ function buildBoundedSleepWindowEvidence(
       provider: resolveSleepWindowPublicProvider(window),
       recordedAt: window.recordedAt,
       sleepType: window.sleepType ?? (window.nap ? "nap" : "unknown"),
+      sleepState: window.sleepState,
       startAt: window.startAt,
       timeZone: window.timeZone ?? null,
     })),
@@ -1316,7 +1319,10 @@ export interface ProjectedWearableSummaryBundle {
   sourceHealth: ProjectedWearableSourceHealthSummary[];
 }
 
-export function buildWearableSummaryBundleFromDataset(dataset: WearableDataset): WearableSummaryBundle {
+export function buildWearableSummaryBundleFromDataset(
+  dataset: WearableDataset,
+  options: { includeSourceHealth?: boolean } = {},
+): WearableSummaryBundle {
   const activityDays = listWearableActivityDaysFromDataset(dataset);
   const sleepNights = listWearableSleepNightsFromDataset(dataset);
   const recoveryDays = listWearableRecoveryDaysFromDataset(dataset);
@@ -1331,7 +1337,7 @@ export function buildWearableSummaryBundleFromDataset(dataset: WearableDataset):
     bodyStateDays: publicBodyStateDays,
     recoveryDays: publicRecoveryDays,
     sleepNights: publicSleepNights,
-    sourceHealth: buildWearableSourceHealth({
+    sourceHealth: options.includeSourceHealth === false ? [] : buildWearableSourceHealth({
       activityDays: publicActivityDays,
       bodyStateDays: publicBodyStateDays,
       dataset,

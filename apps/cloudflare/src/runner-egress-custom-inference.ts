@@ -338,7 +338,7 @@ function normalizeChatFunctionDefinition(
     : { additionalProperties: true, type: "object" };
   return {
     ...(typeof tool.description === "string"
-      ? { description: tool.description.slice(0, 4_096) }
+      ? { description: tool.description }
       : {}),
     name,
     parameters,
@@ -351,7 +351,7 @@ function normalizeCustomToolDefinition(
   const name = encodeCustomToolName(requireToolName(tool.name));
   return {
     ...(typeof tool.description === "string"
-      ? { description: tool.description.slice(0, 4_096) }
+      ? { description: tool.description }
       : {}),
     name,
     parameters: {
@@ -370,7 +370,7 @@ function normalizeNamespaceToolDefinition(
   const name = requireToolName(tool.name);
   return {
     ...(typeof tool.description === "string"
-      ? { description: tool.description.slice(0, 4_096) }
+      ? { description: tool.description }
       : {}),
     name: encodeNamespaceToolName({ name, namespace }),
     parameters: readToolParameters(tool),

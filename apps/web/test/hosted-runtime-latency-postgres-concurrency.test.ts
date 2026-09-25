@@ -4,6 +4,8 @@ import type { PrismaClient } from "@prisma/client";
 import { describe, expect, it } from "vitest";
 
 import {
+  linkHostedIngressLatencyTracesToAcceptedLinqDelivery,
+  recordHostedIngressAcceptedFromMailboxItem,
   recordHostedIngressAssistantMilestone,
   recordHostedIngressProviderStarted,
   recordHostedIngressRuntimeMilestone,
@@ -26,6 +28,90 @@ if (
 describe.skipIf(!runPostgresProof)(
   "hosted runtime latency PostgreSQL set writes",
   () => {
+    it.each([
+      { kind: "ingress", first: "writer" }, { kind: "ingress", first: "deletion" },
+      { kind: "delivery", first: "writer" }, { kind: "delivery", first: "deletion" },
+    ] as const)("fences $kind trace creation against account deletion when $first starts first", async ({ kind, first }) => {
+      const suffix = randomUUID().replaceAll("-", "");
+      const memberId = `member_trace_deletion_${suffix}`;
+      const mailboxItemId = `mailbox_trace_deletion_${suffix}`;
+      const deliveryId = `delivery_trace_deletion_${suffix}`;
+      const writerName = `trace_writer_${suffix.slice(0, 8)}`;
+      const deleterName = `trace_deleter_${suffix.slice(0, 8)}`;
+      const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const writer = createPrismaClient({ databaseUrl: withPostgresApplicationName(databaseUrl, writerName), poolMax: 1 });
+      const deleter = createPrismaClient({ databaseUrl: withPostgresApplicationName(databaseUrl, deleterName), poolMax: 1 });
+      let markReady!: () => void;
+      const ready = new Promise<void>((resolve) => { markReady = resolve; });
+      let release!: () => void;
+      const barrier = new Promise<void>((resolve) => { release = resolve; });
+      const inFlight: Promise<unknown>[] = [];
+      const record = async (prisma: NonNullable<Parameters<typeof recordHostedIngressAcceptedFromMailboxItem>[0]["prisma"]>) => kind === "ingress"
+        ? recordHostedIngressAcceptedFromMailboxItem({ mailboxItemId, prisma, source: "linq" })
+        : linkHostedIngressLatencyTracesToAcceptedLinqDelivery({
+          authenticatedUserId: memberId, answeredMailboxItemIds: [mailboxItemId],
+          linqDeliveryId: deliveryId, prisma, replyRuntimeAttemptId: null,
+        });
+      try {
+        await observer.hostedMember.create({ data: { id: memberId } });
+        await observer.hostedMailboxItem.create({ data: {
+          id: mailboxItemId, userId: memberId, dedupeKey: mailboxItemId,
+          kind: "conversation.message", lane: "conversation", laneSeq: 1n,
+          occurredAt: new Date(), payloadSchema: "murph.hosted-execution.conversation-message.v1",
+        } });
+        await observer.hostedLinqDelivery.create({ data: {
+          id: deliveryId, source: "synthetic", attemptedAt: new Date(),
+        } });
+        const deleteAccount = () => deleter.$transaction(async (tx) => {
+          await tx.hostedMember.update({ where: { id: memberId }, data: { suspendedAt: new Date() } });
+          if (first === "deletion") { markReady(); await barrier; }
+          await tx.hostedIngressLatencyTrace.deleteMany({ where: { userId: memberId } });
+          await tx.hostedMember.delete({ where: { id: memberId } });
+        }, { timeout: 15_000 });
+        if (first === "writer") {
+          const writing = writer.$transaction(async (tx) => {
+            expect(await record({
+              $executeRaw: tx.$executeRaw.bind(tx), $queryRaw: tx.$queryRaw.bind(tx),
+              $transaction: writer.$transaction.bind(writer), hostedIngressLatencyTrace: tx.hostedIngressLatencyTrace,
+            })).toMatchObject({ recorded: true });
+            markReady();
+            await barrier;
+          }, { timeout: 15_000 });
+          inFlight.push(writing);
+          await Promise.race([ready, writing]);
+          const deleting = deleteAccount();
+          inFlight.push(deleting);
+          await waitForPostgresLock({ applicationName: deleterName, observer });
+          release();
+          await Promise.all([writing, deleting]);
+        } else {
+          const deleting = deleteAccount();
+          inFlight.push(deleting);
+          await Promise.race([ready, deleting]);
+          const writing = record(writer).then(
+            (result) => ({ result, error: null }),
+            (error: unknown) => ({ result: null, error }),
+          );
+          inFlight.push(writing);
+          await waitForPostgresLock({ applicationName: writerName, observer });
+          release();
+          await deleting;
+          const outcome = await writing;
+          if (kind === "ingress") expect(outcome.error).toMatchObject({ message: "Hosted ingress latency trace insert did not produce a readable row." });
+          else expect(outcome.result).toMatchObject({ recorded: false });
+        }
+        expect(await observer.hostedIngressLatencyTrace.count({ where: { userId: memberId } })).toBe(0);
+        expect(await observer.hostedMailboxItem.count({ where: { userId: memberId } })).toBe(0);
+      } finally {
+        release();
+        await Promise.allSettled(inFlight);
+        await observer.hostedIngressLatencyTrace.deleteMany({ where: { userId: memberId } });
+        await observer.hostedMember.deleteMany({ where: { id: memberId } });
+        await observer.hostedLinqDelivery.deleteMany({ where: { id: deliveryId } });
+        await Promise.all([observer.$disconnect(), writer.$disconnect(), deleter.$disconnect()]);
+      }
+    });
+
     it("locks ordinary runtime milestones in trace-id order", async () => {
       const suffix = randomUUID().replaceAll("-", "");
       const memberId = `hbm_latency_lock_order_${suffix}`;
@@ -157,7 +243,11 @@ describe.skipIf(!runPostgresProof)(
       const availableTraceId = `hil_latency_skip_locked_available_${suffix}`;
       const runtimeAttemptId = `runtime_latency_skip_locked_${suffix}`;
       const blocker = createPrismaClient({ databaseUrl, poolMax: 1 });
-      const writer = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const applicationName = `typing_acceptance_lock_${suffix.slice(0, 8)}`;
+      const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const writer = createPrismaClient({
+        databaseUrl: withPostgresLockOrderProbe(databaseUrl, applicationName), poolMax: 1,
+      });
       let releaseTraceLock!: () => void;
       const traceLockRelease = new Promise<void>((resolve) => {
         releaseTraceLock = resolve;
@@ -360,8 +450,17 @@ describe.skipIf(!runPostgresProof)(
           firstCodexOutputObservedAtEpochMs: assistantMilestoneAt.getTime(),
         });
 
+        // Accepted typing must survive even when this is the caller's final retry.
+        const acceptanceWhileLocked = recordHostedIngressAssistantMilestone({
+          ...assistantInput, milestone: "linq_typing_accepted",
+        });
+        inFlight.push(acceptanceWhileLocked);
+        await waitForPostgresLock({ applicationName, observer });
         releaseTraceLock();
         await blockerPromise;
+        await expect(acceptanceWhileLocked).resolves.toEqual({
+          matchedCount: 1, recorded: true, unmatchedCount: 0,
+        });
 
         await expect(
           recordHostedIngressProviderStarted(batchedProviderInput),
@@ -396,6 +495,7 @@ describe.skipIf(!runPostgresProof)(
           ),
         ).toMatchObject({
           firstCodexOutputObservedAtEpochMs: assistantMilestoneAt.getTime(),
+          linqTypingAcceptedAtEpochMs: assistantMilestoneAt.getTime(),
         });
       } finally {
         releaseTraceLock();
@@ -403,6 +503,7 @@ describe.skipIf(!runPostgresProof)(
         await writer.hostedMember.deleteMany({ where: { id: memberId } });
         await Promise.all([
           blocker.$disconnect(),
+          observer.$disconnect(),
           writer.$disconnect(),
         ]);
       }
@@ -984,9 +1085,10 @@ describe.skipIf(!runPostgresProof)(
           suffix,
         });
 
+        // Prisma enforces UTC even when the connection URL requests another zone.
         await expect(observer.$queryRaw<Array<{ timeZone: string }>>`
           SELECT current_setting('TimeZone') AS "timeZone"
-        `).resolves.toEqual([{ timeZone: "Australia/Sydney" }]);
+        `).resolves.toEqual([{ timeZone: "UTC" }]);
 
         const requestedAssistantInputIds = [
           assistantInputIds[1],
@@ -1138,8 +1240,8 @@ describe.skipIf(!runPostgresProof)(
           source: "linq",
         });
 
-        await Promise.all([
-          recordHostedIngressAssistantMilestone({
+        const typingMilestones = [
+          {
             assistantInputIds,
             at: new Date("2026-08-09T12:00:50.000Z"),
             authenticatedUserId: memberId,
@@ -1148,8 +1250,8 @@ describe.skipIf(!runPostgresProof)(
             runtimeAttemptId,
             runtimeLeaseGeneration: "4",
             source: "linq",
-          }),
-          recordHostedIngressAssistantMilestone({
+          },
+          {
             assistantInputIds: [...assistantInputIds].reverse(),
             at: new Date("2026-08-09T12:00:51.000Z"),
             authenticatedUserId: memberId,
@@ -1158,8 +1260,29 @@ describe.skipIf(!runPostgresProof)(
             runtimeAttemptId,
             runtimeLeaseGeneration: "4",
             source: "linq",
-          }),
-        ]);
+          },
+        ] satisfies Parameters<typeof recordHostedIngressAssistantMilestone>[0][];
+        const typingWrites = await Promise.all(typingMilestones.map(async (input) => ({
+          input,
+          result: await recordHostedIngressAssistantMilestone(input),
+        })));
+        for (const { input, result } of typingWrites) {
+          const contendedCount = result.contendedCount ?? 0;
+          expect(result).toEqual({
+            ...(contendedCount > 0 ? { contendedCount } : {}),
+            matchedCount: assistantInputIds.length - contendedCount,
+            recorded: contendedCount < assistantInputIds.length,
+            unmatchedCount: contendedCount,
+          });
+          // SKIP LOCKED reports contention; replay only that milestone after both writers finish.
+          if (contendedCount > 0) {
+            await expect(recordHostedIngressAssistantMilestone(input)).resolves.toEqual({
+              matchedCount: assistantInputIds.length,
+              recorded: true,
+              unmatchedCount: 0,
+            });
+          }
+        }
 
         const ordinaryRows = await observer.hostedIngressLatencyTrace.findMany({
           select: { assistantInputId: true, phaseBreakdownJson: true },

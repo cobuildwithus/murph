@@ -163,7 +163,7 @@ test('setup scheduling helpers respect terminal gating and launch routing', () =
       },
       { stdinIsTTY: true, stderrIsTTY: true },
     ),
-    'assistant-chat',
+    null,
   )
   assert.equal(
     resolveSetupPostLaunchAction(
@@ -225,7 +225,7 @@ test('setup scheduling helpers respect terminal gating and launch routing', () =
       },
       { stdinIsTTY: true, stderrIsTTY: true },
     ),
-    true,
+    false,
   )
   assert.deepEqual(
     listSetupReadyWearables({

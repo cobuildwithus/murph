@@ -1,3 +1,5 @@
+import { queueHostedLinqHomeContactCardAfterDelivery } from "./linq-contact-card-delivery";
+import { handleHostedLinqPollWebhook } from "../hosted-polls/linq-webhook";
 import type {
   Prisma,
   PrismaClient,
@@ -12,6 +14,7 @@ import {
   inspectHostedLinqMessageReceivedParts,
   sendHostedLinqReadReceipt,
   type HostedLinqMessageReceivedPartsInspection,
+  type HostedLinqWebhookEvent,
   verifyAndParseHostedLinqWebhookRequest,
 } from "./linq";
 import {
@@ -76,6 +79,7 @@ import {
 } from "./linq-terminal-retry";
 import {
   parseHostedLinqProviderEvent,
+  type ParsedHostedLinqProviderEvent,
 } from "./linq-provider-events";
 import {
   deriveHostedOnboardingTimingErrorName,
@@ -173,6 +177,7 @@ import {
 import {
   createHostedPhoneLookupKey,
 } from "./contact-privacy";
+import { readUnchangedHostedLinqHomeRoute } from "./hosted-member-routing-linq";
 import {
   projectHostedMemberRoutingState,
   readHostedMemberRoutingRecord,
@@ -271,6 +276,7 @@ function isModelAllowedFirstContactAdmission(
 
 export async function handleHostedOnboardingLinqWebhook(input: {
   rawBody: string;
+  webhookReceivedAt?: Date;
   scheduleAfterResponse?: HostedWebhookPostResponseScheduler;
   signature: string | null;
   timestamp: string | null;
@@ -326,13 +332,9 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       signalAbortedAfterVerify: input.signal?.aborted ?? false,
     });
 
-    if (event.event_type === "chat.typing_indicator.started") {
-      requireHostedLinqTypingIndicatorStartedEvent(event);
-      const response: HostedOnboardingLinqWebhookResponse = {
-        ignored: true,
-        ok: true,
-        reason: "typing-ignored",
-      };
+    const earlyResponse = await handleHostedLinqNonMessageWebhook(event);
+    if (earlyResponse) {
+      const response = earlyResponse;
       responseReason = response.reason ?? null;
       finishHostedOnboardingTiming(timing, "completed", {
         eventIdSuffix: toHostedOnboardingLogIdSuffix(eventId),
@@ -360,205 +362,69 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       && (event.event_type === "reaction.added" || event.event_type === "reaction.removed")
     ) {
       const prisma = input.prisma ?? getPrisma();
-      const providerResult = await ingestHostedLinqProviderEventDirect({
+      const reaction = await resolveHostedLinqReactionWebhook({
         event: providerEvent,
         prisma,
         scheduleAfterResponse: input.scheduleAfterResponse,
-      });
-      if (providerResult.groupJoinOfferHandled) {
-        const response: HostedOnboardingLinqWebhookResponse = {
-          duplicate: true,
-          ignored: true,
-          ok: true,
-          reason: "duplicate-linq-group-join-offer-reaction",
-        };
-        responseReason = response.reason ?? null;
-        finishHostedOnboardingTiming(timing, "completed", {
-          duplicate: true,
-          eventIdSuffix: toHostedOnboardingLogIdSuffix(eventId),
-          eventType,
-          responseReason,
-        });
-        return response;
-      }
-      const reactionResult = await handleHostedGroupJoinOfferReaction({
-        event: providerEvent,
-        prisma,
         signal: input.signal,
       });
-      // Every terminal outcome for a proven canonical join offer is consumed
-      // here. Falling through would turn a decided reaction into ordinary group
-      // runtime work.
-      if (
-        reactionResult.status === "accepted"
-        || reactionResult.reason === "already_group_member"
-        || reactionResult.reason === "member_suspended"
-        || reactionResult.reason === "recipient_region_unsupported"
-      ) {
-        const response: HostedOnboardingLinqWebhookResponse = {
-          duplicate: providerResult.duplicate || undefined,
-          ignored: reactionResult.status !== "accepted",
-          ok: true,
-          reason: reactionResult.status === "accepted"
-            ? "accepted-linq-group-join-offer-reaction"
-            : reactionResult.reason === "member_suspended"
-              ? "ignored-linq-group-join-offer-member-suspended"
-              : reactionResult.reason === "already_group_member"
-                ? "ignored-linq-group-join-offer-already-member"
-                : "ignored-linq-group-join-offer-region-unsupported",
-        };
-        responseReason = response.reason ?? null;
+      if ("response" in reaction) {
+        responseReason = reaction.response.reason ?? null;
         finishHostedOnboardingTiming(timing, "completed", {
-          duplicate: providerResult.duplicate,
+          duplicate: reaction.duplicate,
           eventIdSuffix: toHostedOnboardingLogIdSuffix(eventId),
           eventType,
           responseReason,
         });
-        return response;
+        return reaction.response;
       }
-
-      const messageEvent = await buildHostedLinqAffirmativeReactionMessageEvent({
-        event: providerEvent,
-        ...(input.signal ? { signal: input.signal } : {}),
-      });
-      if (messageEvent) {
-        event = messageEvent;
-        affirmativeReaction = true;
-        providerEvent = null;
-      } else {
-        const contextStaged = providerResult.duplicate
-          ? false
-          : await stageHostedLinqGroupReactionContext({
-              event: providerEvent,
-              prisma,
-              ...(input.signal ? { signal: input.signal } : {}),
-            });
-        const response: HostedOnboardingLinqWebhookResponse = {
-          duplicate: providerResult.duplicate || undefined,
-          ignored: !contextStaged,
-          ok: true,
-          reason: contextStaged
-            ? "staged-linq-group-reaction-context"
-            : `skipped-linq-group-join-offer-reaction:${reactionResult.reason}`,
-        };
-        responseReason = response.reason ?? null;
-        finishHostedOnboardingTiming(timing, "completed", {
-          duplicate: providerResult.duplicate,
-          eventIdSuffix: toHostedOnboardingLogIdSuffix(eventId),
-          eventType,
-          responseReason,
-        });
-        return response;
-      }
+      event = reaction.messageEvent;
+      affirmativeReaction = true;
+      providerEvent = null;
     }
+
     if (
       providerEvent
       && event.event_type !== "message.received"
       && event.event_type !== "message.edited"
     ) {
       const prisma = input.prisma ?? getPrisma();
-      const providerResult = event.event_type === "participant.added"
-        || event.event_type === "participant.removed"
-        ? await ingestHostedLinqParticipantEventDirect({
-            event: providerEvent,
-            participantChange: requireHostedLinqParticipantChangedEvent(event),
-            prisma,
-          })
-        : await ingestHostedLinqProviderEventDirect({
-            event: providerEvent,
-            prisma,
-            scheduleAfterResponse: input.scheduleAfterResponse,
-          });
-      await scheduleHostedLinqProviderAlertEmails({
-        alertIds: providerResult.alertIds,
+      const result = await handleHostedLinqProviderOnlyWebhook({
+        event,
+        providerEvent,
         prisma,
         scheduleAfterResponse: input.scheduleAfterResponse,
       });
-      await retryHostedLinqTerminalSendForEvent({ event: providerEvent, prisma });
-      const response: HostedOnboardingLinqWebhookResponse = {
-        duplicate: providerResult.duplicate || undefined,
-        ignored: true,
-        ok: true,
-        reason: providerResult.duplicate
-          ? "duplicate-linq-provider-event"
-          : `recorded-linq-provider-event:${providerEvent.eventType}`,
-      };
-      responseReason = response.reason ?? null;
+      responseReason = result.response.reason ?? null;
       finishHostedOnboardingTiming(timing, "completed", {
-        alertCount: providerResult.alertIds.length,
-        duplicate: providerResult.duplicate,
+        ...result.details,
         eventIdSuffix: toHostedOnboardingLogIdSuffix(eventId),
         eventType,
-        ...(providerEvent.eventType === "chat.group_icon_updated"
-          || providerEvent.eventType === "chat.group_icon_update_failed"
-            ? {
-                chatIdSuffix: toHostedOnboardingLogIdSuffix(providerEvent.linqChatId),
-                failureCode: providerEvent.failureCode,
-                providerStatus: providerEvent.providerStatus,
-              }
-            : {}),
         responseReason,
       });
-      return response;
+      return result.response;
     }
 
     input.signal?.throwIfAborted();
     const prisma = input.prisma ?? getPrisma();
     if (event.event_type === "message.edited") {
-      const editedEvent = requireHostedLinqMessageEditedEvent(event);
-      const planTiming = startHostedOnboardingTiming(
-        "hosted-onboarding.webhook.linq.plan-message-edit",
-        {
-          eventIdSuffix: toHostedOnboardingLogIdSuffix(event.event_id),
-          eventType: event.event_type,
-        },
-      );
-      let editPlan: Awaited<ReturnType<typeof planHostedLinqMessageEditedWebhook>>;
-      try {
-        editPlan = await runHostedLinqMessageEditPreparedTransaction({
-          event: editedEvent,
-          prisma,
-        });
-      } catch (error) {
-        finishHostedOnboardingTiming(planTiming, "failed", {
-          errorName: deriveHostedOnboardingTimingErrorName(error),
-        });
-        throw error;
-      }
-      finishHostedOnboardingTiming(
-        planTiming,
-        editPlan.response.reason ?? "completed",
-        {
-          duplicate: Boolean(editPlan.response.duplicate),
-          ok: editPlan.response.ok,
-          wakeUserPresent: Boolean(
-            editPlan.wakeHandoffs?.some((handoff) => handoff.userId),
-          ),
-        },
-      );
-
-      scheduleHostedLinqProviderEventIngestionBestEffort({
-        event: providerEvent,
+      const { editPlan, wakeHandoffResult } = await handleHostedLinqMessageEditWebhook({
+        event,
+        providerEvent,
         prisma,
-        scheduleAfterResponse: input.scheduleAfterResponse,
-      });
-      const wakeHandoff = editPlan.wakeHandoffs?.[0];
-      const wakeHandoffResult = await maybeHandoffHostedExecutionWebhookWake({
-        response: editPlan.response,
+        webhookReceivedAt: input.webhookReceivedAt,
         scheduleAfterResponse: input.scheduleAfterResponse,
         signal: input.signal,
-        wakeHandoff,
       });
       responseReason = editPlan.response.reason ?? null;
-      finishHostedOnboardingTiming(timing, "completed", {
-        duplicate: Boolean(editPlan.response.duplicate),
-        eventIdSuffix: toHostedOnboardingLogIdSuffix(eventId),
+      finishHostedLinqWebhookWakeTiming({
+        timing,
+        response: editPlan.response,
+        eventId,
         eventType,
         responseReason,
-        signalAbortedBeforeReturn: input.signal?.aborted ?? false,
-        wakeHandoffReason: wakeHandoffResult?.reason ?? null,
-        wakeHandoffSignalAccepted: wakeHandoffResult?.signalAccepted ?? false,
-        wakeHandoffStarted: wakeHandoffResult?.started ?? false,
+        signal: input.signal,
+        wakeHandoffResult,
       });
       return editPlan.response;
     }
@@ -592,6 +458,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
         event: requireHostedLinqMessageReceivedEvent(planningEvent),
         phonePrefixes:
           getHostedOnboardingEnvironment().linqInstantStartPhonePrefixes,
+        smsEnabled: getHostedOnboardingEnvironment().linqSmsInstantStartEnabled,
       });
     let instantFirstTurnGeneration:
       Promise<HostedLinqInstantFirstTurnGeneration> | null = null;
@@ -623,6 +490,9 @@ export async function handleHostedOnboardingLinqWebhook(input: {
             prisma,
           })
         : null;
+      // A positive continuation lookup can seed the first direct preparation.
+      // This is only a speculative member ID, never locked admission authority.
+      let initialDirectPreparationMemberId: string | undefined;
       const startInstantFirstTurnGeneration = async (continuationOnly = false): Promise<void> => {
         if (
           instantFirstTurnGeneration
@@ -639,13 +509,17 @@ export async function handleHostedOnboardingLinqWebhook(input: {
           event: planningEvent,
           participantContact: context.participantContact,
         });
-        const claim = await claimHostedLinqInstantFirstTurn({
-          ...(continuationOnly ? {
-            continuationMemberId: await resolveHostedLinqDirectPreparationMemberId({
+        const continuationMemberId = continuationOnly
+          ? await resolveHostedLinqDirectPreparationMemberId({
               event: planningEvent,
               prisma,
-            }),
-          } : {}),
+            })
+          : null;
+        if (continuationMemberId) {
+          initialDirectPreparationMemberId = continuationMemberId;
+        }
+        const claim = await claimHostedLinqInstantFirstTurn({
+          ...(continuationOnly ? { continuationMemberId } : {}),
           linqChatId: context.summary.chatId,
           prisma,
           request,
@@ -653,12 +527,16 @@ export async function handleHostedOnboardingLinqWebhook(input: {
         if (claim.kind === "unavailable") {
           return;
         }
-        instantOpeningContinuation = claim.openingTone !== undefined;
+        instantOpeningContinuation = claim.opening !== undefined;
+        const generationTiming = startHostedOnboardingTiming(
+          "hosted-onboarding.webhook.linq.first-turn-generation",
+          { openingContinuation: instantOpeningContinuation },
+        );
         const generation = startHostedLinqInstantFirstTurnGeneration({
           claim,
           request,
           ...(input.signal ? { signal: input.signal } : {}),
-        });
+        }).finally(() => finishHostedOnboardingTiming(generationTiming, "settled"));
         // Enrollment or later planning can still choose the ordinary signup
         // path. Observe a rejected speculative generation even when there is
         // then no active-member handoff to await it; the original promise is
@@ -673,6 +551,10 @@ export async function handleHostedOnboardingLinqWebhook(input: {
         const {
           instantStartAllowed = true,
         } = options;
+        // Consume once: cold misses, preparation retries, and later plans after
+        // activation must discover their own member instead of reusing this ID.
+        const directPreparationMemberId = initialDirectPreparationMemberId;
+        initialDirectPreparationMemberId = undefined;
         let reusableDirectCryptoDomainRoots: {
           memberId: string;
           preparedCryptoDomainRoots: PreparedHostedCryptoDomainRootCandidates;
@@ -766,6 +648,10 @@ export async function handleHostedOnboardingLinqWebhook(input: {
           },
           prepare: async ({ attempt }) => {
             const preparation = await prepareHostedLinqThreadRoutingCrypto({
+              requirePrivateRouting: attempt > 0,
+              ...(attempt === 0 && directPreparationMemberId
+                ? { directPreparationMemberId }
+                : {}),
               event: planningEvent,
               participantMemberIds:
                 planningResolution.pendingGroupParticipantMemberIds ?? [],
@@ -877,6 +763,9 @@ export async function handleHostedOnboardingLinqWebhook(input: {
             // Reply generation has no side effects, so it can run beside the
             // classifier while provider work still waits for persisted allow.
             await startInstantFirstTurnGeneration();
+            const admissionTiming = startHostedOnboardingTiming(
+              "hosted-onboarding.webhook.linq.first-contact-admission",
+            );
             let classifiedAdmission: Awaited<ReturnType<typeof classifyHostedLinqFirstContactAdmission>>;
             try {
               classifiedAdmission = await classifyHostedLinqFirstContactAdmission({
@@ -888,6 +777,8 @@ export async function handleHostedOnboardingLinqWebhook(input: {
                 throw error;
               }
               classifiedAdmission = buildHostedLinqFirstContactAdmissionClassifierUnavailableDecision();
+            } finally {
+              finishHostedOnboardingTiming(admissionTiming, "settled");
             }
             firstContactAdmissionClassified = true;
 
@@ -918,6 +809,9 @@ export async function handleHostedOnboardingLinqWebhook(input: {
         instantStartTypingHint = startHostedLinqInstantStartTypingHintBestEffort({
           event: planningEvent,
         });
+        const enrollmentTiming = startHostedOnboardingTiming(
+          "hosted-onboarding.webhook.linq.starter-enrollment",
+        );
         let enrollmentFailed = false;
         try {
           const enrollment = await ensureHostedLinqInstantStartStarterUsageEnrollment({
@@ -950,6 +844,8 @@ export async function handleHostedOnboardingLinqWebhook(input: {
               eventIdSuffix: toHostedOnboardingLogIdSuffix(event.event_id),
             },
           );
+        } finally {
+          finishHostedOnboardingTiming(enrollmentTiming, "settled");
         }
         plan = await runPlan({
           instantStartAllowed: !enrollmentFailed,
@@ -1039,91 +935,12 @@ export async function handleHostedOnboardingLinqWebhook(input: {
     });
 
     if (plan.desiredSideEffects.length > 0) {
-      const drainResult = await drainHostedLinqSideEffectsDirect({
+      plan = await drainHostedLinqWebhookPlan({
+        plan,
         prisma,
         scheduleAfterResponse: input.scheduleAfterResponse,
-        sideEffects: plan.desiredSideEffects,
         signal: input.signal,
       });
-      const pendingRequiredDelivery = drainResult.skipped.find(
-        (skip) =>
-          (
-            skip.template === "invite_signup"
-            || skip.template === "invite_signup_fallback"
-            || skip.template === HOSTED_LINQ_GROUP_SETUP_TEMPLATE
-            || skip.template === HOSTED_LINQ_GROUP_LINE_RECOVERY_TEMPLATE
-          )
-          && skip.reason === "notice_in_flight",
-      );
-      if (pendingRequiredDelivery) {
-        const groupLineRecoveryInFlight =
-          pendingRequiredDelivery.template
-            === HOSTED_LINQ_GROUP_LINE_RECOVERY_TEMPLATE;
-        const groupSetupInFlight = pendingRequiredDelivery.template
-          === HOSTED_LINQ_GROUP_SETUP_TEMPLATE;
-        throw hostedOnboardingError({
-          code: groupSetupInFlight
-            ? "HOSTED_LINQ_GROUP_SETUP_DELIVERY_IN_FLIGHT"
-            : groupLineRecoveryInFlight
-              ? "HOSTED_LINQ_GROUP_LINE_RECOVERY_IN_FLIGHT"
-              : "HOSTED_LINQ_SIGNUP_DELIVERY_IN_FLIGHT",
-          httpStatus: 503,
-          message: groupSetupInFlight
-            ? "The group setup message is still recovering. Retry this webhook after the current delivery attempt expires."
-            : groupLineRecoveryInFlight
-              ? "The group line recovery message is still recovering. Retry this webhook after the current delivery attempt expires."
-              : "The signup link is still recovering. Retry this webhook after the current delivery attempt expires.",
-          retryable: true,
-        });
-      }
-      const decidedUnsentGroupLineRecovery = drainResult.skipped.find(
-        (skip) =>
-          skip.template === HOSTED_LINQ_GROUP_LINE_RECOVERY_TEMPLATE
-          && (
-            skip.reason === "effect_unresolved"
-            || skip.reason === "notice_target_unauthorized"
-          ),
-      );
-      if (decidedUnsentGroupLineRecovery && drainResult.sentCount === 0) {
-        plan = {
-          ...plan,
-          desiredSideEffects: [],
-          response: {
-            ignored: true,
-            ok: true,
-            reason: "group-chat-line-unavailable",
-          },
-        };
-      }
-      const decidedUnsentSignup = drainResult.skipped.find(
-        (skip) =>
-          (
-            skip.template === "invite_signup"
-            || skip.template === "invite_signup_fallback"
-          )
-          && (
-            skip.reason === "effect_unresolved"
-            || skip.reason === "notice_already_claimed"
-            || skip.reason === "notice_target_unauthorized"
-          ),
-      );
-      if (decidedUnsentSignup && drainResult.sentCount === 0) {
-        plan = {
-          ...plan,
-          desiredSideEffects: [],
-          response: {
-            ...(decidedUnsentSignup.reason === "notice_already_claimed"
-              ? { duplicate: true }
-              : { ignored: true }),
-            ok: true,
-            reason: decidedUnsentSignup.reason === "effect_unresolved"
-              ? "signup-link-attempts-exhausted"
-              : decidedUnsentSignup.reason === "notice_already_claimed"
-                ? "signup-link-already-sent"
-                : "signup-link-target-unavailable",
-          },
-        };
-      }
     }
 
     responseReason = plan.response.reason ?? null;
@@ -1178,6 +995,8 @@ export async function handleHostedOnboardingLinqWebhook(input: {
     const wakeHandoffResult = await (async () => {
       try {
         return await maybeHandoffHostedExecutionWebhookWake({
+          webhookReceivedAt: input.webhookReceivedAt,
+          ingressTypingAcceptedAt: instantStartTypingHint?.started,
           response: plan.response,
           scheduleAfterResponse: input.scheduleAfterResponse,
           signal: input.signal,
@@ -1213,15 +1032,14 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       await sendReadReceipt();
     }
 
-    finishHostedOnboardingTiming(timing, "completed", {
-      duplicate: Boolean(plan.response.duplicate),
-      eventIdSuffix: toHostedOnboardingLogIdSuffix(eventId),
+    finishHostedLinqWebhookWakeTiming({
+      timing,
+      response: plan.response,
+      eventId,
       eventType,
       responseReason,
-      signalAbortedBeforeReturn: input.signal?.aborted ?? false,
-      wakeHandoffReason: wakeHandoffResult?.reason ?? null,
-      wakeHandoffSignalAccepted: wakeHandoffResult?.signalAccepted ?? false,
-      wakeHandoffStarted: wakeHandoffResult?.started ?? false,
+      signal: input.signal,
+      wakeHandoffResult,
     });
     return plan.response;
   } catch (error) {
@@ -1258,6 +1076,310 @@ export async function handleHostedOnboardingLinqWebhook(input: {
     });
     throw error;
   }
+}
+
+function finishHostedLinqWebhookWakeTiming(input: {
+  timing: ReturnType<typeof startHostedOnboardingTiming>;
+  response: HostedOnboardingLinqWebhookResponse;
+  eventId: string | null;
+  eventType: string | null;
+  responseReason: string | null;
+  signal?: AbortSignal;
+  wakeHandoffResult: Awaited<ReturnType<typeof maybeHandoffHostedExecutionWebhookWake>>;
+}): void {
+  const { wakeHandoffResult } = input;
+  finishHostedOnboardingTiming(input.timing, "completed", {
+    duplicate: Boolean(input.response.duplicate),
+    eventIdSuffix: toHostedOnboardingLogIdSuffix(input.eventId),
+    eventType: input.eventType,
+    responseReason: input.responseReason,
+    signalAbortedBeforeReturn: input.signal?.aborted ?? false,
+    wakeHandoffReason: wakeHandoffResult?.reason ?? null,
+    wakeHandoffSignalAccepted: wakeHandoffResult?.signalAccepted ?? false,
+    wakeHandoffStarted: wakeHandoffResult?.started ?? false,
+  });
+}
+
+async function resolveHostedLinqReactionWebhook(input: {
+  event: ParsedHostedLinqProviderEvent;
+  prisma: PrismaClient;
+  scheduleAfterResponse?: HostedWebhookPostResponseScheduler;
+  signal?: AbortSignal;
+}): Promise<
+  | { messageEvent: HostedLinqWebhookEvent }
+  | { response: HostedOnboardingLinqWebhookResponse; duplicate: boolean }
+> {
+  const { prisma } = input;
+  const providerResult = await ingestHostedLinqProviderEventDirect({
+    event: input.event,
+    prisma,
+    scheduleAfterResponse: input.scheduleAfterResponse,
+  });
+  if (providerResult.groupJoinOfferHandled) {
+    const response: HostedOnboardingLinqWebhookResponse = {
+      duplicate: true,
+      ignored: true,
+      ok: true,
+      reason: "duplicate-linq-group-join-offer-reaction",
+    };
+    return { response, duplicate: true };
+  }
+  const reactionResult = await handleHostedGroupJoinOfferReaction({
+    event: input.event,
+    prisma,
+    signal: input.signal,
+  });
+  // Every terminal outcome for a proven canonical join offer is consumed
+  // here. Falling through would turn a decided reaction into ordinary group
+  // runtime work.
+  if (
+    reactionResult.status === "accepted"
+    || reactionResult.reason === "already_group_member"
+    || reactionResult.reason === "member_suspended"
+    || reactionResult.reason === "recipient_region_unsupported"
+  ) {
+    const response: HostedOnboardingLinqWebhookResponse = {
+      duplicate: providerResult.duplicate || undefined,
+      ignored: reactionResult.status !== "accepted",
+      ok: true,
+      reason: reactionResult.status === "accepted"
+        ? "accepted-linq-group-join-offer-reaction"
+        : reactionResult.reason === "member_suspended"
+          ? "ignored-linq-group-join-offer-member-suspended"
+          : reactionResult.reason === "already_group_member"
+            ? "ignored-linq-group-join-offer-already-member"
+            : "ignored-linq-group-join-offer-region-unsupported",
+    };
+    return { response, duplicate: providerResult.duplicate };
+  }
+
+  const messageEvent = await buildHostedLinqAffirmativeReactionMessageEvent({
+    event: input.event,
+    ...(input.signal ? { signal: input.signal } : {}),
+  });
+  if (messageEvent) {
+    return { messageEvent };
+  }
+  const contextStaged = providerResult.duplicate
+    ? false
+    : await stageHostedLinqGroupReactionContext({
+        event: input.event,
+        prisma,
+        ...(input.signal ? { signal: input.signal } : {}),
+      });
+  const response: HostedOnboardingLinqWebhookResponse = {
+    duplicate: providerResult.duplicate || undefined,
+    ignored: !contextStaged,
+    ok: true,
+    reason: contextStaged
+      ? "staged-linq-group-reaction-context"
+      : `skipped-linq-group-join-offer-reaction:${reactionResult.reason}`,
+  };
+  return { response, duplicate: providerResult.duplicate };
+}
+
+async function handleHostedLinqProviderOnlyWebhook(input: {
+  event: HostedLinqWebhookEvent;
+  providerEvent: ParsedHostedLinqProviderEvent;
+  prisma: PrismaClient;
+  scheduleAfterResponse?: HostedWebhookPostResponseScheduler;
+}) {
+  const { event, providerEvent, prisma } = input;
+  const providerResult = event.event_type === "participant.added"
+    || event.event_type === "participant.removed"
+    ? await ingestHostedLinqParticipantEventDirect({
+        event: providerEvent,
+        participantChange: requireHostedLinqParticipantChangedEvent(event),
+        prisma,
+      })
+    : await ingestHostedLinqProviderEventDirect({
+        event: providerEvent,
+        prisma,
+        scheduleAfterResponse: input.scheduleAfterResponse,
+      });
+  await scheduleHostedLinqProviderAlertEmails({
+    alertIds: providerResult.alertIds,
+    prisma,
+    scheduleAfterResponse: input.scheduleAfterResponse,
+  });
+  await retryHostedLinqTerminalSendForEvent({ event: providerEvent, prisma });
+  const response: HostedOnboardingLinqWebhookResponse = {
+    duplicate: providerResult.duplicate || undefined,
+    ignored: true,
+    ok: true,
+    reason: providerResult.duplicate
+      ? "duplicate-linq-provider-event"
+      : `recorded-linq-provider-event:${providerEvent.eventType}`,
+  };
+
+  return {
+    response,
+    details: {
+      alertCount: providerResult.alertIds.length,
+      duplicate: providerResult.duplicate,
+      ...(providerEvent.eventType === "chat.group_icon_updated"
+        || providerEvent.eventType === "chat.group_icon_update_failed"
+          ? {
+              chatIdSuffix: toHostedOnboardingLogIdSuffix(providerEvent.linqChatId),
+              failureCode: providerEvent.failureCode,
+              providerStatus: providerEvent.providerStatus,
+            }
+          : {}),
+    },
+  };
+}
+
+async function handleHostedLinqMessageEditWebhook(input: {
+  event: HostedLinqWebhookEvent;
+  providerEvent: ParsedHostedLinqProviderEvent | null;
+  prisma: PrismaClient;
+  webhookReceivedAt?: Date;
+  scheduleAfterResponse?: HostedWebhookPostResponseScheduler;
+  signal?: AbortSignal;
+}) {
+  const { event, providerEvent, prisma } = input;
+  const editedEvent = requireHostedLinqMessageEditedEvent(event);
+  const planTiming = startHostedOnboardingTiming(
+    "hosted-onboarding.webhook.linq.plan-message-edit",
+    {
+      eventIdSuffix: toHostedOnboardingLogIdSuffix(event.event_id),
+      eventType: event.event_type,
+    },
+  );
+  let editPlan: Awaited<ReturnType<typeof planHostedLinqMessageEditedWebhook>>;
+  try {
+    editPlan = await runHostedLinqMessageEditPreparedTransaction({
+      event: editedEvent,
+      prisma,
+    });
+  } catch (error) {
+    finishHostedOnboardingTiming(planTiming, "failed", {
+      errorName: deriveHostedOnboardingTimingErrorName(error),
+    });
+    throw error;
+  }
+  finishHostedOnboardingTiming(
+    planTiming,
+    editPlan.response.reason ?? "completed",
+    {
+      duplicate: Boolean(editPlan.response.duplicate),
+      ok: editPlan.response.ok,
+      wakeUserPresent: Boolean(
+        editPlan.wakeHandoffs?.some((handoff) => handoff.userId),
+      ),
+    },
+  );
+
+  scheduleHostedLinqProviderEventIngestionBestEffort({
+    event: providerEvent,
+    prisma,
+    scheduleAfterResponse: input.scheduleAfterResponse,
+  });
+  const wakeHandoff = editPlan.wakeHandoffs?.[0];
+  const wakeHandoffResult = await maybeHandoffHostedExecutionWebhookWake({
+    webhookReceivedAt: input.webhookReceivedAt,
+    response: editPlan.response,
+    scheduleAfterResponse: input.scheduleAfterResponse,
+    signal: input.signal,
+    wakeHandoff,
+  });
+  return { editPlan, wakeHandoffResult };
+}
+
+async function drainHostedLinqWebhookPlan(input: {
+  plan: Awaited<ReturnType<typeof planHostedOnboardingLinqWebhook>>;
+  prisma: PrismaClient;
+  scheduleAfterResponse?: HostedWebhookPostResponseScheduler;
+  signal?: AbortSignal;
+}): Promise<Awaited<ReturnType<typeof planHostedOnboardingLinqWebhook>>> {
+  const { prisma } = input;
+  let { plan } = input;
+  const drainResult = await drainHostedLinqSideEffectsDirect({
+    prisma,
+    scheduleAfterResponse: input.scheduleAfterResponse,
+    sideEffects: plan.desiredSideEffects,
+    signal: input.signal,
+  });
+  const pendingRequiredDelivery = drainResult.skipped.find(
+    (skip) =>
+      (
+        skip.template === "invite_signup"
+        || skip.template === "invite_signup_fallback"
+        || skip.template === HOSTED_LINQ_GROUP_SETUP_TEMPLATE
+        || skip.template === HOSTED_LINQ_GROUP_LINE_RECOVERY_TEMPLATE
+      )
+      && skip.reason === "notice_in_flight",
+  );
+  if (pendingRequiredDelivery) {
+    const groupLineRecoveryInFlight =
+      pendingRequiredDelivery.template
+        === HOSTED_LINQ_GROUP_LINE_RECOVERY_TEMPLATE;
+    const groupSetupInFlight = pendingRequiredDelivery.template
+      === HOSTED_LINQ_GROUP_SETUP_TEMPLATE;
+    throw hostedOnboardingError({
+      code: groupSetupInFlight
+        ? "HOSTED_LINQ_GROUP_SETUP_DELIVERY_IN_FLIGHT"
+        : groupLineRecoveryInFlight
+          ? "HOSTED_LINQ_GROUP_LINE_RECOVERY_IN_FLIGHT"
+          : "HOSTED_LINQ_SIGNUP_DELIVERY_IN_FLIGHT",
+      httpStatus: 503,
+      message: groupSetupInFlight
+        ? "The group setup message is still recovering. Retry this webhook after the current delivery attempt expires."
+        : groupLineRecoveryInFlight
+          ? "The group line recovery message is still recovering. Retry this webhook after the current delivery attempt expires."
+          : "The signup link is still recovering. Retry this webhook after the current delivery attempt expires.",
+      retryable: true,
+    });
+  }
+  const decidedUnsentGroupLineRecovery = drainResult.skipped.find(
+    (skip) =>
+      skip.template === HOSTED_LINQ_GROUP_LINE_RECOVERY_TEMPLATE
+      && (
+        skip.reason === "effect_unresolved"
+        || skip.reason === "notice_target_unauthorized"
+      ),
+  );
+  if (decidedUnsentGroupLineRecovery && drainResult.sentCount === 0) {
+    plan = {
+      ...plan,
+      desiredSideEffects: [],
+      response: {
+        ignored: true,
+        ok: true,
+        reason: "group-chat-line-unavailable",
+      },
+    };
+  }
+  const decidedUnsentSignup = drainResult.skipped.find(
+    (skip) =>
+      (
+        skip.template === "invite_signup"
+        || skip.template === "invite_signup_fallback"
+      )
+      && (
+        skip.reason === "effect_unresolved"
+        || skip.reason === "notice_already_claimed"
+        || skip.reason === "notice_target_unauthorized"
+      ),
+  );
+  if (decidedUnsentSignup && drainResult.sentCount === 0) {
+    plan = {
+      ...plan,
+      desiredSideEffects: [],
+      response: {
+        ...(decidedUnsentSignup.reason === "notice_already_claimed"
+          ? { duplicate: true }
+          : { ignored: true }),
+        ok: true,
+        reason: decidedUnsentSignup.reason === "effect_unresolved"
+          ? "signup-link-attempts-exhausted"
+          : decidedUnsentSignup.reason === "notice_already_claimed"
+            ? "signup-link-already-sent"
+            : "signup-link-target-unavailable",
+      },
+    };
+  }
+  return plan;
 }
 
 function logHostedLinqMessageReceivedPartsWarning(input: {
@@ -1345,7 +1467,15 @@ async function resolveHostedLinqPlanningEvent(input: {
   } else if (threadRoute) {
     logHostedLinqChatClassification("thread-route-group");
     resolvedIsGroup = true;
+  } else if (webhookIsGroup === false) {
+    // The verified provider event supplies audience authority. A durable group
+    // route overrides it above and is checked again under the chat lock by the
+    // planner; an HTTP read cannot make those ownership checks unnecessary.
+    logHostedLinqChatClassification("webhook-direct");
+    resolvedIsGroup = false;
   } else {
+    // Legacy or incomplete payloads do not prove a private audience. A home
+    // binding identifies an owner, not the current participant roster.
     let canonicalIsGroup: boolean | null;
     try {
       const summary = await getHostedLinqChatSummary({
@@ -1393,19 +1523,17 @@ async function resolveHostedLinqPlanningEvent(input: {
         })
       : null;
   return {
-    event: webhookIsGroup === true
-      ? messageEvent
-      : {
-          ...messageEvent,
-          data: {
-            ...messageEvent.data,
-            chat: {
-              id: messageEvent.data.chat_id,
-              ...(messageEvent.data.chat ?? {}),
-              is_group: resolvedIsGroup,
-            },
-          },
+    event: {
+      ...messageEvent,
+      data: {
+        ...messageEvent.data,
+        chat: {
+          id: messageEvent.data.chat_id,
+          ...messageEvent.data.chat,
+          is_group: resolvedIsGroup,
         },
+      },
+    },
     ...(pendingGroupRoster?.initialGroupDisplayName
       ? { initialGroupDisplayName: pendingGroupRoster.initialGroupDisplayName }
       : {}),
@@ -1551,7 +1679,7 @@ const HOSTED_LINQ_INSTANT_START_TYPING_HINT_TIMEOUT_MS = 2_500;
 
 type HostedLinqInstantStartTypingHint = {
   chatId: string;
-  started: Promise<void>;
+  started: Promise<Date | null>;
 };
 
 // Instant start is the sender's first-ever message and the reply waits on a
@@ -1580,12 +1708,14 @@ function startHostedLinqInstantStartTypingHintBestEffort(input: {
             { httpStatus: result.status },
           );
         }
+        return result.ok ? new Date() : null;
       })
       .catch((error: unknown) => {
         logHostedOnboardingDiagnostic(
           "hosted-onboarding.webhook.linq.instant-start-typing-hint-failed",
           { errorName: deriveHostedOnboardingTimingErrorName(error) },
         );
+        return null;
       });
     return { chatId, started };
   } catch (error) {
@@ -1848,6 +1978,13 @@ async function ingestHostedLinqProviderEventDirect(input: {
       scheduleAfterResponse: input.scheduleAfterResponse,
       service: providerResult.restoreOnboardingLink.service,
     });
+  } else if (!providerResult.duplicate && input.event.deliveryStatus === "delivered") {
+    await queueHostedLinqHomeContactCardAfterDelivery({
+      chatId: input.event.linqChatId,
+      prisma: input.prisma,
+      scheduleAfterResponse: input.scheduleAfterResponse,
+      service: input.event.service,
+    });
   }
   return providerResult;
 }
@@ -1989,6 +2126,7 @@ function buildBlockedHostedLinqFirstContactAdmissionPlan(
 
 export async function handleHostedOnboardingTelegramWebhook(input: {
   rawBody: string;
+  webhookReceivedAt?: Date;
   scheduleAfterResponse?: HostedWebhookPostResponseScheduler;
   secretToken: string | null;
   prisma?: PrismaClient;
@@ -2090,6 +2228,7 @@ export async function handleHostedOnboardingTelegramWebhook(input: {
   const confirmationDeadlineMs = createHostedPostCommitDeadline(undefined);
   try {
     await maybeHandoffHostedExecutionWebhookWake({
+      webhookReceivedAt: input.webhookReceivedAt,
       response: plan.response,
       scheduleAfterResponse: input.scheduleAfterResponse,
       signal: input.signal,
@@ -2207,7 +2346,8 @@ interface HostedThreadRoutingCryptoPreparation {
   preparedDirectTelegramRouting?: HostedDirectTelegramRoutingCryptoPreparation;
   preparedDirectMailboxPayloadRoot?: {
     memberId: string;
-    preparedControlRoot: PreparedHostedDomainRootForWeb;
+    preparedControlRoot: PreparedHostedDomainRootForWeb | null;
+    unchangedHomeRoute?: ReturnType<typeof readUnchangedHostedLinqHomeRoute>;
     preparedCryptoDomainRoots: PreparedHostedCryptoDomainRootCandidates;
     preparedFamilyInvite: HostedFamilyPhoneInvitePreparation | null;
     preparedFamilyOwnerNotification: PreparedHostedFamilyOwnerNotification | null;
@@ -2268,6 +2408,8 @@ async function prepareHostedThreadDeliveryRouteAndWarmMailbox(input: {
 }
 
 async function prepareHostedLinqThreadRoutingCrypto(input: {
+  requirePrivateRouting?: boolean;
+  directPreparationMemberId?: string;
   event: Parameters<typeof requireHostedLinqMessageReceivedEvent>[0];
   participantMemberIds: readonly string[];
   pendingGroupRosterUnavailable: boolean;
@@ -2372,6 +2514,10 @@ async function prepareHostedLinqThreadRoutingCrypto(input: {
     return {
       preparedDirectMailboxPayloadRoot:
         await prepareHostedLinqDirectMailboxPayloadRoot({
+          requirePrivateRouting: input.requirePrivateRouting,
+          ...(input.directPreparationMemberId
+            ? { directPreparationMemberId: input.directPreparationMemberId }
+            : {}),
           event: input.event,
           prisma: input.prisma,
           ...(input.reusableDirectCryptoDomainRoots
@@ -2881,7 +3027,30 @@ export async function warmHostedLinqMailboxPayloadRoot(input: {
   };
 }
 
+function readHostedLinqUnchangedDirectPreparation(input: {
+  requirePrivateRouting?: boolean;
+  accessAllowed: boolean;
+  preparedFamilyInvite: HostedFamilyPhoneInvitePreparation | null;
+  context: ReturnType<typeof resolveHostedOnboardingLinqMessageContext>;
+  routingRecord: HostedMemberRoutingRecord | null;
+}): ReturnType<typeof readUnchangedHostedLinqHomeRoute> {
+  const { context, routingRecord } = input;
+  return !input.requirePrivateRouting
+    && input.accessAllowed && !input.preparedFamilyInvite
+    && context.messageEvent.data.chat?.is_group === false
+    && context.participantContact
+    ? readUnchangedHostedLinqHomeRoute({
+        chatId: context.summary.chatId,
+        participantContact: context.participantContact,
+        recipientPhone: context.recipientPhoneNumber,
+        routingRecord,
+      })
+    : null;
+}
+
 async function prepareHostedLinqDirectMailboxPayloadRoot(input: {
+  requirePrivateRouting?: boolean;
+  directPreparationMemberId?: string;
   event: Parameters<typeof requireHostedLinqMessageReceivedEvent>[0];
   prisma: PrismaClient;
   reusableDirectCryptoDomainRoots?: {
@@ -2890,7 +3059,8 @@ async function prepareHostedLinqDirectMailboxPayloadRoot(input: {
   };
 }): Promise<{
   memberId: string;
-  preparedControlRoot: PreparedHostedDomainRootForWeb;
+  preparedControlRoot: PreparedHostedDomainRootForWeb | null;
+  unchangedHomeRoute?: ReturnType<typeof readUnchangedHostedLinqHomeRoute>;
   preparedCryptoDomainRoots: PreparedHostedCryptoDomainRootCandidates;
   preparedFamilyInvite: HostedFamilyPhoneInvitePreparation | null;
   preparedFamilyOwnerNotification: PreparedHostedFamilyOwnerNotification | null;
@@ -2900,10 +3070,11 @@ async function prepareHostedLinqDirectMailboxPayloadRoot(input: {
   routingRecord: HostedMemberRoutingRecord | null;
   routingState: HostedMemberRoutingStateSnapshot | null;
 } | null> {
-  const memberId = await resolveHostedLinqDirectPreparationMemberId({
-    event: input.event,
-    prisma: input.prisma,
-  });
+  const memberId = input.directPreparationMemberId
+    ?? await resolveHostedLinqDirectPreparationMemberId({
+      event: input.event,
+      prisma: input.prisma,
+    });
   if (!memberId) {
     return null;
   }
@@ -2913,12 +3084,8 @@ async function prepareHostedLinqDirectMailboxPayloadRoot(input: {
     memberId,
     prisma: input.prisma,
   });
-  const [identityRecord, routingRecord, accessAllowed, preparedFamilyInvite] =
+  const [routingRecord, accessAllowed, preparedFamilyInvite] =
     await Promise.all([
-      readHostedMemberIdentityRecord({
-        memberId,
-        prisma: input.prisma,
-      }),
       readHostedMemberRoutingRecord({
         memberId,
         prisma: input.prisma,
@@ -2934,16 +3101,31 @@ async function prepareHostedLinqDirectMailboxPayloadRoot(input: {
           })
         : null,
     ]);
+  // Only Family acceptance consumes the private identity snapshot. Ordinary
+  // messages use blind identity/home lookups, revalidated under the locks.
+  const identityRecord = preparedFamilyInvite
+    ? await readHostedMemberIdentityRecord({ memberId, prisma: input.prisma })
+    : null;
   const shouldPrepareFamilyAcceptance =
     preparedFamilyInvite?.kind === "pending_acceptance";
+  const shouldPrepareIngress =
+    shouldPrepareFamilyAcceptance
+    || (accessAllowed && preparedFamilyInvite?.kind !== "accepted_replay");
+  const unchangedHomeRoute = readHostedLinqUnchangedDirectPreparation({
+    requirePrivateRouting: input.requirePrivateRouting,
+    accessAllowed,
+    preparedFamilyInvite,
+    context,
+    routingRecord,
+  });
   const preparedCryptoDomainRoots =
     await prepareHostedCryptoDomainRootCandidates({
       ...(shouldPrepareFamilyAcceptance
         ? {}
         : {
-            domains: preparedFamilyInvite?.kind === "accepted_replay"
-              ? (["control"] as const)
-              : accessAllowed
+            domains: unchangedHomeRoute
+              ? (["ingress"] as const)
+              : shouldPrepareIngress
               ? (["control", "ingress"] as const)
               : (["control"] as const),
           }),
@@ -2957,10 +3139,6 @@ async function prepareHostedLinqDirectMailboxPayloadRoot(input: {
         : {}),
       userId: memberId,
     });
-  const shouldPrepareIngress =
-    shouldPrepareFamilyAcceptance
-    || (accessAllowed && preparedFamilyInvite?.kind !== "accepted_replay");
-
   // Candidate signing finishes before unwrap preparation begins. Each phase is
   // bounded at two concurrent provider operations: ingress runs beside one
   // control lane, and that control lane warms historical roots sequentially
@@ -2995,6 +3173,9 @@ async function prepareHostedLinqDirectMailboxPayloadRoot(input: {
       ? preserveFirstPreparationError(() => prepareDomainRoot("ingress"))
       : Promise.resolve(null),
     preserveFirstPreparationError(async () => {
+      if (unchangedHomeRoute) {
+        return { preparedControlRoot: null, identityState: null, routingState: null };
+      }
       const preparedControlRoot = await prepareDomainRoot("control");
       for (const rootKeyId of preparedFamilyInvite
         ? readHostedMemberIdentityControlRootKeyIds(identityRecord)
@@ -3049,6 +3230,7 @@ async function prepareHostedLinqDirectMailboxPayloadRoot(input: {
       })
     : null;
   return {
+    unchangedHomeRoute,
     identityRecord,
     identityState: controlRoutingResult.value.identityState,
     memberId,
@@ -3155,4 +3337,11 @@ export async function runHostedOnboardingWebhookTransaction<TResult>(
       ...buildHostedWebhookDbTimingLogDetails(operations),
     });
   }
+}
+
+async function handleHostedLinqNonMessageWebhook(event: HostedLinqWebhookEvent): Promise<HostedOnboardingLinqWebhookResponse | null> {
+  if (await handleHostedLinqPollWebhook(event)) return { ok: true, ignored: true };
+  if (event.event_type !== "chat.typing_indicator.started") return null;
+  requireHostedLinqTypingIndicatorStartedEvent(event);
+  return { ok: true, ignored: true, reason: "typing-ignored" };
 }

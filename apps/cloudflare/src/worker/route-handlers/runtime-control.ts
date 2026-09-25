@@ -1,14 +1,15 @@
+import { buildRuntimeProcessingSummaryEntry, recordRuntimeProcessingSummary, type RuntimeProcessingDiagnostics } from "../../user-runner/diagnostics.ts";
+import { controlPostgresRuntimeVoice, readPostgresRunnerStatus, reconcilePostgresRuntimeConsent } from "../../runtime-user-control.ts";
 import {
   emitHostedExecutionStructuredLog,
+  parseHostedVoiceControlRequest,
 } from "@murphai/hosted-execution";
 import type {
   HostedRuntimeEnsureProcessingRequest,
   HostedRuntimeEnsureProcessingResponse,
 } from "@murphai/hosted-execution/orchestration-control";
-import {
-  isHostedRuntimeShellPrewarmOrchestrationAttemptId,
-  type HostedRuntimeLatencyPhaseBreakdown,
-  type HostedRuntimeShellPrewarmOrchestrationDiagnostics,
+import type {
+  HostedRuntimeLatencyPhaseBreakdown,
 } from "@murphai/hosted-execution/runtime-control";
 import {
   assertHostedRuntimeProcessingTimeoutMs,
@@ -34,9 +35,7 @@ import {
   requireJsonObject,
 } from "../../json.ts";
 import {
-  readCachedRequestText,
-  resolveUserRunnerStub,
-  type WorkerRouteContext,
+  readCachedRequestText, type WorkerRouteContext
 } from "../../worker-routes/shared.ts";
 import {
   readPresentedWorkerRouteAuthorization,
@@ -57,6 +56,7 @@ import {
 import {
   decodeRouteParam,
 } from "../route-utils/route-params.ts";
+import { ensurePostgresRuntimeProcessing } from "../../runtime-processing.ts";
 
 const runtimeEnsureProcessingRoute = {
   authorizeBeforeMethod: true,
@@ -73,6 +73,25 @@ const runtimeEnsureProcessingRoute = {
   methods: [CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS.runtimeEnsureProcessing.method],
   name: "runtime-ensure-processing",
   signatureBodyLimitBytes: INTERNAL_CONTROL_JSON_BODY_LIMIT_BYTES,
+  wrongMethodResponse: "method-not-allowed",
+} satisfies DeclarativeRoute<WorkerRouteContext>;
+
+const voiceControlRoute = {
+  authorizeBeforeMethod: true,
+  authorization: "vercel-oidc",
+  beforeMethod(context, params) {
+    return requireBoundInternalRouteUser(context, params, "voice-control");
+  },
+  async handle(context, params) {
+    const body = await readCachedRequestText(context, { limitBytes: 72 * 1024 });
+    let command;
+    try { command = parseHostedVoiceControlRequest(JSON.parse(body)); }
+    catch { return json({ error: "Invalid voice command." }, 400); }
+    return json(await controlPostgresRuntimeVoice(context.env, decodeRouteParam(params.userId), command));
+  },
+  match: (pathname) => matchCloudflareHostedControlUserRoutePath("voiceControl", pathname),
+  methods: [CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS.voiceControl.method],
+  name: "voice-control",
   wrongMethodResponse: "method-not-allowed",
 } satisfies DeclarativeRoute<WorkerRouteContext>;
 
@@ -102,25 +121,6 @@ const runtimeHealthDataConsentRoute = {
   wrongMethodResponse: "method-not-allowed",
 } satisfies DeclarativeRoute<WorkerRouteContext>;
 
-const runtimeShellPrewarmRoute = {
-  authorizeBeforeMethod: true,
-  authorization: "vercel-oidc",
-  beforeMethod(context, params) {
-    return requireBoundInternalRouteUser(context, params, "runtime-shell-prewarm");
-  },
-  async handle(context, params) {
-    return handleRuntimeShellPrewarmRoute(context, params.userId);
-  },
-  match: (pathname) => matchCloudflareHostedControlUserRoutePath(
-    "runtimeShellPrewarm",
-    pathname,
-  ),
-  methods: [CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS.runtimeShellPrewarm.method],
-  name: "runtime-shell-prewarm",
-  signatureBodyLimitBytes: INTERNAL_CONTROL_JSON_BODY_LIMIT_BYTES,
-  wrongMethodResponse: "method-not-allowed",
-} satisfies DeclarativeRoute<WorkerRouteContext>;
-
 const userStatusRoute = {
   authorizeBeforeMethod: true,
   authorization: "vercel-oidc",
@@ -137,8 +137,8 @@ const userStatusRoute = {
 } satisfies DeclarativeRoute<WorkerRouteContext>;
 
 export const runtimeProcessingRoutes = [
+  voiceControlRoute,
   runtimeEnsureProcessingRoute,
-  runtimeShellPrewarmRoute,
   runtimeHealthDataConsentRoute,
 ] as const;
 
@@ -151,9 +151,7 @@ export async function handleStatusRoute(
   encodedUserId: string,
 ): Promise<Response> {
   const userId = decodeRouteParam(encodedUserId);
-  const stub = await resolveUserRunnerStub(context.env, userId);
-  const status = await stub.runnerStatus(readHostedStatusRouteOptions(context.url));
-  return json(status);
+  return json(await readPostgresRunnerStatus(context.env, userId, readHostedStatusRouteOptions(context.url)));
 }
 
 function readHostedStatusRouteOptions(url: URL): { logLimit?: number } | undefined {
@@ -200,6 +198,9 @@ export async function handleRuntimeEnsureProcessingRoute(
     );
     commandTimeoutMs = readRuntimeEnsureProcessingCommandTimeoutMs(context.request.headers);
     const authorizationKind = readPresentedWorkerRouteAuthorization(context.request);
+    if ((ensureRequest.admission || ensureRequest.voiceCallId) && authorizationKind !== "vercel-oidc") {
+      throw new TypeError("Runtime admission may only be supplied by authenticated Web requests.");
+    }
     orchestration = readRuntimeEnsureProcessingOrchestrationDiagnostics(
       context.request.headers,
       cloudflareRouteReceivedAtEpochMs,
@@ -322,111 +323,10 @@ export async function handleRuntimeHealthDataConsentRoute(
       "Hosted runtime health-data consent request must be empty.",
     );
   }
-  const stub = await resolveUserRunnerStub(context.env, userId);
-  if (!stub.reconcileRuntimeHealthDataConsentForUser) {
-    throw new Error(
-      "Hosted runtime health-data consent reconciliation is unavailable.",
-    );
-  }
-  return json(await stub.reconcileRuntimeHealthDataConsentForUser(userId));
+  return json(await reconcilePostgresRuntimeConsent(context.env, userId));
 }
 
-async function handleRuntimeShellPrewarmRoute(
-  context: WorkerRouteContext,
-  encodedUserId: string,
-): Promise<Response> {
-  const shellPrewarmCloudflareRouteReceivedAtEpochMs = Date.now();
-  const userId = decodeRouteParam(encodedUserId);
-  try {
-    const payload = await readCachedRequestText(context, {
-      limitBytes: INTERNAL_CONTROL_JSON_BODY_LIMIT_BYTES,
-    });
-    const body = requireJsonObject(payload.trim() ? JSON.parse(payload) : {});
-    if (Object.keys(body).some((key) => ![
-      "orchestrationAttemptId",
-      "requestStartedAtEpochMs",
-      "source",
-    ].includes(key))) {
-      throw new TypeError("Hosted runtime shell prewarm request has unknown fields.");
-    }
-    const orchestrationAttemptId = body.orchestrationAttemptId;
-    const requestStartedAtEpochMs = body.requestStartedAtEpochMs;
-    const hasLegacyTelemetryShape = orchestrationAttemptId === undefined
-      && requestStartedAtEpochMs === undefined;
-    if (
-      !hasLegacyTelemetryShape
-      && !isHostedRuntimeShellPrewarmOrchestrationAttemptId(orchestrationAttemptId)
-    ) {
-      throw new TypeError(
-        "Hosted runtime shell prewarm orchestrationAttemptId is invalid.",
-      );
-    }
-    if (
-      !hasLegacyTelemetryShape
-      && (
-        typeof requestStartedAtEpochMs !== "number"
-        || !Number.isSafeInteger(requestStartedAtEpochMs)
-        || requestStartedAtEpochMs < 0
-      )
-    ) {
-      throw new TypeError(
-        "Hosted runtime shell prewarm requestStartedAtEpochMs is invalid.",
-      );
-    }
-    const requestDiagnostics:
-      HostedRuntimeShellPrewarmOrchestrationDiagnostics =
-      hasLegacyTelemetryShape ? {} : {
-        shellPrewarmOrchestrationAttemptId: orchestrationAttemptId,
-        shellPrewarmRequestStartedAtEpochMs: requestStartedAtEpochMs,
-      };
-    const source = body.source;
-    if (
-      source !== undefined
-      && source !== "linq-instant-start"
-      && source !== "linq-message-routing"
-      && source !== "linq-typing-started"
-    ) {
-      throw new TypeError("Hosted runtime shell prewarm source is invalid.");
-    }
-
-    const stub = context.env.USER_RUNNER.getByName(userId);
-    if (!stub.prewarmRuntimeShellForUser) {
-      throw new Error("User runner shell-prewarm RPC is unavailable.");
-    }
-    const orchestration: HostedRuntimeShellPrewarmOrchestrationDiagnostics = {
-      shellPrewarmCloudflareRouteReceivedAtEpochMs,
-      ...requestDiagnostics,
-      ...(context.runtimeControlAuthTiming === undefined ? {} : {
-        shellPrewarmRuntimeControlAuthFinishedAtEpochMs:
-          context.runtimeControlAuthTiming.runtimeControlAuthFinishedAtEpochMs,
-        shellPrewarmRuntimeControlAuthStartedAtEpochMs:
-          context.runtimeControlAuthTiming.runtimeControlAuthStartedAtEpochMs,
-      }),
-    };
-    await stub.prewarmRuntimeShellForUser(userId, source, orchestration);
-    return json({ accepted: true }, 202);
-  } catch (error) {
-    emitHostedExecutionStructuredLog({
-      component: "worker",
-      details: buildWorkerRouteLogDetails({
-        reason: "runtime-shell-prewarm-request-failed",
-        routeName: "runtime-shell-prewarm",
-      }, context.request, userId),
-      error,
-      level: "warn",
-      message: "Hosted worker runtime shell prewarm request failed.",
-      phase: "failed",
-      userId,
-    });
-    const classified = classifyPublicRouteError(error);
-    return json({
-      code: "invalid_request",
-      error: classified.error,
-    }, classified.status);
-  }
-}
-
-function runRuntimeEnsureProcessingForUser(input: {
+async function runRuntimeEnsureProcessingForUser(input: {
   commandStartedAtEpochMs: number;
   commandTimeoutMs: number | null;
   context: WorkerRouteContext;
@@ -434,14 +334,36 @@ function runRuntimeEnsureProcessingForUser(input: {
   orchestration: NonNullable<HostedRuntimeLatencyPhaseBreakdown["orchestration"]>;
   userId: string;
 }): Promise<HostedRuntimeEnsureProcessingResponse> {
-  const stub = input.context.env.USER_RUNNER.getByName(input.userId);
-  return stub.ensureRuntimeProcessingForUser({
+  const command = {
     ...input.ensureRequest,
     commandStartedAtEpochMs: input.commandStartedAtEpochMs,
     ...(input.commandTimeoutMs === null ? {} : { commandTimeoutMs: input.commandTimeoutMs }),
     orchestration: input.orchestration,
     userId: input.userId,
-  });
+  };
+  const diagnostics: RuntimeProcessingDiagnostics = {
+    stage: "admission",
+    details: {
+      runtimeProcessingBackend: "postgres",
+      commandStartedAtEpochMs: input.commandStartedAtEpochMs,
+      runtimeProcessingRequestedMode: input.ensureRequest.processingMode ?? "default",
+      triggeredByWebDirect: input.orchestration.triggeredByWebDirect === true,
+    },
+  };
+  let postgres: HostedRuntimeEnsureProcessingResponse | undefined;
+  try {
+    postgres = await ensurePostgresRuntimeProcessing(input.context.env, command, diagnostics);
+  } finally {
+    if (postgres?.kind !== "runtime_processing_accepted" || postgres.action !== "woken") {
+      // Snapshot before detaching so telemetry cannot extend the command budget.
+      const entry = buildRuntimeProcessingSummaryEntry(diagnostics, postgres, input.commandStartedAtEpochMs);
+      const telemetry = Promise.resolve().then(() => recordRuntimeProcessingSummary({
+        env: input.context.environment, entry, orchestrationAttemptId: command.orchestrationAttemptId, userId: input.userId,
+      })).catch(() => undefined);
+      try { input.context.executionCtx?.waitUntil(telemetry); } catch { /* Rejection is already owned. */ }
+    }
+  }
+  return postgres;
 }
 
 export function readRuntimeEnsureProcessingCommandTimeoutMs(headers: Headers): number | null {

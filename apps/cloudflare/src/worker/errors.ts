@@ -5,11 +5,13 @@ import {
 import {
   json,
 } from "../json.ts";
+
 import {
   buildWorkerRouteLogDetails,
 } from "./route-utils/log-details.ts";
 
 export function mapWorkerRouteError(request: Request, error: unknown): Response {
+
   emitHostedExecutionStructuredLog({
     component: "worker",
     details: buildWorkerRouteLogDetails({
@@ -25,6 +27,7 @@ export function mapWorkerRouteError(request: Request, error: unknown): Response 
 }
 
 export function classifyPublicRouteError(error: unknown): { error: string; status: number } {
+
   if (error instanceof SyntaxError) {
     return { error: "Invalid JSON.", status: 400 };
   }

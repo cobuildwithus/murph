@@ -91,7 +91,7 @@ export function buildHostedLinqTerminalRetryMessage(
   return {
     idempotency_key: idempotencyKey,
     parts,
-    preferred_service: original.preferred_service ?? "iMessage",
+    preferred_service: "iMessage",
     ...(original.effect ? { effect: original.effect } : {}),
     ...(original.reply_to ? { reply_to: original.reply_to } : {}),
   };
@@ -135,6 +135,7 @@ async function readRetryCandidate(input: {
           id: true,
           messageLookupKey: true,
           status: true,
+          service: true,
           failureCode: true,
           failureReason: true,
           terminalRetryOriginalMessageLookupKey: true,
@@ -167,7 +168,9 @@ async function readRetryCandidate(input: {
   if (failed.status !== "failed" || !isHostedLinqTerminalSendFailure(failed)) {
     return { candidate: null, reason: "failure_not_retryable" } as const;
   }
-  return { candidate: { delivery, message }, reason: null } as const;
+  // Only this exact failed receipt owns fallback service evidence, not a sibling
+  // or the multipart parent's latest-receipt projection.
+  return { candidate: { delivery, message, receiptService: failed.service }, reason: null } as const;
 }
 
 async function readRetryPolicyBlock(input: {
@@ -219,23 +222,39 @@ async function readRetryPolicyBlock(input: {
 
 function readFailedOutboundMismatch(
   original: Message,
-  input: { messageId: string; chatId: string; lineKey: string },
+  input: { messageId: string; chatId: string; lineKey: string; receiptService: string | null },
 ): string | null {
   if (original.id !== input.messageId) return "provider_message_mismatch";
   if (original.chat_id !== input.chatId) return "provider_chat_mismatch";
   if (original.is_from_me !== true) return "provider_direction_mismatch";
   if (original.delivery_status !== "failed") return "provider_status_not_failed";
-  if (original.service !== "iMessage") return "provider_service_not_imessage";
+  // A terminal failure may have no actual delivery transport. Only the exact
+  // failed receipt may fill that gap; explicit other/unknown values stay closed.
+  if (original.service !== "iMessage"
+    && (original.service != null || input.receiptService !== "iMessage")) {
+    return "provider_service_not_imessage";
+  }
+  if (original.preferred_service != null && original.preferred_service !== "iMessage") {
+    return "provider_preferred_service_not_imessage";
+  }
   return createHostedPhoneLookupKeyReadCandidates(
     original.from_handle?.handle ?? original.from,
   ).includes(input.lineKey) ? null : "provider_sender_mismatch";
 }
 
-/**
- * Called both after receipt ingestion and after runtime acceptance so neither
- * arrival order can strand a known terminal failure. The existing message row
- * owns the one-attempt fence, including duplicate/concurrent webhook delivery.
- */
+type RetryServiceClass = "omitted" | "null" | "imessage" | "sms" | "rcs" | "unknown";
+
+function classifyRetryService(value: unknown): RetryServiceClass {
+  switch (value) {
+    case undefined: return "omitted";
+    case null: return "null";
+    case "iMessage": return "imessage";
+    case "SMS": return "sms";
+    case "RCS": return "rcs";
+    default: return "unknown";
+  }
+}
+
 type RetryStage = "candidate" | "policy" | "retrieve" | "content" | "claim" | "send" | "record";
 type RetryDiagnostic = {
   stage: RetryStage;
@@ -246,9 +265,17 @@ type RetryDiagnostic = {
   messageRef: string | null;
   eventIdSuffix: string | null;
   providerStatus?: number;
+  providerServiceClass?: RetryServiceClass;
+  providerPreferredServiceClass?: RetryServiceClass;
+  receiptServiceClass?: RetryServiceClass;
   errorKind?: "timeout" | "provider_http" | "database" | "unexpected";
 };
 
+/**
+ * Called both after receipt ingestion and after runtime acceptance so neither
+ * arrival order can strand a known terminal failure. The existing message row
+ * owns the one-attempt fence, including duplicate/concurrent webhook delivery.
+ */
 export async function retryHostedLinqTerminalSend(input: {
   chatId: string | null;
   messageId: string | null;
@@ -309,6 +336,7 @@ async function runTerminalRetry(input: {
   const result = await readRetryCandidate({ ...keys, prisma });
   if (!result.candidate) { diagnostic.reason = result.reason; return; }
   const { delivery } = result.candidate;
+  diagnostic.receiptServiceClass = classifyRetryService(result.candidate.receiptService);
   const lineKey = delivery.phoneNumberLookupKey!;
   const threadIsDirect = delivery.threadIsDirect!;
   const policyInput = { chatId, chatKeys: keys.chatKeys, lineKey, threadIsDirect };
@@ -318,7 +346,11 @@ async function runTerminalRetry(input: {
 
   diagnostic.stage = "retrieve";
   const original = await readHostedLinqFailedMessage(messageId);
-  const mismatch = readFailedOutboundMismatch(original, { messageId, chatId, lineKey });
+  diagnostic.providerServiceClass = classifyRetryService(original.service);
+  diagnostic.providerPreferredServiceClass = classifyRetryService(original.preferred_service);
+  const mismatch = readFailedOutboundMismatch(original, {
+    messageId, chatId, lineKey, receiptService: result.candidate.receiptService,
+  });
   if (mismatch) { diagnostic.reason = mismatch; return; }
   const messageRowId = result.candidate.message?.id
     ?? `hlm_terminal_${sha256Hex(delivery.id)}`;
@@ -342,6 +374,11 @@ async function runTerminalRetry(input: {
     const current = currentResult.candidate;
     if (!current) { diagnostic.reason = currentResult.reason; return false; }
     if (current.delivery.id !== delivery.id) { diagnostic.reason = "delivery_changed"; return false; }
+    diagnostic.receiptServiceClass = classifyRetryService(current.receiptService);
+    const mismatch = readFailedOutboundMismatch(original, {
+      messageId, chatId, lineKey, receiptService: current.receiptService,
+    });
+    if (mismatch) { diagnostic.reason = mismatch; return false; }
     const reason = await readRetryPolicyBlock({ ...policyInput, prisma: tx });
     if (reason) { diagnostic.reason = reason; return false; }
     if (!current.message) {

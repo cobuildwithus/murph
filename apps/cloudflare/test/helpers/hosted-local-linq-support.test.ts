@@ -1,7 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { buildHostedRunnerContainerEnv } from "../../src/hosted-env-policy.ts";
+
 import {
   buildHostedLinqInboundEvent,
+  HOSTED_LOCAL_LINQ_API_TOKEN,
+  postHostedLocalLinqWebhook,
   startHostedLocalLinqStub,
   type HostedLocalLinqWaitScenario,
 } from "./hosted-local-linq-support.js";
@@ -14,14 +18,121 @@ const passiveWaitScenario = {
   buildFailureMessage: async (_userId: string, summaryLines: readonly string[]) =>
     summaryLines.join("\n"),
 } satisfies HostedLocalLinqWaitScenario;
+const providerHeaders = { authorization: `Bearer ${HOSTED_LOCAL_LINQ_API_TOKEN}` };
+
+describe("hosted local Linq webhook redelivery", () => {
+  const input = {
+    event: { event_id: "evt_fixture", event_type: "message.received" },
+    secret: "synthetic-webhook-key",
+    webBaseUrl: "http://127.0.0.1:8123",
+  };
+  const staleRoute = () => Response.json({
+    error: { code: "HOSTED_THREAD_ROUTE_PREPARATION_REQUIRED", retryable: true },
+  }, { status: 503 });
+
+  afterEach(() => vi.restoreAllMocks());
+
+  it("redelivers the identical signed event once after retryable route preparation", async () => {
+    const accepted = Response.json({ ok: true }, { status: 202 });
+    const send = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(staleRoute())
+      .mockResolvedValueOnce(accepted);
+    const response = await postHostedLocalLinqWebhook(input);
+
+    expect(response).toBe(accepted);
+    await expect(response.json()).resolves.toEqual({ ok: true });
+    expect(send).toHaveBeenCalledTimes(2);
+    expect(send.mock.calls[1]).toEqual(send.mock.calls[0]);
+    expect(send.mock.calls[0]?.[1]?.body).toBe(JSON.stringify(input.event));
+  });
+
+  it("returns a persistent route failure after one redelivery", async () => {
+    const finalFailure = staleRoute();
+    const send = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(staleRoute())
+      .mockResolvedValueOnce(finalFailure);
+    const response = await postHostedLocalLinqWebhook(input);
+
+    expect(response).toBe(finalFailure);
+    expect(response.bodyUsed).toBe(false);
+    expect(send).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    { status: 202, body: '{"ok":true}' },
+    { status: 500, body: '{"error":{"code":"HOSTED_THREAD_ROUTE_PREPARATION_REQUIRED","retryable":true}}' },
+    { status: 503, body: '{"error":{"code":"OTHER_FAILURE","retryable":true}}' },
+    { status: 503, body: '{"error":{"code":"HOSTED_THREAD_ROUTE_PREPARATION_REQUIRED","retryable":false}}' },
+    { status: 503, body: '{"error":{"code":"HOSTED_THREAD_ROUTE_PREPARATION_REQUIRED"}}' },
+    { status: 503, body: 'null' },
+    { status: 503, body: 'not json' },
+  ])("preserves terminal or unrecognized response $status / $body", async ({ status, body }) => {
+    const original = new Response(body, { status });
+    const send = vi.spyOn(globalThis, "fetch").mockResolvedValue(original);
+    const response = await postHostedLocalLinqWebhook(input);
+
+    expect(response).toBe(original);
+    await expect(response.text()).resolves.toBe(body);
+    expect(send).toHaveBeenCalledTimes(1);
+  });
+
+  it("leaves transport failures visible without redelivery", async () => {
+    const failure = new Error("Synthetic transport failure");
+    const send = vi.spyOn(globalThis, "fetch").mockRejectedValue(failure);
+    await expect(postHostedLocalLinqWebhook(input)).rejects.toBe(failure);
+    expect(send).toHaveBeenCalledTimes(1);
+  });
+});
 
 describe("hosted local Linq provider stub", () => {
+  it.each([
+    { attachmentId: "att_pdf_fixture", extension: "pdf", mimeType: "application/pdf" },
+    { attachmentId: "att_image_fixture", extension: "png", mimeType: "image/png" },
+    { attachmentId: "att_voice_fixture", extension: "wav", mimeType: "audio/wav" },
+  ])("keeps $extension download URLs aligned with the runner CDN origin", async ({
+    attachmentId,
+    extension,
+    mimeType,
+  }) => {
+    const stub = await startHostedLocalLinqStub();
+
+    try {
+      const runnerEnv = buildHostedRunnerContainerEnv({
+        HOSTED_ASSISTANT_PROVIDER: "openai",
+        HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "linq",
+        HOSTED_EXECUTION_RUNNER_HOST_ALIAS: "172.17.0.1",
+        LINQ_API_BASE_URL: stub.runnerBaseUrl,
+        LINQ_API_TOKEN: HOSTED_LOCAL_LINQ_API_TOKEN,
+        LINQ_ATTACHMENT_CDN_BASE_URL: stub.attachmentDownloadBaseUrl,
+      });
+      const expectedCdnOrigin = `${stub.runnerBaseUrl}/attachment-downloads`;
+      expect(runnerEnv.LINQ_API_BASE_URL).toBe("https://api.linqapp.com/api/partner/v3");
+      expect(runnerEnv.LINQ_ATTACHMENT_CDN_BASE_URL).toBe(expectedCdnOrigin);
+
+      const metadata = await fetch(`${stub.baseUrl}/attachments/${attachmentId}`, {
+        headers: { ...providerHeaders, host: "api.linqapp.com" },
+      });
+      expect(metadata.status).toBe(200);
+      const expectedDownloadUrl = `${expectedCdnOrigin}/${attachmentId}.${extension}`;
+      await expect(metadata.json()).resolves.toEqual({ download_url: expectedDownloadUrl });
+
+      // The host test reaches the same public byte route over loopback.
+      const bytes = await fetch(`${stub.baseUrl}${new URL(expectedDownloadUrl).pathname}`);
+      expect(bytes.status).toBe(200);
+      expect(bytes.headers.get("content-type")).toBe(mimeType);
+      expect((await bytes.arrayBuffer()).byteLength).toBeGreaterThan(0);
+      expect(stub.observedRequests.at(-1)?.authorizationStatus).toBe("missing");
+    } finally {
+      await stub.stop();
+    }
+  });
+
   it("serves canonical direct-chat summaries through its shared runtime URL", async () => {
     const stub = await startHostedLocalLinqStub();
 
     try {
       expect(new URL(stub.runnerBaseUrl).hostname).toBe("host.docker.internal");
-      const response = await fetch(`${stub.baseUrl}/chats/chat_direct`);
+      const response = await fetch(`${stub.baseUrl}/chats/chat_direct`, { headers: providerHeaders });
 
       expect(response.status).toBe(200);
       expect(Number.isSafeInteger(stub.observedRequests[0]?.observedAtEpochMs)).toBe(
@@ -60,7 +171,7 @@ describe("hosted local Linq provider stub", () => {
     });
 
     try {
-      const response = await fetch(`${stub.baseUrl}/chats/chat_group`);
+      const response = await fetch(`${stub.baseUrl}/chats/chat_group`, { headers: providerHeaders });
 
       expect(response.status).toBe(200);
       await expect(response.json()).resolves.toEqual({
@@ -102,7 +213,7 @@ describe("hosted local Linq provider stub", () => {
           size_bytes: 128,
         }),
         headers: {
-          authorization: "Bearer hosted-local",
+          ...providerHeaders,
           "content-type": "application/json",
         },
         method: "POST",
@@ -145,7 +256,7 @@ describe("hosted local Linq provider stub", () => {
           },
         }),
         headers: {
-          authorization: "Bearer hosted-local",
+          ...providerHeaders,
           "content-type": "application/json",
         },
         method: "POST",
@@ -307,14 +418,14 @@ describe("hosted local Linq provider stub", () => {
 
     try {
       stub.setChatIsGroup("chat_group", true);
-      const groupResponse = await fetch(`${stub.baseUrl}/chats/chat_group`);
+      const groupResponse = await fetch(`${stub.baseUrl}/chats/chat_group`, { headers: providerHeaders });
       await expect(groupResponse.json()).resolves.toMatchObject({
         id: "chat_group",
         is_group: true,
       });
 
       stub.setChatIsGroup("chat_group", false);
-      const directResponse = await fetch(`${stub.baseUrl}/chats/chat_group`);
+      const directResponse = await fetch(`${stub.baseUrl}/chats/chat_group`, { headers: providerHeaders });
       await expect(directResponse.json()).resolves.toMatchObject({
         id: "chat_group",
         is_group: false,
@@ -380,6 +491,7 @@ async function postLinqStubMessage(input: {
       },
     }),
     headers: {
+      ...providerHeaders,
       "content-type": "application/json",
     },
     method: "POST",

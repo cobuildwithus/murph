@@ -4,17 +4,12 @@ import {
 } from "@prisma/client";
 
 import {
-  decryptHostedWebNullableString,
   encryptHostedWebNullableString,
 } from "../hosted-web/encryption";
 import { createHostedStripeCheckoutSessionLookupKey } from "./contact-privacy";
 
 export const HOSTED_MEMBER_SUBSCRIPTION_CHECKOUT_SESSION_FIELD =
   "hosted-member-subscription-checkout.stripe-session-id";
-
-type HostedSubscriptionCheckoutPrisma =
-  | Prisma.TransactionClient
-  | PrismaClient;
 
 export interface PreparedHostedMemberSubscriptionCheckout {
   encryptedSessionId: string;
@@ -77,33 +72,6 @@ export async function bindHostedMemberSubscriptionCheckoutUnderLockTx(input: {
   if (existing?.memberId !== input.memberId) {
     throw new TypeError("Stripe Checkout session already has a different owner.");
   }
-}
-
-export async function listHostedMemberSubscriptionCheckoutSessionIds(input: {
-  memberId: string;
-  prisma: HostedSubscriptionCheckoutPrisma;
-}): Promise<string[]> {
-  const rows = await input.prisma.hostedMemberSubscriptionCheckout.findMany({
-    orderBy: { createdAt: "asc" },
-    select: {
-      memberId: true,
-      stripeCheckoutSessionIdEncrypted: true,
-    },
-    where: { memberId: input.memberId },
-  });
-
-  return Promise.all(rows.map(async (row) => {
-    const sessionId = await decryptHostedWebNullableString({
-      field: HOSTED_MEMBER_SUBSCRIPTION_CHECKOUT_SESSION_FIELD,
-      memberId: row.memberId,
-      prisma: input.prisma,
-      value: row.stripeCheckoutSessionIdEncrypted,
-    });
-    if (!sessionId) {
-      throw new TypeError("Stored Stripe Checkout session id is unavailable.");
-    }
-    return sessionId;
-  }));
 }
 
 function isPrismaUniqueConstraintError(

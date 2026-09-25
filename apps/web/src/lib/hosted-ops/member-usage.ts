@@ -928,36 +928,6 @@ function toHostedOpsMemberUsageResetAllResult(
   };
 }
 
-async function hasHostedOpsStarterResetRuntimeRecovery(input: {
-  memberId: string;
-  prisma: HostedOpsMemberUsageReceiptClient;
-}): Promise<boolean> {
-  const activeResetGrants = await input.prisma.hostedUsageCreditEntry.findMany({
-    select: { beneficiaryMemberId: true },
-    take: 1,
-    where: {
-      beneficiaryMemberId: input.memberId,
-      grant: { remainingUsdMicros: { gt: 0n } },
-      kind: "starter_grant",
-      sourceReferenceLookupKey:
-        HOSTED_OPS_STARTER_RESET_SOURCE_REFERENCE_LOOKUP_KEY,
-    },
-  });
-  if (activeResetGrants.length === 0) {
-    return false;
-  }
-  const stalledMailboxItems = await input.prisma.hostedMailboxItem.findMany({
-    select: { userId: true },
-    take: 1,
-    where: {
-      aiUsageDeniedAt: { not: null },
-      consumedAt: null,
-      userId: input.memberId,
-    },
-  });
-  return stalledMailboxItems.length > 0;
-}
-
 export async function resetHostedOpsMemberUsage(
   input: HostedOpsMemberUsageResetInput,
   prisma: PrismaClient = getPrisma(),
@@ -997,6 +967,7 @@ async function resetHostedOpsMemberUsageTransaction(
   return prisma.$transaction(async (tx) => {
     const memberRows = await tx.$queryRaw<Array<{
       hasActiveUsageCreditGrant: boolean;
+      remainingStarterCreditUsdMicros: bigint;
       usageCreditBalanceUsdMicros: bigint | null;
       usageCreditLedgerVersion: bigint | null;
     }>>`
@@ -1007,6 +978,15 @@ async function resetHostedOpsMemberUsageTransaction(
           WHERE "grant_projection"."beneficiary_member_id" = "hosted_member"."id"
             AND "grant_projection"."remaining_usd_micros" > 0
         ) AS "hasActiveUsageCreditGrant",
+        COALESCE((
+          SELECT SUM(grant_projection."remaining_usd_micros")
+          FROM "hosted_usage_credit_grant" AS grant_projection
+          JOIN "hosted_usage_credit_entry" AS entry
+            ON entry."id" = grant_projection."entry_id"
+          WHERE grant_projection."beneficiary_member_id" = "hosted_member"."id"
+            AND grant_projection."remaining_usd_micros" > 0
+            AND entry."kind" = 'starter_grant'
+        ), 0)::bigint AS "remainingStarterCreditUsdMicros",
         "usage_credit_balance_usd_micros" AS "usageCreditBalanceUsdMicros",
         "usage_credit_ledger_version" AS "usageCreditLedgerVersion"
       FROM "hosted_member" AS "hosted_member"
@@ -1061,33 +1041,10 @@ async function resetHostedOpsMemberUsageTransaction(
       throw new HostedOpsMemberUsageResetStaleError();
     }
 
-    if (
-      input.operationId
-      && canonicalGate.allowanceSource === "direct_starter"
-      && canonicalGate.allowed
-    ) {
-      const runtimeRecheckRequired =
-        await hasHostedOpsStarterResetRuntimeRecovery({
-          memberId: input.memberId,
-          prisma: tx,
-        });
-      const result = createHostedOpsMemberUsageResetAllNoopResult({
-        memberId: input.memberId,
-        now: input.now,
-        outcome: runtimeRecheckRequired ? "unchanged" : "skipped",
-        resetMode: runtimeRecheckRequired
-          ? "starter_allowance"
-          : null,
-        runtimeRecheckRequired,
-      });
-      await createHostedOpsMemberUsageResetAllReceipt({
-        operationId: input.operationId,
-        result,
-        tx,
-      });
-      return result;
-    }
-
+    const starterAllowanceDeficitUsdMicros =
+      member.remainingStarterCreditUsdMicros < HOSTED_STARTER_USAGE_GRANT_USD_MICROS
+        ? HOSTED_STARTER_USAGE_GRANT_USD_MICROS - member.remainingStarterCreditUsdMicros
+        : 0n;
     const resettableDecision = canonicalGate.allowed
       || canonicalGate.reason === "ai_usage_limit_exceeded";
     if (input.operationId && !resettableDecision) {
@@ -1114,6 +1071,7 @@ async function resetHostedOpsMemberUsageTransaction(
         : "included_usage";
     if (
       resetMode === "starter_allowance"
+      && !input.operationId
       && (
         canonicalGate.allowed
         || canonicalGate.reason !== "ai_usage_limit_exceeded"
@@ -1124,6 +1082,7 @@ async function resetHostedOpsMemberUsageTransaction(
     }
     if (
       resetMode === "starter_allowance"
+      && usageCreditBalanceUsdMicros === 0n
       && member.hasActiveUsageCreditGrant
     ) {
       throw new TypeError(
@@ -1227,17 +1186,20 @@ async function resetHostedOpsMemberUsageTransaction(
       });
     }
 
-    const outcome = resetMode === "included_usage"
+    const starterCreditToGrantUsdMicros = resetMode === "starter_allowance"
+      ? starterAllowanceDeficitUsdMicros
+      : 0n;
+    const outcome = starterCreditToGrantUsdMicros === 0n
         && period.spentUsdMicros === 0n
         && period.blockedAt === null
         && delivery === null
       ? "unchanged"
       : "reset";
     let usageCreditGrantedUsdMicros = 0n;
-    if (resetMode === "starter_allowance") {
+    if (starterCreditToGrantUsdMicros > 0n) {
       const grant = await appendHostedUsageCreditGrantTx({
         effectiveAt: input.now,
-        grantUsdMicros: HOSTED_STARTER_USAGE_GRANT_USD_MICROS,
+        grantUsdMicros: starterCreditToGrantUsdMicros,
         lockedBeneficiary: {
           balanceUsdMicros: usageCreditBalanceUsdMicros,
           beneficiaryMemberId: input.memberId,
@@ -1264,7 +1226,7 @@ async function resetHostedOpsMemberUsageTransaction(
           "Hosted ops Starter reset unexpectedly replayed an existing grant.",
         );
       }
-      usageCreditGrantedUsdMicros = HOSTED_STARTER_USAGE_GRANT_USD_MICROS;
+      usageCreditGrantedUsdMicros = starterCreditToGrantUsdMicros;
     }
     if (outcome === "reset") {
       const updated = await tx.hostedAiUsagePeriod.updateMany({

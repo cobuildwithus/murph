@@ -19,7 +19,8 @@ import {
   buildSensitiveActionMessage,
   buildSettingsSensitiveActionBinding,
   createSensitiveActionChallenge,
-  verifyAndConsumeSensitiveActionChallenge,
+  verifySensitiveActionChallenge,
+  consumeSensitiveActionChallengeTx,
 } from "@/src/lib/sensitive-actions/server";
 
 const PRIVATE_KEY = "0x0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" as const;
@@ -336,6 +337,9 @@ function createPrismaFake() {
   const rows = new Map<string, Row>();
   const prisma = {
     __rows: rows,
+    $queryRaw: vi.fn().mockResolvedValue([]),
+    hostedMember: { findUnique: vi.fn().mockResolvedValue({ suspendedAt: null }) },
+    hostedMemberApprovalCredentials: { findUnique: vi.fn().mockResolvedValue(null) },
     async $transaction<T>(callback: (tx: PrismaClient) => Promise<T>) {
       return callback(prisma as unknown as PrismaClient);
     },
@@ -375,4 +379,9 @@ function createPrismaFake() {
     },
   };
   return prisma as unknown as PrismaClient & { __rows: Map<string, Row> };
+}
+
+async function verifyAndConsumeSensitiveActionChallenge(input: Parameters<typeof verifySensitiveActionChallenge>[0]) {
+  const challenge = await verifySensitiveActionChallenge(input);
+  return input.prisma.$transaction((prisma) => consumeSensitiveActionChallengeTx({ challenge, now: input.now, prisma }));
 }

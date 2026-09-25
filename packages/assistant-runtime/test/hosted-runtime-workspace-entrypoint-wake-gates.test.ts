@@ -1,7 +1,8 @@
 import {
   TEST_NOW,
   TEST_USER_ID,
-  createBundleRef,
+  createSnapshotFixtureRef,
+  createVaultSnapshotBundle,
   createDeferred,
   createMailboxItem,
   createMailboxPort,
@@ -136,12 +137,15 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps one projectio
         sleepStartAt: "2026-04-26T22:04:00.000Z",
       }]);
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      // Restore canonical timezone metadata instead of a null/empty workspace.
+      const initialSnapshot = await createVaultSnapshotBundle({ vaultRoot });
+      const artifactBytesByHash = new Map([[initialSnapshot.hash, initialSnapshot.bytes]]);
 
       resultPromise = runHostedWorkspaceRuntimeJobInProcess(
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_runtime_vault_share_conversation_preempt",
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
@@ -150,13 +154,9 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps one projectio
         {
           async createCheckpointSnapshot(snapshotInput) {
             events.push(`snapshot:${snapshotInput.reason}`);
-            return {
-              snapshotRef: createBundleRef({
-                hash: "b".repeat(64),
-                key: "users/bundles/member-synthetic/runtime-vault-share-conversation-preempt.bundle.json",
-                size: 640,
-              }),
-            };
+            const snapshot = await createVaultSnapshotBundle({ vaultRoot });
+            artifactBytesByHash.set(snapshot.hash, snapshot.bytes);
+            return { snapshotRef: snapshot.snapshotRef };
           },
           async importItem(item) {
             events.push(`mailbox.importItem:${item.item.id}`);
@@ -173,6 +173,7 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps one projectio
             };
           },
           platform: createPlatform({
+            artifactBytesByHash,
             mailboxPort: createMailboxPort({
               events,
               fetchRequests,
@@ -245,7 +246,7 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps one projectio
                 });
               },
               events,
-              workspace: createWorkspaceState({ version: "4" }),
+              workspace: createWorkspaceState({ snapshotRef: initialSnapshot.snapshotRef, version: "4" }),
             }),
           }),
           runtimeWakeSignal,
@@ -435,9 +436,11 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps one projectio
       assert.ok(events.includes("vault-share.deliver:done"), events.join(","));
       assert.equal(activeProjectionDeliveries, 0);
       assert.ok(activeScopeReads >= 2);
-      assert.equal(projectionDeliveryCalls, 4);
+      assert.equal(projectionDeliveryCalls, 6);
       assert.deepEqual(projectionKinds, [
         "sleep-times.v0",
+        "profile-name.v0",
+        "time-zone.v0",
         "sleep-times.v0",
         "profile-name.v0",
         "time-zone.v0",
@@ -484,7 +487,7 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps one projectio
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_runtime_vault_share_checkpoint_failure",
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
@@ -494,9 +497,8 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps one projectio
           async createCheckpointSnapshot(snapshotInput) {
             events.push(`snapshot:${snapshotInput.reason}`);
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "e".repeat(64),
-                key: "users/bundles/member-synthetic/runtime-vault-share-checkpoint.bundle.json",
                 size: 640,
               }),
             };
@@ -588,7 +590,7 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps one projectio
     const runtimeAbortController = new AbortController();
     const runtimeAbortReason = new Error("synthetic stale gate foreground proof complete");
     const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
-    const idleCheckpointDelayMs = 1;
+    const runnerIdleTtlMs = 1;
     const runtimeTransitionTimeoutMs = 15_000;
     const systemFollowUpWakeAt = "2099-04-27T00:10:00.000Z";
     const mailboxItems = [
@@ -607,7 +609,7 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps one projectio
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_runtime_foreground_stale_gate",
-            idleCheckpointDelayMs,
+            runnerIdleTtlMs,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
@@ -617,9 +619,8 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps one projectio
           async createCheckpointSnapshot(snapshotInput) {
             events.push(`snapshot:${snapshotInput.reason}`);
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "e".repeat(64),
-                key: "users/bundles/member-synthetic/runtime-foreground-stale-gate.bundle.json",
                 size: 640,
               }),
             };
@@ -757,7 +758,7 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps one projectio
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_runtime_foreground_device_gate",
-            idleCheckpointDelayMs: 25,
+            runnerIdleTtlMs: 25,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
@@ -767,9 +768,8 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps one projectio
           async createCheckpointSnapshot(snapshotInput) {
             events.push(`snapshot:${snapshotInput.reason}`);
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "d".repeat(64),
-                key: "users/bundles/member-synthetic/runtime-foreground-device-gate.bundle.json",
                 size: 640,
               }),
             };
@@ -895,7 +895,7 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps one projectio
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_runtime_device_continuation_key",
-            idleCheckpointDelayMs: 25,
+            runnerIdleTtlMs: 25,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
@@ -905,9 +905,8 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps one projectio
           async createCheckpointSnapshot(snapshotInput) {
             events.push(`snapshot:${snapshotInput.reason}`);
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "e".repeat(64),
-                key: "users/bundles/member-synthetic/runtime-device-continuation-key.bundle.json",
                 size: 640,
               }),
             };
@@ -961,7 +960,6 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps one projectio
               });
               return {
                 checkpointReason: "assistant_runtime_commit" as const,
-                deviceSyncMaintenanceRan: true,
                 nextWakeAt: continuationWakeAt,
                 nextWakeReason: "device-sync.reconcile",
                 progressed: true,
@@ -972,10 +970,6 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps one projectio
               };
             }
 
-            assert.deepEqual(input.deviceSyncWorkspaceWakeHandled, {
-              nextWakeAt: initialWakeAt,
-              nextWakeReason: "device-sync.reconcile",
-            });
             assert.equal(input.workspace?.nextWakeAt, initialWakeAt);
             assert.equal(input.workspace?.nextWakeReason, "device-sync.reconcile");
             if (lateConversationInputId) {
@@ -1034,7 +1028,7 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps one projectio
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_runtime_foreground_outbox_gate",
-            idleCheckpointDelayMs: 25,
+            runnerIdleTtlMs: 25,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
@@ -1044,9 +1038,8 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps one projectio
           async createCheckpointSnapshot(snapshotInput) {
             events.push(`snapshot:${snapshotInput.reason}`);
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "b".repeat(64),
-                key: "users/bundles/member-synthetic/runtime-foreground-outbox-gate.bundle.json",
                 size: 640,
               }),
             };
@@ -1218,7 +1211,7 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps one projectio
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_runtime_same_device_gate",
-            idleCheckpointDelayMs: 25,
+            runnerIdleTtlMs: 25,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
@@ -1228,9 +1221,8 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps one projectio
           async createCheckpointSnapshot(snapshotInput) {
             events.push(`snapshot:${snapshotInput.reason}`);
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "c".repeat(64),
-                key: "users/bundles/member-synthetic/runtime-same-device-gate.bundle.json",
                 size: 640,
               }),
             };
@@ -1324,7 +1316,7 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps one projectio
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_runtime_replaced_device_gate",
-            idleCheckpointDelayMs: 120,
+            runnerIdleTtlMs: 120,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
@@ -1334,9 +1326,8 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps one projectio
           async createCheckpointSnapshot(snapshotInput) {
             events.push(`snapshot:${snapshotInput.reason}`);
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "b".repeat(64),
-                key: "users/bundles/member-synthetic/runtime-replaced-device-gate.bundle.json",
                 size: 640,
               }),
             };
@@ -1418,7 +1409,7 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps one projectio
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_runtime_idle_checkpoint_timer",
-            idleCheckpointDelayMs: 250,
+            runnerIdleTtlMs: 250,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
@@ -1428,9 +1419,8 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps one projectio
           async createCheckpointSnapshot(snapshotInput) {
             assert.equal(snapshotInput.idleCheckpointTrigger, "idle_window");
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "d".repeat(64),
-                key: "users/bundles/member-synthetic/runtime-idle-checkpoint-timer.bundle.json",
                 size: 640,
               }),
             };
@@ -1466,7 +1456,7 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps one projectio
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-idle-checkpoint-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
-    const idleCheckpointDelayMs = 1_000;
+    const runnerIdleTtlMs = 1_000;
     const providerCleanupWakeAt = new Date(Date.now() + 5 * 60_000).toISOString();
     let snapshotStartedAtMs: number | null = null;
 
@@ -1477,7 +1467,7 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps one projectio
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_runtime_provider_cleanup_idle_delay",
-            idleCheckpointDelayMs,
+            runnerIdleTtlMs,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
@@ -1489,9 +1479,8 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps one projectio
             events.push(`snapshot:${snapshotInput.reason}`);
             assert.equal(snapshotInput.reason, "idle_shutdown");
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "6".repeat(64),
-                key: "users/bundles/member-synthetic/provider-cleanup-idle-delay.bundle.json",
                 size: 640,
               }),
             };
@@ -1532,7 +1521,7 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps one projectio
       assert.equal(checkpointRequests[0]?.nextWakeAt, providerCleanupWakeAt);
       assert.equal(checkpointRequests[0]?.nextWakeReason, "assistant");
       assert.ok(snapshotStartedAtMs !== null);
-      assert.ok(snapshotStartedAtMs - startedAt >= idleCheckpointDelayMs - 50);
+      assert.ok(snapshotStartedAtMs - startedAt >= runnerIdleTtlMs - 50);
       assert.ok(snapshotStartedAtMs - startedAt < 5_000);
       assert.deepEqual(checkpointRequests.map((request) => request.reason), [
         "idle_shutdown",
@@ -1546,7 +1535,7 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps one projectio
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-provider-cleanup-replace-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
-    const idleCheckpointDelayMs = 250;
+    const runnerIdleTtlMs = 250;
     let replacementWakeAt: string | null = null;
     let snapshotStartedAtMs: number | null = null;
 
@@ -1565,7 +1554,7 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps one projectio
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_runtime_provider_cleanup_replace_idle_delay",
-            idleCheckpointDelayMs,
+            runnerIdleTtlMs,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
@@ -1577,9 +1566,8 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps one projectio
             events.push(`snapshot:${snapshotInput.reason}`);
             assert.equal(snapshotInput.reason, "idle_shutdown");
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "7".repeat(64),
-                key: "users/bundles/member-synthetic/provider-cleanup-replace-idle-delay.bundle.json",
                 size: 640,
               }),
             };
@@ -1602,7 +1590,7 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps one projectio
             return {
               afterCheckpoint: async () => {
                 replacementWakeAt = new Date(
-                  Date.now() + idleCheckpointDelayMs + 1_000,
+                  Date.now() + runnerIdleTtlMs + 1_000,
                 ).toISOString();
                 const checkpoint = await recordHostedProviderCleanupBeforeCommit({
                   checkpoint: {
@@ -1637,7 +1625,7 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps one projectio
         nextWakeAt: replacementWakeAt,
       });
       assert.ok(snapshotStartedAtMs !== null);
-      assert.ok(snapshotStartedAtMs - startedAt >= idleCheckpointDelayMs - 50);
+      assert.ok(snapshotStartedAtMs - startedAt >= runnerIdleTtlMs - 50);
       assert.ok(snapshotStartedAtMs - startedAt < 5_000);
     } finally {
       await removeTempRoot(vaultRoot);
@@ -1648,7 +1636,7 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps one projectio
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-idle-checkpoint-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
-    const idleCheckpointDelayMs = 250;
+    const runnerIdleTtlMs = 250;
     const projectedWakeAt = new Date(Date.now()).toISOString();
     let assistantPhaseCalls = 0;
     let firstCheckpointStartedAtMs: number | null = null;
@@ -1660,7 +1648,7 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps one projectio
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_runtime_idle_checkpoint_projected_wake",
-            idleCheckpointDelayMs,
+            runnerIdleTtlMs,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
@@ -1671,9 +1659,8 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps one projectio
             firstCheckpointStartedAtMs ??= performance.now();
             events.push(`snapshot:${snapshotInput.reason}`);
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "8".repeat(64),
-                key: "users/bundles/member-synthetic/runtime-idle-checkpoint-projected-wake.bundle.json",
                 size: 640,
               }),
             };
@@ -1684,7 +1671,7 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps one projectio
           platform: createPlatform({
             mailboxPort: createMailboxPort({
               events,
-              items: [],
+              items: [createMailboxItem()],
             }),
             workspacePort: createWorkspacePort({
               checkpointRequests,
@@ -1725,7 +1712,7 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps one projectio
       const elapsedMs = performance.now() - startedAt;
       assert.ok(elapsedMs < 2_000);
       assert.ok(firstCheckpointStartedAtMs !== null);
-      assert.ok(firstCheckpointStartedAtMs - startedAt >= idleCheckpointDelayMs - 50);
+      assert.ok(firstCheckpointStartedAtMs - startedAt >= runnerIdleTtlMs - 50);
       assert.equal(assistantPhaseCalls, 2);
       const secondAssistantPhaseIndex = events.indexOf("assistant.phase:2");
       const snapshotIndex = events.findIndex((event) => event === "snapshot:idle_shutdown");
@@ -1745,7 +1732,7 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps one projectio
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-idle-checkpoint-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
-    const idleCheckpointDelayMs = 180_000;
+    const runnerIdleTtlMs = 180_000;
     const projectedWakeAt = new Date(Date.parse(TEST_NOW) + 60_000).toISOString();
     const assistantOneObserved = createDeferred<void>();
     const assistantTwoObserved = createDeferred<void>();
@@ -1761,7 +1748,7 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps one projectio
           createWorkspaceRuntimeJobInput({
             request: {
               attemptId: "attempt_synthetic_runtime_projected_wake_deadline_checkpoint",
-              idleCheckpointDelayMs,
+              runnerIdleTtlMs,
               leaseGeneration: "9",
               userId: TEST_USER_ID,
               workspaceVersion: "4",
@@ -1772,9 +1759,8 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps one projectio
               firstCheckpointStartedAtMs ??= Date.now();
               events.push(`snapshot:${snapshotInput.reason}`);
               return {
-                snapshotRef: createBundleRef({
+                snapshotRef: createSnapshotFixtureRef({
                   hash: "9".repeat(64),
-                  key: "users/bundles/member-synthetic/runtime-projected-wake-deadline.bundle.json",
                   size: 640,
                 }),
               };
@@ -1785,7 +1771,7 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps one projectio
             platform: createPlatform({
               mailboxPort: createMailboxPort({
                 events,
-                items: [],
+                items: [createMailboxItem()],
               }),
               workspacePort: createWorkspacePort({
                 checkpointRequests,
@@ -1843,7 +1829,7 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps one projectio
       await vi.advanceTimersByTimeAsync(1_000);
       const result = await resultPromise;
 
-      assert.equal(firstCheckpointStartedAtMs, Date.parse(TEST_NOW) + idleCheckpointDelayMs);
+      assert.equal(firstCheckpointStartedAtMs, Date.parse(TEST_NOW) + runnerIdleTtlMs);
       assert.equal(assistantPhaseCalls, 2);
       assert.deepEqual(checkpointRequests.map((request) => request.reason), [
         "idle_shutdown",
@@ -1866,9 +1852,9 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps one projectio
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-idle-checkpoint-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
-    const idleCheckpointDelayMs = 180_000;
+    const runnerIdleTtlMs = 180_000;
     const projectedWakeAt = new Date(
-      Date.parse(TEST_NOW) + idleCheckpointDelayMs,
+      Date.parse(TEST_NOW) + runnerIdleTtlMs,
     ).toISOString();
     const assistantOneObserved = createDeferred<void>();
     let assistantPhaseCalls = 0;
@@ -1882,7 +1868,7 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps one projectio
           createWorkspaceRuntimeJobInput({
             request: {
               attemptId: "attempt_synthetic_runtime_projected_wake_at_idle_floor",
-              idleCheckpointDelayMs,
+              runnerIdleTtlMs,
               leaseGeneration: "9",
               userId: TEST_USER_ID,
               workspaceVersion: "4",
@@ -1892,9 +1878,8 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps one projectio
             async createCheckpointSnapshot(snapshotInput) {
               events.push(`snapshot:${snapshotInput.reason}`);
               return {
-                snapshotRef: createBundleRef({
+                snapshotRef: createSnapshotFixtureRef({
                   hash: "b".repeat(64),
-                  key: "users/bundles/member-synthetic/runtime-projected-wake-at-floor.bundle.json",
                   size: 640,
                 }),
               };
@@ -1903,7 +1888,7 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps one projectio
               return { status: "imported" };
             },
             platform: createPlatform({
-              mailboxPort: createMailboxPort({ events, items: [] }),
+              mailboxPort: createMailboxPort({ events, items: [createMailboxItem()] }),
               workspacePort: createWorkspacePort({
                 checkpointRequests,
                 events,
@@ -1939,7 +1924,7 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps one projectio
 
       await withRealTimeout(assistantOneObserved.promise, 15_000, () => events.join(","));
       await waitForFakeTimerScheduled(() => events.join(","));
-      await vi.advanceTimersByTimeAsync(idleCheckpointDelayMs - 1);
+      await vi.advanceTimersByTimeAsync(runnerIdleTtlMs - 1);
       assert.equal(assistantPhaseCalls, 1);
       assert.equal(checkpointRequests.length, 0);
 
@@ -1967,7 +1952,7 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps one projectio
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-idle-checkpoint-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
-    const idleCheckpointDelayMs = 180_000;
+    const runnerIdleTtlMs = 180_000;
     const retryDelayMs = 60_000;
     const retryWakeAt = new Date(Date.parse(TEST_NOW) + retryDelayMs).toISOString();
     const assistantOneObserved = createDeferred<void>();
@@ -1984,7 +1969,7 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps one projectio
           createWorkspaceRuntimeJobInput({
             request: {
               attemptId: "attempt_synthetic_runtime_progressed_false_retry",
-              idleCheckpointDelayMs,
+              runnerIdleTtlMs,
               leaseGeneration: "9",
               userId: TEST_USER_ID,
               workspaceVersion: "4",
@@ -1995,9 +1980,8 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps one projectio
               firstCheckpointStartedAtMs ??= Date.now();
               events.push(`snapshot:${snapshotInput.reason}`);
               return {
-                snapshotRef: createBundleRef({
+                snapshotRef: createSnapshotFixtureRef({
                   hash: "a".repeat(64),
-                  key: "users/bundles/member-synthetic/runtime-progressed-false-retry.bundle.json",
                   size: 640,
                 }),
               };
@@ -2061,14 +2045,14 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps one projectio
       await withRealTimeout(assistantTwoObserved.promise, 15_000, () => events.join(","));
       assert.equal(checkpointRequests.length, 0);
 
-      await vi.advanceTimersByTimeAsync(idleCheckpointDelayMs - 1);
+      await vi.advanceTimersByTimeAsync(runnerIdleTtlMs - 1);
       assert.equal(checkpointRequests.length, 0);
       await vi.advanceTimersByTimeAsync(1);
       const result = await resultPromise;
 
       assert.equal(
         firstCheckpointStartedAtMs,
-        Date.parse(TEST_NOW) + retryDelayMs + idleCheckpointDelayMs,
+        Date.parse(TEST_NOW) + retryDelayMs + runnerIdleTtlMs,
       );
       assert.deepEqual(events.filter((event) => event.startsWith("assistant.phase:")), [
         "assistant.phase:1:none",
@@ -2102,7 +2086,7 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps one projectio
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_runtime_receipt_status_followup",
-            idleCheckpointDelayMs: 25,
+            runnerIdleTtlMs: 25,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
@@ -2112,9 +2096,8 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps one projectio
           async createCheckpointSnapshot(snapshotInput) {
             events.push(`snapshot:${snapshotInput.reason}`);
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: `${checkpointRequests.length}`.repeat(64).slice(0, 64),
-                key: "users/bundles/member-synthetic/runtime-receipt-status-followup.bundle.json",
                 size: 640,
               }),
             };
@@ -2194,7 +2177,7 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps one projectio
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
-    const idleCheckpointDelayMs = 75;
+    const runnerIdleTtlMs = 75;
     const projectedWakeAt = new Date(Date.now()).toISOString();
     let assistantPhaseCalls = 0;
 
@@ -2204,7 +2187,7 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps one projectio
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_runtime_idle_checkpoint_external_after_projected",
-            idleCheckpointDelayMs,
+            runnerIdleTtlMs,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
@@ -2214,9 +2197,8 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps one projectio
           async createCheckpointSnapshot(snapshotInput) {
             events.push(`snapshot:${snapshotInput.reason}`);
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "7".repeat(64),
-                key: "users/bundles/member-synthetic/runtime-idle-checkpoint-external-after-projected.bundle.json",
                 size: 640,
               }),
             };
@@ -2281,7 +2263,7 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps one projectio
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const mailboxItems: HostedMailboxItem[] = [];
     const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
-    const idleCheckpointDelayMs = 500;
+    const runnerIdleTtlMs = 500;
     const projectedWakeDelayMs = 5_000;
     let assistantPhaseCalls = 0;
     let projectedWakeAt: string | null = null;
@@ -2295,7 +2277,7 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps one projectio
           createWorkspaceRuntimeJobInput({
             request: {
               attemptId: "attempt_synthetic_post_checkpoint_external_future_wake",
-              idleCheckpointDelayMs,
+              runnerIdleTtlMs,
               leaseGeneration: "9",
               userId: TEST_USER_ID,
               workspaceVersion: "4",
@@ -2305,11 +2287,8 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps one projectio
             async createCheckpointSnapshot(snapshotInput) {
               events.push(`snapshot:${snapshotInput.reason}`);
               return {
-                snapshotRef: createBundleRef({
+                snapshotRef: createSnapshotFixtureRef({
                   hash: `${checkpointRequests.length}`.repeat(64).slice(0, 64),
-                  key:
-                    "users/bundles/member-synthetic/"
-                    + "runtime-post-checkpoint-external-future-wake.bundle.json",
                   size: 640,
                 }),
               };
@@ -2462,7 +2441,7 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps one projectio
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_runtime_idle_checkpoint_timer_before_projected_wake",
-            idleCheckpointDelayMs: 250,
+            runnerIdleTtlMs: 250,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
@@ -2472,9 +2451,8 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps one projectio
           async createCheckpointSnapshot(snapshotInput) {
             assert.equal(snapshotInput.idleCheckpointTrigger, "idle_window");
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "9".repeat(64),
-                key: "users/bundles/member-synthetic/runtime-idle-checkpoint-timer-before-wake.bundle.json",
                 size: 640,
               }),
             };
@@ -2485,7 +2463,7 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps one projectio
           platform: createPlatform({
             mailboxPort: createMailboxPort({
               events,
-              items: [],
+              items: [createMailboxItem()],
             }),
             workspacePort: createWorkspacePort({
               checkpointRequests,
@@ -2529,7 +2507,7 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps one projectio
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_runtime_idle_checkpoint_wrong_user",
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
@@ -2539,9 +2517,8 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps one projectio
           async createCheckpointSnapshot(snapshotInput) {
             assert.equal(snapshotInput.idleCheckpointTrigger, "idle_window");
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "e".repeat(64),
-                key: "users/bundles/member-synthetic/runtime-idle-checkpoint-wrong-user.bundle.json",
                 size: 256,
               }),
             };

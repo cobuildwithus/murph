@@ -75,7 +75,8 @@ describe('assistant execution prompt contract', () => {
       channel: 'linq',
     }).prompt
 
-    expect(prompt).toContain('existing private direct Murph conversation')
+    expect(prompt).toContain('a private direct Murph conversation')
+    expect(prompt).toContain('This is an output-only turn. Do not call tools')
     expect(prompt).toContain('bounded committed private conversation history')
     expect(prompt).toContain('The platform owns delivery')
     expect(prompt).toContain('"kind":"send_message"')
@@ -152,6 +153,13 @@ describe('assistant execution prompt contract', () => {
     const scopedSafety =
       'A diagnosis, medication, disability, age, pregnancy status, allergy, dietary restriction, or other health-context fact can change or block the specific advice it affects, but it is not a blanket veto on benign calculations, summaries, logging, education, or unrelated low-risk actions.'
 
+    expect(groupPrompt).toContain('If an attended request expands into several record edits or repeated repairs')
+    expect(groupPrompt).toContain('Send at most one short, natural group progress update')
+    const unavailable = buildAssistantExecutionBehaviorText({
+      profile: 'gpt5-agentic', progressUpdatesAvailable: false,
+    })
+    expect(unavailable).toContain('Member-visible interim progress is unavailable on this route')
+    expect(unavailable).not.toContain('send one update before starting')
     expect(groupPrompt).toContain(sharedIdentity)
     expect(directPrompt).toContain(sharedIdentity)
     expect(groupPrompt).toContain(sharedStyleOwner)
@@ -529,7 +537,7 @@ describe('assistant execution prompt contract', () => {
       'Do not repeat child reads/analysis/writes except canonical readback before claiming a write.',
     )
     expect(prompt).toContain(
-      'Skip tiny lookup/calculation/extraction or work whose assignment/readback exceeds one root pass.',
+      'Unless the user requests delegation, skip tiny lookup/calculation/extraction or work whose assignment/readback exceeds one root pass.',
     )
     expect(prompt).toContain(
       'Do not split one judgment to fill slots.',
@@ -558,13 +566,13 @@ describe('assistant execution prompt contract', () => {
       'Child is a one-shot leaf: complete only the assignment, then stop.',
     )
     expect(prompt).toContain(
-      'Do not message/resume/reuse/close/interrupt/wait on/nest it or hold the reply open.',
+      'Do not message/resume/reuse/close/interrupt/nest it. Wait only when its result is needed to answer; independent background work must not hold the reply open.',
     )
     expect(prompt).toContain(
-      'Root keeps safety, permissions, user comms, voice, sensitive reasoning, reply-critical work, final synthesis, dynamic/server tools, browser, phone, external actions.',
+      'Root keeps safety, permissions, user comms, voice, sensitive reasoning, final synthesis, dynamic/server tools, browser, phone, external actions.',
     )
     expect(prompt).toContain(
-      'If current answer/safe action depends on it, do it once in root.',
+      'Do reply-critical work once in root by default; an explicitly requested bounded lookup may run in a child, with the root waiting and synthesizing its result.',
     )
     expect(prompt).toContain(
       'On every later ordinary inbound turn, revisit each child you spawned that was still generating when you sent the spawning reply',
@@ -576,7 +584,7 @@ describe('assistant execution prompt contract', () => {
       'Stop revisiting that child after using its result, or after it fails, is cancelled, or loses relevance.',
     )
     expect(prompt).toContain(
-      'do not call `wait_agent`, wait, or block the reply.',
+      'Otherwise, do not wait or block the reply; handle the current request and check again on the next ordinary inbound turn.',
     )
     expect(prompt).toContain(
       'Never perform this recheck during a scheduled automation, maintenance, system-notification, or output-only turn.',
@@ -588,7 +596,7 @@ describe('assistant execution prompt contract', () => {
       'Use a newly completed result at most once and only when it is still relevant.',
     )
     expect(groupPrompt).toContain(
-      'do not call `wait_agent`, wait, or block the reply.',
+      'Otherwise, do not wait or block the reply; handle the current request and check again on the next ordinary inbound turn.',
     )
     expect(prompt).toContain(
       'Reply may say the team is sorting/saving what the user shared',
@@ -658,7 +666,8 @@ describe('assistant execution prompt contract', () => {
     expect(directPrompt).toContain('hypothetical questions are not events')
     expect(directPrompt).toContain('use `note` when none fits')
     expect(directPrompt).toContain('start one workout')
-    expect(directPrompt).toContain('Check at 13:00 local')
+    expect(directPrompt).toContain("member's assigned local schedule")
+    expect(directPrompt).not.toContain('Check at 13:00 local')
     expect(directPrompt).toContain(
       'vault-cli wearables patterns --date <local-date> --format json',
     )
@@ -1121,7 +1130,13 @@ describe('assistant execution prompt contract', () => {
 
     expect(prompt).toContain('Vault file sends:')
     expect(prompt).toContain('Export requested vault files.')
-    expect(prompt).toContain('ZIPs may read originals in place. Inspect before refusing.')
+    expect(prompt).toContain('ZIPs may read originals in place')
+    expect(prompt).toContain("archive all files under that member's workspace root as-is")
+    expect(prompt).toContain('any credential-bearing records present')
+    expect(prompt).toContain('without content-based exclusion, redaction, or sanitization')
+    expect(prompt).not.toContain('Exclude credentials, tokens, environment secrets')
+    expect(prompt).not.toContain('include a non-sensitive omission notice')
+    expect(prompt).toContain("submit only the new ZIP's generated-delivery ref")
     expect(prompt).toContain(
       'For a newly generated file requested for sending now',
     )
@@ -1348,16 +1363,16 @@ describe('assistant execution prompt contract', () => {
       'Use `murph.send_progress_update` for interim updates the member must see; commentary does not count',
     )
     expect(prompt).toContain(
-      'Default to no progress update',
+      'Keep quick answers and one or two straightforward actions quiet',
     )
     expect(prompt).toContain(
-      'Send one only when the member is likely to wait noticeably',
+      'For several record edits, 3+ substantive checks/actions',
     )
     expect(prompt).toContain(
-      'Routine onboarding/setup never qualifies by itself, even when it uses tools or the runtime is slow',
+      'If a quick task expands into repeated repairs, additional edits, or a noticeable wait',
     )
     expect(prompt).toContain(
-      'one or two quick calls, and the next setup question go straight to the final reply',
+      'aim to update before about 20 seconds of silent work',
     )
     expect(prompt).toContain(
       'send a required child-start acknowledgement after spawning.',
@@ -1402,6 +1417,8 @@ describe('assistant execution prompt contract', () => {
     expect(prompt).toContain(
       'Skip skill reads, setup checks, routine single-command reads, quick replies, one-shot logging/capture/memory saves, and auto-transcribed audio unless broader work is long-running.',
     )
+    expect(prompt).not.toContain('Default to no progress update')
+    expect(prompt).not.toContain('Routine onboarding/setup never qualifies by itself')
     expect(prompt).not.toContain('saving recovered data')
     expect(prompt).not.toContain('before the first non-progress tool call')
     expect(prompt).not.toContain(
@@ -1565,40 +1582,27 @@ describe('assistant execution prompt contract', () => {
     }
   })
 
-  it('offers a weather check before saving outdoor reminder automations', () => {
-    const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
-
-    expect(prompt).toContain('Outdoor-conditions reminder guard')
-    expect(prompt).toContain(
-      'reuse a city or region already known from this conversation, saved context, or the plan',
-    )
-    expect(prompt).toContain(
-      'offer once, as an option, to take one; ask for city or region, never an exact address',
-    )
-    expect(prompt).toContain(
-      'let a decline save the automation unchanged without raising it again',
-    )
-    expect(prompt).toContain(
-      'read weather for it before composing the message: call `murph.connected_apps_execute` with no account selector and `toolSlug: OPENWEATHER_API_GET_CURRENT_WEATHER`',
-    )
-    expect(prompt).toContain(
-      'or `OPENWEATHER_API_GET5_DAY_FORECAST` when the activity window is still hours away',
-    )
-    expect(prompt).toContain(
-      'Both slugs are server-allowlisted accountless reads, so search first only when their argument schema is unclear',
-    )
-    expect(prompt).toContain(
-      'name the conditions, then offer the nearest workable time in the same window or an indoor equivalent',
-    )
-    expect(prompt).toContain(
-      "Weather changes a run's wording, never whether it happens",
-    )
-    expect(prompt).toContain(
-      'with no stored location or a failed read, send the ordinary reminder without mentioning the check',
-    )
-    expect(prompt).toContain(
-      'save that coarse location once with `vault-cli memory upsert` so later automations reuse it instead of asking again',
-    )
+  it('routes outdoor authoring and execution to current location policy without freezing a city', () => {
+    for (const turnTrigger of [null, 'automation-cron'] as const) {
+      const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({ turnTrigger }))
+      expect(prompt).toContain("before authoring or running an outdoor reminder, read the `connected-apps` skill's reminder-location policy")
+      expect(prompt).toContain('never freeze an incidental current city into recurring instructions')
+      expect(prompt).toContain('Preserve explicitly fixed destinations and reminder timing')
+      expect(prompt).toContain('Newer member statements and Journal travel override incidental legacy cities')
+      expect(prompt).toContain('Planned arrival is not proof of presence')
+      expect(prompt).toContain('cross-check an inherited incidental city against bounded ongoing/recent canonical travel')
+      expect(prompt).toContain('with its date and any known validity window')
+      expect(prompt).not.toContain('With a location, store it in the instructions')
+      expect(prompt).not.toContain('so later automations reuse it instead of asking again')
+    }
+    const executionOnly = buildAssistantSystemPrompt(createCommonCodexPromptInput({
+      turnTrigger: 'automation-cron', hostedRuntime: true, assistantHostedAutomationAvailable: false,
+    }))
+    expect(executionOnly).toContain('Scheduled automation changes are unavailable in this turn')
+    expect(executionOnly).toContain('Private reminder location:')
+    expect(executionOnly).toContain('cross-check an inherited incidental city')
+    const group = buildAssistantSystemPrompt(createCommonCodexPromptInput({ conversationScope: 'group' }))
+    expect(group).not.toContain('Private reminder location:')
   })
 
   it('keeps outdoor reminder locations out of personal records in group rooms', () => {
@@ -1987,7 +1991,7 @@ describe('assistant consumption lookup guidance', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
 
     expect(prompt).toContain(
-      'Training/movement: daily-activity owns wearable facts; workout-csv-import owns workout CSVs; running-cardio and strength-training own programming; aerobic-fitness, competition-training, mobility-posture, physical-therapy. Use Health Commons for recovery-modality evidence and safety.',
+      'Training/movement: daily-activity owns wearable facts, walking breaks, and everyday movement targets; workout-csv-import owns workout CSVs; running-cardio and strength-training own programming; aerobic-fitness, competition-training, mobility-posture, physical-therapy. Use Health Commons for recovery-modality evidence and safety.',
     )
     expect(prompt).toContain(
       'Strength sets: strength-training chooses one owner. Exact activity-session stays live; exact regimen or experiment owns occurrences even with a workout-format template; only a standalone workout-format reminder starts a workout. Terse wording never switches owners. In groups, hand off privately without reads or writes.',
@@ -2231,7 +2235,29 @@ describe('assistant system prompt cache stability', () => {
     // visibility, and workspace-safe launch recovery; focused Terra proof owns it.
     // Private group-consent recovery adds 609 characters; focused Terra journeys
     // verify the actionable next step and prevent ineffective context handoffs.
-    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(72_803)
+    // Nutrition guidance adds 287 characters; six focused Terra journeys cover
+    // first-card invitation, suppression, routine logging and scheduled closeout.
+    // Selected-date meal recovery adds 164 characters; five focused Terra
+    // journeys cover manual estimation, clarification, and nonnumeric tracking.
+    // Upcoming Journal context adds 29 characters to the skill routing hint;
+    // complete direct/group provider-input measurements cover its composed cost.
+    // Complete private workspace archives replace the former content filtering;
+    // composed input measurement and focused Terra archive inspection cover it.
+    // Meal skill routing adds 300 characters to prevent preflight discovery.
+    // Complete direct/group input measurements and five focused Terra journeys
+    // cover the cost and behavior; retain the existing 41-character margin.
+    // Pattern-ready Journal tags add 1,178 characters. Complete native-provider
+    // direct/group captures and live Sol capture/query proof cover this cost;
+    // retain the previous margin without changing the unchanged group surface.
+    // Saved-duration and support-privacy clarifications use the reviewed margin;
+    // focused Sol journeys retain no-reconfirmation and de-identification checks.
+    // Goal setup distinguishes proposal from execution and reuses completed research.
+    // Complete-input byte measurement covers this increase; conditional support
+    // execution removes about 26 KB from fresh quiet-plan skill reads.
+    // Shared lasting-correction routing adds 1,022 characters. Complete private
+    // and group request measurements plus live task/preference/one-off proof
+    // cover this resident rule; retain the existing base margin.
+    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(77_722)
   })
 
   it('passes the injected CLI contract through byte-for-byte at the stable-route tail', () => {
@@ -2561,7 +2587,7 @@ describe('assistant system prompt cache stability', () => {
       'Current Murph product base URL for user-facing app links: http://localhost:3000',
     )
     expect(promptA.cacheMetadata.staticPromptHash).toBe(
-      '917dbe9fa7eef01764f01d66e7a43914cdf0b943b8c76d89f6e51ccb7e8b7a0b',
+      'd0ad54bd4a67a3937c845bc04aefb4fd4082d67bdca984ed14010e736abc20bf',
     )
     expect(promptA.cacheMetadata.toolSchemaHash).toBe(
       'assistant-tool-schema-common-codex-test',
@@ -2722,7 +2748,7 @@ describe('assistant experiment onboarding guidance', () => {
       'Do not search Health Commons for workflow eligibility resolved by an owning tool or skill from canonical state.',
     )
     expect(prompt).toContain(
-      "Skip this search only when the request is limited to deterministic exact food-label nutrition facts resolved by food-journal's label database; use that database directly.",
+      "For deterministic exact food-label nutrition facts, use food-journal's label database directly.",
     )
     expect(prompt).toContain(
       'Health reasoning or advice beyond the returned label facts still requires Commons.',
@@ -2799,7 +2825,7 @@ describe('assistant experiment onboarding guidance', () => {
       'Do not apply this default to factual questions, logging or record updates, requests to be heard without problem-solving, acute or unstable situations',
     )
     expect(prompt).toContain(
-      'cases primarily owned by urgent or clinician-led evaluation, decisions the existing record already resolves, or cases where one clearly indicated direct action makes comparison unnecessary',
+      'cases primarily owned by urgent or clinician-led evaluation, decisions the existing record already resolves, or ordinary plans with a chosen or clearly indicated action',
     )
     expect(prompt).toContain(
       'give a working assessment plus one context-grounded bounded trial without waiting for experiment vocabulary or an explicit action verb',
@@ -2816,6 +2842,9 @@ describe('assistant experiment onboarding guidance', () => {
     expect(prompt).toContain(
       'For any multi-day or repeated comparison, also read experiment-onboarding',
     )
+    expect(prompt).toContain('For repeated plans, use behavior-followthrough to offer reminders and a check-in proactively.')
+    expect(prompt).not.toContain('add behavior-followthrough only when recurring support matters')
+    expect(groupPrompt).not.toContain('offer reminders and a check-in proactively')
     expect(prompt.match(/Private longitudinal default:/gu) ?? []).toHaveLength(1)
     expect(
       prompt.match(/A reminder, calendar event, check-in, recurring workflow, or tracking plan is a separate action\./gu) ?? [],
@@ -3108,11 +3137,9 @@ describe('assistant Murph onboarding guidance', () => {
     expect(prompt).toContain(
       'For that first-reply fast path, do not read the onboarding skill and do not run `vault-cli assistant onboarding resume-context --format json`.',
     )
-    expect(prompt).toContain('Use the host-rendered current clock in these instructions; only if it is absent, read the current clock once.')
-    expect(prompt).not.toContain('Read the current clock once and use `murph.automation`')
-    expect(prompt).toContain('This injected recipe is the explicit exception to requiring a loaded skill for its stable slug.')
-    expect(prompt).toContain('localAt: { date: <target YYYY-MM-DD>, time: <target HH:MM>, timeZone: <current clock IANA timezone> }')
-    expect(prompt).not.toContain('at: <now + 15 minutes, ISO with offset>')
+    expect(prompt).toContain('Do not schedule a check-in during this opening exchange.')
+    expect(prompt).not.toContain('onboarding-early-stall-check-in')
+    expect(prompt).not.toContain('Early-stall check-in:')
 
     expect(prompt).toContain(
       'hey — what should i call you?',
@@ -3313,19 +3340,19 @@ describe('assistant conversation scope', () => {
     for (const prompt of [directPrompt, groupPrompt]) {
       expect(prompt).toContain('Delegated initiative:')
       expect(prompt).toContain(
-        'When the requester clearly delegates judgment or an outcome—asking Murph to handle something, choose, decide, figure it out, take the lead, use its judgment, or make it happen—take the mandate instead of handing the work back as a checklist.',
+        'when asked to choose, make reasonable reversible choices and state material assumptions.',
       )
       expect(prompt).toContain(
-        'Do not ask for preferences merely to avoid choosing; mention only assumptions that materially affect the result.',
+        'Finish authorized work with verified results or explain the blocker.',
       )
       expect(prompt).toContain(
-        'Ask only for facts that materially change safety, authorization, correctness, or the next useful step.',
+        'Ask only what changes safety, authority, correctness, or the next step.',
       )
       expect(prompt).toContain(
-        'Complete everything useful that is independent of a blocker first.',
+        'Complete independent work first; make required approval concrete.',
       )
       expect(prompt).toContain(
-        'If a texting-route reply still needs user input, ask exactly one highest-value blocker as the final question.',
+        'If input is needed, ask one highest-value blocker last on texting routes.',
       )
       expect(prompt).toContain(
         'Delegation authorizes judgment among already permitted options; it does not create consent or effect authority beyond the request and owning rule.',

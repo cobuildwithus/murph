@@ -92,29 +92,31 @@ export interface HostedUsageCreditOfferDefinition {
   readonly priceIdEnvKey: string;
 }
 
+// New purchases include 80% of the cash price as usage, matching paid plans.
+// Fulfillment honors each purchase's stored grant, including historical offers.
 const HOSTED_USAGE_CREDIT_OFFER_DEFINITIONS = {
   usage_5_usd: {
     cashAmountMinor: 500,
     cashCurrency: "usd",
-    grantUsdMicros: 5_000_000n,
+    grantUsdMicros: 4_000_000n,
     priceIdEnvKey: "HOSTED_ONBOARDING_STRIPE_PRICE_ID_USAGE_CREDIT_5_USD",
   },
   usage_10_usd: {
     cashAmountMinor: 1_000,
     cashCurrency: "usd",
-    grantUsdMicros: 10_000_000n,
+    grantUsdMicros: 8_000_000n,
     priceIdEnvKey: "HOSTED_ONBOARDING_STRIPE_PRICE_ID_USAGE_CREDIT_10_USD",
   },
   usage_20_usd: {
     cashAmountMinor: 2_000,
     cashCurrency: "usd",
-    grantUsdMicros: 20_000_000n,
+    grantUsdMicros: 16_000_000n,
     priceIdEnvKey: "HOSTED_ONBOARDING_STRIPE_PRICE_ID_USAGE_CREDIT_20_USD",
   },
   usage_25_usd: {
     cashAmountMinor: 2_500,
     cashCurrency: "usd",
-    grantUsdMicros: 25_000_000n,
+    grantUsdMicros: 20_000_000n,
     priceIdEnvKey: "HOSTED_ONBOARDING_STRIPE_PRICE_ID_USAGE_CREDIT_25_USD",
   },
 } as const satisfies Record<

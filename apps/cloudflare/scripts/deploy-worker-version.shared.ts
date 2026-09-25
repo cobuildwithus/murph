@@ -9,9 +9,10 @@ import type {
   DirectDeployReleaseEvidence,
 } from "./container-release-receipt.ts";
 
-type EnvSource = Readonly<Record<string, string | undefined>>;
+import { readContainerRolloutMode, type ContainerRolloutMode } from "./container-rollout-policy.ts";
 
-export type ContainerRolloutMode = "gradual" | "immediate" | "worker-only";
+type EnvSource = Readonly<Record<string, string | undefined>>;
+export type { ContainerRolloutMode } from "./container-rollout-policy.ts";
 
 export interface DeploymentStatusPayload {
   created_on: string;
@@ -77,11 +78,6 @@ interface HostedWorkerDeploymentSettings {
   includeSecrets: boolean;
   versionTag: string;
 }
-
-const DEFAULT_CONTAINER_ROLLOUT_BY_CONTEXT: Readonly<Record<string, ContainerRolloutMode>> = {
-  production: "immediate",
-};
-const DEFAULT_CONTAINER_ROLLOUT_MODE: ContainerRolloutMode = "gradual";
 
 export async function runHostedWorkerDeployment(input: {
   configPath: string;
@@ -207,29 +203,11 @@ function resolveHostedWorkerDeploymentSettings(
   return {
     containerRolloutMode: readContainerRolloutMode(
       env.HOSTED_EXECUTION_CONTAINER_ROLLOUT,
-      DEFAULT_CONTAINER_ROLLOUT_BY_CONTEXT[deployContext] ?? DEFAULT_CONTAINER_ROLLOUT_MODE,
     ),
     deploymentMessage: deploymentMessageOverride ?? `${deployContext} direct deploy ${versionTag}`,
     includeSecrets,
     versionTag,
   };
-}
-
-function readContainerRolloutMode(
-  value: string | undefined,
-  defaultMode: ContainerRolloutMode,
-): ContainerRolloutMode {
-  const normalized = normalizeOptionalString(value);
-
-  if (!normalized) {
-    return defaultMode;
-  }
-
-  if (normalized === "gradual" || normalized === "immediate" || normalized === "worker-only") {
-    return normalized;
-  }
-
-  throw new Error("HOSTED_EXECUTION_CONTAINER_ROLLOUT must be 'gradual', 'immediate', or 'worker-only'.");
 }
 
 async function requireCurrentDeployment(

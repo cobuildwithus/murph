@@ -77,7 +77,7 @@ test("protected-main policy owns both immutable native sources", async () => {
   }), /40-character SHA/u);
 });
 
-test("trusted iOS controller is six-hour, latest-outcome gated, and production-only", async () => {
+test("trusted iOS controller is twelve-hour, executed on every admission, and production-only", async () => {
   const workflow = await readFile(
     path.join(REPO_ROOT, ".github", "workflows", "native-ios-hosted-e2e.yml"),
     "utf8",
@@ -87,18 +87,18 @@ test("trusted iOS controller is six-hour, latest-outcome gated, and production-o
     workflow.indexOf("\njobs:\n"),
   );
 
-  assert.match(workflow, /schedule:\n\s+- cron: "17 \*\/6 \* \* \*"/u);
-  assert.match(workflow, /schedule:\n\s+- cron: "17 \*\/6 \* \* \*"\n\s+workflow_dispatch:/u);
+  assert.match(workflow, /schedule:\n\s+- cron: "17 \*\/12 \* \* \*"/u);
+  assert.match(workflow, /schedule:\n\s+- cron: "17 \*\/12 \* \* \*"\n\s+workflow_dispatch:/u);
   assert.match(workflow, /actions: read\n\s+contents: read/u);
   assert.match(workflowConcurrency, /group: native-ios-production-canary/u);
   assert.match(workflowConcurrency, /cancel-in-progress: false/u);
   assert.doesNotMatch(workflowConcurrency, /queue:/u);
-  assert.match(
+  assert.doesNotMatch(
     workflow,
     /native-ios-hosted-e2e\.yml\/runs\?event=schedule&status=completed&per_page=1/u,
   );
   assert.doesNotMatch(workflow, /status=success/u);
-  assert.match(workflow, /previous_conclusion.*success/su);
+  assert.doesNotMatch(workflow, /previous_conclusion/u);
   assert.match(workflow, /RUN_ATTEMPT: \$\{\{ github\.run_attempt \}\}/u);
   assert.match(workflow, /CURRENT_SHA: \$\{\{ github\.sha \}\}/u);
   assert.match(workflow, /EVENT_NAME: \$\{\{ github\.event_name \}\}/u);
@@ -136,14 +136,14 @@ test("trusted iOS controller is six-hour, latest-outcome gated, and production-o
   }
 });
 
-test("iOS controller admits only current-main manual recovery and skips same-SHA success", async () => {
+test("iOS controller admits only current-main manual recovery and executes unchanged revisions on every twelve-hour admission", async () => {
   const workflow = await readFile(
     path.join(REPO_ROOT, ".github", "workflows", "native-ios-hosted-e2e.yml"),
     "utf8",
   );
   const script = extractWorkflowStepScript(
     workflow,
-    "Compare main with the latest completed scheduled outcome",
+    "Validate protected main canary admission",
   );
   const tempDir = await mkdtemp(path.join(tmpdir(), "native-ios-cadence-proof-"));
   try {
@@ -169,7 +169,7 @@ fi
 `, { mode: 0o755 });
     const scenarios = [
       { attempt: "1", conclusion: "", eventName: "schedule", expected: "true", previousSha: "" },
-      { attempt: "1", conclusion: "success", eventName: "schedule", expected: "false", previousSha: SHA },
+      { attempt: "1", conclusion: "success", eventName: "schedule", expected: "true", previousSha: SHA },
       { attempt: "1", conclusion: "failure", eventName: "schedule", expected: "true", previousSha: SHA },
       { attempt: "1", conclusion: "success", eventName: "schedule", expected: "true", previousSha: "c".repeat(40) },
       { attempt: "2", conclusion: "success", eventName: "schedule", expected: "true", previousSha: SHA },
@@ -247,7 +247,7 @@ fi
           ...invalid,
         },
       });
-      assert.equal(result.status, 1);
+      assert.equal(result.status, 0);
     }
 
     const historyFailure = spawnSync("bash", ["-c", script], {
@@ -265,13 +265,72 @@ fi
         RUN_ATTEMPT: "1",
       },
     });
-    assert.equal(historyFailure.status, 42);
+    assert.equal(historyFailure.status, 0);
   } finally {
     await rm(tempDir, { force: true, recursive: true });
   }
 });
 
-test("production canary requires the exact scheduled main revision", () => {
+test("iOS workflow selects the verified deployed revision independently of main", async () => {
+  const workflow = await readFile(
+    path.join(REPO_ROOT, ".github", "workflows", "native-ios-hosted-e2e.yml"),
+    "utf8",
+  );
+  const select = extractWorkflowStepScript(workflow, "Select verified production deployment");
+  const dispatch = workflow.slice(
+    workflow.indexOf("      - name: Verify current production alias and dispatch non-destructive canary"),
+  );
+  assert.match(dispatch, /DEPLOYED_SHA: \$\{\{ steps\.production\.outputs\.web_sha \}\}/u);
+  assert.match(dispatch, /--web-sha "\$\{DEPLOYED_SHA\}"/u);
+  const dir = await mkdtemp(path.join(tmpdir(), "ios-production-selection-"));
+  try {
+    await writeFile(path.join(dir, "git"), `#!/bin/bash
+set -euo pipefail
+[[ "$*" == "merge-base --is-ancestor ${SHA} origin/main" ]] || exit 64
+exit "$ANCESTRY_EXIT"
+`, { mode: 0o700 });
+    await writeFile(path.join(dir, "pnpm"), `#!/bin/bash
+set -euo pipefail
+case "$*" in
+  "--dir apps/web exec tsx scripts/resolve-vercel-production-alias-sha.ts")
+    printf '%s\\n' "$ALIAS_SHA" ;;
+  "--dir apps/web exec tsx scripts/verify-current-vercel-production-deployment.ts")
+    [[ "$DEPLOYED_SHA" == "${SHA}" ]] || exit 65
+    printf '%s\\n' "$VERIFIED_SHA" ;;
+  *) exit 64 ;;
+esac
+`, { mode: 0o700 });
+    const output = path.join(dir, "output");
+    const env = {
+      ...process.env,
+      PATH: `${dir}:${process.env.PATH ?? ""}`,
+      GITHUB_OUTPUT: output,
+      ALIAS_SHA: SHA,
+      ANCESTRY_EXIT: "0",
+      VERIFIED_SHA: SHA,
+      // The controller is newer than production: this must still execute.
+      DEPLOYED_SHA: IOS_SHA,
+    };
+    const run = (script, overrides = {}) => spawnSync("bash", ["-c", script], {
+      cwd: REPO_ROOT, encoding: "utf8", env: { ...env, ...overrides },
+    });
+    assert.equal(run(select).status, 0);
+    assert.equal(await readFile(output, "utf8"), `web_sha=${SHA}\n`);
+    for (const overrides of [
+      { ALIAS_SHA: "invalid" },
+      { ANCESTRY_EXIT: "1" },
+      { VERIFIED_SHA: IOS_SHA },
+    ]) {
+      await writeFile(output, "");
+      assert.notEqual(run(select, overrides).status, 0);
+      assert.equal(await readFile(output, "utf8"), "");
+    }
+  } finally {
+    await rm(dir, { force: true, recursive: true });
+  }
+});
+
+test("production canary requires the exact selected revision at dispatch", () => {
   assert.equal(selectProductionCanaryWebSha(SHA, SHA), SHA);
   assert.throws(
     () => selectProductionCanaryWebSha(SHA, IOS_SHA),

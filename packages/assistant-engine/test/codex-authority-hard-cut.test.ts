@@ -79,13 +79,5 @@ describe('Codex authority hard cut', () => {
     )
   })
 
-  it('does not materialize the displayed Codex default model into CLI turn selection', async () => {
-    const source = await readWorkspacePackageSource(
-      'assistant-cli/src/assistant/ui/chat-controller-models.ts',
-    )
 
-    expect(source).not.toContain(
-      'normalizeNullableString(input.codexDisplay.model)',
-    )
-  })
 })

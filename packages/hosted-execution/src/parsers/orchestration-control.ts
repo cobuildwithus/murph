@@ -1,6 +1,9 @@
+import { parseHostedVoiceCallId } from "../voice-input.ts";
 import {
+  readHostedMailboxWakeHighWater,
   type HostedMailboxLaneLag,
 } from "../runtime-control.ts";
+import { parseHostedRuntimeOwnerResponse } from "../runtime-owner.ts";
 import {
   HOSTED_RUNTIME_ENSURE_PROCESSING_RESPONSE_KINDS,
   HOSTED_RUNTIME_PROCESSING_ACCEPTED_ACTIONS,
@@ -252,8 +255,11 @@ export function parseHostedRuntimeEnsureProcessingRequest(
 ): HostedRuntimeEnsureProcessingRequest {
   const record = requireObject(value, "Hosted runtime ensure-processing request");
   assertExactKeys(record, "Hosted runtime ensure-processing request", [
+    "admission",
     "assistantExecutionBlocked",
     "conversationWorkPending",
+    "voiceCallId",
+    "mailboxWakeHighWater",
     "orchestrationAttemptId",
     "processingMode",
   ]);
@@ -265,6 +271,7 @@ export function parseHostedRuntimeEnsureProcessingRequest(
         "Hosted runtime ensure-processing request processingMode",
         HOSTED_RUNTIME_PROCESSING_MODES,
       );
+  const effectiveProcessingMode = processingMode ?? "default";
   const assistantExecutionBlocked = record.assistantExecutionBlocked === undefined
     ? undefined
     : requireExactTrue(
@@ -276,29 +283,52 @@ export function parseHostedRuntimeEnsureProcessingRequest(
       "Hosted runtime ensure-processing request assistantExecutionBlocked requires system_mailbox processingMode.",
     );
   }
+  if (record.voiceCallId !== undefined && effectiveProcessingMode !== "default") {
+    throw new TypeError("Voice reservation requires default processing mode.");
+  }
+  const mailboxWakeHighWater = readHostedMailboxWakeHighWater(record.mailboxWakeHighWater);
+  if (record.mailboxWakeHighWater !== undefined && !mailboxWakeHighWater) {
+    throw new TypeError("Hosted runtime ensure-processing request mailboxWakeHighWater requires both mailbox lanes.");
+  }
   const conversationWorkPending = record.conversationWorkPending === undefined
     ? undefined
     : requireExactTrue(
         record.conversationWorkPending,
         "Hosted runtime ensure-processing request conversationWorkPending",
       );
-  if (conversationWorkPending && processingMode != null && processingMode !== "default") {
+  if (conversationWorkPending && effectiveProcessingMode !== "default") {
     throw new TypeError(
       "Hosted runtime ensure-processing request conversationWorkPending requires default processingMode.",
     );
   }
 
   return {
+    ...(record.voiceCallId === undefined ? {} : { voiceCallId: parseHostedVoiceCallId(record.voiceCallId) }),
+    ...(record.admission === undefined ? {} : {
+      admission: parseRuntimeProcessingAdmission(record.admission, effectiveProcessingMode),
+    }),
     ...(assistantExecutionBlocked === undefined
       ? {}
       : { assistantExecutionBlocked }),
     ...(conversationWorkPending === undefined ? {} : { conversationWorkPending }),
+    ...(mailboxWakeHighWater ? { mailboxWakeHighWater } : {}),
     orchestrationAttemptId: requireOpaqueIdentifier(
       record.orchestrationAttemptId,
       "Hosted runtime ensure-processing request orchestrationAttemptId",
     ),
     ...(processingMode === undefined ? {} : { processingMode }),
   };
+}
+
+function parseRuntimeProcessingAdmission(value: unknown, processingMode: string) {
+  const admission = parseHostedRuntimeOwnerResponse(value);
+  if (admission.cutover !== "postgres" || !admission.owner || admission.owner.phase === "idle") {
+    throw new TypeError("Runtime admission requires a non-idle Postgres owner.");
+  }
+  if (admission.status === "existing") return admission;
+  if (admission.status === "claimed" && admission.owner.phase === "starting"
+    && admission.owner.processingMode === processingMode) return admission;
+  throw new TypeError("Runtime admission must be existing or a new claim matching the requested mode.");
 }
 
 export function parseHostedRuntimeEnsureProcessingResponse(

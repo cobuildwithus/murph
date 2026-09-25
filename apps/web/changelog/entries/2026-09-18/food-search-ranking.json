@@ -1,0 +1,19 @@
+{
+  "publishedOn": "2026-09-18",
+  "order": 100,
+  "item": {
+    "id": "food-search-ranking",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Food search improvements",
+    "summary": "Food search is more efficient, with the same matches and result order.",
+    "details": "Typo handling and the food information shown with each result stay the same.",
+    "relevanceTags": [
+      "food",
+      "search"
+    ],
+    "sourcePullRequests": [
+      3564
+    ]
+  }
+}

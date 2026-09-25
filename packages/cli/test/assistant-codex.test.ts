@@ -566,7 +566,7 @@ test('executeCodexAppServerTurn classifies resume RPC failures as stale provider
   )
 })
 
-test('executeCodexAppServerTurn interrupts the child and records the provider thread when aborted', async () => {
+test('executeCodexAppServerTurn interrupts the native turn without stopping the child and records the provider thread', async () => {
   const workingDirectory = await createTempDir('assistant-codex-cli-abort-')
   const controller = new AbortController()
   let spawnedChild: MockChildProcess | null = null
@@ -616,6 +616,15 @@ test('executeCodexAppServerTurn interrupts the child and records the provider th
           }),
         )
         controller.abort()
+        const interrupt = await waitForRpcMethod(child, 'turn/interrupt')
+        child.stdout.write(jsonLine({ id: interrupt.id, result: {} }))
+        child.stdout.write(jsonLine({
+          method: 'turn/completed',
+          params: {
+            threadId: 'thread-abort-public',
+            turn: createCodexTurn('turn-abort-public', 'interrupted'),
+          },
+        }))
       })()
     })
 
@@ -648,16 +657,8 @@ test('executeCodexAppServerTurn interrupts the child and records the provider th
       turnId: 'turn-abort-public',
     },
   })
-  assert.deepEqual(child.kill.mock.calls, [
-    ['SIGINT'],
-    ['SIGKILL'],
-    ['SIGKILL'],
-  ])
-  assert.deepEqual(processGroupKill.mock.calls, [
-    [-1234, 'SIGINT'],
-    [-1234, 'SIGKILL'],
-    [-1234, 'SIGKILL'],
-  ])
+  assert.deepEqual(child.kill.mock.calls, [])
+  assert.deepEqual(processGroupKill.mock.calls, [])
 })
 
 test('extractCodexTraceUpdates stays usable through the public assistant-engine codex export', () => {
@@ -684,7 +685,7 @@ test('extractCodexTraceUpdates stays usable through the public assistant-engine 
 
 function createCodexTurn(
   id: string,
-  status: 'completed' | 'inProgress',
+  status: 'completed' | 'inProgress' | 'interrupted',
 ): Record<string, unknown> {
   const completed = status === 'completed'
   return {

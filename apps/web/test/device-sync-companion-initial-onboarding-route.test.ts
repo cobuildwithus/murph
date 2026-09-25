@@ -8,14 +8,14 @@ const mocks = vi.hoisted(() => ({
   readHostedInitialOnboardingState: vi.fn(),
   readHostedMemberMessagingSetupState: vi.fn(),
   readHostedMurphContactContextForMember: vi.fn(),
-  requireActivePrivyMemberAuthFromBearerToken: vi.fn(),
+  requireActiveHostedMemberAuthFromBearerToken: vi.fn(),
   signalHostedMailboxAppendRuntime: vi.fn(),
   transaction: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/request-auth", () => ({
-  requireActivePrivyMemberAuthFromBearerToken:
-    mocks.requireActivePrivyMemberAuthFromBearerToken,
+  requireActiveHostedMemberAuthFromBearerToken:
+    mocks.requireActiveHostedMemberAuthFromBearerToken,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/initial-onboarding", () => ({
@@ -73,7 +73,7 @@ describe("companion initial onboarding routes", () => {
     mocks.transaction.mockImplementation(async (
       callback: (tx: unknown) => Promise<unknown>,
     ) => callback({ tx: true }));
-    mocks.requireActivePrivyMemberAuthFromBearerToken.mockResolvedValue({
+    mocks.requireActiveHostedMemberAuthFromBearerToken.mockResolvedValue({
       member: { id: "member_123" },
     });
     mocks.readHostedInitialOnboardingState.mockResolvedValue({
@@ -123,7 +123,7 @@ describe("companion initial onboarding routes", () => {
     expect(payload.catalog.voices[0].previewURL).toMatch(
       /^https:\/\/www\.withmurph\.ai\/audio\//u,
     );
-    expect(mocks.requireActivePrivyMemberAuthFromBearerToken)
+    expect(mocks.requireActiveHostedMemberAuthFromBearerToken)
       .toHaveBeenCalledWith(request, expect.anything());
   });
 
@@ -200,7 +200,7 @@ describe("companion initial onboarding routes", () => {
   it("keeps bearer authentication and canonical state reads fail-closed", async () => {
     const errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
     const authFailure = new Error("auth failed");
-    mocks.requireActivePrivyMemberAuthFromBearerToken.mockRejectedValue(authFailure);
+    mocks.requireActiveHostedMemberAuthFromBearerToken.mockRejectedValue(authFailure);
     const request = new Request(
       "https://app.example.test/api/device-sync/companion/initial-onboarding",
       { headers: { authorization: "Bearer identity-token" } },
@@ -211,7 +211,7 @@ describe("companion initial onboarding routes", () => {
     expect(authResponse.status).toBe(500);
     expect(mocks.readHostedInitialOnboardingState).not.toHaveBeenCalled();
 
-    mocks.requireActivePrivyMemberAuthFromBearerToken.mockResolvedValue({
+    mocks.requireActiveHostedMemberAuthFromBearerToken.mockResolvedValue({
       member: { id: "member_123" },
     });
     const stateFailure = new Error("state failed");

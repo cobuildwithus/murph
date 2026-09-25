@@ -94,6 +94,13 @@ export const HOSTED_LOCAL_CLOUDFLARE_ACCOUNT_ID =
 export const webDir = path.join(repoRoot, "apps", "web");
 export const cloudflareDir = path.join(repoRoot, "apps", "cloudflare");
 export const cloudflareDevVarsPath = path.join(cloudflareDir, ".dev.vars");
+export const HOSTED_LOCAL_RUNNER_BUNDLE_ROOT = path.join(
+  repoRoot,
+  "apps",
+  "cloudflare",
+  ".deploy",
+  "runner-bundle",
+);
 export const vercelLinkCandidatePaths = [
   path.join(webDir, ".vercel", "project.json"),
   path.join(webDir, ".vercel", "repo.json"),
@@ -182,7 +189,6 @@ export const WRANGLER_VAR_ALLOWLIST = [
   "HOSTED_LOCAL_E2E_PARSER_TOOLCHAIN",
   "FFMPEG_COMMAND",
   "HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS",
-  "HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS",
   "HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS",
   "HOSTED_EXECUTION_RETRY_DELAY_MS",
   "HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS",

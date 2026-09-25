@@ -22,7 +22,6 @@ import {
   runHostedWorkspaceInvocation as runHostedWorkspaceInvocationPublic,
 } from "@murphai/assistant-runtime/hosted-invocation";
 import {
-  checkpointHostedRuntimeBridgeWorkspace as checkpointHostedRuntimeBridgeWorkspaceTestkitPublic,
   createHostedWorkspaceRuntimeBridgeJobOptions as createHostedWorkspaceRuntimeBridgeJobOptionsPublic,
 } from "@murphai/assistant-runtime/hosted-invocation-testkit";
 import {
@@ -66,7 +65,6 @@ import {
   runHostedWorkspaceInvocation as runHostedWorkspaceInvocationDirect,
 } from "../src/hosted-invocation.ts";
 import {
-  checkpointHostedRuntimeBridgeWorkspace as checkpointHostedRuntimeBridgeWorkspaceTestkitDirect,
   createHostedWorkspaceRuntimeBridgeJobOptions as createHostedWorkspaceRuntimeBridgeJobOptionsDirect,
 } from "../src/hosted-invocation-testkit.ts";
 import {
@@ -108,6 +106,7 @@ const expectedAssistantRuntimePublicExportKeys = [
   "./hosted-provider-effects",
   "./hosted-runtime-contracts",
   "./hosted-runtime-worker-contracts",
+  "./hosted-vault-share-capture-worker",
   "./hosted-workspace-restore-preparation",
 ] as const;
 
@@ -269,10 +268,6 @@ test("hosted-invocation-testkit subpath export stays wired to bridge option cons
   assert.equal(
     createHostedWorkspaceRuntimeBridgeJobOptionsPublic,
     createHostedWorkspaceRuntimeBridgeJobOptionsDirect,
-  );
-  assert.equal(
-    checkpointHostedRuntimeBridgeWorkspaceTestkitPublic,
-    checkpointHostedRuntimeBridgeWorkspaceTestkitDirect,
   );
 });
 

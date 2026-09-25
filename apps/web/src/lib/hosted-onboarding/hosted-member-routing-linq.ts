@@ -31,6 +31,56 @@ import {
   hasUnresolvedHostedLinqProviderDispatchForChatTx,
 } from "./linq-delivery-store";
 
+// The verified identity writer holds the member lock. Retire only the old
+// phone's conversation authority; the member keeps their assigned Murph line.
+export async function reconcileHostedMemberLinqPhoneBindingsTx(input: {
+  memberId: string;
+  previousIdentity: { phoneNumber: string | null; phoneNumberVerifiedAt: Date | null } | null;
+  nextPhone: { number: string } | null;
+  prisma: Prisma.TransactionClient;
+}): Promise<void> {
+  const previous = input.previousIdentity;
+  if (!input.nextPhone || !previous?.phoneNumberVerifiedAt || !previous.phoneNumber
+    || previous.phoneNumber === input.nextPhone.number) return;
+
+  const lookupKeys = createHostedPhoneLookupKeyReadCandidates(previous.phoneNumber);
+  await acquireHostedMemberHomeLinqRouteLockTx(input);
+  await input.prisma.hostedMemberRouting.updateMany({
+    where: {
+      memberId: input.memberId,
+      OR: [
+        { linqParticipantContactKind: null },
+        { linqParticipantContactKind: "phone", linqParticipantContactLookupKey: { in: lookupKeys } },
+      ],
+    },
+    data: {
+      linqChatIdEncrypted: null,
+      linqChatLookupKey: null,
+      linqParticipantContactKind: null,
+      linqParticipantContactLookupKey: null,
+    },
+  });
+  await input.prisma.hostedMemberRouting.updateMany({
+    where: {
+      memberId: input.memberId,
+      OR: [
+        { pendingLinqParticipantContactKind: null },
+        { pendingLinqParticipantContactKind: "phone", pendingLinqParticipantContactLookupKey: { in: lookupKeys } },
+      ],
+    },
+    data: {
+      pendingLinqChatIdEncrypted: null,
+      pendingLinqChatLookupKey: null,
+      pendingLinqParticipantContactEncrypted: null,
+      pendingLinqParticipantContactKind: null,
+      pendingLinqParticipantContactLookupKey: null,
+      pendingLinqParticipantContactObservedAt: null,
+      pendingLinqRecipientPhoneEncrypted: null,
+      pendingLinqRecipientPhoneLookupKey: null,
+    },
+  });
+}
+
 export async function demoteHostedMemberLinqGroupChatBindingsTx(input: {
   enforceProviderDispatchFence?: boolean;
   linqChatId: string;
@@ -727,6 +777,32 @@ function isHostedMemberHomeLinqBindingUnchanged(input: {
       lockedHomeRoute.pendingLinqRecipientPhoneLookupKey,
     ].every((value) => value === null))
   );
+}
+
+/**
+ * Reuses provider-attested values only when current blind indexes describe the
+ * exact clean binding. This is preparation, never a substitute for locked
+ * member, participant, chat, access, and routing-record revalidation.
+ */
+export function readUnchangedHostedLinqHomeRoute(input: {
+  chatId: string;
+  participantContact: HostedLinqParticipantContact;
+  recipientPhone: string | null;
+  routingRecord: Pick<HostedMemberRouting, keyof typeof hostedMemberLinqBindingSelect> | null;
+}): { chatId: string; recipientPhone: string; assignedAt: Date | null } | null {
+  const recipientPhone = normalizePhoneNumber(input.recipientPhone);
+  const linqChatLookupKey = createHostedLinqChatLookupKey(input.chatId);
+  if (!recipientPhone || !linqChatLookupKey || !input.routingRecord
+    || !isHostedMemberHomeLinqBindingUnchanged({
+      clearPending: true,
+      homeLineAssignedAt: input.routingRecord.linqHomeLineAssignedAt,
+      linqChatLookupKey,
+      lockedHomeRoute: input.routingRecord,
+      participantContact: input.participantContact,
+      recipientPhone,
+      recipientPhoneLookupKey: createHostedPhoneLookupKey(recipientPhone),
+    })) return null;
+  return { chatId: input.chatId, recipientPhone, assignedAt: input.routingRecord.linqHomeLineAssignedAt };
 }
 
 /**

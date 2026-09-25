@@ -274,13 +274,13 @@ function HostedSettingsIdentityActions({
   removalPending: boolean;
   verified: boolean;
 }) {
-  const phoneMismatchCanRecover = method === "phone"
+  const contactMismatchCanRecover = ["phone", "email"].includes(method)
     && privyState?.status === "mismatched";
   const refreshRequired = connected
     && verified
     && !removalPending
     && privyState?.status !== "matched"
-    && !phoneMismatchCanRecover;
+    && !contactMismatchCanRecover;
   const label = resolveIdentityActionLabel({
     connected,
     method,

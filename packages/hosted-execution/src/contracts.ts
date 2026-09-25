@@ -31,6 +31,8 @@ import type {
   HostedExecutionLogLevel,
 } from "./observability.ts";
 
+export const HOSTED_EXECUTION_DEFAULT_RUNNER_IDLE_TTL_MS = 10 * 60 * 1_000;
+
 export const HOSTED_EXECUTION_SIGNATURE_HEADER = "x-hosted-execution-signature";
 export const HOSTED_EXECUTION_TIMESTAMP_HEADER = "x-hosted-execution-timestamp";
 export const HOSTED_EXECUTION_NONCE_HEADER = "x-hosted-execution-nonce";
@@ -106,6 +108,7 @@ export const HOSTED_EXECUTION_WAKE_KINDS = [
   "assistant.ask.requested",
   "assistant.ask.completed",
   "clinical-records.sync-requested",
+  "clinical-records.enrichment-requested",
   "device-sync.wake",
   "environment-interview.completed",
   "environment-voice.captured",
@@ -129,6 +132,7 @@ export const HOSTED_EXECUTION_CONVERSATION_MESSAGE_CHANNELS = [
   "linq",
   "telegram",
   "email",
+  "voice",
 ] as const;
 
 export type HostedExecutionConversationMessageChannel =
@@ -789,10 +793,19 @@ export interface HostedExecutionEmailConversationMessagePayload {
   to?: string[];
 }
 
+/** Native normalized speech admitted by the authenticated call owner. */
+export interface HostedExecutionVoiceConversationMessagePayload {
+  channel: "voice";
+  callId: string;
+  inputId: string;
+  text: string;
+}
+
 export type HostedExecutionConversationMessagePayload =
   | HostedExecutionLinqConversationMessagePayload
   | HostedExecutionTelegramConversationMessagePayload
-  | HostedExecutionEmailConversationMessagePayload;
+  | HostedExecutionEmailConversationMessagePayload
+  | HostedExecutionVoiceConversationMessagePayload;
 
 /**
  * Returns only the human-authored text represented by a conversation wake.
@@ -809,7 +822,7 @@ export function readHostedExecutionConversationMessageText(
       .join("\n")
     : payload.channel === "telegram"
       ? payload.telegramMessage.text ?? ""
-      : "";
+      : payload.channel === "voice" ? payload.text : "";
   const normalized = text.trim();
   return normalized.length > 0 ? normalized : null;
 }
@@ -885,6 +898,13 @@ export interface HostedExecutionClinicalRecordsSyncRequestedWake
   generation: number;
   kind: "clinical-records.sync-requested";
   runId: string;
+}
+
+/** Local durable work points to retained clinical evidence, never provider credentials. */
+export interface HostedExecutionClinicalEnrichmentRequestedWake
+  extends HostedExecutionBaseWake {
+  jobId: string;
+  kind: "clinical-records.enrichment-requested";
 }
 
 export const HOSTED_EXECUTION_ENVIRONMENT_VOICE_MAX_BYTES = 3 * 1024 * 1024;
@@ -1038,6 +1058,7 @@ export type HostedExecutionWake =
   | HostedExecutionAssistantAskRequestedWake
   | HostedExecutionAssistantAskCompletedWake
   | HostedExecutionClinicalRecordsSyncRequestedWake
+  | HostedExecutionClinicalEnrichmentRequestedWake
   | HostedExecutionDeviceSyncWake
   | HostedExecutionEnvironmentInterviewCompletedWake
   | HostedExecutionEnvironmentVoiceCapturedWake

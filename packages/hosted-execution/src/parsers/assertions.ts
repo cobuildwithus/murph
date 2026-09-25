@@ -135,3 +135,39 @@ export function assertAllowedObjectKeys(
     }
   }
 }
+
+export function parseAllowedString<T extends string>(
+  value: unknown,
+  label: string,
+  allowed: readonly T[],
+): T {
+  const text = requireString(value, label);
+
+  if (allowed.includes(text as T)) {
+    return text as T;
+  }
+
+  throw new TypeError(`${label} is not supported.`);
+}
+
+export function requireNonNegativeInteger(value: unknown, label: string): number {
+  const parsed = requireNumber(value, label);
+
+  if (!Number.isSafeInteger(parsed) || parsed < 0) {
+    throw new TypeError(`${label} must be a non-negative integer.`);
+  }
+
+  return parsed;
+}
+
+export function requireNonNegativeBigIntString(value: unknown, label: string): string {
+  const text = requireString(value, label);
+
+  if (!/^[0-9]+$/u.test(text)) {
+    throw new TypeError(
+      `${label} must be a non-negative base-10 integer string.`,
+    );
+  }
+
+  return text;
+}

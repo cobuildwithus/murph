@@ -1,13 +1,16 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import {
   access,
+  copyFile,
   mkdir,
   mkdtemp,
   readFile,
+  readdir,
   rm,
   stat,
   writeFile,
 } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -16,7 +19,8 @@ import {
   parseMemoryDocument,
   vaultMetadataSchema,
 } from "@murphai/contracts";
-import type { Metafile } from "esbuild";
+import { normalizeCliTiming, type CliTiming } from "@murphai/runtime-state/cli-timing";
+import { build, type Metafile } from "esbuild";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
@@ -24,6 +28,7 @@ import {
   assertVaultCliBundleWithinBudgets,
   bundleInstalledVaultCliBinary,
 } from "../scripts/runner-bundle/bundle-cli.js";
+import { bundleRunnerContainerEntrypoint } from "../scripts/runner-bundle/bundle-entrypoint.js";
 import {
   RUNNER_BUNDLE_SHARED_EXTERNALS,
   RUNNER_BUNDLE_SHARED_FORBIDDEN_INPUT_MARKERS,
@@ -202,8 +207,201 @@ async function stageFakeInstalledCli(cliSource: string): Promise<string> {
   return bundleDir;
 }
 
+// The CLI imports timing literally, while the loader imports query by variable.
+// Only the public timing implementation/catalog are copied from the candidate's
+// built package; the query is a synthetic successful read, not a replacement
+// query implementation. The real-query/transport proof uses the assembled hosted
+// gate in hosted-runtime-codex-config.test.ts.
+const TIMING_OWNER_SPECIFIER = "@murphai/runtime-state/node/cli-timing";
+const QUERY_TIMING_PHASES = ["query-freshness", "query-manifest", "query-status"] as const;
+const LIFECYCLE_TIMING_PHASES = ["setup", "dispatch", "post-dispatch", "teardown", "total"] as const;
+const TIMED_FAKE_CLI_SOURCE = `${FAKE_CLI_SOURCE}
+import assert from 'node:assert/strict';
+import { writeFileSync } from 'node:fs';
+if (args.join(' ') === 'wearables latest --format json') {
+  const { withCliTiming, timeCliDispatch, finishCliTimingAction, startCliPhase } =
+    await import('@murphai/runtime-state/node/cli-timing');
+  const loadRuntimeModule = (specifier) => import(specifier);
+  await withCliTiming(async () => {
+    await timeCliDispatch('wearables latest', async () => {
+      const query = await loadRuntimeModule('@murphai/query');
+      assert.equal(await query.read(process.env.MURPH_TEST_QUERY_PATH), 17);
+    });
+    finishCliTimingAction();
+    startCliPhase('teardown')();
+  }, process.env.MURPH_TEST_TIMING_REPORT
+    ? (report) => writeFileSync(process.env.MURPH_TEST_TIMING_REPORT,
+        JSON.stringify(report), { mode: 0o600 })
+    : undefined);
+}
+`;
+
+async function stageInstalledTimingFixture(bundleDir: string): Promise<void> {
+  const resolve = createRequire(import.meta.url).resolve;
+  let ownerPath: string;
+  let catalogPath: string;
+  try {
+    ownerPath = resolve(TIMING_OWNER_SPECIFIER);
+    catalogPath = resolve("@murphai/runtime-state/cli-timing");
+    await Promise.all([access(ownerPath), access(catalogPath)]);
+  } catch {
+    throw new Error("Build the candidate's @murphai/runtime-state public timing exports before running the bundle fixture.");
+  }
+  const runtimeRoot = path.join(bundleDir, "node_modules", "@murphai", "runtime-state");
+  await mkdir(path.join(runtimeRoot, "dist", "node"), { recursive: true });
+  await Promise.all([
+    copyFile(ownerPath, path.join(runtimeRoot, "dist", "node", "cli-timing.js")),
+    copyFile(catalogPath, path.join(runtimeRoot, "dist", "cli-timing.js")),
+    writeFile(path.join(runtimeRoot, "package.json"), JSON.stringify({
+      name: "@murphai/runtime-state", type: "module",
+      exports: {
+        "./node/cli-timing": "./dist/node/cli-timing.js",
+        "./cli-timing": "./dist/cli-timing.js",
+      },
+    })),
+  ]);
+  const queryRoot = path.join(bundleDir, "node_modules", "@murphai", "query");
+  await mkdir(queryRoot, { recursive: true });
+  await writeFile(path.join(queryRoot, "package.json"), JSON.stringify({
+    name: "@murphai/query", type: "module", exports: "./index.js",
+  }));
+  await writeFile(path.join(queryRoot, "index.js"), [
+    "import { readFile } from 'node:fs/promises';",
+    "import { timeCliPhase } from '@murphai/runtime-state/node/cli-timing';",
+    "export function read(file) {",
+    "  return timeCliPhase('query-freshness', async () => {",
+    "    const text = await timeCliPhase('query-manifest', () => readFile(file, 'utf8'));",
+    "    return timeCliPhase('query-status', async () => JSON.parse(text));",
+    "  });",
+    "}",
+  ].join("\n"));
+  await writeFile(path.join(bundleDir, "query.json"), "17\n", { mode: 0o600 });
+}
+
+async function runTimingFixture(input: {
+  bundleDir: string;
+  entry: string;
+  enabled: boolean;
+  wrapper?: boolean;
+}): Promise<{ output: { status: number | null; stdout: string; stderr: string }; timing: CliTiming | null }> {
+  const reportPath = path.join(input.bundleDir, "report.json");
+  await rm(reportPath, { force: true });
+  const env: NodeJS.ProcessEnv = { ...process.env,
+    HOME: path.join(input.bundleDir, ".parity-probe-home"), VAULT: "",
+    MURPH_TEST_QUERY_PATH: path.join(input.bundleDir, "query.json"),
+    MURPH_TEST_TIMING_REPORT: input.enabled ? reportPath : "",
+  };
+  delete env.MURPH_CLI_TIMING_ENDPOINT;
+  const args = ["wearables", "latest", "--format", "json"];
+  const result = spawnSync(input.wrapper ? input.entry : process.execPath,
+    input.wrapper ? args : [input.entry, ...args], {
+      encoding: "utf8", env, timeout: 10_000,
+    });
+  expect(result.error).toBeUndefined();
+  expect(result.signal).toBeNull();
+  const output = { status: result.status, stdout: result.stdout, stderr: result.stderr };
+  expect(output.status).toBe(0);
+  expect(output.stderr).toBe("");
+  expect(JSON.parse(output.stdout)).toEqual({ args, version: "9.9.9" });
+  if (!input.enabled) {
+    await expect(access(reportPath)).rejects.toThrow();
+    return { output, timing: null };
+  }
+  const raw = JSON.parse(await readFile(reportPath, "utf8"));
+  const timing = normalizeCliTiming(raw);
+  expect(timing).not.toBeNull();
+  // The actual bounded, private-safe report, not a parallel assertion format.
+  expect(timing).toEqual(raw);
+  expect(timing).toMatchObject({ reportCount: 1, droppedCalls: 0, droppedSpans: 0,
+    batchContainers: 0, outOfWindowReports: 0, transportTruncated: false });
+  expect(timing!.commands).toHaveLength(1);
+  expect(timing!.commands[0]).toMatchObject({ command: "wearables latest", outcome: "ok", calls: 1 });
+  expect(JSON.stringify(timing)).not.toContain(input.bundleDir);
+  expect(output.stdout + output.stderr).not.toMatch(/murph\/cliTiming|MURPH_.*TIMING/u);
+  return { output, timing };
+}
+
 describe("runner bundle vault-cli esbuild step", () => {
+  it("restores native query phases through the actual bundle step and retargeted wrappers without changing output", async () => {
+    const bundleDir = await stageFakeInstalledCli(TIMED_FAKE_CLI_SOURCE);
+    await stageInstalledTimingFixture(bundleDir);
+    const cliRoot = path.join(bundleDir, "node_modules", "@murphai", "murph");
+    const entry = path.join(cliRoot, "dist", "bin.js");
+    const baseline = await runTimingFixture({ bundleDir, entry, enabled: true });
+
+    // Executable negative control: the production policy with only the timing
+    // external removed reproduces the former split, even after this fix lands.
+    const brokenOut = path.join(cliRoot, ".split");
+    const broken = await build({
+      absWorkingDir: bundleDir,
+      banner: {
+        js: "import { createRequire as __vaultCliCreateRequire } from 'node:module'; const require = __vaultCliCreateRequire(import.meta.url);",
+      },
+      bundle: true, charset: "utf8", entryPoints: [path.relative(bundleDir, entry)],
+      external: RUNNER_BUNDLE_SHARED_EXTERNALS.filter((name) => name !== TIMING_OWNER_SPECIFIER),
+      format: "esm", logLevel: "error", metafile: true, minifySyntax: true,
+      outdir: brokenOut, platform: "node", splitting: true, tsconfigRaw: "{}",
+    });
+    expect(Object.keys(broken.metafile.inputs).some((name) =>
+      name.endsWith("node_modules/@murphai/runtime-state/dist/node/cli-timing.js"))).toBe(true);
+    const splitEntry = path.join(brokenOut, "bin.js");
+    const split = await runTimingFixture({ bundleDir, entry: splitEntry, enabled: true });
+    expect(split.output).toEqual(baseline.output);
+    const splitPhases = split.timing!.commands[0]!.phases.map((phase) => phase.phase);
+    expect(splitPhases).toEqual(expect.arrayContaining([...LIFECYCLE_TIMING_PHASES]));
+    for (const phase of QUERY_TIMING_PHASES) expect(splitPhases).not.toContain(phase);
+
+    // No injected esbuild options at the production boundary: all assembly
+    // guards/parity probes must pass before either executable wrapper is changed.
+    await bundleInstalledVaultCliBinary(bundleDir);
+    const bundledEntry = path.join(cliRoot, ".bundle", "bin.js");
+    const bundledSource = (await Promise.all((await readdir(path.dirname(bundledEntry)))
+      .filter((name) => name.endsWith(".js"))
+      .map((name) => readFile(path.join(path.dirname(bundledEntry), name), "utf8")))).join("\n");
+    expect(bundledSource).not.toContain("node:async_hooks");
+    expect(bundledSource).not.toContain("murph.cli-timing.v1");
+    expect(bundledSource).toMatch(/import\(["']@murphai\/runtime-state\/node\/cli-timing["']\)/u);
+    for (const currentEntry of [entry, bundledEntry, ...["vault-cli", "murph"].map((name) =>
+      path.join(bundleDir, "node_modules", ".bin", name))]) {
+      const wrapper = path.dirname(currentEntry).endsWith(`${path.sep}.bin`);
+      const enabled = await runTimingFixture({ bundleDir, entry: currentEntry, enabled: true, wrapper });
+      expect(enabled.output).toEqual(baseline.output);
+      const phases = enabled.timing!.commands[0]!.phases.map((phase) => phase.phase);
+      expect(phases).toEqual(expect.arrayContaining([...LIFECYCLE_TIMING_PHASES, ...QUERY_TIMING_PHASES]));
+      const disabled = await runTimingFixture({ bundleDir, entry: currentEntry, enabled: false, wrapper });
+      expect(disabled.output).toEqual(baseline.output);
+      expect(disabled.timing).toBeNull();
+    }
+    const splitDisabled = await runTimingFixture({ bundleDir, entry: splitEntry, enabled: false });
+    expect(splitDisabled.output).toEqual(baseline.output);
+  });
+
+  it.each(["vault-cli", "entrypoint"] as const)("rejects a relative timing-owner import bypass in the %s bundle", async (boundary) => {
+    const bundleDir = await stageFakeInstalledCli(FAKE_CLI_SOURCE);
+    await stageInstalledTimingFixture(bundleDir);
+    const entry = boundary === "vault-cli"
+      ? path.join(bundleDir, "node_modules", "@murphai", "murph", "dist", "bin.js")
+      : path.join(bundleDir, "dist", "container-entrypoint.js");
+    await mkdir(path.dirname(entry), { recursive: true });
+    const relativeOwner = boundary === "vault-cli"
+      ? "../../runtime-state/dist/node/cli-timing.js"
+      : "../node_modules/@murphai/runtime-state/dist/node/cli-timing.js";
+    await writeFile(entry, `import { startCliPhase } from '${relativeOwner}';\nstartCliPhase('total')();\n`);
+    await expect(boundary === "vault-cli"
+      ? bundleInstalledVaultCliBinary(bundleDir)
+      : bundleRunnerContainerEntrypoint(bundleDir)).rejects.toThrow(
+      /bundle inlined .*runtime-state\/dist\/node\/cli-timing\.js/u,
+    );
+  });
+
+
   it("inlines Health Commons while keeping asset and generated SDK packages external", () => {
+    expect(RUNNER_BUNDLE_SHARED_EXTERNALS).toContain(TIMING_OWNER_SPECIFIER);
+    expect(RUNNER_BUNDLE_SHARED_EXTERNALS).not.toContain("@murphai/runtime-state");
+    expect(RUNNER_BUNDLE_SHARED_EXTERNALS).not.toContain("@murphai/runtime-state/*");
+    expect(RUNNER_BUNDLE_SHARED_FORBIDDEN_INPUT_MARKERS).toContain(
+      "/@murphai/runtime-state/dist/node/cli-timing.js",
+    );
     expect(RUNNER_BUNDLE_SHARED_EXTERNALS).not.toContain("@murphai/health-commons");
     expect(RUNNER_BUNDLE_SHARED_EXTERNALS).not.toContain("@murphai/health-commons/*");
     expect(RUNNER_BUNDLE_SHARED_FORBIDDEN_INPUT_MARKERS).not.toContain(

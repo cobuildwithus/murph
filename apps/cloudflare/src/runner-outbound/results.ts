@@ -33,7 +33,7 @@ import {
 } from "../runner-meal-photo-route.ts";
 import { asWorkerStringEnvironment } from "../worker-contracts.ts";
 import {
-  requireRunnerRuntimeWriteFenceWrite,
+  requireRunnerRuntimeWriteFence,
   RunnerRuntimeWriteFenceError,
 } from "./write-fence.ts";
 import {
@@ -354,7 +354,7 @@ async function requestOwnsRuntimeWriteFenceWrite(input: {
   userId: string;
 }): Promise<boolean> {
   try {
-    await requireRunnerRuntimeWriteFenceWrite({
+    await requireRunnerRuntimeWriteFence({
       env: input.env,
       request: input.request,
       userId: input.userId,

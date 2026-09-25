@@ -110,15 +110,16 @@ test("GoalsSection routes anonymous visitors to Telegram where that is the defau
   assert.match(markup, /href="https:\/\/t\.me\/withmurph_bot\?text=Hey(?:\+|%20)Murph(?:\+|%20)*[^"]*stay/);
 });
 
-test("GoalsSection sends members to the guide, whose CTA resolves their own line", () => {
+test("GoalsSection resolves the member conversation without linking to home or a guide", () => {
   const { markup } = renderSection({
     messengerChannel: "imessage",
     wrap: (section) =>
       withAuth(section, { authenticated: true, authenticationStatus: "ready" }),
   });
 
-  assert.match(markup, /aria-label="Open Murph"[^>]*href="\/home"/);
-  assert.match(markup, /href="\/goals\/stay-independent-as-i-age"/);
+  assert.match(markup, /<button[^>]*data-goal-composer-send/);
+  assert.doesNotMatch(markup, /href="\/home"/);
+  assert.doesNotMatch(markup, /href="\/goals\/stay-independent-as-i-age"/);
   assert.doesNotMatch(markup, /href="sms:/);
 });
 
@@ -132,8 +133,9 @@ test("GoalsSection never hands the public line to an unverifiable session, even 
       ),
   });
 
-  assert.match(markup, /href="\/goals\/stay-independent-as-i-age"/);
-  assert.match(markup, /aria-label="Open Murph"[^>]*href="\/home"/);
+  assert.doesNotMatch(markup, /href="\/goals\/stay-independent-as-i-age"/);
+  assert.match(markup, /<button[^>]*data-goal-composer-send/);
+  assert.doesNotMatch(markup, /href="\/home"/);
   assert.doesNotMatch(markup, /href="sms:/);
   assert.doesNotMatch(markup, /t\.me\//);
 });

@@ -1,5 +1,6 @@
 import { GoalCategoryBrowse } from "@/src/components/goals/goal-category-browse";
 import { GoalGuide } from "@/src/components/goals/goal-guide";
+import { AuthProvider } from "@/src/components/hosted-onboarding/auth-dialog-provider";
 import { GoalsSection } from "@/src/components/homepage/goals-section";
 import type { GoalIndexEntryModel } from "@/src/lib/goals/goal-models";
 import type { HomepageGoalPersona } from "@/src/lib/goals/homepage-goal-personas";
@@ -93,8 +94,8 @@ const DESIGN_GOAL_PERSONAS: HomepageGoalPersona[] = [
   designPersona("live-long", "Live long", [
     ["stay-independent-as-i-age", "stay independent as I age"],
     ["keep-my-brain-healthy-as-i-age", "keep my brain healthy as I age"],
-    ["lower-blood-pressure", "lower my blood pressure"],
-    ["lower-cholesterol", "lower my cholesterol"],
+    ["lower-blood-pressure", "track my blood pressure"],
+    ["lower-cholesterol", "understand my cholesterol"],
   ]),
   designPersona("motherhood", "Motherhood", [
     ["stay-strong-during-pregnancy", "stay strong during pregnancy"],
@@ -198,15 +199,17 @@ export function GoalGuideStudy() {
             Hey Murph, help me… composer
           </h1>
           <p className="mt-3 max-w-2xl text-sm leading-6 text-muted-foreground">
-            Production composition with synthetic personas: the shared goal composer, persona pills opening on Live long, and goal cards that hand off to Messages. Inert here, so nothing fetches or sends.
+            Signed-in production composition with synthetic personas: the shared goal composer, persona pills opening on Live long, and goal cards that hand off to Messages. Inert here, so nothing fetches or sends.
           </p>
 
           <div className="mt-10 overflow-hidden rounded-2xl border border-border bg-background" inert>
-            <GoalsSection
-              personas={DESIGN_GOAL_PERSONAS}
-              startOption={DESIGN_CONTACT_OPTION}
-              totalGoalCount={252}
-            />
+            <AuthProvider authenticated>
+              <GoalsSection
+                personas={DESIGN_GOAL_PERSONAS}
+                startOption={DESIGN_CONTACT_OPTION}
+                totalGoalCount={252}
+              />
+            </AuthProvider>
           </div>
         </div>
       </section>
