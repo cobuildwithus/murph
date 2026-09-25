@@ -1796,6 +1796,103 @@ it.each([
   ]);
 });
 
+it.each([
+  { label: "successful notice", partial: true, noticeFails: false, foreground: true, direct: true, expectedNotices: 1 },
+  { label: "failed notice", partial: true, noticeFails: true, foreground: true, direct: true, expectedNotices: 1 },
+  { label: "normal delivery", partial: false, noticeFails: false, foreground: true, direct: true, expectedNotices: 0 },
+  { label: "background retry", partial: true, noticeFails: false, foreground: false, direct: true, expectedNotices: 0 },
+  { label: "group delivery", partial: true, noticeFails: false, foreground: true, direct: false, expectedNotices: 0 },
+])("acknowledges a newly delayed Linq link once: $label", async (scenario) => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  vi.setSystemTime(new Date("2026-08-06T20:00:00.000Z"));
+  const fixture = await createHostedLinqAttachmentFixture({
+    imageCount: 0,
+    key: "link-delay-notice",
+    answeredMailboxItemIds: ["mailbox_item_link_delay"],
+    message: "Your calendar is ready https://calendar.example.test/view",
+    target: "linq_chat_link_delay",
+  });
+  const intent = { ...fixture.intent, threadIsDirect: scenario.direct };
+  await saveAssistantOutboxIntent(fixture.vaultRoot, intent);
+  fixture.effect = {
+    ...fixture.effect,
+    deliveryPhase: scenario.foreground ? "foreground_current_turn" : "background_retry",
+    payload: { ...fixture.effect.payload, threadIsDirect: scenario.direct },
+  };
+  fixture.linqDeliveryContext.threadIsDirect = scenario.direct;
+  let linkFails = scenario.partial;
+  const sends: Array<{ key: string; kind: "primary" | "link" | "notice" }> = [];
+  const providerFetch = vi.fn<typeof fetch>(async (request, init) => {
+    expect(String(request)).toContain(`/chats/${fixture.target}/messages`);
+    const body = JSON.parse(await readFetchRequestBody(request, init));
+    const part = body.message.parts[0];
+    const kind = part.type === "link"
+      ? "link"
+      : part.value === "Your calendar is ready" ? "primary" : "notice";
+    sends.push({ key: body.message.idempotency_key, kind });
+    if (kind === "notice") {
+      expect(part.value).toBe("The link is taking longer to send. I'll keep trying.");
+      expect(await readAssistantOutboxIntent(fixture.vaultRoot, intent.intentId))
+        .toMatchObject({ status: "retryable", nextAttemptAt: expect.any(String) });
+    }
+    if ((kind === "link" && linkFails) || (kind === "notice" && scenario.noticeFails)) {
+      return new Response(JSON.stringify({ error: "Temporarily unavailable" }), {
+        status: 503,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    return new Response(JSON.stringify({ message: { id: `linq_${kind}_accepted` } }), {
+      headers: { "Content-Type": "application/json" },
+    });
+  });
+  const recordLinqDeliveryOutcome = vi.fn<
+    NonNullable<ReturnType<typeof createHostedRuntimeEffectsPortStub>["recordLinqDeliveryOutcome"]>
+  >(async () => {});
+  const drainInput = {
+    ...buildHostedLinqDrainInput({
+      fixture,
+      providerFetch,
+      publicInternetFetch: vi.fn<typeof fetch>(),
+    }),
+    effectsPort: createHostedRuntimeEffectsPortStub({ recordLinqDeliveryOutcome }),
+  };
+  const first = await drainHostedPreparedAssistantDeliveries(drainInput);
+  expect(first[0]?.deliveryStatus).toBe(scenario.partial ? "retryable" : "sent");
+  const noticeAttempts = sends.filter((send) => send.kind === "notice");
+  expect(new Set(noticeAttempts.map((send) => send.key)).size).toBe(scenario.expectedNotices);
+  const noticeAttemptCount = noticeAttempts.length;
+  if (scenario.partial) {
+    for (const retrySucceeds of [false, true]) {
+      const pending = await readAssistantOutboxIntent(fixture.vaultRoot, intent.intentId);
+      expect(pending?.deliveryConfirmationPending).toBe(false);
+      if (!pending?.nextAttemptAt) throw new Error("Expected durable link retry");
+      vi.setSystemTime(new Date(pending.nextAttemptAt));
+      linkFails = !retrySucceeds;
+      const retried = await drainHostedPreparedAssistantDeliveries(drainInput);
+      expect(retried[0]?.deliveryStatus).toBe(retrySucceeds ? "sent" : "retryable");
+    }
+  }
+  expect(sends.filter((send) => send.kind === "notice")).toHaveLength(noticeAttemptCount);
+  for (const kind of ["primary", "link"] as const) {
+    expect(new Set(sends.filter((send) => send.kind === kind).map((send) => send.key)).size).toBe(1);
+  }
+  const completed = await readAssistantOutboxIntent(fixture.vaultRoot, intent.intentId);
+  expect(completed).toMatchObject({
+    status: "sent",
+    delivery: { providerMessageIds: ["linq_primary_accepted", "linq_link_accepted"] },
+  });
+  const noticeOutcomes = recordLinqDeliveryOutcome.mock.calls
+    .map(([outcome]) => outcome)
+    .filter((outcome) => outcome.idempotencyKey?.startsWith("assistant-link-delay:"));
+  if (scenario.expectedNotices && !scenario.noticeFails) {
+    expect(noticeOutcomes).toHaveLength(1);
+  }
+  for (const outcome of noticeOutcomes) {
+    expect(outcome.intentId).toBeNull();
+    expect(outcome.answeredMailboxItemIds ?? []).toEqual([]);
+  }
+});
+
 async function createHostedLinqAttachmentFixture(input: {
   answeredMailboxItemIds?: readonly string[];
   autoReply?: boolean;

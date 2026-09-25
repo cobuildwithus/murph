@@ -6,8 +6,8 @@
     "kind": "improvement",
     "priority": 2,
     "title": "Clearer updates when a task needs another try",
-    "summary": "In private conversations, Murph briefly explains a failed step before continuing a safe recovery.",
-    "details": "Quick successful requests stay quiet. Recovery updates describe what happened and the next step without inventing an outage or promising a completion time.",
+    "summary": "In private conversations, Murph explains a failed step before safe recovery and can acknowledge a delayed link send.",
+    "details": "When the text of a reply is accepted but its separate link send remains unresolved, Murph attempts one brief update while retrying the link. Successful requests stay quiet; updates do not invent an outage or a completion time.",
     "relevanceTags": ["conversation", "reliability"],
     "sourcePullRequests": []
   }
