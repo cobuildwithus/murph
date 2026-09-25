@@ -1567,7 +1567,7 @@ index 95d21fdbf55cf80860f4d5d60d7d94966e8783bc..3f14208da06efc83e92d5acd0be890c6
          matchesStoredCaptureValue(candidate.precedingUserMessageSignature, capture.committedUserTurn.signature),
      );
 diff --git a/src/prepare-chatgpt-draft.js b/src/prepare-chatgpt-draft.js
-index a6444ae284b90c9136c5d91f9a933ad58df8ca04..adaff176b140bf691d1be51726bc04fab8fbecf5 100644
+index a6444ae284b90c9136c5d91f9a933ad58df8ca04..683727bb5ebecb3dc8f56ad45f0a3926c1e5ed76 100644
 --- a/src/prepare-chatgpt-draft.js
 +++ b/src/prepare-chatgpt-draft.js
 @@ -11,6 +11,7 @@ const {
@@ -1587,6 +1587,24 @@ index a6444ae284b90c9136c5d91f9a933ad58df8ca04..adaff176b140bf691d1be51726bc04fa
    '[data-testid="composer-intelligence-picker-content"] [role="menuitem"][aria-label="Select model"]',
    '[data-testid="model-switcher-dropdown-button"]',
    '[data-testid="composer-footer-actions"] button[aria-haspopup="menu"]',
+@@ -266,7 +269,7 @@ function createPageCdpCommandChannel(initialSocket, { commandTimeoutMs, closeSoc
+     });
+   };
+ 
+-  const command = async (method, params = {}) => {
++  const command = async (method, params = {}, timeoutMs = commandTimeoutMs) => {
+     const commandSocket = currentSocket;
+     const id = ++nextId;
+     const payload = JSON.stringify({ id, method, params });
+@@ -277,7 +280,7 @@ function createPageCdpCommandChannel(initialSocket, { commandTimeoutMs, closeSoc
+       commandSocket.send(payload);
+       return await withTimeout(
+         response,
+-        commandTimeoutMs,
++        Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : commandTimeoutMs,
+         `CDP socket command timed out: ${method}`,
+         () => pending.delete(id),
+       );
 @@ -386,6 +389,15 @@ function extractConversationHref(value, fallbackOrigin = '') {
    return `${origin}/c/${chatId}`;
  }
@@ -1642,6 +1660,21 @@ index a6444ae284b90c9136c5d91f9a933ad58df8ca04..adaff176b140bf691d1be51726bc04fa
  }
  
  function formatDurationMs(durationMs) {
+@@ -2345,12 +2359,12 @@ async function main() {
+   };
+   const cdp = pageCdpChannel.command;
+ 
+-  const evaluate = async (expression) => {
++  const evaluate = async (expression, timeoutMs = pageCommandTimeoutMs) => {
+     const result = await cdp('Runtime.evaluate', {
+       expression,
+       returnByValue: true,
+       awaitPromise: true,
+-    });
++    }, timeoutMs);
+     return result.result?.value;
+   };
+ 
 @@ -2606,7 +2620,7 @@ async function main() {
          y: Math.round(rect.top + rect.height / 2),
        };
@@ -1681,6 +1714,15 @@ index a6444ae284b90c9136c5d91f9a933ad58df8ca04..adaff176b140bf691d1be51726bc04fa
        }
        await sleep(200);
      }
+@@ -5144,7 +5160,7 @@ async function main() {
+           message: String((error && error.message) || error || 'unknown')
+         };
+       }
+-    })()`);
++    })()`, configuredDraftTimeoutMs);
+   };
+ 
+   const appendDraftComposerPromptNatively = async (prompt) => {
 @@ -5260,13 +5276,7 @@ async function main() {
            .replace(/[^a-z0-9]+/g, ' ')
            .replace(/\\s+/g, ' ')

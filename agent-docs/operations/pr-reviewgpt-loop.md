@@ -52,6 +52,10 @@ the prepared draft or conversation is the user-facing result. Never implement
 this cleanup as a profile-wide tab sweep or close a target that the current run
 did not create.
 
+Synchronous prompt insertion uses the configured draft timeout so healthy large
+multiline inserts can finish. Other page commands retain their shorter deadline;
+insertion still fails when its configured budget expires.
+
 Normal reviews use regular Chat, never ChatGPT Work. The package confirms that
 surface before model selection, before staging, and immediately before send. A
 fresh new-chat target switches the Chat/Work control to Chat when necessary; an
