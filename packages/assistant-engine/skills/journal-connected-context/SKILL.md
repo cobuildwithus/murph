@@ -134,6 +134,23 @@ practical impact; do not read the whole inbox, newsletters, or correspondence. O
 look back at most 90 days for future travel. Later passes read only enough new
 or changed confirmations to update future trips.
 
+Establish each destination from explicit booking geography: a destination field,
+property address locality, or a clearly linked itinerary segment. Listing names,
+room names, scenic amenities, and provider office/footer addresses do not establish
+the destination. If search results or snippets lack that evidence, read the exact
+confirmation before assigning a city, region, or destination timezone. A geocoder
+match cannot prove where the booking is. If the confirmation still lacks a
+reliable destination, keep the confirmed booking and dates with a neutral lodging
+title and explicitly unknown destination; do not guess geography or its timezone.
+Preserve source-supported local dates and timing precision. Do not invent check-in
+or checkout times from dates alone.
+
+For an existing imported lodging plan whose destination is supported only by its
+title, re-read its mapped confirmation and correct the same canonical event
+through the version-checked edit path below. Preserve newer member corrections.
+A saved title or a refreshed verification timestamp is not independent geographic
+evidence. Failed source reads preserve the saved record without upgrading certainty.
+
 Group transport, hotel, timezone, and return segments into one itinerary. Save
 one canonical `journal-plan` note per trip with normalized dates, cities or
 regions, transport type, departure/arrival and connection segments, lodging dates,

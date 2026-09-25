@@ -11,6 +11,22 @@ import {
 } from '../src/assistant/system-prompt.js'
 
 describe('connected-apps skill and system-prompt coverage', () => {
+  it('requires source geography before treating lodging names as destinations', async () => {
+    const skill = (await readFile(path.join(resolveAssistantSkillsRoot(), 'journal-connected-context', 'SKILL.md'), 'utf8')).replace(/\s+/gu, ' ')
+    for (const text of [
+      'Listing names, room names, scenic amenities, and provider office/footer addresses do not establish the destination',
+      'read the exact confirmation before assigning a city, region, or destination timezone',
+      'keep the confirmed booking and dates with a neutral lodging title and explicitly unknown destination',
+      'A geocoder match cannot prove where the booking is',
+      're-read its mapped confirmation and correct the same canonical event',
+      'Preserve newer member corrections',
+    ]) expect(skill).toContain(text)
+    expect(skill).toContain('A planned trip does not prove arrival, current location')
+    expect(skill).toContain('Routine plan saves, updates, cancellations, and scheduling a future check-in stay silent')
+    const connected = (await readConnectedAppsSkill()).replace(/\s+/gu, ' ')
+    expect(connected).toContain('A lodging title alone is not destination evidence')
+  })
+
   it('anchors Journal follow-ups to event end while preserving passive-evidence suppression', async () => {
     const skill = (await readFile(path.join(resolveAssistantSkillsRoot(), 'journal-connected-context', 'SKILL.md'), 'utf8')).replace(/\s+/gu, ' ')
     expect(skill).toContain('one private check-in one hour after the event ends, using its end timestamp rather than its start')
