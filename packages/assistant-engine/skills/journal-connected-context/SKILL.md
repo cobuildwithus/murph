@@ -98,32 +98,46 @@ the same Journal plan and its pending follow-up. An event absent from a limited
 window, an incomplete page, or a failed read is not cancellation evidence.
 Follow bounded pagination and exact-id reads before removing a known plan. Never create a second plan for the same provider occurrence; preserve account and calendar identity.
 
-Before a follow-up, check passive Journal or wearable evidence. If it already
-shows what happened, do not ask. Otherwise schedule one private check-in one
-hour after the event ends, using its end timestamp rather than its start.
-For example, an 18:00–19:00 event gets a 20:00 check-in in the event timezone.
-For an all-day date-only plan, keep the Journal/context entry but do not infer
-an overnight check-in from its midnight date boundary; an end-based check-in
-requires a real end time. Preserve already-authorized follow-ups.
-Save that one-shot check-in with `murph.automation` in
-the same pass that creates the plan. Bind it to the current private
-conversation using `contextReferences: [{"entityKind":"event","entityId":"<saved event id>"}]`.
-A Journal note is an event; do not use its `note` subtype as the entity kind. Its
-instructions must check passive evidence first and stay quiet when that
-evidence already resolves the event. Do not defer this write to a later
-connected-context pass. Use `schedule.kind=at` with `schedule.localAt.date`,
-`schedule.localAt.time`, and the event's IANA timezone. Do not use raw
-`schedule.at`. One event gets one check-in.
+## Follow-up eligibility
 
-For every eligible ongoing or future timed plan, also reconcile its linked
-follow-up even when the plan and source mapping already exist and have not
-changed. Read matching automations including paused and archived history. A
-prior pass may have saved the plan and ledger before scheduling failed. If no
-linked follow-up exists and end plus one hour is still in the future, save the
-missing check-in now. Reuse an existing check-in; never reactivate a paused,
-canceled, completed, or member-disabled one. Do not create a catch-up question
-for a past check-in time. Apply source/category opt-outs first, exclude canceled
-and all-day plans, and deduplicate aliases by the canonical plan/trip id.
+A saved plan is context, not a reason to interrupt. Do not automatically ask
+whether an event happened, someone attended, or a journey was completed merely
+to fill in the Journal. This applies to travel and other calendar activities.
+Keep useful plans even when no follow-up is warranted.
+
+Schedule a follow-up only for an explicit member request or a concrete,
+member-specific health purpose supported by current context: an unresolved
+symptom, recovery question, or existing health goal, routine, or experiment
+whose next decision depends on the answer. Name that purpose and the missing
+information in the instructions. Event category alone is insufficient; do not
+invent a health concern or add generic sleep, hydration, or wellness advice to
+justify outreach. Use existing Journal, wearable, and conversation evidence
+first; if it resolves the question, do not ask.
+
+For an eligible follow-up, ask about the useful health question directly.
+Preserve the member's requested timing; otherwise choose timing appropriate to
+that health question. There is no default end-plus-one-hour check-in. Date-only
+all-day boundaries do not supply a clock time. Save through `murph.automation`
+in the same pass, bound to the current private conversation with
+`contextReferences: [{"entityKind":"event","entityId":"<saved event id>"}]`.
+A Journal note is an event, not entity kind `note`. Use `schedule.kind=at` with
+`schedule.localAt.date`, `schedule.localAt.time`, and the event's IANA timezone.
+Instructions must recheck usefulness and passive evidence at execution and
+return `skip` when no useful question remains. One event or trip gets at most
+one useful follow-up, not one per segment.
+
+Reconcile linked follow-ups under this same eligibility rule, including when
+source plans are unchanged or a previous save was partial. Inspect the full
+automation and relevant canonical context, including paused and archived
+history. Archive an active automatically generated attendance/logistics-only
+check-in when its instructions and context establish no concrete health purpose
+and no explicit member request. Do not infer provenance from a title alone.
+Preserve explicit requests, useful health support, pause/archive state, and
+uncertain cases. Do not replace a retired question with generic health advice.
+Create a missing eligible follow-up only when its useful time is still future;
+never create a catch-up question or reactivate a completed or disabled one.
+Apply source/category opt-outs first, exclude canceled plans, and deduplicate
+aliases by canonical plan.
 
 ## Email travel pass
 
@@ -161,8 +175,8 @@ A relevant registration can update the matching activity plan. Do
 not save email bodies, prices, booking codes, attachments, exact addresses, or
 other passengers. Reconcile updates and cancellations into the same plan.
 
-Check passive evidence first. One trip gets at most one useful check-in, not one
-per segment.
+Apply the follow-up eligibility rule above. A travel confirmation alone never
+authorizes a check-in; retain its useful context silently.
 
 ## Canonical plans and useful context
 
@@ -244,8 +258,9 @@ older memory or provider evidence. Match the same subject and occurrence; a plan
 an absent reply, a failed/partial read, or an event missing from a search does not
 prove completion or cancellation. Respect all source and category opt-outs.
 
-A repair needs a concrete contradiction with current evidence. Judge correctness
-by meaning: equivalent wording is already correct. Do not polish a repaired
+Apart from retiring proven automatic attendance/logistics-only check-ins under
+the follow-up eligibility rule above, a repair needs a concrete contradiction
+with current evidence. Judge correctness by meaning: equivalent wording is already correct. Do not polish a repaired
 instruction, add generic future-proofing, or add a new suppression condition to a
 recurring habit because one occurrence is complete. Stop once the mismatch is
 resolved; the same evidence on another pass is not a new reason to edit.
@@ -302,5 +317,5 @@ and revision after successful reads and writes. Routine plan
 saves, updates, cancellations, and scheduling a future check-in stay silent:
 return the scheduled `skip` decision, with an internal `privateSummary` only.
 Send a message only for a necessary clarification or
-a currently due check-in that passive evidence has not resolved. A new saved
-plan or trip alone is never a reason to send. Never send a process report.
+a currently due follow-up that meets the eligibility rule and passive evidence
+has not resolved. A new saved plan or trip alone is never a reason to send. Never send a process report.

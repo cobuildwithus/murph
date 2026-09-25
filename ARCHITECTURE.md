@@ -290,6 +290,12 @@ already concise records remain unchanged. This policy uses the existing memory
 format and tool, with no schema migration or second profile store.
 
 The morning Journal connected-context automation writes canonical Journal plans.
+Connected plans alone do not authorize attendance or logistics check-ins. New
+follow-ups require an explicit member request or a concrete health purpose;
+scheduled execution applies this rule to legacy instructions too. Morning
+reconciliation archives proven automatic logistics-only checks, preserving
+explicit requests, useful health support, and uncertain cases. No new state or
+scheduler is introduced.
 It also reviews existing private reminders against current permitted canonical
 context, even without new connected plans. Existing version-checked automation
 patches repair supported instruction, timing, reference, and lifecycle mistakes;
