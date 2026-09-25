@@ -83,31 +83,17 @@ function isAssistantRoutingChoice(
 const MODEL_OPTIONS = [
   {
     artwork: "sol",
-    description: "Health intelligence with GPT-6",
+    description: "Deep health intelligence",
     model: HOSTED_ASSISTANT_GPT_6_SOL_MODEL,
-    name: "GPT-6 Sol",
+    name: "Sol",
     usage: "Balanced usage",
   },
   {
     artwork: "luna",
-    description: "An alternative GPT-6 model",
-    model: HOSTED_ASSISTANT_GPT_6_LUNA_MODEL,
-    name: "GPT-6 Luna",
-    usage: "Low usage",
-  },
-  {
-    artwork: "luna",
     description: "Fast health intelligence",
-    model: HOSTED_ASSISTANT_LUNA_MODEL,
-    name: "GPT-5.6 Luna",
+    model: HOSTED_ASSISTANT_GPT_6_LUNA_MODEL,
+    name: "Luna",
     usage: "Low usage",
-  },
-  {
-    artwork: "sol",
-    description: "Deep health intelligence",
-    model: HOSTED_ASSISTANT_SOL_MODEL,
-    name: "GPT-5.6 Sol",
-    usage: "High usage",
   },
   {
     artwork: "astra",
@@ -669,7 +655,7 @@ function HostedAssistantModelSettingsForm(
         enteringCustom
           ? `Saved. Inference on your endpoint. ${readProductModelName(savedModel)} through ${readProviderName(savedProvider)} stays your managed default.`
           : (managed?.dormantSolPreference ?? dormantSolPreference)
-          ? `Saved. Inference on ${readProductModelName(savedModel)} through ${readProviderName(savedProvider)} while Edge is paused; GPT-5.6 Sol remains saved.`
+          ? `Saved. Inference on ${readProductModelName(savedModel)} through ${readProviderName(savedProvider)} while Edge is paused; your previous model remains saved.`
           : `Saved. ${readProductModelName(savedModel)} through ${readProviderName(savedProvider)} is your default.`,
       );
     } catch (error) {
@@ -694,8 +680,8 @@ function HostedAssistantModelSettingsForm(
       setStatus({
         message: solNoLongerAvailable
           ? props.customInferenceAvailable
-            ? `Your Edge access changed. Your managed default stays ${readModelName(currentModel)}.`
-            : `Your Edge access changed. Murph will keep using ${readModelName(currentModel)}.`
+            ? `Your Edge access changed. Your managed default stays ${readProductModelName(currentModel)}.`
+            : `Your Edge access changed. Murph will keep using ${readProductModelName(currentModel)}.`
           : veniceNoLongerAvailable
             ? props.customInferenceAvailable
               ? "Venice is no longer available. OpenAI remains your saved managed provider."
@@ -737,8 +723,8 @@ function HostedAssistantModelSettingsForm(
         {dormantSolPreference ? (
           <p className="w-full rounded-xl border border-border bg-muted/30 p-4 text-sm text-pretty text-muted-foreground">
             {props.customInferenceAvailable
-              ? `${readModelName(currentModel)} is your managed default while Edge is paused. GPT-5.6 Sol is still saved and will return with Edge. Choose another model or save this default to replace it.`
-              : `${readModelName(currentModel)} is active while Edge is paused. GPT-5.6 Sol is still saved and will return with Edge. Choose another model or save this default to replace it.`}
+              ? `${readProductModelName(currentModel)} is your managed default while Edge is paused. Your previous model is still saved and will return with Edge. Choose another model or save this default to replace it.`
+              : `${readProductModelName(currentModel)} is active while Edge is paused. Your previous model is still saved and will return with Edge. Choose another model or save this default to replace it.`}
           </p>
         ) : null}
 
@@ -775,8 +761,7 @@ function HostedAssistantModelSettingsForm(
                 || option.model === HOSTED_ASSISTANT_GPT_6_LUNA_MODEL)
                 && draftRouting !== HOSTED_ASSISTANT_OPENAI_PROVIDER;
               const unavailable = requiresOpenAi ||
-                (option.model === HOSTED_ASSISTANT_SOL_MODEL && !solAvailable)
-                || (option.model === HOSTED_ASSISTANT_ASTRA_MODEL
+                (option.model === HOSTED_ASSISTANT_ASTRA_MODEL
                   && (!availableModels?.includes(HOSTED_ASSISTANT_ASTRA_MODEL)
                     || draftRouting !== HOSTED_ASSISTANT_OPENAI_PROVIDER));
               const current = option.model === currentModel;
@@ -945,10 +930,6 @@ function ModelOptionBadge({ children }: { children: React.ReactNode }) {
       {children}
     </Badge>
   );
-}
-
-function readModelName(model: HostedAssistantProductModel): string {
-  return `${model.startsWith("gpt-6-") ? "GPT-6" : "GPT-5.6"} ${readProductModelName(model)}`;
 }
 
 function readProductModelName(model: HostedAssistantProductModel): string {

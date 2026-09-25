@@ -1,0 +1,15 @@
+{
+  "publishedOn": "2026-09-25",
+  "order": 200,
+  "item": {
+    "id": "simpler-model-choices",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Simpler model choices",
+    "summary": "Choose Sol, Luna, or Astra in Settings without sorting through model versions.",
+    "details": "Older models no longer appear as choices. Existing saved preferences stay in place until you change them.",
+    "relevanceTags": ["settings"],
+    "sourcePullRequests": [],
+    "tryIt": {"label": "Choose your model", "href": "/settings"}
+  }
+}
