@@ -2251,7 +2251,10 @@ describe('assistant system prompt cache stability', () => {
     // retain the previous margin without changing the unchanged group surface.
     // Saved-duration and support-privacy clarifications use the reviewed margin;
     // focused Sol journeys retain no-reconfirmation and de-identification checks.
-    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(76_300)
+    // Shared lasting-correction routing adds 1,022 characters. Complete private
+    // and group request measurements plus live task/preference/one-off proof
+    // cover this resident rule; retain the existing six-character margin.
+    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(77_322)
   })
 
   it('passes the injected CLI contract through byte-for-byte at the stable-route tail', () => {
