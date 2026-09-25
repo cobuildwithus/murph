@@ -1,3 +1,4 @@
+import { queueHostedLinqHomeContactCardAfterDelivery } from "@/src/lib/hosted-onboarding/linq-contact-card-delivery";
 import { after } from "next/server";
 import { lockHostedLinqMessageReceiptsTx } from "@/src/lib/hosted-onboarding/linq-message-receipt-lock";
 
@@ -193,8 +194,9 @@ export const POST = withJsonError(async (request: Request) => {
         prisma,
       });
 
-  scheduleHostedLinqTerminalRetriesAfterResponse({
+  scheduleHostedLinqDeliveryFollowupsAfterResponse({
     acceptedAt,
+    memberId: userId,
     recorded: result.recorded,
     chatId: linqChatId,
     messageIds: providerMessageIds,
@@ -223,8 +225,9 @@ export const POST = withJsonError(async (request: Request) => {
   });
 });
 
-function scheduleHostedLinqTerminalRetriesAfterResponse(input: {
+function scheduleHostedLinqDeliveryFollowupsAfterResponse(input: {
   acceptedAt: Date | null;
+  memberId: string;
   recorded: boolean;
   chatId: string | null;
   messageIds: readonly string[];
@@ -232,8 +235,8 @@ function scheduleHostedLinqTerminalRetriesAfterResponse(input: {
 }): void {
   const { chatId, messageIds, prisma } = input;
   if (!input.acceptedAt || !input.recorded || !chatId || messageIds.length === 0) return;
-  // A failure receipt can beat the acceptance callback. Reconcile after the
-  // normal handoff; successful replies do no provider work here.
+  // Delivery or failure receipts can beat acceptance. Reconcile retries and
+  // contact sharing after the normal handoff and home-route commit.
   try {
     after(async () => {
       for (const messageId of messageIds) {
@@ -245,6 +248,12 @@ function scheduleHostedLinqTerminalRetriesAfterResponse(input: {
           });
         }
       }
+      await queueHostedLinqHomeContactCardAfterDelivery({
+        chatId,
+        expectedMemberId: input.memberId,
+        messageIds,
+        prisma,
+      });
     });
   } catch {
     // Scheduling failure must not invalidate an accepted runtime handoff.
