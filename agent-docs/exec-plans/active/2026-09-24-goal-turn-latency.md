@@ -90,4 +90,8 @@ canary threshold, or production credential changes.
   with a support offer and zero unaccepted writes or runtime issues.
 - Candidate committed and draft PR #3700 opened. Release note added for quiet-plan
   setup, without promising a response-time threshold.
-- Pending exact-head review/CI, deployment, and protected production canary.
+- Broad CI found seven stale test expectations across six files after the policy
+  move and routing edits. Extend the existing whole-owner policy reader to the
+  follow-through reference and refresh the three changed prompt fingerprints.
+  The focused seven-file regression run passes all 170 tests.
+- Pending exact-head CI, deployment, and protected production canary.
