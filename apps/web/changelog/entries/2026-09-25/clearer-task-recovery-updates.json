@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-25",
+  "order": 100,
+  "item": {
+    "id": "clearer-task-recovery-updates",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Clearer updates when a task needs another try",
+    "summary": "In private conversations, Murph briefly explains a failed step before continuing a safe recovery.",
+    "details": "Quick successful requests stay quiet. Recovery updates describe what happened and the next step without inventing an outage or promising a completion time.",
+    "relevanceTags": ["conversation", "reliability"],
+    "sourcePullRequests": []
+  }
+}

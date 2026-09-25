@@ -26680,6 +26680,88 @@ describeRealCodex('real Codex voice reminder destination e2e', () => {
   }, 360_000)
 })
 
+describeRealCodex('real Codex link recovery progress e2e', () => {
+  it.each([false, true])('link recovery acknowledges a failed lookup without inventing delivery: failure=%s', async (failFirstLookup) => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-link-recovery-e2e-'))
+    const requests: AssistantHostedDeviceToolRequest[] = []
+    const progressUpdates: string[] = []
+    const effects: string[] = []
+    const connectUrl = 'https://connect.example.test/oura/recovery'
+    try {
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never',
+        baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions: buildAssistantSystemPrompt({
+          assistantCliContract: null, assistantContextSnapshotPrompt: null,
+          assistantHostedDeviceConnectAvailable: true,
+          assistantHostedDeviceConnectProviders: [{ label: 'Oura', provider: 'oura' }],
+          assistantKnowledgeToolsAvailable: false, assistantProgressUpdatesAvailable: true,
+          channel: 'linq', cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+          conversationScope: 'direct', currentLocalDate: '2026-10-14',
+          currentInstant: '2026-10-14T16:00:00.000Z', currentTimeZone: 'America/New_York',
+          hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic',
+          onboardingGuidance: false, ordinaryInboundTurn: true,
+        }),
+        dynamicTools: [MURPH_DEVICE_TOOL, MURPH_SEND_PROGRESS_UPDATE_TOOL],
+        env: config.env,
+        hostedToolContext: {
+          ...createRealCodexSupportHostedToolContext('direct'),
+          deviceTool: { async request(request) {
+            requests.push(request)
+            effects.push(request.action)
+            if (request.action === 'list_accounts') {
+              if (failFirstLookup && requests.length === 1) {
+                throw new Error('Synthetic read-only lookup timed out.')
+              }
+              return { action: 'list_accounts', accounts: [], provider: request.provider ?? null, sourceProvider: null }
+            }
+            if (request.action !== 'connect' || request.provider !== 'oura') {
+              throw new Error('Unexpected device mutation.')
+            }
+            return { action: 'connect', link: {
+              authorizationUrl: connectUrl, connectUrl, expiresAt: '2026-10-14T17:00:00.000Z',
+              provider: 'oura', providerLabel: 'Oura',
+            } }
+          } },
+        },
+        model: config.model, modelProvider: config.modelProvider,
+        progressDelivery: { async send(text) {
+          progressUpdates.push(text)
+          effects.push('progress')
+          return { kind: 'sent', source: 'model' }
+        } },
+        prompt: 'Check whether my Oura is connected. If it is not, give me the link to connect it.',
+        reasoningEffort: 'low', sandbox: 'read-only', workingDirectory,
+      })
+      const reply = result.finalMessage.trim()
+      process.stdout.write('[link-recovery-live] ' + JSON.stringify({
+        failFirstLookup, effects, progressUpdates, reply,
+      }) + '\n')
+      expect(effects).toEqual(failFirstLookup
+        ? ['list_accounts', 'progress', 'list_accounts', 'connect']
+        : ['list_accounts', 'connect'])
+      expect(requests.filter((request) => request.action === 'connect'))
+        .toEqual([{ action: 'connect', provider: 'oura' }])
+      expect(progressUpdates).toHaveLength(failFirstLookup ? 1 : 0)
+      if (failFirstLookup) {
+        expect(progressUpdates[0]).toMatch(/check|lookup|connect|Oura/iu)
+        expect(progressUpdates[0]).toMatch(/again|retry|trouble|snag|delay|slow|couldn.t|didn.t/iu)
+      }
+      expect(reply).toContain(connectUrl)
+      expect([...progressUpdates, reply].join('\n')).not.toMatch(
+        /Linq|outage|in a few|in \d+ minutes|send (?:it|the link) later|already sent|successfully connected/iu,
+      )
+      expect(readCapabilityRoutingActions(result.jsonEvents)
+        .filter((action) => action.kind === 'command')).toEqual([])
+    } finally {
+      await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+    }
+  }, 360_000)
+})
+
 describeRealCodex('real Codex automation edit progress e2e', () => {
   it.each([
     { count: 1, label: 'quick single edit', progressCount: 0 },
