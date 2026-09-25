@@ -58,9 +58,11 @@ device-sync recovery path.
 Hosted execution no longer flows through a web-owned acquire/commit/finalize run
 protocol; the restored local runtime imports mailbox items, pulls dirty
 device-sync state, and checkpoints its own workspace state.
-Status checkpoints retaining the same snapshot record its identical cleanup
-candidate once, avoiding duplicate database reads and writes. Retirement checks,
-recovery deadlines and distinct current/replaced resource metadata stay intact.
+Status checkpoints retaining the same normalized snapshot skip cleanup bookkeeping
+entirely. New publication and migration own resource registration; unchanged status
+updates introduce no new resource. Retirement validation and workspace CAS still
+run. Changed references record current and replaced resources, preserving recovery
+deadlines and metadata.
 
 Accessible auth completion routes to `/home`, which reads the member-owned
 onboarding completion state on every load. Pending members with a resolved text

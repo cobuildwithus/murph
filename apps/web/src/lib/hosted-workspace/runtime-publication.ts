@@ -36,10 +36,12 @@ export async function checkpointHostedRuntimeWorkspace(
           const owner = await requireHostedRuntimeCallbackTx(tx, input.userId, input.runtimeAuthority
             ? { ...input.runtimeAuthority, userId: input.userId }
             : null);
-          if (owner) await requireRuntimeResourcesPublishableTx(tx, input.userId, snapshotOrphanCandidates(parseHostedExecutionSnapshotRef(input.snapshotRef)));
+          const snapshot = parseHostedExecutionSnapshotRef(input.snapshotRef);
+          if (owner) await requireRuntimeResourcesPublishableTx(tx, input.userId, snapshotOrphanCandidates(snapshot));
           const result = await checkpointHostedWorkspaceTx({ ...input, tx });
-          if (owner && result.status === "updated") {
-            const snapshot = parseHostedExecutionSnapshotRef(input.snapshotRef);
+          // A status-only checkpoint creates no new resource obligation.
+          // Publication/migration already registered the unchanged archive.
+          if (owner && result.status === "updated" && !isDeepStrictEqual(snapshot, result.replacedSnapshotRef)) {
             const candidates = snapshotOrphanCandidates(snapshot);
             const previous = result.replacedSnapshotRef;
             // Only a newly accepted archive with explicit retention evidence earns
@@ -55,15 +57,9 @@ export async function checkpointHostedRuntimeWorkspace(
               ));
               for (const candidate of candidates) candidate.recoveryUntil = recoveryUntil;
             }
-            // Status-only checkpoints retain the same archive. Recording its
-            // identical cleanup candidate twice adds two serial DB operations.
-            // Compare the complete candidate so differing retention or resource
-            // metadata still goes through the existing validation and update.
-            const replacedCandidates = snapshotOrphanCandidates(result.replacedSnapshotRef ?? null)
-              .filter((previous) => !candidates.some((current) => isDeepStrictEqual(current, previous)));
             await recordRuntimeOrphansTx(tx, input.userId, [
               ...candidates,
-              ...replacedCandidates,
+              ...snapshotOrphanCandidates(result.replacedSnapshotRef ?? null),
             ], new Date());
           }
           return result;

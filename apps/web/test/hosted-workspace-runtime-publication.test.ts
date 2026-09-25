@@ -111,7 +111,7 @@ describe("slow workspace checkpoint diagnostics", () => {
     }));
   });
 
-  it.each(["same", "different", "metadata-change"])("deduplicates only identical snapshot cleanup candidates (%s)", async (scenario) => {
+  it.each(["same", "different", "metadata-change"])("skips cleanup bookkeeping only for unchanged snapshots (%s)", async (scenario) => {
     const unchanged = scenario === "same";
     const snapshot = { hash: "a".repeat(64), size: 512, key: "synthetic-current", updatedAt: "2026-09-25T00:00:00.000Z" };
     const previous = unchanged ? snapshot
@@ -130,10 +130,10 @@ describe("slow workspace checkpoint diagnostics", () => {
     await checkpointHostedRuntimeWorkspace({ ...input, snapshotRef: snapshot });
 
     expect(orphan.findFirst).toHaveBeenCalledOnce();
-    expect(orphan.findUnique).toHaveBeenCalledTimes(unchanged ? 1 : 2);
-    expect(orphan.upsert).toHaveBeenCalledTimes(unchanged ? 1 : 2);
+    expect(orphan.findUnique).toHaveBeenCalledTimes(unchanged ? 0 : 2);
+    expect(orphan.upsert).toHaveBeenCalledTimes(unchanged ? 0 : 2);
     const persisted = orphan.upsert.mock.calls.map(([call]) => call.create.snapshotRef);
-    expect(persisted).toEqual(unchanged ? [snapshot] : [snapshot, previous]);
+    expect(persisted).toEqual(unchanged ? [] : [snapshot, previous]);
   });
 
 
@@ -150,7 +150,7 @@ describe("slow workspace checkpoint diagnostics", () => {
   });
 
 
-  it("records an unchanged v2 archive once without extending its recovery deadline", async () => {
+  it("leaves an unchanged v2 archive and its recovery deadline untouched", async () => {
     const schema = "murph.hosted-workspace-snapshot.v2";
     const objectKey = await hostedWorkspaceSnapshotObjectKey({ userId: input.userId, snapshotId: "synthetic" });
     const snapshot = {
@@ -176,10 +176,9 @@ describe("slow workspace checkpoint diagnostics", () => {
     mocks.transaction.mockImplementation(async (callback: (tx: object) => Promise<unknown>) =>
       callback({ hostedRuntimeOrphan: orphan }));
     await checkpointHostedRuntimeWorkspace({ ...input, snapshotRef: snapshot });
-    expect(orphan.findUnique).toHaveBeenCalledOnce();
-    expect(orphan.upsert).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
-      update: expect.objectContaining({ recoveryUntil, cleanupAt: recoveryUntil, snapshotRef: snapshot }),
-    }));
+    expect(orphan.findFirst).toHaveBeenCalledOnce();
+    expect(orphan.findUnique).not.toHaveBeenCalled();
+    expect(orphan.upsert).not.toHaveBeenCalled();
   });
 
 });

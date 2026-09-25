@@ -57,7 +57,7 @@ beforeEach(() => {
   edges.backend.mockResolvedValue("postgres");
   edges.retire.mockResolvedValue(true);
   edges.release.mockResolvedValue(true);
-  edges.authorize.mockResolvedValue(null);
+  edges.authorize.mockResolvedValue({ cutover: "postgres", owner: null });
 });
 afterEach(() => { vi.restoreAllMocks(); });
 
@@ -133,5 +133,16 @@ describe("runtime ownership response", () => {
     expect(edges.authorize).toHaveBeenCalledExactlyOnceWith({ ...payload, prisma: {}, userId: identity.userId });
     expect(edges.after).not.toHaveBeenCalled();
     expect(edges.loaded).not.toHaveBeenCalled();
+    expect(edges.backend).not.toHaveBeenCalled();
+  });
+
+  it.each(["legacy", "draining"])("uses the locked authorization result for %s routing", async (cutover) => {
+    edges.authenticate.mockResolvedValueOnce({ userId: identity.userId, payload: {
+      operation: "authorize_provider", runnerContainerName: null,
+      providerEgressTokenHash: "c".repeat(64), providerKind: "linq",
+    } });
+    edges.authorize.mockResolvedValueOnce({ cutover, owner: null });
+    await expect((await post()).json()).resolves.toEqual({ cutover, status: "blocked", owner: null });
+    expect(edges.backend).not.toHaveBeenCalled();
   });
 });

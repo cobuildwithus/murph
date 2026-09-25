@@ -797,3 +797,6 @@ Lodging destination evidence and focused assistant proof are tracked in
 
 Health-purpose connected-plan follow-ups and legacy suppression are tracked in
 [`health-purpose check-ins`](exec-plans/completed/2026-09-25-health-purpose-checkins.md).
+
+Further removal of duplicate provider routing reads and unchanged-snapshot cleanup
+bookkeeping is tracked in [`runtime latency work removal`](exec-plans/active/2026-09-25-runtime-latency-work-removal.md).
