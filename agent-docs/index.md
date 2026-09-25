@@ -768,3 +768,7 @@ are tracked in `exec-plans/completed/2026-09-24-signup-contact-card.md`.
 Early Linq text typing reuses the existing staging-to-turn handoff owned by
 `packages/assistant-runtime/README.md`; implementation and synthetic proof are
 tracked in [`warm typing latency`](exec-plans/completed/2026-09-25-warm-typing-latency.md).
+
+Actual message-processing latency reductions in checkpoint wake discovery and
+snapshot cleanup bookkeeping are tracked in
+[`message processing latency`](exec-plans/completed/2026-09-25-message-processing-latency.md).

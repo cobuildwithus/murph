@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { hostedWorkspaceSnapshotObjectKey } from "@murphai/hosted-execution/storage-paths";
 
 const mocks = vi.hoisted(() => ({
   transaction: vi.fn(),
@@ -92,4 +93,76 @@ describe("slow workspace checkpoint diagnostics", () => {
       transactionFinishMs: 0,
     }));
   });
+
+  it.each(["same", "different", "metadata-change"])("deduplicates only identical snapshot cleanup candidates (%s)", async (scenario) => {
+    const unchanged = scenario === "same";
+    const snapshot = { hash: "a".repeat(64), size: 512, key: "synthetic-current", updatedAt: "2026-09-25T00:00:00.000Z" };
+    const previous = unchanged ? snapshot
+      : scenario === "metadata-change" ? { ...snapshot, updatedAt: "2026-09-24T00:00:00.000Z" }
+      : { ...snapshot, hash: "b".repeat(64), key: "synthetic-previous", size: 256 };
+    const orphan = {
+      findFirst: vi.fn().mockResolvedValue(null),
+      findUnique: vi.fn().mockResolvedValue(null),
+      upsert: vi.fn().mockResolvedValue({}),
+    };
+    mocks.requireOwner.mockResolvedValue({});
+    mocks.checkpoint.mockResolvedValue({ status: "updated", replacedSnapshotRef: previous });
+    mocks.transaction.mockImplementation(async (callback: (tx: object) => Promise<unknown>) =>
+      callback({ hostedRuntimeOrphan: orphan }));
+
+    await checkpointHostedRuntimeWorkspace({ ...input, snapshotRef: snapshot });
+
+    expect(orphan.findFirst).toHaveBeenCalledOnce();
+    expect(orphan.findUnique).toHaveBeenCalledTimes(unchanged ? 1 : 2);
+    expect(orphan.upsert).toHaveBeenCalledTimes(unchanged ? 1 : 2);
+    const persisted = orphan.upsert.mock.calls.map(([call]) => call.create.snapshotRef);
+    expect(persisted).toEqual(unchanged ? [snapshot] : [snapshot, previous]);
+  });
+
+
+  it("still rejects retired archives before publication or cleanup writes", async () => {
+    const snapshot = { hash: "a".repeat(64), size: 512, key: "synthetic-retired", updatedAt: "2026-09-25T00:00:00.000Z" };
+    const orphan = { findFirst: vi.fn().mockResolvedValue({ resourceId: "synthetic-retired" }), upsert: vi.fn() };
+    mocks.requireOwner.mockResolvedValue({});
+    mocks.transaction.mockImplementation(async (callback: (tx: object) => Promise<unknown>) =>
+      callback({ hostedRuntimeOrphan: orphan }));
+    await expect(checkpointHostedRuntimeWorkspace({ ...input, snapshotRef: snapshot }))
+      .rejects.toMatchObject({ code: "HOSTED_RUNTIME_RESOURCE_RETIRED" });
+    expect(mocks.checkpoint).not.toHaveBeenCalled();
+    expect(orphan.upsert).not.toHaveBeenCalled();
+  });
+
+
+  it("records an unchanged v2 archive once without extending its recovery deadline", async () => {
+    const schema = "murph.hosted-workspace-snapshot.v2";
+    const objectKey = await hostedWorkspaceSnapshotObjectKey({ userId: input.userId, snapshotId: "synthetic" });
+    const snapshot = {
+      schema, userId: input.userId, snapshotId: "synthetic", objectKey,
+      createdAt: "2026-09-25T00:00:00.000Z", upload: "direct-r2-presigned-put",
+      encryption: {
+        scheme: "murph.hosted-workspace-snapshot-single-object.v1",
+        aad: { schema, purpose: "workspace-snapshot", userId: input.userId, snapshotId: "synthetic", objectKey },
+        ivBase64: Buffer.alloc(12).toString("base64url"), rootKeyId: "synthetic-root", wrappedDataKey: "synthetic-wrapped-key",
+      },
+      archive: { compression: "zstd", format: "tar", encryptedByteSize: 128,
+        encryptedObjectSha256: "a".repeat(64), plaintextArchiveSha256: "b".repeat(64),
+        fileCount: 1, totalPlainBytes: 256 },
+    };
+    const recoveryUntil = new Date("2026-09-25T01:00:00.000Z");
+    const orphan = {
+      findFirst: vi.fn().mockResolvedValue(null),
+      findUnique: vi.fn().mockResolvedValue({ objectKey, recoveryUntil }),
+      upsert: vi.fn().mockResolvedValue({}),
+    };
+    mocks.requireOwner.mockResolvedValue({});
+    mocks.checkpoint.mockResolvedValue({ status: "updated", replacedSnapshotRef: snapshot });
+    mocks.transaction.mockImplementation(async (callback: (tx: object) => Promise<unknown>) =>
+      callback({ hostedRuntimeOrphan: orphan }));
+    await checkpointHostedRuntimeWorkspace({ ...input, snapshotRef: snapshot });
+    expect(orphan.findUnique).toHaveBeenCalledOnce();
+    expect(orphan.upsert).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+      update: expect.objectContaining({ recoveryUntil, cleanupAt: recoveryUntil, snapshotRef: snapshot }),
+    }));
+  });
+
 });

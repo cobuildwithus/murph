@@ -1077,33 +1077,37 @@ async function resolveHostedSystemMailboxProcessingModeWake(input: {
   systemMailboxWakeReason: string | null;
 }> {
   const now = new Date(input.nowMs);
-  const pendingAssistantInputWakeAt =
-    await resolveHostedPendingAssistantInputWakeAt({
+  // These independent local reads share one observation time. Join every read
+  // on failure before the invocation can release or replace the workspace.
+  const wakeReads = [
+    resolveHostedPendingAssistantInputWakeAt({
       inspectOnly: true,
       now: () => now.toISOString(),
       vaultRoot: input.vaultRoot,
-    });
-  const outboxWakeAt = await resolveHostedAssistantOutboxNextWakeAt({
-    now,
-    vaultRoot: input.vaultRoot,
-  });
-  const providerCleanupWakeAt = await resolveHostedProviderCleanupScheduledWakeAt({
-    nowMs: input.nowMs,
-    vaultRoot: input.vaultRoot,
-  });
-  const systemMailboxWakes = input.systemMailboxWakes
-    ?? await resolveHostedSystemMailboxWakeCandidates({
+    }),
+    resolveHostedAssistantOutboxNextWakeAt({ now, vaultRoot: input.vaultRoot }),
+    resolveHostedProviderCleanupScheduledWakeAt({
+      nowMs: input.nowMs,
+      vaultRoot: input.vaultRoot,
+    }),
+    input.systemMailboxWakes ?? resolveHostedSystemMailboxWakeCandidates({
       now: () => now.toISOString(),
       state: input.systemMailboxState,
       vaultRoot: input.vaultRoot,
+    }),
+    resolveHostedAssistantCronWakeAfterInitialImport({
+      nowMs: input.nowMs,
+      operatorHomeRoot: input.operatorHomeRoot,
+      runtimeEnv: input.runtimeEnv,
+      vaultRoot: input.vaultRoot,
+    }),
+  ] as const;
+  const [pendingAssistantInputWakeAt, outboxWakeAt, providerCleanupWakeAt,
+    systemMailboxWakes, assistantCronWake] = await Promise.all(wakeReads).catch(async (error) => {
+      await Promise.allSettled(wakeReads);
+      throw error;
     });
   const systemMailboxWake = systemMailboxWakes.next;
-  const assistantCronWake = await resolveHostedAssistantCronWakeAfterInitialImport({
-    nowMs: input.nowMs,
-    operatorHomeRoot: input.operatorHomeRoot,
-    runtimeEnv: input.runtimeEnv,
-    vaultRoot: input.vaultRoot,
-  });
   const outboxWake = createHostedRuntimeWakeCandidate(
     outboxWakeAt,
     HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON,

@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from "node:util";
 import type { HostedExecutionRuntimeAuthority } from "@murphai/hosted-execution/auth";
 import { parseHostedExecutionSnapshotRef, parseHostedBrowserVaultReplicaRef, isHostedWorkspaceSnapshotV2Ref } from "@murphai/hosted-execution/parsers";
 import { HOSTED_RUNTIME_SNAPSHOT_RECOVERY_RETENTION_MS } from "@murphai/hosted-execution/runtime-resources";
@@ -53,9 +54,15 @@ export async function checkpointHostedRuntimeWorkspace(
               ));
               for (const candidate of candidates) candidate.recoveryUntil = recoveryUntil;
             }
+            // Status-only checkpoints retain the same archive. Recording its
+            // identical cleanup candidate twice adds two serial DB operations.
+            // Compare the complete candidate so differing retention or resource
+            // metadata still goes through the existing validation and update.
+            const replacedCandidates = snapshotOrphanCandidates(result.replacedSnapshotRef ?? null)
+              .filter((previous) => !candidates.some((current) => isDeepStrictEqual(current, previous)));
             await recordRuntimeOrphansTx(tx, input.userId, [
               ...candidates,
-              ...snapshotOrphanCandidates(result.replacedSnapshotRef ?? null),
+              ...replacedCandidates,
             ], new Date());
           }
           return result;

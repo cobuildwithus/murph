@@ -165,6 +165,10 @@ provider acceptance is pending. Typing never blocks admission. Failed staging,
 self-authored input, consumed replay, disabled auto-replies, and unbound routes do
 not start preparation; failed admission cancels an unclaimed handle. Attachment
 evidence and canonical receipt/watermark checkpoints keep their existing gates.
+Runtime status checkpoints resolve independent pending-input, outbox,
+provider-cleanup, system-mailbox and cron wake reads concurrently (at most five).
+Wake selection keeps its existing precedence; every started read settles before
+failure can release or replace the workspace.
 The existing content-free import diagnostic may include `audioPairCount`,
 `audioPairPreparationMs` (whole pair preparation wall span), and
 `audioParsePreparationOverlapMs` (intersection of artifact/parse/scratch-cleanup
