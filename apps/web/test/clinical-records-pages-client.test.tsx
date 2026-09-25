@@ -1092,7 +1092,7 @@ describe("Clinical Records status page", () => {
     const completeBadge = Array.from(rendered.container.querySelectorAll("span"))
       .find((span) => span.textContent === "Imported");
     assert.ok(completeBadge);
-    expect(completeBadge.className).toContain("bg-primary");
+    expect(completeBadge.className).toContain("text-primary");
     expect(rendered.container.querySelector('a[href="/biomarkers"]')?.textContent).toBe("View lab results");
     expect(rendered.container.textContent).toContain(
       "Your records are saved and ready for conversations with Murph.",

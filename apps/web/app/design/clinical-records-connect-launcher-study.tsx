@@ -8,7 +8,7 @@ import {
 
 import { ProviderSearchView, type ProviderSearchViewProps } from "@/app/(dashboard)/records/connect/provider-search-view";
 
-import { ConnectionRow, DisconnectDialog, RecordsPrivacyControls } from "@/app/(dashboard)/records/records-page-client";
+import { ConnectionRow, DisconnectDialog, RecordsPageClient, RecordsPrivacyControls } from "@/app/(dashboard)/records/records-page-client";
 import type { ClinicalRecordConnectionContract } from "@/src/lib/clinical-records/client-contracts";
 
 const savedSource: ClinicalRecordConnectionContract = {
@@ -56,6 +56,17 @@ export function ClinicalRecordsConnectLauncherStudy() {
       data-design-section="clinical-records-connect-launcher"
       inert
     >
+      <div id="records-overview" className="xl:col-span-2">
+        <RecordsPageClient
+          authenticated
+          initialCallback={null}
+          initialLoadError={false}
+          initialConnections={[{
+            ...savedSource, displayName: "Northstar Health", lastCheckedAt: null, nextSyncAt: null,
+            latestRun: { ...savedSource.latestRun!, importedCount: 248, status: "partial", reviewCount: 12, skippedExistingCount: 6 },
+          }]}
+        />
+      </div>
       <StudyState label="Find your provider">
         <ProviderSearchView {...searchPreview} />
       </StudyState>
