@@ -50,9 +50,7 @@ const WIDTHS = [320, 375, 390, 768, 1280] as const;
 const OVERFLOW_TOLERANCE_PX = 1;
 
 // Layout fidelity caveats (deliberately not engineered around):
-//   - Text width depends on the `next/font/google` families, which Next fetches
-//     at compile time. CI runners have network access, so production metrics are
-//     used; an offline runner would fall back to system metrics.
+//   - Text width uses the bundled `next/font/local` families, including offline.
 //   - The nav's GitHub star count is a best-effort server-side fetch and does
 //     not drive marketing-section width, so its presence/absence is immaterial.
 
