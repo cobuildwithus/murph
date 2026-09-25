@@ -144,7 +144,7 @@ test("screenshot categories keep the production studies available without one gi
   expect(sectionsMarkup).toContain(
     "Settings inference routing, locked models, and endpoint",
   );
-  expect(sectionsMarkup).toContain("High usage · Edge required");
+  expect(sectionsMarkup).toContain("Highest usage · Edge required");
   expect(sectionsMarkup).toContain(">Upgrade to Edge</button>");
   expect(sectionsMarkup).not.toContain("Sol requires an active Edge plan.");
   expect(sectionsMarkup).toContain(
