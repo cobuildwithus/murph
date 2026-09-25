@@ -10133,6 +10133,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
         const report = await executeRealCodexAppServerTurn({
           ...common, dynamicTools: [MURPH_GROUP_SHARED_READ_TOOL],
           developerInstructions: buildAssistantSystemPrompt({ ...systemOptions,
+            assistantHostedAutomationAvailable: false,
             currentLocalDate: '2030-02-19', currentInstant: '2030-02-19T10:00:00.000Z',
             turnTrigger: 'automation-cron', scheduledOccurrenceAt: '2030-02-19T10:00:00.000Z',
           }),

@@ -56,3 +56,4 @@ Updated: 2026-09-24
 - PR remains draft until the requested live scenario passes and required exact-head checks are green.
 
 - Draft PR: https://github.com/cobuildwithus/murph/pull/3697; live authentication remains the completion blocker.
+- Reconciled the newer base while preserving both docs-index additions; scheduled fixture advertises only its actual read-only tool port.
