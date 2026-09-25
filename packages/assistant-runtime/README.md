@@ -14,7 +14,7 @@ Current responsibilities:
 - yield system-mailbox completion during container shutdown, drain owned projection
   work, and retain checkpointed recording with its due successor wake; explicit
   host aborts and checkpoint failures remain errors
-- preserve independent system-work completion across empty runtime nudges during projection discovery/delivery, browser-vault publication, recording, and snapshotting; qualify notifications against the bounded conversation mailbox and reuse that fetched batch for a real foreground handoff
+- preserve system-work admission and completion across empty runtime nudges during startup, projection discovery/delivery, browser-vault publication, recording, and snapshotting; qualify notifications through the same bounded foreground mailbox prefetch and current due-work projection, reuse that fetched batch for a real foreground handoff, and avoid qualification reads when no hint arrived
 - settle independent system-work writes before a clean foreground return so late
   completion enters the existing durable checkpoint and browser publication path;
   a real projection failure retains the mailbox item and its existing retry wake
