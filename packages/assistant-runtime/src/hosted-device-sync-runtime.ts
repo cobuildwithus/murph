@@ -12,7 +12,7 @@ import {
 import {
   areJunctionProviderSlugsDataEquivalent,
 } from "@murphai/device-syncd/junction-inline-authority";
-import { shapeHostedDeviceSyncJobHintPayload } from "@murphai/device-syncd/hosted-hints";
+import { describeHostedDeviceSyncCoalescibleFetch, shapeHostedDeviceSyncJobHintPayload } from "@murphai/device-syncd/hosted-hints";
 import {
   isJunctionCompanionHrvRmssdJob,
   JUNCTION_COMPANION_HRV_OBSERVATION_INVALID_CODE,
@@ -1462,6 +1462,54 @@ function applyHostedDirtyDeviceSyncState(input: {
   };
 }
 
+/** Share pull work within one bounded dirty page, retaining each original completion obligation. */
+function coalesceHostedDirtyDeviceSyncFetches(
+  provider: string,
+  jobs: readonly HostedDirtyDeviceSyncJob[],
+): Map<HostedDirtyDeviceSyncJob, DeviceSyncJobInput> {
+  type Candidate = { job: HostedDirtyDeviceSyncJob; start: number; end: number };
+  const byKey = new Map<string, Candidate[]>();
+  for (const job of jobs) {
+    const fetch = describeHostedDeviceSyncCoalescibleFetch(provider, job.input);
+    // Payload IDs distinguish a fresh notification from earlier fetched work.
+    if (!fetch || !job.dirtyPayloadId) continue;
+    const candidates = byKey.get(fetch.key) ?? [];
+    candidates.push({ job, start: fetch.start, end: fetch.end });
+    byKey.set(fetch.key, candidates);
+  }
+  const result = new Map<HostedDirtyDeviceSyncJob, DeviceSyncJobInput>();
+  for (const candidates of byKey.values()) {
+    candidates.sort((a, b) => a.start - b.start || a.end - b.end);
+    let index = 0;
+    while (index < candidates.length) {
+      const first = candidates[index]!;
+      const members = [first.job];
+      let end = first.end;
+      index += 1;
+      while (index < candidates.length) {
+        const next = candidates[index]!;
+        const unionEnd = Math.max(end, next.end);
+        if (next.start > end || unionEnd - first.start > 366 * 86_400_000) break;
+        members.push(next.job);
+        end = unionEnd;
+        index += 1;
+      }
+      if (members.length < 2) continue;
+      const windowStart = new Date(first.start).toISOString();
+      const windowEnd = new Date(end).toISOString();
+      const identity = members.map((member) => [member.dirtyPayloadId, member.input.dedupeKey]).sort();
+      const sharedInput: DeviceSyncJobInput = {
+        ...first.job.input,
+        payload: { ...first.job.input.payload, windowStart, windowEnd },
+        dedupeKey: `hosted-dirty:coalesced:${createHash("sha256")
+          .update(JSON.stringify([identity, windowStart, windowEnd])).digest("hex")}`,
+      };
+      for (const member of members) result.set(member, sharedInput);
+    }
+  }
+  return result;
+}
+
 function admitHostedDirtyDeviceSyncJobsForAccount(input: {
   accountId: string;
   connectionId: string;
@@ -1471,7 +1519,11 @@ function admitHostedDirtyDeviceSyncJobsForAccount(input: {
   store: HostedRuntimeDeviceSyncStore;
 }): HostedDirtyDeviceSyncAdmissionResult {
   let availableSlots = HOSTED_DEVICE_SYNC_PASS_JOB_LIMIT;
-  const requestedDedupeKeys = new Set(input.jobs.map((job) => job.input.dedupeKey));
+  const coalesced = coalesceHostedDirtyDeviceSyncFetches(input.provider, input.jobs);
+  const requestedDedupeKeys = new Set([
+    ...input.jobs.map((job) => job.input.dedupeKey),
+    ...[...coalesced.values()].map((job) => job.dedupeKey),
+  ]);
   const jobIdsByDedupeKey = new Map<string, string>();
   for (const job of input.store.iteratePendingJobsForAccount(input.accountId)) {
     availableSlots = Math.max(0, availableSlots - 1);
@@ -1483,11 +1535,18 @@ function admitHostedDirtyDeviceSyncJobsForAccount(input: {
       jobIdsByDedupeKey.set(job.dedupeKey, job.id);
     }
   }
+  // A pre-upgrade job or its suffix still owns the original window. Do not fork it.
+  const retainedGroups = new Set<DeviceSyncJobInput>();
+  for (const [job, group] of coalesced) {
+    if (job.input.dedupeKey && jobIdsByDedupeKey.has(job.input.dedupeKey)) retainedGroups.add(group);
+  }
   const pendingDirtyPayloadJobs: HostedDeviceSyncRuntimeDirtyPayloadJob[] = [];
   let admittedJobCount = 0;
 
   for (const job of input.jobs) {
-    const dedupeKey = job.input.dedupeKey;
+    const group = coalesced.get(job);
+    const jobInput = group && !retainedGroups.has(group) ? group : job.input;
+    const dedupeKey = jobInput.dedupeKey;
     let jobId = dedupeKey ? jobIdsByDedupeKey.get(dedupeKey) ?? null : null;
     if (!jobId) {
       if (availableSlots === 0) {
@@ -1495,12 +1554,12 @@ function admitHostedDirtyDeviceSyncJobsForAccount(input: {
       }
       const enqueued = input.store.enqueueJob({
         accountId: input.accountId,
-        availableAt: job.input.availableAt,
+        availableAt: jobInput.availableAt,
         dedupeKey,
-        kind: job.input.kind,
-        maxAttempts: job.input.maxAttempts,
-        payload: job.input.payload ?? {},
-        priority: job.input.priority ?? 0,
+        kind: jobInput.kind,
+        maxAttempts: jobInput.maxAttempts,
+        payload: jobInput.payload ?? {},
+        priority: jobInput.priority ?? 0,
         provider: input.provider,
       });
       jobId = enqueued.id;

@@ -164,6 +164,16 @@ Current providers:
   the committed `queued`/`dead` transition and remaining bounded attempt budget,
   while a typed origin distinguishes them from canonical-apply and checkpoint-side
   diagnostics.
+- Hosted dirty admission coalesces overlapping plain Garmin notification fetches
+  for steps, distance, active calories, and respiratory rate within one bounded
+  dirty page. Only matching resource and event types share a range, capped at
+  366 days. Inline data, backfill/cursor payloads, and unknown fields stay separate.
+  Every original payload retains its acknowledgement owner; group identities
+  include all original payload IDs so fresh notifications cannot join older
+  fetched work. Existing original jobs prevent coalescing their group, and
+  retained shared continuations keep their narrowed window on cold restore.
+  Changing a page's membership can conservatively repeat a fetch; it never
+  treats overlap alone as proof that new notifications were imported.
 - Successful Junction resource/webhook jobs preserve the full-sync completion
   watermark. They still complete and clear their own failures, while only a
   terminal reconcile or backfill whose window ends at the current closed-day
