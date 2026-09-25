@@ -1449,6 +1449,30 @@ describe("handleHostedOnboardingLinqWebhook", () => {
   });
 
   it.each([
+    { template: "instant_first_turn_v1" as const, path: "instant iMessage signup" },
+    { template: null, path: "app or website signup welcome" },
+    { template: null, path: "ordinary direct reply" },
+  ])("shares the home contact card after delivered $path", async ({ template }) => {
+    const prisma = createHostedLinqDeliveryReceiptWebhookPrisma({
+      sourceRef: "synthetic-opening", template, homeMemberId: "member_123",
+    });
+    const tasks: Array<() => Promise<void>> = [];
+    const event = buildHostedLinqProviderReceiptEvent({
+      eventId: "evt_home_delivered", eventType: "message.delivered",
+      messageId: "message_home", chatId: "chat_home",
+    });
+    await handleHostedOnboardingLinqWebhook({
+      prisma, rawBody: JSON.stringify(event), signature: null, timestamp: null,
+      scheduleAfterResponse: (task) => { tasks.push(task); },
+    });
+    expect(mocks.shareMurphHostedLinqNativeContactCardToChat).not.toHaveBeenCalled();
+    for (const task of tasks) await task();
+    expect(mocks.shareMurphHostedLinqNativeContactCardToChat).toHaveBeenCalledExactlyOnceWith({
+      chatId: "chat_home", memberId: "member_123", prisma,
+    });
+  });
+
+  it.each([
     { chatId: "chat_signup_direct", threadKind: "direct" },
     { chatId: "chat_signup_group", threadKind: "group" },
   ])(
@@ -1778,7 +1802,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       createdAt: "2026-03-26T11:59:00.000Z",
       eventId: "evt_stale_signup",
       eventType: "message.delivered" as const,
-      expectedScheduledTaskCount: 0,
+      expectedScheduledTaskCount: 1,
       label: "stale",
       providerEventCreateCounts: [1],
       receiptUpdateCounts: [0],
@@ -1787,7 +1811,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       createdAt: "2026-03-26T12:00:02.000Z",
       eventId: "evt_non_advancing_signup",
       eventType: "message.delivered" as const,
-      expectedScheduledTaskCount: 0,
+      expectedScheduledTaskCount: 1,
       label: "non-advancing",
       providerEventCreateCounts: [1],
       receiptUpdateCounts: [0],
@@ -1795,14 +1819,14 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     {
       eventId: "evt_delivered_non_invite",
       eventType: "message.delivered" as const,
-      expectedScheduledTaskCount: 0,
+      expectedScheduledTaskCount: 1,
       label: "non-invite template",
       providerEventCreateCounts: [1],
       receiptUpdateCounts: [1],
       template: "ai_usage_quota" as const,
     },
   ])(
-    "does not share for a $label delivery event",
+    "does not share for a $label event without a home route",
     async ({
       createdAt,
       eventId,
@@ -16610,7 +16634,8 @@ function createHostedLinqDeliveryReceiptWebhookPrisma(input: {
   providerEventCreateCounts?: readonly number[];
   receiptUpdateCounts?: readonly number[];
   sourceRef: string;
-  template: "ai_usage_quota" | "invite_signup" | "invite_signup_fallback";
+  homeMemberId?: string;
+  template: "ai_usage_quota" | "invite_signup" | "invite_signup_fallback" | "instant_first_turn_v1" | null;
 }): HostedOnboardingLinqWebhookPrismaFixture {
   const providerEventCreateCounts = input.providerEventCreateCounts ?? [1];
   const hostedLinqProviderEventCreateMany = vi.fn().mockResolvedValue({
@@ -16629,6 +16654,11 @@ function createHostedLinqDeliveryReceiptWebhookPrisma(input: {
   }
 
   const prisma = asPrismaTransactionClient({
+    hostedMemberRouting: {
+      upsert: vi.fn(),
+      findMany: vi.fn().mockResolvedValue(input.homeMemberId
+        ? [{ memberId: input.homeMemberId }] : []),
+    },
     hostedLinqAlert: {
       createMany: vi.fn().mockResolvedValue({ count: 1 }),
     },
