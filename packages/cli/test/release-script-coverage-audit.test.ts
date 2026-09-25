@@ -1331,6 +1331,7 @@ describe('monorepo release flow coverage audit', () => {
         "'@cloudflare/containers@0.3.7': patches/@cloudflare__containers@0.3.7.patch",
         "'@cobuild/repo-tools@0.1.17': patches/@cobuild__repo-tools@0.1.17.patch",
         "'@cobuild/review-gpt@0.5.147': patches/@cobuild__review-gpt@0.5.147.patch",
+        'frog@1.1.0: patches/frog@1.1.0.patch',
         'incur@0.4.5: patches/incur@0.4.5.patch',
         'incur@0.5.1: patches/incur@0.5.1.patch',
         'ink@6.8.0: patches/ink@6.8.0.patch',
