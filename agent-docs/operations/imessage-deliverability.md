@@ -143,8 +143,9 @@ replay compatibility. See Linq's
 and [attachment](https://docs.linqapp.com/guides/messaging/attachments/)
 limits.
 
-The Linq adapter includes distinct image alternative text in the provider text
-part for accessibility. It must reject a rendered text part over Linq's 10,000
+The Linq adapter sends the authored message without appending image alternative
+text as visible prose. Alt text remains on stored response media; image-only
+sends remain image-only. It must reject a rendered text part over Linq's 10,000
 character limit before private vault bytes are loaded or uploaded and before
 message-provider entry, with `deliveryMayHaveSucceeded: false`.
 An ordinary failed direct-chat image response remains outstanding image work:
