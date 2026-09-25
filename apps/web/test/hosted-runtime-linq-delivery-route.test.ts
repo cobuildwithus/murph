@@ -6,12 +6,17 @@ import {
 
 const mocks = vi.hoisted(() => ({
   after: vi.fn(),
+  queueHostedLinqHomeContactCardAfterDelivery: vi.fn(),
   getPrisma: vi.fn(),
   linkHostedIngressLatencyTracesToAcceptedLinqDelivery: vi.fn(),
   materializeHostedSignupWelcomeHomeRouteTx: vi.fn(),
   recordHostedLinqRuntimeDeliveryOutcomeTx: vi.fn(),
   retryHostedLinqTerminalSend: vi.fn(),
   requireHostedCloudflareCallbackRequest: vi.fn(),
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/linq-contact-card-delivery", () => ({
+  queueHostedLinqHomeContactCardAfterDelivery: mocks.queueHostedLinqHomeContactCardAfterDelivery,
 }));
 
 vi.mock("next/server", async (importOriginal) => ({
@@ -288,6 +293,12 @@ describe("hosted runtime Linq delivery route", () => {
     expect(mocks.after).toHaveBeenCalledTimes(2);
 
     await runScheduledAfterTask();
+    expect(mocks.queueHostedLinqHomeContactCardAfterDelivery).toHaveBeenCalledWith({
+      chatId: "linq_chat_123",
+      expectedMemberId: "member_123",
+      messageIds: ["linq_text_message", "linq_link_message"],
+      prisma,
+    });
     expect(mocks.retryHostedLinqTerminalSend.mock.calls).toEqual([
       [{ chatId: "linq_chat_123", messageId: "linq_text_message", prisma }],
       [{ chatId: "linq_chat_123", messageId: "linq_link_message", prisma }],
@@ -349,6 +360,7 @@ describe("hosted runtime Linq delivery route", () => {
       recorded: false,
     });
     expect(mocks.after).not.toHaveBeenCalled();
+    expect(mocks.queueHostedLinqHomeContactCardAfterDelivery).not.toHaveBeenCalled();
     expect(mocks.linkHostedIngressLatencyTracesToAcceptedLinqDelivery).not.toHaveBeenCalled();
   });
 
