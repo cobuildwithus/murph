@@ -3795,7 +3795,11 @@ describe("hosted system mailbox notification execution context", () => {
     }
   });
 
-  it.each([null, "2026-04-27T00:00:30.000Z"])("publishes device cadence without a runtime wake and preserves maintenance retry %s", async (maintenanceRetryAt) => {
+  it.each([
+    { boundary: "stale", maintenanceRetryAt: null },
+    { boundary: "stale", maintenanceRetryAt: "2026-04-27T00:00:30.000Z" },
+    ...["webhook", "manual", "equal-cadence", "future-cadence", "new-epoch", "other-connection", "unknown-hint", "webhook-barrier"].map((boundary) => ({ boundary, maintenanceRetryAt: null })),
+  ])("publishes device cadence and retires only covered schedules ($boundary, maintenance: $maintenanceRetryAt)", async ({ boundary, maintenanceRetryAt }) => {
     const workspace = await createHostedRuntimeWorkspace("murph-hosted-system-mailbox-");
     const connectionId = "dsc_completion_same_admission";
     const connectedAt = "2026-04-01T00:00:00.000Z";
@@ -3870,6 +3874,7 @@ describe("hosted system mailbox notification execution context", () => {
       }
       await enqueueHostedSystemMailboxItem({
         item: createResolvedDeviceSyncItem({
+          dedupeKey: wake.eventId,
           id: "mailbox_item_system_device_sync_completion_same_admission",
         }),
         vaultRoot: workspace.vaultRoot,
@@ -3887,6 +3892,42 @@ describe("hosted system mailbox notification execution context", () => {
       });
       assert.equal(prepared?.status, "processed");
 
+      // A sweep can enqueue the old cadence while this pass is checkpointing.
+      const staleSchedule = buildHostedExecutionDeviceSyncWake({
+        ...wake,
+        connectionId: boundary === "other-connection" ? "dsc_other_connection" : connectionId,
+        eventId: "device-sync.wake:completed-cadence-duplicate",
+        expectedConnectedAt: boundary === "new-epoch" ? FIXED_NOW : connectedAt,
+        reason: boundary === "webhook" ? "webhook_hint" : "reconcile_due",
+        hint: {
+          nextReconcileAt: boundary === "equal-cadence" ? nextReconcileAt
+            : boundary === "future-cadence" ? "2026-04-27T07:00:00.000Z" : FIXED_NOW,
+          ...(boundary === "manual" ? { reason: "manual_reconcile" } : {}),
+          ...(boundary === "unknown-hint" ? { reason: "future_work_kind" } : {}),
+        },
+      });
+      if (boundary === "webhook-barrier") {
+        const webhook = buildHostedExecutionDeviceSyncWake({
+          ...wake, eventId: "device-sync.wake:new-dirty-work", reason: "webhook_hint",
+        });
+        await enqueueHostedSystemMailboxItem({
+          item: createResolvedDeviceSyncItem({
+            dedupeKey: webhook.eventId, id: "mailbox_item_new_dirty_work", laneSeq: "2",
+          }),
+          vaultRoot: workspace.vaultRoot,
+          wake: webhook,
+        });
+      }
+      await enqueueHostedSystemMailboxItem({
+        item: createResolvedDeviceSyncItem({
+          dedupeKey: staleSchedule.eventId,
+          id: "mailbox_item_completed_cadence_duplicate",
+          laneSeq: "3",
+        }),
+        vaultRoot: workspace.vaultRoot,
+        wake: staleSchedule,
+      });
+
       await expect(recordHostedSystemMailboxItemAfterCheckpoint({
         deviceSyncCompletionAcceptedInCurrentAdmission: true,
         item: prepared.item,
@@ -3895,8 +3936,8 @@ describe("hosted system mailbox notification execution context", () => {
       })).resolves.toEqual({
         deviceSyncWake: undefined,
         failed: 0,
-        nextWakeAt: maintenanceRetryAt,
-        ...(maintenanceRetryAt ? { nextWakeReason: "device-sync.reconcile" } : {}),
+        nextWakeAt: boundary === "stale" ? maintenanceRetryAt : expect.any(String),
+        ...(maintenanceRetryAt || boundary !== "stale" ? { nextWakeReason: "device-sync.reconcile" } : {}),
         recorded: 0,
       });
       expect(fetchSnapshot).toHaveBeenCalledWith({
@@ -3913,10 +3954,20 @@ describe("hosted system mailbox notification execution context", () => {
           observedUpdatedAt: updatedAt,
         }],
       });
-      const remaining = (await readHostedSystemMailboxState(workspace.vaultRoot)).pending;
-      expect(remaining.map((item) => item.nextAttemptAt)).toEqual(
-        maintenanceRetryAt ? [maintenanceRetryAt] : [],
-      );
+      const completedState = await readHostedSystemMailboxState(workspace.vaultRoot);
+      const remaining = completedState.pending;
+      if (boundary === "stale" && !maintenanceRetryAt) {
+        expect(resolveHostedSystemMailboxHandledThroughSeq({
+          importedSeq: "3", now: FIXED_NOW, state: completedState,
+        })).toBe("3");
+      }
+      expect(remaining.filter((item) => item.itemId === "mailbox_item_completed_cadence_duplicate"))
+        .toHaveLength(boundary === "stale" ? 0 : 1);
+      expect(remaining.filter((item) => item.itemId === "mailbox_item_new_dirty_work"))
+        .toHaveLength(boundary === "webhook-barrier" ? 1 : 0);
+      expect(remaining.some((item) => item.itemId === "mailbox_item_system_device_sync_completion_same_admission")).toBe(false);
+      if (maintenanceRetryAt) expect(remaining.map((item) => item.nextAttemptAt)).toEqual([maintenanceRetryAt]);
+      expect(mocks.executeHostedMailboxEvent).toHaveBeenCalledTimes(1);
     } finally {
       vi.useRealTimers();
       await workspace.cleanup();

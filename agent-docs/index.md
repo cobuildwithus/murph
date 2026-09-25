@@ -1,5 +1,10 @@
 # Murph Agent Docs Index
 
+Completed device polling-hint cleanup and the hourly-preflight investigation are
+recorded in [stale device wakes](exec-plans/completed/2026-09-24-stale-device-wakes.md).
+The runtime mailbox contract remains in
+[`hosted-runtime-protocol.md`](references/hosted-runtime-protocol.md).
+
 Runtime ownership response timing is tracked in
 [the response plan](exec-plans/completed/2026-09-23-runtime-owner-response.md);
 its durable contract remains in the hosted Postgres runtime reference.
