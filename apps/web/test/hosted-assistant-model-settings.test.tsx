@@ -4,7 +4,7 @@ import path from "node:path";
 
 import {
   HOSTED_ASSISTANT_ASTRA_MODEL,
-  HOSTED_ASSISTANT_LUNA_MODEL,
+  HOSTED_ASSISTANT_GPT_6_LUNA_MODEL,
   HOSTED_ASSISTANT_OPENAI_PROVIDER,
   HOSTED_ASSISTANT_SOL_MODEL,
   HOSTED_ASSISTANT_DEFAULT_MODEL,
@@ -141,14 +141,18 @@ test("GPT-6 models are available on Pulse and identify the active fallback accur
   const { document } = parseHTML(markup);
   const sol = document.querySelector('input[id="assistant-model-gpt-6-sol"]');
   const luna = document.querySelector('input[id="assistant-model-gpt-6-luna"]');
+  assert.deepEqual(
+    [...document.querySelectorAll("input")].map((input) => input.getAttribute("value")),
+    ["gpt-6-sol", "gpt-6-luna", "gpt-6-astra"],
+  );
   assert.ok(sol?.hasAttribute("checked"));
   assert.equal(sol?.hasAttribute("disabled"), false);
   assert.equal(luna?.hasAttribute("disabled"), false);
-  assert.match(document.textContent ?? markup, /GPT-6 Sol is active while Edge is paused/);
-  assert.match(markup, /GPT-5.6 Sol is still saved/);
+  assert.match(document.textContent ?? markup, /Sol is active while Edge is paused/);
+  assert.match(markup, /Your previous model is still saved/);
 });
 
-test("eligible Pulse members discover the Edge upgrade from the disabled Sol card", () => {
+test("eligible Pulse members discover the Edge upgrade from the disabled Astra card", () => {
   const markup = renderToStaticMarkup(
     createElement(HostedAssistantModelSettings, {
       canUpgradeToEdge: true,
@@ -159,23 +163,24 @@ test("eligible Pulse members discover the Edge upgrade from the disabled Sol car
     }),
   );
 
-  assert.match(markup, />GPT-5.6 Luna</);
-  assert.match(markup, />GPT-6 Sol</);
-  assert.match(markup, />GPT-5.6 Sol</);
+  assert.match(markup, />Luna</);
+  assert.match(markup, />Sol</);
+  assert.match(markup, />Astra</);
+  assert.doesNotMatch(markup, /GPT-|assistant-model-gpt-5\.6/);
   assert.doesNotMatch(markup, /Sol requires an active Edge plan\./);
-  assert.match(markup, /High usage · Edge required/);
+  assert.match(markup, /Highest usage · Edge required/);
   assert.match(markup, /!opacity-100/);
   assert.match(
     markup,
-    /aria-describedby="assistant-model-gpt-5\.6-sol-description assistant-model-gpt-5\.6-sol-meta"/,
+    /aria-describedby="assistant-model-gpt-6-astra-description assistant-model-gpt-6-astra-meta"/,
   );
   assert.match(markup, />Upgrade to Edge<\/button>/);
   assert.match(markup, /role="radio"/);
   assert.match(markup, /Save change/);
-  assert.match(markup, new RegExp(`value="${HOSTED_ASSISTANT_SOL_MODEL}"`));
+  assert.match(markup, new RegExp(`value="${HOSTED_ASSISTANT_ASTRA_MODEL}"`));
 });
 
-test("other non-Edge members can still choose Luna or GPT-6 Sol without an invalid upgrade action", () => {
+test("other non-Edge members can still choose Luna or Sol without an invalid upgrade action", () => {
   const markup = renderToStaticMarkup(
     createElement(HostedAssistantModelSettings, {
       canUpgradeToEdge: false,
@@ -186,15 +191,16 @@ test("other non-Edge members can still choose Luna or GPT-6 Sol without an inval
     }),
   );
 
-  assert.match(markup, />GPT-5.6 Luna</);
-  assert.match(markup, />GPT-6 Sol</);
-  assert.match(markup, />GPT-5.6 Sol</);
+  assert.match(markup, />Luna</);
+  assert.match(markup, />Sol</);
+  assert.match(markup, />Astra</);
+  assert.doesNotMatch(markup, /GPT-|assistant-model-gpt-5\.6/);
   assert.doesNotMatch(markup, /Sol requires an active Edge plan\./);
-  assert.match(markup, /High usage · Edge required/);
+  assert.match(markup, /Highest usage · Edge required/);
   assert.doesNotMatch(markup, />Upgrade to Edge<\/button>/);
   assert.match(markup, /role="radio"/);
   assert.match(markup, /Save change/);
-  assert.match(markup, new RegExp(`value="${HOSTED_ASSISTANT_SOL_MODEL}"`));
+  assert.match(markup, new RegExp(`value="${HOSTED_ASSISTANT_ASTRA_MODEL}"`));
 });
 
 test("custom inference marks the model cards as the managed default", () => {
@@ -609,7 +615,7 @@ test("retrying a failed endpoint exit preserves dormant Sol", async () => {
     payload: { mode: "managed" },
     url: "/api/settings/assistant",
   });
-  assert.match(view.container.textContent ?? "", /Sol is still saved/u);
+  assert.match(view.container.textContent ?? "", /Your previous model is still saved/u);
   assert.equal(findButton(view.container, "Save change").disabled, false);
 
   await act(async () => {
@@ -631,7 +637,7 @@ test("retrying a failed endpoint exit preserves dormant Sol", async () => {
   }
   assertHiddenSaveAnnouncement(
     view.container,
-    /Saved\. Inference on Sol through Venice while Edge is paused; GPT-5\.6 Sol remains saved\./u,
+    /Saved\. Inference on Sol through Venice while Edge is paused; your previous model remains saved\./u,
   );
 
   view.cleanup();
@@ -838,10 +844,10 @@ test("closing the provider dialog leaves the draft unchanged", async () => {
   view.cleanup();
 });
 
-test("a model-only save adopts the server's canonical provider", async () => {
+test("a model-only save uses the server's canonical model and provider", async () => {
   mocks.requestHostedOnboardingJson.mockResolvedValue({
     dormantSolPreference: false,
-    model: HOSTED_ASSISTANT_LUNA_MODEL,
+    model: HOSTED_ASSISTANT_GPT_6_LUNA_MODEL,
     ok: true,
     provider: HOSTED_ASSISTANT_OPENAI_PROVIDER,
     solAvailable: true,
@@ -853,14 +859,14 @@ test("a model-only save adopts the server's canonical provider", async () => {
       configurationAvailable: true,
       initialDormantSolPreference: false,
       initialModel: HOSTED_ASSISTANT_DEFAULT_MODEL,
-      initialProvider: HOSTED_ASSISTANT_VENICE_PROVIDER,
+      initialProvider: HOSTED_ASSISTANT_OPENAI_PROVIDER,
       solAvailable: true,
       veniceAvailable: true,
     }),
   );
 
   await act(async () => {
-    findModelRadio(view.container, HOSTED_ASSISTANT_LUNA_MODEL).click();
+    findModelRadio(view.container, HOSTED_ASSISTANT_GPT_6_LUNA_MODEL).click();
   });
   await act(async () => {
     submitForm(view.container);
@@ -869,7 +875,7 @@ test("a model-only save adopts the server's canonical provider", async () => {
 
   expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
     method: "POST",
-    payload: { model: HOSTED_ASSISTANT_LUNA_MODEL },
+    payload: { model: HOSTED_ASSISTANT_GPT_6_LUNA_MODEL },
     url: "/api/settings/assistant-model",
   });
   assert.match(view.container.textContent ?? "", /Inference on OpenAI/u);
@@ -938,11 +944,11 @@ test("a provider-only save preserves a dormant Sol preference", async () => {
     },
     url: "/api/settings/assistant-model",
   });
-  assert.match(view.container.textContent ?? "", /Sol is still saved/u);
+  assert.match(view.container.textContent ?? "", /Your previous model is still saved/u);
   assert.equal(findHiddenSaveAnnouncement(view.container), announcement);
   assert.match(
     announcement.textContent ?? "",
-    /Saved\. Inference on Sol through Venice while Edge is paused; GPT-5\.6 Sol remains saved\./u,
+    /Saved\. Inference on Sol through Venice while Edge is paused; your previous model remains saved\./u,
   );
   assert.equal(findButton(view.container, "Save change").disabled, false);
 
@@ -951,16 +957,16 @@ test("a provider-only save preserves a dormant Sol preference", async () => {
 
 test("a combined provider and model save preserves both choices for retry", async () => {
   const combinedPayload = {
-    model: HOSTED_ASSISTANT_SOL_MODEL,
-    provider: HOSTED_ASSISTANT_VENICE_PROVIDER,
+    model: HOSTED_ASSISTANT_GPT_6_LUNA_MODEL,
+    provider: HOSTED_ASSISTANT_OPENAI_PROVIDER,
   };
   mocks.requestHostedOnboardingJson
     .mockRejectedValueOnce(new Error("temporary failure"))
     .mockResolvedValueOnce({
       dormantSolPreference: false,
-      model: HOSTED_ASSISTANT_SOL_MODEL,
+      model: HOSTED_ASSISTANT_GPT_6_LUNA_MODEL,
       ok: true,
-      provider: HOSTED_ASSISTANT_VENICE_PROVIDER,
+      provider: HOSTED_ASSISTANT_OPENAI_PROVIDER,
       solAvailable: true,
       updated: true,
     });
@@ -970,12 +976,12 @@ test("a combined provider and model save preserves both choices for retry", asyn
       configurationAvailable: true,
       initialDormantSolPreference: false,
       initialModel: HOSTED_ASSISTANT_DEFAULT_MODEL,
-      initialProvider: HOSTED_ASSISTANT_OPENAI_PROVIDER,
+      initialProvider: HOSTED_ASSISTANT_VENICE_PROVIDER,
       solAvailable: true,
       veniceAvailable: true,
     }),
   );
-  const solInput = findModelRadio(view.container, HOSTED_ASSISTANT_SOL_MODEL);
+  const lunaInput = findModelRadio(view.container, HOSTED_ASSISTANT_GPT_6_LUNA_MODEL);
 
   await act(async () => {
     findButton(view.container, "Change").click();
@@ -983,9 +989,9 @@ test("a combined provider and model save preserves both choices for retry", asyn
   await act(async () => {
     findProviderRadio(
       view.document,
-      HOSTED_ASSISTANT_VENICE_PROVIDER,
+      HOSTED_ASSISTANT_OPENAI_PROVIDER,
     ).click();
-    solInput.click();
+    lunaInput.click();
   });
   await act(async () => {
     submitForm(view.container);
@@ -1003,9 +1009,9 @@ test("a combined provider and model save preserves both choices for retry", asyn
   );
   assert.match(
     view.container.textContent ?? "",
-    /Inference on Venice after Save/u,
+    /Inference on OpenAI after Save/u,
   );
-  assert.ok(isRadioChecked(solInput));
+  assert.ok(isRadioChecked(lunaInput));
   assert.equal(findButton(view.container, "Save change").disabled, false);
 
   await act(async () => {
@@ -1019,10 +1025,10 @@ test("a combined provider and model save preserves both choices for retry", asyn
     payload: combinedPayload,
     url: "/api/settings/assistant-model",
   });
-  assert.match(view.container.textContent ?? "", /Inference on Venice/u);
+  assert.match(view.container.textContent ?? "", /Inference on OpenAI/u);
   assertHiddenSaveAnnouncement(
     view.container,
-    /Saved\. Sol through Venice is your default\./u,
+    /Saved\. Luna through OpenAI is your default\./u,
   );
   assert.ok(findButton(view.container, "Save change").disabled);
 
@@ -1032,7 +1038,7 @@ test("a combined provider and model save preserves both choices for retry", asyn
 test("non-Edge members can explicitly save Luna as their default model", async () => {
   mocks.requestHostedOnboardingJson.mockResolvedValue({
     dormantSolPreference: false,
-    model: HOSTED_ASSISTANT_LUNA_MODEL,
+    model: HOSTED_ASSISTANT_GPT_6_LUNA_MODEL,
     ok: true,
     solAvailable: false,
     updated: true,
@@ -1048,10 +1054,10 @@ test("non-Edge members can explicitly save Luna as their default model", async (
   );
   const lunaInput = findModelRadio(
     view.container,
-    HOSTED_ASSISTANT_LUNA_MODEL,
+    HOSTED_ASSISTANT_GPT_6_LUNA_MODEL,
   );
 
-  assert.ok(findModelRadio(view.container, HOSTED_ASSISTANT_SOL_MODEL).disabled);
+  assert.ok(findModelRadio(view.container, HOSTED_ASSISTANT_ASTRA_MODEL).disabled);
   await act(async () => {
     lunaInput?.click();
   });
@@ -1062,7 +1068,7 @@ test("non-Edge members can explicitly save Luna as their default model", async (
 
   expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
     method: "POST",
-    payload: { model: HOSTED_ASSISTANT_LUNA_MODEL },
+    payload: { model: HOSTED_ASSISTANT_GPT_6_LUNA_MODEL },
     url: "/api/settings/assistant-model",
   });
   assertHiddenSaveAnnouncement(
@@ -1076,7 +1082,6 @@ test("non-Edge members can explicitly save Luna as their default model", async (
 });
 
 test.each([
-  ["Edge", HOSTED_ASSISTANT_SOL_MODEL, "Sol"],
   ["Edge", HOSTED_ASSISTANT_ASTRA_MODEL, "Astra"],
   ["Max", HOSTED_ASSISTANT_ASTRA_MODEL, "Astra"],
 ] as const)("%s members can save their selected premium model", async (_plan, model, name) => {
@@ -1089,7 +1094,7 @@ test.each([
   });
   const view = await renderClient(
     createElement(HostedAssistantModelSettings, {
-      availableModels: [HOSTED_ASSISTANT_LUNA_MODEL, HOSTED_ASSISTANT_DEFAULT_MODEL, HOSTED_ASSISTANT_SOL_MODEL, ...(model === HOSTED_ASSISTANT_ASTRA_MODEL ? [model] : [])],
+      availableModels: [HOSTED_ASSISTANT_GPT_6_LUNA_MODEL, HOSTED_ASSISTANT_DEFAULT_MODEL, HOSTED_ASSISTANT_SOL_MODEL, ...(model === HOSTED_ASSISTANT_ASTRA_MODEL ? [model] : [])],
       canUpgradeToEdge: false,
       configurationAvailable: true,
       initialDormantSolPreference: false,
@@ -1152,7 +1157,7 @@ test("a generic save failure keeps the selected model available to retry", async
     .mockRejectedValueOnce(new Error("temporary failure"))
     .mockResolvedValueOnce({
       dormantSolPreference: false,
-      model: HOSTED_ASSISTANT_SOL_MODEL,
+      model: HOSTED_ASSISTANT_GPT_6_LUNA_MODEL,
       ok: true,
       solAvailable: true,
       updated: true,
@@ -1166,10 +1171,10 @@ test("a generic save failure keeps the selected model available to retry", async
       solAvailable: true,
     }),
   );
-  const solInput = findModelRadio(view.container, HOSTED_ASSISTANT_SOL_MODEL);
+  const lunaInput = findModelRadio(view.container, HOSTED_ASSISTANT_GPT_6_LUNA_MODEL);
 
   await act(async () => {
-    solInput?.click();
+    lunaInput?.click();
   });
   await act(async () => {
     submitForm(view.container);
@@ -1180,7 +1185,7 @@ test("a generic save failure keeps the selected model available to retry", async
     view.container.querySelector('[role="alert"]')?.textContent,
     "We couldn’t save this change. Try again.",
   );
-  assert.ok(isRadioChecked(solInput));
+  assert.ok(isRadioChecked(lunaInput));
   assert.equal(findButton(view.container, "Save change").disabled, false);
 
   await act(async () => {
@@ -1190,7 +1195,7 @@ test("a generic save failure keeps the selected model available to retry", async
 
   assertHiddenSaveAnnouncement(
     view.container,
-    /Saved\. Sol through OpenAI is your default\./u,
+    /Saved\. Luna through OpenAI is your default\./u,
   );
   assert.ok(findButton(view.container, "Save change").disabled);
   expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledTimes(2);
@@ -1201,14 +1206,14 @@ test("a generic save failure keeps the selected model available to retry", async
 test("model radios stay labeled and the form becomes busy while saving", async () => {
   let resolveRequest: ((value: {
     dormantSolPreference: false;
-    model: typeof HOSTED_ASSISTANT_SOL_MODEL;
+    model: typeof HOSTED_ASSISTANT_GPT_6_LUNA_MODEL;
     ok: true;
     solAvailable: true;
     updated: true;
   }) => void) | undefined;
   const request = new Promise<{
     dormantSolPreference: false;
-    model: typeof HOSTED_ASSISTANT_SOL_MODEL;
+    model: typeof HOSTED_ASSISTANT_GPT_6_LUNA_MODEL;
     ok: true;
     solAvailable: true;
     updated: true;
@@ -1231,7 +1236,7 @@ test("model radios stay labeled and the form becomes busy while saving", async (
       artwork: "luna",
       backgroundAccent: "#777b7d",
       description: "Fast health intelligence",
-      model: HOSTED_ASSISTANT_LUNA_MODEL,
+      model: HOSTED_ASSISTANT_GPT_6_LUNA_MODEL,
       name: "Luna",
       usage: "Low usage",
     },
@@ -1239,19 +1244,10 @@ test("model radios stay labeled and the form becomes busy while saving", async (
       accent: "#8f6817",
       artwork: "sol",
       backgroundAccent: "#d9ad35",
-      description: "Health intelligence with GPT-6",
-      model: HOSTED_ASSISTANT_DEFAULT_MODEL,
-      name: "GPT-6 Sol",
-      usage: "Balanced usage",
-    },
-    {
-      accent: "#8f6817",
-      artwork: "sol",
-      backgroundAccent: "#d9ad35",
       description: "Deep health intelligence",
-      model: HOSTED_ASSISTANT_SOL_MODEL,
+      model: HOSTED_ASSISTANT_DEFAULT_MODEL,
       name: "Sol",
-      usage: "High usage",
+      usage: "Balanced usage",
     },
   ] as const;
   const artworkRadii: number[] = [];
@@ -1311,13 +1307,12 @@ test("model radios stay labeled and the form becomes busy while saving", async (
     assert.match(label?.textContent ?? "", new RegExp(option.usage));
   }
   assert.ok(
-    artworkRadii[0] < artworkRadii[1]
-      && artworkRadii[1] === artworkRadii[2],
+    artworkRadii[0] < artworkRadii[1],
   );
 
-  const solInput = findModelRadio(view.container, HOSTED_ASSISTANT_SOL_MODEL);
+  const lunaInput = findModelRadio(view.container, HOSTED_ASSISTANT_GPT_6_LUNA_MODEL);
   await act(async () => {
-    solInput?.click();
+    lunaInput?.click();
   });
   await act(async () => {
     submitForm(view.container);
@@ -1335,7 +1330,7 @@ test("model radios stay labeled and the form becomes busy while saving", async (
     assert.ok(resolveRequest);
     resolveRequest({
       dormantSolPreference: false,
-      model: HOSTED_ASSISTANT_SOL_MODEL,
+      model: HOSTED_ASSISTANT_GPT_6_LUNA_MODEL,
       ok: true,
       solAvailable: true,
       updated: true,
@@ -1345,47 +1340,6 @@ test("model radios stay labeled and the form becomes busy while saving", async (
 
   assert.equal(form?.getAttribute("aria-busy"), "false");
   assert.equal(fieldset?.hasAttribute("disabled"), false);
-  assert.ok(findButton(view.container, "Save change").disabled);
-
-  view.cleanup();
-});
-
-test("a stale Edge page removes Sol without changing the saved model", async () => {
-  const { HostedOnboardingApiError } = await import(
-    "@/src/components/hosted-onboarding/client-api"
-  );
-  mocks.requestHostedOnboardingJson.mockRejectedValue(
-    new HostedOnboardingApiError({
-      code: "ASSISTANT_MODEL_SOL_REQUIRES_EDGE",
-      message: "ineligible",
-    }),
-  );
-  const view = await renderClient(
-    createElement(HostedAssistantModelSettings, {
-      canUpgradeToEdge: false,
-      configurationAvailable: true,
-      initialDormantSolPreference: false,
-      initialModel: HOSTED_ASSISTANT_LUNA_MODEL,
-      solAvailable: true,
-    }),
-  );
-  const solInput = findModelRadio(view.container, HOSTED_ASSISTANT_SOL_MODEL);
-
-  await act(async () => {
-    solInput?.click();
-  });
-  await act(async () => {
-    submitForm(view.container);
-    await Promise.resolve();
-  });
-
-  assert.match(
-    view.container.textContent ?? "",
-    /Your Edge access changed\. Murph will keep using GPT-5\.6 Luna\./,
-  );
-  const lunaInput = findModelRadio(view.container, HOSTED_ASSISTANT_LUNA_MODEL);
-  assert.ok(isRadioChecked(lunaInput));
-  assert.ok(findModelRadio(view.container, HOSTED_ASSISTANT_SOL_MODEL).disabled);
   assert.ok(findButton(view.container, "Save change").disabled);
 
   view.cleanup();
@@ -1448,9 +1402,9 @@ test("refreshed eligibility resets the client state after an Edge upgrade", asyn
     }),
   );
 
-  assert.ok(findModelRadio(view.container, HOSTED_ASSISTANT_LUNA_MODEL));
+  assert.ok(findModelRadio(view.container, HOSTED_ASSISTANT_GPT_6_LUNA_MODEL));
   assert.ok(findModelRadio(view.container, HOSTED_ASSISTANT_DEFAULT_MODEL));
-  assert.ok(findModelRadio(view.container, HOSTED_ASSISTANT_SOL_MODEL).disabled);
+  assert.ok(findModelRadio(view.container, HOSTED_ASSISTANT_ASTRA_MODEL).disabled);
 
   await view.rerender(
     createElement(HostedAssistantModelSettings, {
@@ -1459,6 +1413,7 @@ test("refreshed eligibility resets the client state after an Edge upgrade", asyn
       initialDormantSolPreference: false,
       initialModel: HOSTED_ASSISTANT_DEFAULT_MODEL,
       solAvailable: true,
+      availableModels: [HOSTED_ASSISTANT_DEFAULT_MODEL, HOSTED_ASSISTANT_GPT_6_LUNA_MODEL, HOSTED_ASSISTANT_ASTRA_MODEL],
     }),
   );
 
@@ -1466,49 +1421,11 @@ test("refreshed eligibility resets the client state after an Edge upgrade", asyn
     view.container,
     HOSTED_ASSISTANT_DEFAULT_MODEL,
   );
-  const solInput = findModelRadio(view.container, HOSTED_ASSISTANT_SOL_MODEL);
+  const astraInput = findModelRadio(view.container, HOSTED_ASSISTANT_ASTRA_MODEL);
   assert.ok(isRadioChecked(defaultSolInput));
-  assert.equal(isRadioChecked(solInput), false);
-  assert.equal(solInput.disabled, false);
+  assert.equal(isRadioChecked(astraInput), false);
+  assert.equal(astraInput.disabled, false);
   assert.ok(findButton(view.container, "Save change").disabled);
-
-  view.cleanup();
-});
-
-test("the canonical save response removes Sol after an Edge downgrade", async () => {
-  mocks.requestHostedOnboardingJson.mockResolvedValue({
-    dormantSolPreference: false,
-    model: HOSTED_ASSISTANT_LUNA_MODEL,
-    ok: true,
-    solAvailable: false,
-    updated: true,
-  });
-  const view = await renderClient(
-    createElement(HostedAssistantModelSettings, {
-      canUpgradeToEdge: false,
-      configurationAvailable: true,
-      initialDormantSolPreference: false,
-      initialModel: HOSTED_ASSISTANT_SOL_MODEL,
-      solAvailable: true,
-    }),
-  );
-  const lunaInput = findModelRadio(view.container, HOSTED_ASSISTANT_LUNA_MODEL);
-
-  await act(async () => {
-    lunaInput?.click();
-  });
-  await act(async () => {
-    submitForm(view.container);
-    await Promise.resolve();
-  });
-
-  assert.ok(findModelRadio(view.container, HOSTED_ASSISTANT_SOL_MODEL).disabled);
-  assert.ok(findModelRadio(view.container, HOSTED_ASSISTANT_DEFAULT_MODEL));
-  assert.ok(isRadioChecked(lunaInput));
-  assertHiddenSaveAnnouncement(
-    view.container,
-    /Saved\. Luna through OpenAI is your default\./u,
-  );
 
   view.cleanup();
 });
@@ -1533,7 +1450,7 @@ test("a dormant Sol preference is explained and can be replaced with GPT-6 Sol",
 
   assert.match(
     view.container.textContent ?? "",
-    /GPT-6 Sol is active while Edge is paused\. GPT-5\.6 Sol is still saved and will return with Edge\./,
+    /Sol is active while Edge is paused\. Your previous model is still saved and will return with Edge\./,
   );
   assert.equal(findButton(view.container, "Save change").disabled, false);
 
