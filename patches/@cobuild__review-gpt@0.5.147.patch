@@ -1,7 +1,16 @@
 diff --git a/README.md b/README.md
-index 55e1688d22eb49109303644c11fb684780aa0314..f23eed80af255e81eddc5d1a0034d1869b7fd5b9 100644
+index 55e1688d22eb49109303644c11fb684780aa0314..3ef85b06b907311e6b59d77c878753e70a19a76b 100644
 --- a/README.md
 +++ b/README.md
+@@ -82,7 +82,7 @@ Each run can:
+ - optionally wait for the final response with `--wait`
+ - optionally switch into the dedicated Deep Research flow with `--deep-research`
+ 
+-Normal reviews are kept on regular Chat so they do not consume or appear in ChatGPT Work. On the new-chat page, ReviewGPT switches the Chat/Work control to Chat before it stages anything. It refuses an existing Work conversation and checks the surface again before staging and immediately before auto-send. Deep Research uses its dedicated surface and is unchanged.
++Normal reviews are kept on regular Chat so they do not consume or appear in ChatGPT Work. On the new-chat page, ReviewGPT switches the Chat/Work control to Chat before it stages anything. After that single click it polls for confirmed Chat within a 12-second bound; a still-Work render does not cause another click or staging approval. It refuses an existing Work conversation and checks the surface again before staging and immediately before auto-send. Deep Research uses its dedicated surface and is unchanged.
+ 
+ This package does not own project prompts. Presets, aliases, and preset groups live in the consuming repository, typically through `scripts/review-gpt.config.sh`.
+ 
 @@ -146,13 +146,26 @@ Set `repo_context_url="https://github.com/owner/repo"` in config when connector-
  
  Each run stages `codebase.zip` as the fidelity artifact. Set `snapshot_attachment_name="review-gpt.repo-snapshot.zip"` in your repo config when a consumer needs a different attachment name. The value must be a `.zip` filename, not a path.
@@ -1424,7 +1433,7 @@ index 95d21fdbf55cf80860f4d5d60d7d94966e8783bc..3f14208da06efc83e92d5acd0be890c6
          matchesStoredCaptureValue(candidate.precedingUserMessageSignature, capture.committedUserTurn.signature),
      );
 diff --git a/src/prepare-chatgpt-draft.js b/src/prepare-chatgpt-draft.js
-index a6444ae284b90c9136c5d91f9a933ad58df8ca04..41a742091aa7c29e88e95c8dc2e4bb906749d0fd 100644
+index a6444ae284b90c9136c5d91f9a933ad58df8ca04..0dfb85cad2cadc824749aeaa88a886e300bfa0ff 100644
 --- a/src/prepare-chatgpt-draft.js
 +++ b/src/prepare-chatgpt-draft.js
 @@ -386,6 +386,15 @@ function extractConversationHref(value, fallbackOrigin = '') {
@@ -1473,7 +1482,28 @@ index a6444ae284b90c9136c5d91f9a933ad58df8ca04..41a742091aa7c29e88e95c8dc2e4bb90
  }
  
  function formatDurationMs(durationMs) {
-@@ -5668,7 +5679,6 @@ async function main() {
+@@ -2662,14 +2673,16 @@ async function main() {
+         inferredConversationSince = 0;
+       }
+       if (lastProbe?.status === 'work') {
+-        if (!allowSwitch || !lastProbe.chatPoint || switched) {
++        if (!allowSwitch || !lastProbe.chatPoint) {
+           throw new Error(
+             'ReviewGPT requires regular Chat and refuses to stage or send a normal review in ChatGPT Work.',
+           );
+         }
+-        await keepPageRenderingWhileBackgrounded();
+-        await clickNativePoint(lastProbe.chatPoint);
+-        switched = true;
++        if (!switched) {
++          await keepPageRenderingWhileBackgrounded();
++          await clickNativePoint(lastProbe.chatPoint);
++          switched = true;
++        }
+       }
+       await sleep(200);
+     }
+@@ -5668,7 +5681,6 @@ async function main() {
            responseMarker,
            responseElapsedMs: Date.now() - responseWaitStartedAt,
            minimumResponseMs: minimumMarkedResponseMs,
@@ -1481,7 +1511,7 @@ index a6444ae284b90c9136c5d91f9a933ad58df8ca04..41a742091aa7c29e88e95c8dc2e4bb90
          });
          if (responseDurationFailure) {
            return {
-@@ -6511,12 +6521,13 @@ async function main() {
+@@ -6511,12 +6523,13 @@ async function main() {
  
    const persistAcceptedSendIdentity = (commitResult, conversationHref) => {
      const exactConversationHref = extractConversationHref(conversationHref, desiredTargetOrigin);
@@ -1497,7 +1527,7 @@ index a6444ae284b90c9136c5d91f9a933ad58df8ca04..41a742091aa7c29e88e95c8dc2e4bb90
        committedUserTurn: commitResult.committedUserTurn,
        ...(isDeepResearchMode ? { expectedContentSource: 'deep-research-iframe' } : {}),
        targetId: captureTargetId,
-@@ -6525,6 +6536,9 @@ async function main() {
+@@ -6525,6 +6538,9 @@ async function main() {
        writeThreadCaptureIdentity(captureMetadataFile, acceptedCaptureIdentity);
        console.log('ReviewGPT exact target and committed-turn identity persisted for wake recovery.');
      }
@@ -1507,7 +1537,7 @@ index a6444ae284b90c9136c5d91f9a933ad58df8ca04..41a742091aa7c29e88e95c8dc2e4bb90
      return exactConversationHref;
    };
  
-@@ -6608,7 +6622,7 @@ async function main() {
+@@ -6608,7 +6624,7 @@ async function main() {
      return {
        status: stableConversationHref ? 'timeout-with-conversation' : 'timeout-no-conversation',
        href: stableConversationHref,
@@ -1516,7 +1546,7 @@ index a6444ae284b90c9136c5d91f9a933ad58df8ca04..41a742091aa7c29e88e95c8dc2e4bb90
      };
    };
  
-@@ -6654,10 +6668,6 @@ async function main() {
+@@ -6654,10 +6670,6 @@ async function main() {
              maxWaitMs: Math.min(15_000, timeoutMs),
              waitForConversationStateAfterSend,
            });
@@ -1527,7 +1557,7 @@ index a6444ae284b90c9136c5d91f9a933ad58df8ca04..41a742091aa7c29e88e95c8dc2e4bb90
            const attachmentVerification = await verifyCommittedUserTurnAttachments(
              commitResult,
              Math.min(15_000, timeoutMs),
-@@ -6675,6 +6685,10 @@ async function main() {
+@@ -6675,6 +6687,10 @@ async function main() {
              failure.reviewGptPostSendAttachmentFailure = true;
              throw failure;
            }
@@ -1538,7 +1568,7 @@ index a6444ae284b90c9136c5d91f9a933ad58df8ca04..41a742091aa7c29e88e95c8dc2e4bb90
            const deepResearchKickoff = await advanceDeepResearchPlan();
            return {
              status: 'sent',
-@@ -6719,10 +6733,6 @@ async function main() {
+@@ -6719,10 +6735,6 @@ async function main() {
                  maxWaitMs: Math.min(15_000, timeoutMs),
                  waitForConversationStateAfterSend,
                });
@@ -1549,7 +1579,7 @@ index a6444ae284b90c9136c5d91f9a933ad58df8ca04..41a742091aa7c29e88e95c8dc2e4bb90
                const attachmentVerification = await verifyCommittedUserTurnAttachments(
                  commitResult,
                  Math.min(15_000, timeoutMs),
-@@ -6734,6 +6744,10 @@ async function main() {
+@@ -6734,6 +6746,10 @@ async function main() {
                  failure.reviewGptPostSendAttachmentFailure = true;
                  throw failure;
                }
@@ -1560,7 +1590,7 @@ index a6444ae284b90c9136c5d91f9a933ad58df8ca04..41a742091aa7c29e88e95c8dc2e4bb90
                const deepResearchKickoff = await advanceDeepResearchPlan();
                return {
                  status: 'sent',
-@@ -7314,6 +7328,7 @@ module.exports = {
+@@ -7314,6 +7330,7 @@ module.exports = {
    retryTransientUnauthenticatedSession,
    resolveAcceptedConversationAfterSend,
    extractConversationHref,
