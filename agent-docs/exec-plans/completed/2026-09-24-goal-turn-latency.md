@@ -1,6 +1,6 @@
 # Reduce goal setup turn latency
 
-Status: active
+Status: completed
 Created: 2026-09-24
 Updated: 2026-09-25
 
@@ -257,7 +257,8 @@ canary threshold, or production credential changes.
 - Web admission 36175172299 passed, and both production Web aliases resolved to
   the same source. Protected canary 36179296277 was dispatched for that exact
   deployment; its unchanged 20-second first-reply and canonical 0/0/1 Goal checks
-  are running. Full completion latency remains a separate pending measurement.
+  passed on the unchanged source at 19:46 UTC. Full completion latency is
+  reported separately below.
 - At the user's request, private PR #170 now defaults hosted ReviewGPT to
   `gpt-6-pro`, matching public Murph. Only the existing model default and assertion
   changed. Seven focused tests, shell syntax, typecheck, and exact-head full CI
@@ -266,6 +267,35 @@ canary threshold, or production credential changes.
   model-confirmation validators. The preliminary review passed in 4m22s; the
   user explicitly accepted that completed review and waived only its timer for
   this PR. No permanent review policy changed. PR #170 merged as `5a00bd1a`.
-- Runtime-log read-only diagnostics currently fail during connection establishment
-  with SSL SYSCALL EOF. No production row contents or credentials were retrieved;
-  use the workflow result and retry bounded diagnostics when available.
+- Runtime-log read-only diagnostics initially failed during connection establishment
+  with SSL SYSCALL EOF, then recovered. Bounded aggregate evidence shows proposal
+  processing at 36.5 seconds (five commands totaling 5.1 seconds) and acceptance
+  at 12.3 seconds (two commands totaling 1.4 seconds), with zero failed actions.
+  Proposal sent one progress update; acceptance completed without one. Compare
+  cautiously with the earlier passing run at roughly 60/51 seconds: this is one
+  observed sample, not controlled proof of a stable latency bound.
+- Production eager tool guidance is now 122,028 bytes, consistent with removing
+  about 45 KB of unrelated initial tool context. This is deployed byte evidence;
+  exact target-tokenizer measurements and a sustained speed guarantee are not
+  claimed. Canonical production checkpoint verification passed.
+
+
+## Completion
+
+- Protected canary 36179296277 passed on the deployed source at 19:46 UTC.
+  First-visible replies: welcome 11.4s, identity question 4.2s, runtime identity
+  4.6s, proposal 17.5s, and acceptance 15.1s. Every reply met the unchanged
+  20-second budget. Goal counts were 0 after identity, 0 after proposal, and 1
+  after acceptance. The exact production deployment was reverified at completion.
+- Full assistant processing was 36.5s for proposal and 12.3s for acceptance;
+  the earlier proposal reply was progress. Commands consumed 5.1s and 1.4s,
+  respectively. The remaining model time is real; this successful run does not
+  establish a universal 20-second full-completion guarantee.
+- Merged behavior, focused real-Luna proof, exact-head CI, protected rollout,
+  and canonical production verification satisfy this plan's success criteria.
+  No reply budget, consent rule, production model, or canonical-state invariant
+  was relaxed. The task's separate review-default request is also merged.
+- Final documentation readback, privacy review, reference checks, docs drift,
+  gardening, and diff checks pass. The closeout changes evidence and its index
+  only; it adds no runtime behavior or provider input.
+Completed: 2026-09-25
