@@ -3372,6 +3372,20 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         defaultOwnerWakeObserved = true;
         return true;
       };
+      const qualifySystemMailboxForegroundWake = async (wakeObserved: boolean): Promise<boolean> => {
+        if (!wakeObserved) return false;
+        // A wake is a hint, including an explicit default-owner request. Only
+        // current foreground facts justify yielding background work. Blocked
+        // invocations cannot read conversation input, so retain their handoff.
+        if (assistantExecutionBlocked) return foregroundWakeObserved;
+        if (checkpointReportedConversationInputAhead) return true;
+        await prefetchSystemMailboxAssistantWork();
+        // A checkpoint may report input while the bounded read is in flight.
+        foregroundWakeObserved = checkpointReportedConversationInputAhead
+          || systemMailboxForegroundWakePrefetch !== null;
+        defaultOwnerWakeObserved = foregroundWakeObserved;
+        return foregroundWakeObserved;
+      };
       const checkpointSystemMailboxMode = async (
         stage: string,
         extraCandidates: readonly HostedRuntimeWakeCandidate[] = [],
@@ -3426,28 +3440,16 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       const finishIndependentSystemWorkAfterCheckpoint = async (): Promise<void> => {
         if (systemMailboxForegroundWakePrefetch || readyDurableCheckpointEffects.length === 0) return;
         const completionWakeSignal = createCoalescingRuntimeWakeSignal();
-        const prefetchCompletionForeground = async (): Promise<boolean> => {
-          // Blocked invocations cannot inspect conversation input. Preserve an
-          // already-observed owner handoff instead of treating it as an empty read.
-          if (assistantExecutionBlocked) return foregroundWakeObserved;
-          if (checkpointReportedConversationInputAhead) return true;
-          await prefetchSystemMailboxAssistantWork();
-          // A checkpoint can report newer input while the mailbox read is in flight.
-          foregroundWakeObserved = checkpointReportedConversationInputAhead
-            || systemMailboxForegroundWakePrefetch !== null;
-          defaultOwnerWakeObserved = foregroundWakeObserved;
-          return foregroundWakeObserved;
-        };
         // A hint may already have been consumed during the preceding checkpoint.
         // Confirm that authority too, while retaining checkpoint-reported input.
-        if (foregroundWakeObserved && await prefetchCompletionForeground()) return;
+        if (await qualifySystemMailboxForegroundWake(foregroundWakeObserved)) return;
         systemMailboxWakeSignal = completionWakeSignal;
         const interruption = createHostedRuntimeCheckpointWakeInterruption({
           enabled: true, runtimeWakeSignal: options.runtimeWakeSignal ?? null,
           // Qualify wakes throughout projection, recording, and checkpointing.
           // Scheduler hints alone must not restart already-checkpointed work.
           async shouldInterrupt(notification) {
-            if (!await prefetchCompletionForeground()) return false;
+            if (!await qualifySystemMailboxForegroundWake(true)) return false;
             completionWakeSignal.notify(notification);
             return true;
           },
@@ -3582,7 +3584,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         preempted: boolean;
         prepared: boolean;
       }> => {
-        if (consumeForegroundWake()) {
+        if (await qualifySystemMailboxForegroundWake(consumeForegroundWake())) {
           return { preempted: true, prepared: false };
         }
         const acceptedProgressCheckpointOrdinalBeforePreparation =
@@ -4092,7 +4094,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           );
         }
 
-        if (consumeForegroundWake()) {
+        if (await qualifySystemMailboxForegroundWake(consumeForegroundWake())) {
           return await returnSystemMailboxModeResult();
         }
 
