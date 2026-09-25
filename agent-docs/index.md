@@ -735,6 +735,8 @@ Native turn cancellation and voice continuity proof:
 Recurring report correction persistence and synthetic verification are tracked in
 [`report format correction`](exec-plans/completed/2026-09-24-report-format-correction.md).
 
+Personal Patterns bounded capacity recovery: [`capacity recovery`](exec-plans/completed/2026-09-24-personal-patterns-capacity.md).
+
 Signup-wide native contact-card sharing and daily attempt suppression are owned by
 `operations/imessage-deliverability.md`; implementation and receipt-order proof
 are tracked in `exec-plans/completed/2026-09-24-signup-contact-card.md`.

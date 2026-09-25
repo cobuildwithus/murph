@@ -369,7 +369,12 @@ prefetched workspace in the typed invocation request; restore preserves it
 without another Web read, including when the prefetched workspace is null.
 
 Personal Patterns resolves each vault identity to a stable daily minute between
-09:00 and 16:59 local time. Existing active
+09:00 and 16:59 local time. Its immutable managed identity on a daily-local
+schedule has a four-hour occurrence freshness window so existing Flex retries
+can recover from prolonged capacity shortages. Other identities and one-shot
+or custom cron schedules retain their existing freshness policies, including
+explicit one-shot active windows. Active-until, route, consent, and
+duplicate-delivery checks remain controlling. Existing active
 13:00 records migrate under the cron lock only after running, retrying, or
 pending-delivery work settles. The new schedule and its next-local-day lower
 bound commit together in the canonical record; custom and paused schedules
