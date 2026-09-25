@@ -76,6 +76,9 @@ export function ClinicalRecordsConnectLauncherStudy() {
       <StudyState label="Incomplete import">
         <ul><ConnectionRow connection={{ ...savedSource, latestRun: { ...savedSource.latestRun!, status: "partial", reviewCount: 2, skippedExistingCount: 1 } }} disabled={false} onDisconnect={() => {}} /></ul>
       </StudyState>
+      <StudyState label="Limited portal coverage">
+        <ul><ConnectionRow connection={{ ...savedSource, lastErrorCode: "provider-search-incomplete", latestRun: { ...savedSource.latestRun!, status: "partial", reviewCount: 4, skippedExistingCount: 2 } }} disabled={false} onDisconnect={() => {}} /></ul>
+      </StudyState>
       <StudyState label="Partial results after access ends">
         <ul>
           <ConnectionRow

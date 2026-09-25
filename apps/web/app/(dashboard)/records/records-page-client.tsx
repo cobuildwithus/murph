@@ -339,7 +339,7 @@ function ImportCounts({ importedCount, reviewCount, skippedExistingCount }: { im
         <details className="max-w-xl text-sm leading-6 text-muted-foreground">
           <summary className="w-fit cursor-pointer underline-offset-4 hover:underline">Import details</summary>
           <div className="mt-2 flex flex-col gap-1">
-            {skippedExistingCount > 0 ? <p>{skippedExistingCount.toLocaleString()} already in Murph.</p> : null}
+            {skippedExistingCount > 0 ? <p>{skippedExistingCount.toLocaleString()} repeated {skippedExistingCount === 1 ? "item" : "items"} skipped.</p> : null}
             {reviewCount > 0 ? <p>{reviewCount.toLocaleString()} {reviewCount === 1 ? "item" : "items"} saved for reference. These are kept in your vault but aren’t shown as results.</p> : null}
           </div>
         </details>
@@ -454,6 +454,13 @@ function describeConnection(connection: ClinicalRecordConnectionContract): {
     };
   }
 
+  if (connection.latestRun?.status === "partial" && connection.lastErrorCode === "provider-search-incomplete") {
+    return {
+      badgeVariant: "outline",
+      detail: "Your portal reported limited coverage. Any records saved are ready to use.",
+      label: "Limited portal coverage",
+    };
+  }
   return describeRun(connection.latestRun);
 }
 
@@ -475,7 +482,7 @@ function describeRun(run: ClinicalRecordConnectionContract["latestRun"]): {
     case "complete":
       return importedCount > 0
         ? { badgeVariant: "default", detail: "Your records are saved and ready for conversations with Murph.", label: "Imported" }
-        : { badgeVariant: "outline", detail: (run?.skippedExistingCount ?? 0) > 0 ? "These records were already saved." : "No new results were available to add.", label: "Nothing added" };
+        : { badgeVariant: "outline", detail: (run?.skippedExistingCount ?? 0) > 0 ? "Repeated items were skipped." : "No new results were available to add.", label: "Nothing added" };
     case "partial":
       return importedCount > 0
         ? { badgeVariant: "outline", detail: "Your saved records are ready. Some records couldn’t be imported.", label: "Import incomplete" }

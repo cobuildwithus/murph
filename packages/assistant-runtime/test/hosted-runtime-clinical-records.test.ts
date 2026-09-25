@@ -96,6 +96,18 @@ describe("hosted clinical records maintenance", () => {
     expect(result).toMatchObject({ status: "partial", outcome: { errorCode: "provider-search-incomplete" } });
   });
 
+  it.each(["4101", "4119"])("finishes retrieval with expected Epic patient notice %s", async (code) => {
+    const result = await run(createPort({ fetchPage: async () => ({ status: "page", nextCursor: null,
+      body: bundle([lab("notice-lab"), { resourceType: "OperationOutcome", issue: [{
+        severity: "warning", code: "processing", details: { coding: [{
+          system: "urn:oid:1.2.840.114350.1.13.999.2.7.2.657369", code,
+        }] },
+      }] }]),
+    }) }), successfulImport());
+    expect(result).toMatchObject({ status: "completed", counts: { createdCount: 1 } });
+    expect(result.outcome).not.toHaveProperty("errorCode");
+  });
+
   it("retains committed same-resource query slices across preemption without replaying imports", async () => {
     const queryRun = createQueryRun(["labs", "vitals"]);
     const port = createPort({ readRun: async () => ({ status: "ready", run: queryRun }) });

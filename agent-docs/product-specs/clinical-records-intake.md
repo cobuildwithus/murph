@@ -309,6 +309,15 @@ Unqualified single laboratory reference ranges are retained when their numeric
 boundaries use units compatible with the result, or when they provide a bounded
 text range. Multiple, qualified, inverted, malformed, or unit-incompatible
 ranges hold the containing observation for review instead of being dropped.
+For a qualitative laboratory result, valid numeric reference bounds and their
+units are preserved as bounded reference text alongside supplied range text;
+no numeric result, result unit, or numeric comparison is inferred.
+Explicitly dated observations without a supported metric mapping are preserved
+as source notes with their original values, codes, and qualifiers. Missing-unit
+vitals can also become source notes, without fabricating a unit or normalized
+measurement. Ambiguous coding, incompatible declared units, unsafe modifiers,
+and undated observations remain held. JSON object key order does not change
+source-note identity or content on replay.
 Preemption requeues the same run without discarding or replaying completed page
 progress. Web current-run authority is checked immediately before raw evidence
 persistence and immediately before canonical mutation. Final
@@ -318,9 +327,13 @@ The hosted writer emits v3 manifests and derives outgoing pagination edges
 from raw Bundles, preserving root/reachability/cycle/family/base validation.
 
 Completed slices and prior page batches survive an unrelated later byte/page/resource bound. The
-unfinished work remains checkpointed for retry without refunding historical charges. Meaningful
-OperationOutcome warnings/errors mark coverage incomplete; empty uncertain
-searches never establish allergy absence. SMART `.s` grants authorize search.
+unfinished work remains checkpointed for retry without refunding historical charges.
+Unknown or actionable OperationOutcome warnings/errors mark retrieval incomplete.
+Recognized Epic no-results (4101) and patient-access (4119) notices do not fail
+retrieval, but still cannot establish allergy absence. Denied subtype warnings
+remain explicit coverage limits. Web distinguishes portal coverage limits from
+other partial imports and labels skipped decisions as repeated items, because
+those counts may include repeated review holds rather than saved results. SMART `.s` grants authorize search.
 SUBSETTED resources and unorderable same-identity siblings remain raw evidence
 with an explicit incomplete disposition, leaving validated canonical facts
 unchanged. A resource that omits `meta.lastUpdated` takes its batch manifest
