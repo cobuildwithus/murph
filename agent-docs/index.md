@@ -180,7 +180,7 @@ Follow-through setup lives in `packages/assistant-engine/skills/behavior-followt
 its conditional delivery, reconciliation, and repair rules live in
 `packages/assistant-engine/skills/behavior-followthrough/references/support-runtime.md`.
 Goal-setup latency investigation and focused verification are recorded in
-[`2026-09-24-goal-turn-latency.md`](exec-plans/active/2026-09-24-goal-turn-latency.md).
+[`2026-09-24-goal-turn-latency.md`](exec-plans/completed/2026-09-24-goal-turn-latency.md).
 
 Runtime authority lock/read consolidation is recorded in
 [`2026-09-20-runtime-latency-delete-work.md`](exec-plans/active/2026-09-20-runtime-latency-delete-work.md).

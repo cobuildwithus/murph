@@ -1,6 +1,6 @@
 # Reduce goal setup turn latency
 
-Status: active
+Status: completed
 Created: 2026-09-24
 Updated: 2026-09-25
 
@@ -219,3 +219,83 @@ canary threshold, or production credential changes.
   the first attempt lacked generated client types. Complexity and diff checks
   pass. Parent review confirms test-only behavior and no weakened exact inventory
   or discovery assertion. Full protected delivery replay remains pending.
+
+
+## Queue deployment blocker
+
+- PR #3712 merged after exact-head CI passed. The protected successor passed
+  all 12 predeployment gates, including the corrected Linq delivery scenario.
+  Web production admission also passed for that revision.
+- The Worker was not deployed: Cloudflare returned HTTP 500/code 10013 during
+  the unconditional queue-retention update. One retry of only the failed deploy
+  job on the same immutable source failed at the same step. A preceding rollout
+  had the same failure. No rollback or gate bypass was attempted.
+- Read-only provider inspection confirms both device transport queues already
+  have the required 14-day retention. Their settings do not require mutation.
+  The private deployment owner is being corrected to read current state, skip
+  matching retention, create only after confirmed absence, and verify actual
+  creates or retention-only updates. API and uncertain-state failures stay fatal.
+- The private candidate passes 16 focused helper tests and 29 protected workflow
+  tests. Its real helper is exercised under the workflow's existing deadline
+  against a synthetic API. Full verification, exact-head CI, and required
+  preliminary/final ReviewGPT gates remain pending. Production reply and full
+  completion latency proof remain pending until runtime deployment succeeds.
+
+
+## Protected rollout and review default
+
+- The private queue correction landed independently in Murph Cloud PR #169.
+  Reused that merged owner implementation and removed the duplicate candidate
+  from this task's final private diff. Its focused queue/workflow checks, full
+  verification, exact-head CI, and final review passed.
+- Protected runtime run 36176217626 succeeded on public source
+  `949aba7b3029ee1d4a603777ea4b4a03c2a6c14b`, which includes PRs #3710 and #3712.
+  Both queues were verified unchanged at 14-day retention, avoiding the failing
+  redundant provider mutation. Candidate smoke, hosted execution smoke, and
+  live fleet convergence passed. This does not explain Cloudflare's internal
+  HTTP 500; it removes an unnecessary request from the deployment path.
+- Web admission 36175172299 passed, and both production Web aliases resolved to
+  the same source. Protected canary 36179296277 was dispatched for that exact
+  deployment; its unchanged 20-second first-reply and canonical 0/0/1 Goal checks
+  passed on the unchanged source at 19:46 UTC. Full completion latency is
+  reported separately below.
+- At the user's request, private PR #170 now defaults hosted ReviewGPT to
+  `gpt-6-pro`, matching public Murph. Only the existing model default and assertion
+  changed. Seven focused tests, shell syntax, typecheck, and exact-head full CI
+  passed. Final review on `184fac155397` passed with no findings in 7m39s;
+  recovered thread evidence passes the installed duration and timed-UNKNOWN
+  model-confirmation validators. The preliminary review passed in 4m22s; the
+  user explicitly accepted that completed review and waived only its timer for
+  this PR. No permanent review policy changed. PR #170 merged as `5a00bd1a`.
+- Runtime-log read-only diagnostics initially failed during connection establishment
+  with SSL SYSCALL EOF, then recovered. Bounded aggregate evidence shows proposal
+  processing at 36.5 seconds (five commands totaling 5.1 seconds) and acceptance
+  at 12.3 seconds (two commands totaling 1.4 seconds), with zero failed actions.
+  Proposal sent one progress update; acceptance completed without one. Compare
+  cautiously with the earlier passing run at roughly 60/51 seconds: this is one
+  observed sample, not controlled proof of a stable latency bound.
+- Production eager tool guidance is now 122,028 bytes, consistent with removing
+  about 45 KB of unrelated initial tool context. This is deployed byte evidence;
+  exact target-tokenizer measurements and a sustained speed guarantee are not
+  claimed. Canonical production checkpoint verification passed.
+
+
+## Completion
+
+- Protected canary 36179296277 passed on the deployed source at 19:46 UTC.
+  First-visible replies: welcome 11.4s, identity question 4.2s, runtime identity
+  4.6s, proposal 17.5s, and acceptance 15.1s. Every reply met the unchanged
+  20-second budget. Goal counts were 0 after identity, 0 after proposal, and 1
+  after acceptance. The exact production deployment was reverified at completion.
+- Full assistant processing was 36.5s for proposal and 12.3s for acceptance;
+  the earlier proposal reply was progress. Commands consumed 5.1s and 1.4s,
+  respectively. The remaining model time is real; this successful run does not
+  establish a universal 20-second full-completion guarantee.
+- Merged behavior, focused real-Luna proof, exact-head CI, protected rollout,
+  and canonical production verification satisfy this plan's success criteria.
+  No reply budget, consent rule, production model, or canonical-state invariant
+  was relaxed. The task's separate review-default request is also merged.
+- Final documentation readback, privacy review, reference checks, docs drift,
+  gardening, and diff checks pass. The closeout changes evidence and its index
+  only; it adds no runtime behavior or provider input.
+Completed: 2026-09-25
