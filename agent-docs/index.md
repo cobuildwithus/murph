@@ -191,7 +191,7 @@ Bounded runtime cleanup cadence and shared-owner safety proof are recorded in
 Direct Linq preparation-reason telemetry and retry-preservation proof are recorded in
 [`2026-09-25-linq-preparation-reason-telemetry.md`](exec-plans/completed/2026-09-25-linq-preparation-reason-telemetry.md).
 The preparation member-lock correction and composed PostgreSQL proof are recorded in
-[`2026-09-25-linq-preparation-lock.md`](exec-plans/active/2026-09-25-linq-preparation-lock.md).
+[`2026-09-25-linq-preparation-lock.md`](exec-plans/completed/2026-09-25-linq-preparation-lock.md).
 
 Runtime admission policy and single-request provider backend selection are owned
 by `agent-docs/references/hosted-postgres-runtime.md` and `agent-docs/SECURITY.md`.

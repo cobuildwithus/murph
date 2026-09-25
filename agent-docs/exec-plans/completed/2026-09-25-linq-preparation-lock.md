@@ -1,6 +1,6 @@
 # Avoid unnecessary Linq preparation lock contention
 
-Status: active
+Status: completed
 Created: 2026-09-25
 Updated: 2026-09-25
 
@@ -43,3 +43,12 @@ Task-owned isolated branch from current main; unrelated contact-card work is unt
 - All 261 focused Linq tests pass. Web typecheck, focused lint (one unchanged fixture warning), docs drift, and whitespace pass. Complexity remains unchanged: debt 257, max 89; nine existing planner hotspots have no changed branching. A stale generated changelog module caused one content test failure when generation raced the test; the required generation-before-test order is restored.
 - Candidate and privacy review: no provider calls, query count, retry budget, schema, state, dependency, or protocol change. Existing cross-member, changed-root, routing, and duplicate authority tests remain in the focused suites. Final PR review and exact-head CI remain pending.
 - Draft PR #3724 opened. Changelog provenance now names this PR; all 10 archive cases passed before this provenance-only update. Candidate review found no accepted defects. Required final ReviewGPT and exact-head CI start after the stable candidate is pushed and Ready.
+
+## Completion evidence
+
+PR #3724 contains the one-line correction and composed regression. Final ReviewGPT round one passed on `2d2de9305336a49ab2e8addfb2a268c92ea6f30d` with no qualifying findings; the exact accepted turn, response digest, requested Pro selection, snapshot metadata, and completion marker were verified. Parent review accepts zero findings. The review traced consent revocation and all prepared authority checks.
+
+All 31 PostgreSQL cases, 261 focused Linq cases, 10 archive cases, Web typecheck, lint, docs drift, and complexity checks passed. The old-lock reproduction fails at the intended preparation/member boundary; no historical lock-holder attribution is claimed. All four hosted PostgreSQL CI shards and both CLI matrices passed on the reviewed candidate. Required final-head CI remains a PR completion gate tracked in the PR body; this closeout changes only the plan and index.
+
+Product UX: Ready. Harmless foreign-key contention admits exactly one durable mailbox item; genuine writers retain two-attempt rejection and recover after release. No new user text, provider input, or delivery promise. Functional merge and deployment remain with the human reviewer; existing reason telemetry can evaluate production outcomes after deployment.
+Completed: 2026-09-25
