@@ -1,5 +1,5 @@
 diff --git a/README.md b/README.md
-index 55e1688d22eb49109303644c11fb684780aa0314..3ef85b06b907311e6b59d77c878753e70a19a76b 100644
+index 55e1688d22eb49109303644c11fb684780aa0314..4dca227e1442cfe6ad6529453e794a62792b2f67 100644
 --- a/README.md
 +++ b/README.md
 @@ -82,7 +82,7 @@ Each run can:
@@ -7,7 +7,7 @@ index 55e1688d22eb49109303644c11fb684780aa0314..3ef85b06b907311e6b59d77c878753e7
  - optionally switch into the dedicated Deep Research flow with `--deep-research`
  
 -Normal reviews are kept on regular Chat so they do not consume or appear in ChatGPT Work. On the new-chat page, ReviewGPT switches the Chat/Work control to Chat before it stages anything. It refuses an existing Work conversation and checks the surface again before staging and immediately before auto-send. Deep Research uses its dedicated surface and is unchanged.
-+Normal reviews are kept on regular Chat so they do not consume or appear in ChatGPT Work. On the new-chat page, ReviewGPT switches the Chat/Work control to Chat before it stages anything. After that single click it polls for confirmed Chat within a 12-second bound; a still-Work render does not cause another click or staging approval. It refuses an existing Work conversation and checks the surface again before staging and immediately before auto-send. Deep Research uses its dedicated surface and is unchanged.
++Normal reviews are kept on regular Chat so they do not consume or appear in ChatGPT Work. On the new-chat page, ReviewGPT recognizes Chat/Work radio controls and buttons with `aria-pressed`, and switches the control to Chat before it stages anything. After that single click it polls for confirmed Chat within a 12-second bound; a still-Work render does not cause another click or staging approval. It refuses an existing Work conversation and checks the surface again before staging and immediately before auto-send. Deep Research uses its dedicated surface and is unchanged.
  
  This package does not own project prompts. Presets, aliases, and preset groups live in the consuming repository, typically through `scripts/review-gpt.config.sh`.
  
@@ -1433,7 +1433,7 @@ index 95d21fdbf55cf80860f4d5d60d7d94966e8783bc..3f14208da06efc83e92d5acd0be890c6
          matchesStoredCaptureValue(candidate.precedingUserMessageSignature, capture.committedUserTurn.signature),
      );
 diff --git a/src/prepare-chatgpt-draft.js b/src/prepare-chatgpt-draft.js
-index a6444ae284b90c9136c5d91f9a933ad58df8ca04..0dfb85cad2cadc824749aeaa88a886e300bfa0ff 100644
+index a6444ae284b90c9136c5d91f9a933ad58df8ca04..7fd87046c7276afaad51676dec1a52f184ff8806 100644
 --- a/src/prepare-chatgpt-draft.js
 +++ b/src/prepare-chatgpt-draft.js
 @@ -386,6 +386,15 @@ function extractConversationHref(value, fallbackOrigin = '') {
@@ -1482,6 +1482,24 @@ index a6444ae284b90c9136c5d91f9a933ad58df8ca04..0dfb85cad2cadc824749aeaa88a886e3
  }
  
  function formatDurationMs(durationMs) {
+@@ -2606,7 +2617,7 @@ async function main() {
+         y: Math.round(rect.top + rect.height / 2),
+       };
+     };
+-    const controls = Array.from(document.querySelectorAll('[role="radio"]')).filter(visible);
++    const controls = Array.from(document.querySelectorAll('[role="radio"], button[aria-pressed]')).filter(visible);
+     const chatControl = controls.find((node) => matchesLabel(node, 'chat')) || null;
+     const workControl = controls.find((node) => matchesLabel(node, 'work')) || null;
+     const workUsageVisible = Array.from(
+@@ -2614,7 +2625,7 @@ async function main() {
+     ).some(visible);
+     const workBreadcrumbVisible = Array.from(document.querySelectorAll('body *')).some((node) => {
+       if (!(node instanceof HTMLElement) || node.children.length > 0 || !visible(node)) return false;
+-      if (node.closest('[role="radio"]')) return false;
++      if ([chatControl, workControl].some((control) => control?.contains(node))) return false;
+       const rect = node.getBoundingClientRect();
+       return rect.top >= 0 && rect.top < 120 && normalize(node.textContent) === 'work';
+     });
 @@ -2662,14 +2673,16 @@ async function main() {
          inferredConversationSince = 0;
        }
