@@ -448,6 +448,53 @@ describeRealCodex('real natural goal canary journey', () => {
 })
 
 describeRealCodex('real clinical document extraction journeys', () => {
+  it('clinical extraction live excludes education and branding while preserving member findings', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const fixture = await createCanonicalLiveFixture(config)
+    const education = [
+      'SYNTHETIC PROVIDER HANDOUT. Clinic logo and stock illustration of an inhaler.',
+      'General education: asthma can cause wheezing. Some people are prescribed inhalers.',
+      'Example patient: fictional person treated with albuterol. This is not the current member.',
+      'This handout and its illustration do not document a diagnosis or medication order for its recipient.',
+    ].join('\n')
+    const finding = 'MEMBER CLINICAL REPORT: On 2026-02-14T10:00:00Z, the current member had a left ankle radiograph. Impression: no acute fracture.'
+    let providerEntries = 0
+    try {
+      for (const mixed of [false, true]) {
+        const rawRef = `raw/clinical/fhir/synthetic-source/synthetic-batch/attachments/${mixed ? 'mixed' : 'education'}.txt`
+        const documentPath = path.join(fixture.vault, rawRef)
+        const sourceText = mixed ? `${finding}\n${education}` : education
+        await mkdir(path.dirname(documentPath), { recursive: true })
+        await writeFile(documentPath, sourceText)
+        const writesBefore = await listWriteOperationMetadataPaths(fixture.vault)
+        const result = await executeClinicalDocumentExtraction({
+          workspaceRoot: fixture.vault, documentPath, timeZone: 'UTC', extractedText: sourceText,
+          source: { rawRef, sha256: createHash('sha256').update(sourceText).digest('hex'), mediaType: 'text/plain', clinicalOccurredAt: '2026-02-14T10:00:00Z' },
+          family: 'history', codexCommand: fixture.codexCommand, codexHome: fixture.codexHome,
+          env: fixture.env, model: config.model, modelProvider: config.modelProvider, reasoningEffort: 'high',
+          beforeProviderEntry: async () => { providerEntries += 1 },
+          onProviderUsage: ({ usage }) => { recordRealCodexProviderUsage(usage.usage) },
+        })
+        expect(result.status).toBe('complete')
+        expect(result.records).toHaveLength(mixed ? 1 : 0)
+        if (mixed) {
+          const record = result.records[0]!
+          expect(new Date(record.payload.occurredAt).toISOString()).toBe('2026-02-14T10:00:00.000Z')
+          expect(JSON.stringify(record.payload)).toMatch(/left ankle/iu)
+          expect(JSON.stringify(record.payload)).toMatch(/no acute fracture/iu)
+        }
+        expect(JSON.stringify(result.records)).not.toMatch(/asthma|albuterol|inhaler|logo|illustration/iu)
+        expect(await listWriteOperationMetadataPaths(fixture.vault)).toEqual(writesBefore)
+        expect(await readFile(documentPath, 'utf8')).toBe(sourceText)
+        process.stdout.write(`[clinical-education-live] ${JSON.stringify({ mixed, status: result.status, records: result.records })}\n`)
+      }
+      expect(providerEntries).toBe(2)
+    } finally {
+      await fixture.close()
+      await removeRealCodexTemporaryPaths(config.temporaryPaths)
+    }
+  }, 360_000)
+
   it('clinical extraction live recovers unsupported dates without rewriting valid siblings', async () => {
     const config = await resolveRealCodexE2eConfig()
     const fixture = await createCanonicalLiveFixture(config)

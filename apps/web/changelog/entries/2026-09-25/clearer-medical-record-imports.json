@@ -7,7 +7,7 @@
     "priority": 3,
     "title": "Clearer medical record imports",
     "summary": "Medical record imports distinguish portal coverage limits from routine notices and label repeated items more accurately.",
-    "details": "More text-based lab results can be saved with their original reference ranges. Dated observations without a supported measurement format are preserved as source notes. Uncertain records remain available for reference.",
+    "details": "More text-based lab results can be saved with their original reference ranges. Dated observations without a supported measurement format are preserved as source notes. Document extraction excludes generic education and provider illustrations from medical facts. Uncertain records remain available for reference.",
     "relevanceTags": ["medical-records", "labs"],
     "sourcePullRequests": []
   }

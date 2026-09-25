@@ -10,6 +10,8 @@ Report saved records, portal coverage limits, and repeated processing honestly.
 Preserve supported qualitative laboratory results and their original range
 context without inventing values or units. Preserve dated unmapped observations
 as exact source notes; recover private local data only through canonical APIs.
+Exclude generic education and decorative provider assets from extracted clinical
+facts while preserving explicitly attributed findings in mixed source documents.
 Keep uncertain clinical absence,
 unknown provider warnings, malformed ranges, and denied access fail-closed.
 
@@ -75,9 +77,18 @@ imports can use the existing corrected care-plan query; no automatic live replay
   manifests under the generic raw schema. A synthetic initialized-vault reproduction
   confirms this owner mismatch; tracked in the task-owned Frog entry. Focused clinical
   attestation and canonical readback remain the relevant recovery proof.
-- Focused checks: importer 128, clinical contracts 52, runtime 37, vault execution 31,
+- Focused checks: importer 129, clinical contracts 52, runtime 37, vault execution 31,
   Web records 27, and changelog 46 tests pass. Relevant package and Web typechecks pass.
   Complexity passes across six changed source files; importer debt falls by one and
   the existing three hotspots do not increase. Their current ownership remains clear.
 - Remaining: finish bounded local document extraction, complete final canonical and
   source verification, package the private recovery copy, and commit the reviewed code.
+- Embedded source illustrations were inspected only in temporary scratch and removed;
+  no standalone image records were created. Source originals remain immutable.
+- Added an explicit education/branding exclusion to the extraction owner and local
+  independent review. Deterministic extraction tests pass (22); assistant-engine
+  typecheck passes. Focused live Luna proof passes with two provider entries and no
+  writes: education-only yields no facts, a mixed clinical report yields its one
+  member finding. Reviewed result: Ready. A mistakenly broad test invocation was
+  stopped after an unrelated canonical CLI test failure; the focused suite above
+  was rerun directly and passed.

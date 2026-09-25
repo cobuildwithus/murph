@@ -363,6 +363,14 @@ choose canonical identities or source paths. Foreground replies can continue
 during extraction; snapshots, workspace replacement, fence loss and shutdown
 abort and join the exact owned children. Cancellation retains durable work.
 
+Extraction excludes provider branding, stock illustrations, generic education,
+example results and boilerplate advice. A handout topic is not evidence of a
+member diagnosis, procedure or treatment. Explicit member findings, orders and
+counseling remain eligible, including clinical scans on branded pages. Inspected
+education-only sources produce no proposed facts and do not count as incomplete
+clinical coverage. Immutable source documents retain their original bytes;
+embedded decorative assets are not extracted into separate canonical records.
+
 Validated proposals are frozen in private operational state. A separate bounded
 canonical action derives source identity and raw/page provenance, checks existing
 facts, applies accepted proposals, and reads back the writes before advancing.
