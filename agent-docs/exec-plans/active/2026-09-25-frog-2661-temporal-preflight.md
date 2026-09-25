@@ -60,9 +60,13 @@ and the consumer's parser verification provide the correct owners to compose.
 
 ## Remaining work and landing prerequisite
 
-The consumer must expose the documented package command before this candidate
-can land. That companion is not yet implemented: the private repository has no
-sanctioned worktree helper and the narrow alternative-isolation authorization
-is pending. No private source or policy is copied into this change. Keep this
-PR draft until the companion command, composed command proof, exact-head review,
-and required CI are complete. The issue remains open.
+The consumer companion now exposes the existing verifier through its supported
+package command. Actual public preflight to that command passed using the
+current 11-fixture producer corpus with no service credentials or connections.
+The consumer's real-command regression also passes for valid, incompatible,
+and empty corpora. No private implementation or policy is copied here.
+
+Deliver the consumer command before this harness change. Complete configured
+exact-head reviews and required CI in both repositories, then obtain the
+required cross-repository landing decision. The issue remains open until both
+main branches contain the composed fix. Production deployment is not involved.
