@@ -30,6 +30,12 @@ Plain contact-name presentation and PR preparation are tracked in
 The [email batch follow-up](exec-plans/completed/2026-09-22-group-report-email-batches.md)
 preserves one naming snapshot across sparse shared-data reads.
 
+Recurring report correction persistence and synthetic verification are tracked in
+[`report format correction`](exec-plans/completed/2026-09-24-report-format-correction.md).
+
+General correction scope and canonical-owner verification are tracked in
+[`durable correction scope`](exec-plans/completed/2026-09-24-durable-correction-scope.md).
+
 Automation database load, daily scheduling, and Flex retry work:
 [`2026-09-21-automation-query-load.md`](exec-plans/completed/2026-09-21-automation-query-load.md).
 

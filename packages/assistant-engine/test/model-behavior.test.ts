@@ -2254,7 +2254,10 @@ describe('assistant system prompt cache stability', () => {
     // Goal setup distinguishes proposal from execution and reuses completed research.
     // Complete-input byte measurement covers this increase; conditional support
     // execution removes about 26 KB from fresh quiet-plan skill reads.
-    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(76_700)
+    // Shared lasting-correction routing adds 1,022 characters. Complete private
+    // and group request measurements plus live task/preference/one-off proof
+    // cover this resident rule; retain the existing base margin.
+    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(77_722)
   })
 
   it('passes the injected CLI contract through byte-for-byte at the stable-route tail', () => {
