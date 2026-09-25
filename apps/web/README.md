@@ -2678,3 +2678,28 @@ Current hosted billing assumptions:
   submitted as separate emails in one strict Resend batch with a Preview-bound
   idempotency key, so an ambiguous response can be retried without duplicate
   delivery. Logs contain aggregate counts and safe provider status only.
+
+## Bundled Web fonts
+
+`app/font-assets.ts` uses `next/font/local` and committed WOFF2 assets so Web
+builds never fetch Google Fonts. Keep the existing CSS variables, Fraunces
+400/600, DM Sans 100–1000, and DM Mono 400 when updating these assets.
+The separate TTF assets used for social cards remain unchanged.
+
+Font sources and licenses:
+
+- `Fraunces-400.woff2` and `Fraunces-600.woff2` are lossless WOFF2 encodings of
+  the adjacent committed TTF files. They retain all 624 character mappings.
+- `DMSans-Variable.woff2` comes from `ofl/dmsans/DMSans[opsz,wght].ttf`, with
+  optical size pinned to the default 9 used by the previous Google loader and
+  the complete weight axis retained. It has 403 character mappings.
+- `DMMono-400.woff2` comes from `ofl/dmmono/DMMono-Regular.ttf` and retains all
+  381 character mappings.
+- Upstream files and the three adjacent `*-OFL.txt` licenses come from
+  [Google Fonts commit 23e54b5](https://github.com/google/fonts/tree/23e54b51ddffbc7713c583748e3bd86f62b1fa4a/ofl).
+
+To refresh, review the upstream font and license changes, use FontTools
+`varLib.instancer` to pin DM Sans `opsz=9`, and encode with
+`TTFont.flavor = "woff2"` and Brotli. This is asset preparation only, never a
+build step or application dependency. Verify the local loader emits all four
+files without Google responses, then check the rendered families and weights.

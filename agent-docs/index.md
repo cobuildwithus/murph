@@ -782,3 +782,7 @@ are tracked in `exec-plans/completed/2026-09-24-signup-contact-card.md`.
 
 Health-purpose connected-plan follow-ups and legacy suppression are tracked in
 [`health-purpose check-ins`](exec-plans/completed/2026-09-25-health-purpose-checkins.md).
+
+Web build fonts are bundled locally; source and license provenance is owned by
+`apps/web/README.md` under "Bundled Web fonts". Implementation proof is tracked
+in [`local Web fonts`](exec-plans/completed/2026-09-25-local-web-fonts.md).
