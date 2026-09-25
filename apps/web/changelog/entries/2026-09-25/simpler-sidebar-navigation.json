@@ -1,0 +1,15 @@
+{
+  "publishedOn": "2026-09-25",
+  "order": 110,
+  "item": {
+    "id": "simpler-sidebar-navigation",
+    "kind": "improvement",
+    "priority": 1,
+    "title": "A simpler sidebar",
+    "summary": "Voice no longer appears in the sidebar navigation.",
+    "details": "The desktop sidebar and mobile menu now show the same shorter list of destinations.",
+    "relevanceTags": ["navigation"],
+    "sourcePullRequests": [3726],
+    "tryIt": { "label": "Open Murph", "href": "/home" }
+  }
+}
