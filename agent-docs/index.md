@@ -3,8 +3,8 @@ in [the import-speed plan](exec-plans/completed/2026-09-24-garmin-import-speed.m
 
 # Murph Agent Docs Index
 
-Scheduled CI cleanup is tracked in
-[the CI repair plan](exec-plans/active/2026-09-25-scheduled-ci-repair.md).
+Scheduled assistant real-model CI removal is recorded in
+[the CI removal plan](exec-plans/completed/2026-09-25-scheduled-ci-repair.md).
 
 [CLI read validation telemetry](exec-plans/completed/2026-09-25-cli-read-validation-telemetry.md)
 records the locally verified implementation; [PR #3707](https://github.com/cobuildwithus/murph/pull/3707)
