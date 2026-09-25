@@ -1,0 +1,19 @@
+{
+  "publishedOn": "2026-09-24",
+  "order": 100,
+  "item": {
+    "id": "personal-patterns-capacity-recovery",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "More time to recover Personal Patterns updates",
+    "summary": "Daily Personal Patterns updates can recover from longer temporary service shortages.",
+    "details": "Murph can retry the daily review for up to four hours after its scheduled time. Ordinary reminders keep their existing delivery window.",
+    "relevanceTags": [
+      "personal-patterns",
+      "reliability"
+    ],
+    "sourcePullRequests": [
+      3696
+    ]
+  }
+}

@@ -57,6 +57,7 @@ import {
   seedMurphOnboardingFollowupFromStartedOnboarding,
   seedMurphOnboardingEarlyStallAutomation,
 } from './onboarding-followup-seed.js'
+import { MURPH_PERSONAL_PATTERNS_UPDATE_AUTOMATION_ID } from './managed-automation-ids.js'
 import { assistantRouteSupportsGroupRoomModel } from './group-room-model.js'
 
 import { withAssistantCronWriteLock } from './cron/locking.js'
@@ -66,6 +67,8 @@ import {
   findAssistantCronCanonicalRuntimeRecord,
   readAssistantCronCanonicalRuntimeStore,
 } from './cron/runtime-state.js'
+
+export { MURPH_PERSONAL_PATTERNS_UPDATE_AUTOMATION_ID } from './managed-automation-ids.js'
 
 export { MURPH_ONBOARDING_FOLLOWUP_AUTOMATION }
 
@@ -162,8 +165,6 @@ export const MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID =
   'automation_01JNW7YJ7MNE7M9Q2QWQK4Z3FY'
 export const MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID =
   'automation_X3GPAWV2CCHNCYHAAJ4CE2M144'
-export const MURPH_PERSONAL_PATTERNS_UPDATE_AUTOMATION_ID =
-  'automation_01M0A7T3RN5VPD8C2K4V6X9ZBQ'
 export const MURPH_JOURNAL_CONNECTED_CONTEXT_MORNING_AUTOMATION_ID =
   'automation_01M1J7C8M0RN1NGC0NT3XT7D2A'
 export const MURPH_JOURNAL_CONNECTED_CONTEXT_AFTERNOON_AUTOMATION_ID =
