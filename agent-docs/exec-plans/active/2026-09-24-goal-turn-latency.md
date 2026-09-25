@@ -219,3 +219,24 @@ canary threshold, or production credential changes.
   the first attempt lacked generated client types. Complexity and diff checks
   pass. Parent review confirms test-only behavior and no weakened exact inventory
   or discovery assertion. Full protected delivery replay remains pending.
+
+
+## Queue deployment blocker
+
+- PR #3712 merged after exact-head CI passed. The protected successor passed
+  all 12 predeployment gates, including the corrected Linq delivery scenario.
+  Web production admission also passed for that revision.
+- The Worker was not deployed: Cloudflare returned HTTP 500/code 10013 during
+  the unconditional queue-retention update. One retry of only the failed deploy
+  job on the same immutable source failed at the same step. A preceding rollout
+  had the same failure. No rollback or gate bypass was attempted.
+- Read-only provider inspection confirms both device transport queues already
+  have the required 14-day retention. Their settings do not require mutation.
+  The private deployment owner is being corrected to read current state, skip
+  matching retention, create only after confirmed absence, and verify actual
+  creates or retention-only updates. API and uncertain-state failures stay fatal.
+- The private candidate passes 16 focused helper tests and 29 protected workflow
+  tests. Its real helper is exercised under the workflow's existing deadline
+  against a synthetic API. Full verification, exact-head CI, and required
+  preliminary/final ReviewGPT gates remain pending. Production reply and full
+  completion latency proof remain pending until runtime deployment succeeds.
