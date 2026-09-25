@@ -13,9 +13,9 @@ for (const width of [390, 1280]) {
     await study.scrollIntoViewIfNeeded();
     await expect(study.getByText("Northstar Health", { exact: true })).toBeVisible();
     await expect(study.getByText("Import incomplete", { exact: true })).toBeVisible();
-    await expect(study.getByText("248 records added", { exact: true })).toBeVisible();
+    await expect(study.getByText(/248 records added/)).toBeVisible();
     await expect(study.getByRole("link", { name: "View lab results" })).toHaveAttribute("href", "/biomarkers");
-    await expect(study.getByRole("link", { name: "Import again" })).toHaveAttribute("href", "/records/connect?launch=clinical-records");
+    await expect(study.getByRole("link", { name: "Import again" })).toBeHidden();
     await expect(study.getByRole("button", { name: "Disconnect", exact: true })).toBeHidden();
     await page.evaluate(async () => {
       await document.fonts.ready;
@@ -34,10 +34,11 @@ for (const width of [390, 1280]) {
       let ancestor: Element | null = element;
       while (ancestor) { ancestor.removeAttribute("inert"); ancestor = ancestor.parentElement; }
     });
-    const details = study.locator("summary").filter({ hasText: "Import details" });
+    const details = study.locator("summary").filter({ hasText: "Manage" });
     await details.focus();
     await details.press("Enter");
     await expect(study.getByText("One-time import.", { exact: true })).toBeVisible();
+    await expect(study.getByRole("link", { name: "Import again" })).toHaveAttribute("href", "/records/connect?launch=clinical-records");
     await expect(study.getByText(/12 items saved for reference/)).toBeVisible();
     await study.getByRole("button", { name: "Disconnect", exact: true }).click();
     const dialog = page.getByRole("dialog");
@@ -46,9 +47,6 @@ for (const width of [390, 1280]) {
     await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
     await expect(dialog).toBeHidden();
     await expect(study.getByText("Import incomplete", { exact: true })).toBeVisible();
-    const privacy = study.locator("summary").filter({ hasText: "Your records, your control" });
-    await privacy.focus();
-    await privacy.press("Enter");
     await expect(study.getByRole("link", { name: "How Murph uses your data" })).toBeVisible();
   });
 }

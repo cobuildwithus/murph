@@ -7,7 +7,7 @@
     "priority": 2,
     "title": "Medical records, easier to scan",
     "summary": "See your latest import outcome and open lab results from a simpler medical records page.",
-    "details": "Import history and connection controls sit together under Import details. Incomplete imports stay visible, and Data & privacy remains within reach.",
+    "details": "Import details and connection controls sit together under Manage. Incomplete imports stay visible, and Data & privacy remains within reach.",
     "relevanceTags": [
       "medical-records",
       "privacy"

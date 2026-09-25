@@ -145,15 +145,20 @@ export function RecordsPageClient({
 
   return (
     <div className="flex w-full min-w-0 max-w-3xl flex-col gap-8 sm:gap-10">
-      <header className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
+      <header className="flex flex-wrap items-center justify-between gap-4">
         <PageHeader
           title="Medical records"
           description={connections.length === 0 ? "Bring records from your patient portal into Murph." : undefined}
         />
         {authenticated ? (
-          <Link className={buttonVariants({ size: "lg", variant: connections.length > 0 ? "outline" : "default", className: "shrink-0 self-start sm:self-auto" })} href="/records/connect?launch=clinical-records">
-            <PlusIcon aria-hidden="true" data-icon="inline-start" />
-            Import records
+          <Link
+            aria-label="Import records"
+            title="Import records"
+            className={buttonVariants({ size: connections.length > 0 ? "icon-lg" : "lg", variant: connections.length > 0 ? "ghost" : "default" })}
+            href="/records/connect?launch=clinical-records"
+          >
+            <PlusIcon aria-hidden="true" />
+            {connections.length === 0 ? "Import records" : null}
           </Link>
         ) : null}
       </header>
@@ -191,7 +196,7 @@ export function RecordsPageClient({
         ) : (
           <section aria-labelledby="patient-portals-title">
             <h2 id="patient-portals-title" className="sr-only">Your providers</h2>
-            <ul className="divide-y divide-border overflow-hidden rounded-xl border border-border bg-card">
+            <ul className="divide-y divide-border border-y border-border">
               {connections.map((connection) => (
                 <ConnectionRow
                   key={connection.connectionId}
@@ -227,20 +232,8 @@ export function RecordsPageClient({
 
 export function RecordsPrivacyControls() {
   return (
-    <footer className="flex flex-wrap items-start justify-between gap-x-6 gap-y-2 text-sm text-muted-foreground">
-      <details className="group min-w-0 flex-1 basis-64">
-        <summary className="flex min-h-11 w-fit cursor-pointer list-none items-center gap-2 rounded-sm focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ring [&::-webkit-details-marker]:hidden">
-          <LockKeyholeIcon aria-hidden="true" className="size-3.5" />
-          Your records, your control
-          <ChevronDownIcon aria-hidden="true" className="size-3.5 transition-transform group-open:rotate-180 motion-reduce:transition-none" />
-        </summary>
-        <div className="mt-2 flex max-w-xl flex-col gap-3 text-sm leading-6">
-          <p>Disconnect stops future imports. Records already saved in Murph stay there.</p>
-          <p>Use Data &amp; privacy to withdraw consent or delete your account and saved data. Your hospital’s records stay unchanged.</p>
-          <Link href="/privacy" className="w-fit underline underline-offset-4">How Murph uses your data</Link>
-        </div>
-      </details>
-      <Link href="/settings#data-privacy" className="inline-flex min-h-11 items-center underline underline-offset-4">Data &amp; privacy</Link>
+    <footer className="text-sm text-muted-foreground">
+      <Link href="/settings#data-privacy" className="inline-flex min-h-11 items-center underline-offset-4 hover:underline">Data &amp; privacy</Link>
     </footer>
   );
 }
@@ -259,36 +252,24 @@ export function ConnectionRow({
   const importInProgress = isImportInProgress(connection);
 
   return (
-    <li className="p-5 sm:p-7">
-      <article>
-        <h3 className="font-serif text-2xl font-medium leading-tight tracking-tight text-foreground text-pretty">
+    <li className="py-7">
+      <article className="relative">
+        <h3 className="pr-24 font-serif text-2xl font-medium leading-tight tracking-tight text-foreground text-pretty">
           {connection.displayName}
         </h3>
-        <div aria-atomic="true" aria-live="polite" className="mt-3 flex flex-col gap-2" role="status">
-          {latestRun && !importInProgress ? (
-            <p className="text-sm text-muted-foreground">
-              <span className="font-medium text-foreground">{latestRun.importedCount.toLocaleString()} {latestRun.importedCount === 1 ? "record" : "records"} added</span> in the latest import
-            </p>
-          ) : null}
-          <span className={presentation.badgeVariant === "destructive" ? "text-sm text-destructive" : presentation.badgeVariant === "default" ? "text-sm text-primary" : "text-sm text-muted-foreground"}>
+        <div aria-atomic="true" aria-live="polite" className="mt-2 text-sm leading-6 text-muted-foreground" role="status">
+          <p>
+            {latestRun && !importInProgress ? <>{latestRun.importedCount.toLocaleString()} {latestRun.importedCount === 1 ? "record" : "records"} added. </> : null}
             {importInProgress ? <Spinner aria-hidden="true" role="presentation" className="mr-2 inline size-3.5" /> : null}
-            {presentation.label}
+            <span className={presentation.badgeVariant === "destructive" ? "text-destructive" : presentation.badgeVariant === "default" ? "sr-only" : undefined}>{presentation.label}</span>
             {importInProgress ? <span className="sr-only">. Loading.</span> : null}
-          </span>
-          {importInProgress ? <p className="text-sm leading-6 text-muted-foreground">{presentation.detail}</p> : null}
+          </p>
+          {importInProgress ? <p>{presentation.detail}</p> : null}
         </div>
 
-        <div className="mt-6 flex flex-wrap items-center gap-3">
-          {latestRun && (latestRun.labResultCount ?? 0) > 0 ? (
-            <Link href="/biomarkers" className={buttonVariants({ size: "lg" })}>View lab results</Link>
-          ) : null}
-          {!importInProgress && connection.canImport ? (
-            <Link href="/records/connect?launch=clinical-records" className={buttonVariants({ size: "lg", variant: "outline" })}>
-              {connection.status === "disconnected" || connection.status === "needs_reauth" ? "Reconnect" : "Import again"}
-            </Link>
-          ) : null}
-          {connection.importsRemaining === 0 ? <p className="text-sm text-muted-foreground">This source has reached its import limit. Saved records remain available.</p> : null}
-        </div>
+        {latestRun && (latestRun.labResultCount ?? 0) > 0 ? (
+          <Link href="/biomarkers" className={buttonVariants({ size: "lg", className: "mt-5" })}>View lab results</Link>
+        ) : <ImportAgainLink connection={connection} primary />}
 
         <ConnectionDetails connection={connection} disabled={disabled} onDisconnect={onDisconnect} />
       </article>
@@ -305,12 +286,12 @@ function ConnectionDetails({ connection, disabled, onDisconnect }: {
   const importInProgress = isImportInProgress(connection);
   const skippedExistingCount = latestRun?.skippedExistingCount ?? 0;
   return (
-    <details className="group mt-5 border-t border-border text-sm">
-      <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-3 rounded-sm pt-3 text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ring [&::-webkit-details-marker]:hidden">
-        Import details
+    <details className="group text-sm">
+      <summary className="absolute -top-2 right-0 flex min-h-11 cursor-pointer list-none items-center gap-1 rounded-sm text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ring [&::-webkit-details-marker]:hidden">
+        Manage
         <ChevronDownIcon aria-hidden="true" className="size-4 transition-transform group-open:rotate-180 motion-reduce:transition-none" />
       </summary>
-      <div className="flex max-w-xl flex-col gap-3 pt-4 leading-6 text-muted-foreground">
+      <div className="mt-6 flex max-w-xl flex-col gap-3 border-t border-border pt-5 leading-6 text-muted-foreground">
         {!importInProgress ? <p>{describeConnection(connection).detail}</p> : null}
         {latestRun && !importInProgress ? (
           <>
@@ -323,6 +304,10 @@ function ConnectionDetails({ connection, disabled, onDisconnect }: {
           {connection.nextSyncAt ? <>Daily updates on. Next check around <time dateTime={connection.nextSyncAt}>{formatDate(connection.nextSyncAt)}</time>.</> : connection.status === "needs_reauth" ? "Daily updates stopped. Reconnect to continue." : "One-time import."}
           {connection.lastCheckedAt ? <> Last checked <time dateTime={connection.lastCheckedAt}>{formatDate(connection.lastCheckedAt)}</time>.</> : null}
         </p> : null}
+        {(latestRun?.labResultCount ?? 0) > 0 ? <ImportAgainLink connection={connection} /> : null}
+        {connection.importsRemaining === 0 ? <p>This source has reached its import limit. Saved records remain available.</p> : null}
+        <p>Disconnect stops future imports. Records already saved in Murph stay there.</p>
+        <Link href="/privacy" className="w-fit underline underline-offset-4">How Murph uses your data</Link>
         {connection.status !== "disconnected" ? (
           <Button className="w-fit" disabled={disabled} onClick={onDisconnect} size="sm" type="button" variant="outline">
             Disconnect
@@ -330,6 +315,21 @@ function ConnectionDetails({ connection, disabled, onDisconnect }: {
         ) : null}
       </div>
     </details>
+  );
+}
+
+function ImportAgainLink({ connection, primary = false }: {
+  connection: ClinicalRecordConnectionContract;
+  primary?: boolean;
+}) {
+  if (isImportInProgress(connection) || !connection.canImport) return null;
+  return (
+    <Link
+      href="/records/connect?launch=clinical-records"
+      className={buttonVariants({ size: "lg", variant: primary ? "default" : "link", className: primary ? "mt-5" : "w-fit" })}
+    >
+      {connection.status === "disconnected" || connection.status === "needs_reauth" ? "Reconnect" : "Import again"}
+    </Link>
   );
 }
 

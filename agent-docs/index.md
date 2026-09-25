@@ -767,3 +767,6 @@ are tracked in `exec-plans/completed/2026-09-24-signup-contact-card.md`.
 
 Medical records presentation simplification and responsive interaction proof:
 [`records simplification`](exec-plans/completed/2026-09-25-records-simplify.md).
+
+Further medical records reduction to one contextual action and Manage:
+[`records distillation`](exec-plans/completed/2026-09-25-records-distill.md).
