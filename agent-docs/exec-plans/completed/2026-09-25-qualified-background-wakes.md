@@ -1,6 +1,6 @@
 # Qualify background wake hints before foreground handoff
 
-Status: active
+Status: completed
 Created: 2026-09-25
 Updated: 2026-09-25
 
@@ -101,3 +101,7 @@ Updated: 2026-09-25
   same state. Older runtimes retain the defect until ordinary runner rollout;
   rollback restores old behavior without a data migration. Command-start timeout
   and orchestrator timing policy remain outside this fix.
+
+- Implementation and local proof complete in PR #3708. Required exact-head CI and
+  external review are tracked on the PR before merge; deployment is separate.
+Completed: 2026-09-25
