@@ -290,6 +290,12 @@ already concise records remain unchanged. This policy uses the existing memory
 format and tool, with no schema migration or second profile store.
 
 The morning Journal connected-context automation writes canonical Journal plans.
+Connected plans alone do not authorize attendance or logistics check-ins. New
+follow-ups require an explicit member request or a concrete health purpose;
+scheduled execution applies this rule to legacy instructions too. Morning
+reconciliation archives proven automatic logistics-only checks, preserving
+explicit requests, useful health support, and uncertain cases. No new state or
+scheduler is introduced.
 It also reviews existing private reminders against current permitted canonical
 context, even without new connected plans. Existing version-checked automation
 patches repair supported instruction, timing, reference, and lifecycle mistakes;
@@ -300,8 +306,12 @@ and recurring habits are preserved, including on retries. Source opt-outs still
 apply, and uncertain context does not authorize a mutation.
 Scheduled outdoor reminders independently resolve current member location and
 canonical travel, including recent segments after arrival leaves the upcoming
-projection. Plans remain conditional evidence. No separate reconciliation store,
-location store, or scheduler is introduced.
+projection. Plans remain conditional evidence. Lodging destinations require
+explicit source geography; property names and scenic amenities cannot establish a city. Capture
+reads the exact confirmation when a snippet is insufficient, preserves confirmed
+bookings with unknown destinations, and repairs unsupported imported geography
+through the same revision-checked event owner while preserving member corrections.
+No separate reconciliation store, location store, or scheduler is introduced.
 Each canonical Journal plan note owns end time, planned/tentative/canceled state, verification
 time, category, and optional connected account; existing event fields own start,
 timezone, title, source identity, revision, and detailed logistics. Typed note

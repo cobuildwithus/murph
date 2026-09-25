@@ -1,10 +1,9 @@
 "use client";
 
 import {
-  FileTextIcon,
+  ChevronDownIcon,
   LockKeyholeIcon,
   PlusIcon,
-  UnplugIcon,
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -13,7 +12,6 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { requestHostedOnboardingJson } from "@/src/components/hosted-onboarding/client-api";
 import { useAuth } from "@/src/components/hosted-onboarding/auth-dialog-provider";
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
-import { Badge } from "@/src/components/ui/badge";
 import { Button, buttonVariants } from "@/src/components/ui/button";
 import {
   Dialog,
@@ -146,21 +144,26 @@ export function RecordsPageClient({
     : describeCallback(initialCallback);
 
   return (
-    <div className="flex w-full min-w-0 flex-col gap-10">
-      <PageHeader
-        eyebrow="Private vault"
-        title="Medical records"
-        description="Bring records from your patient portal into Murph."
-      >
+    <div className="flex w-full min-w-0 max-w-3xl flex-col gap-8 sm:gap-10">
+      <header className="flex flex-wrap items-center justify-between gap-4">
+        <PageHeader
+          title="Medical records"
+          description={connections.length === 0 ? "Bring records from your patient portal into Murph." : undefined}
+        />
         {authenticated ? (
-          <Link className={buttonVariants({ size: "lg", className: "mt-5 w-full sm:w-auto" })} href="/records/connect?launch=clinical-records">
-            <PlusIcon aria-hidden="true" data-icon="inline-start" />
-            Import records
+          <Link
+            aria-label="Import records"
+            title="Import records"
+            className={buttonVariants({ size: connections.length > 0 ? "icon-lg" : "lg", variant: connections.length > 0 ? "ghost" : "default" })}
+            href="/records/connect?launch=clinical-records"
+          >
+            <PlusIcon aria-hidden="true" />
+            {connections.length === 0 ? "Import records" : null}
           </Link>
         ) : null}
-      </PageHeader>
+      </header>
 
-      <div className="max-w-5xl space-y-6">
+      <div className="flex flex-col gap-6">
         {callbackNotice ? (
           <Alert
             className={callbackNotice.kind === "neutral"
@@ -191,9 +194,9 @@ export function RecordsPageClient({
         ) : connections.length === 0 ? (
           <EmptyRecordsState />
         ) : (
-          <section aria-labelledby="patient-portals-title" className="space-y-4">
-            <h2 id="patient-portals-title" className="font-serif text-2xl font-medium tracking-tight text-foreground">Your providers</h2>
-            <ul className="divide-y divide-border overflow-hidden rounded-xl border border-border bg-card">
+          <section aria-labelledby="patient-portals-title">
+            <h2 id="patient-portals-title" className="sr-only">Your providers</h2>
+            <ul className="divide-y divide-border border-y border-border">
               {connections.map((connection) => (
                 <ConnectionRow
                   key={connection.connectionId}
@@ -229,13 +232,9 @@ export function RecordsPageClient({
 
 export function RecordsPrivacyControls() {
   return (
-    <section aria-labelledby="records-privacy-title" className="flex max-w-2xl flex-col gap-3 border-t border-border pt-6">
-      <h2 id="records-privacy-title" className="font-serif text-xl font-medium">Your records, your control</h2>
-      <p className="text-sm leading-6 text-muted-foreground">Disconnect stops future imports. Records already saved in Murph stay there.</p>
-      <p className="text-sm leading-6 text-muted-foreground">Use Data &amp; privacy to withdraw consent or delete your account and saved data. Your hospital’s records stay unchanged.</p>
-      <Link href="/settings#data-privacy" className={buttonVariants({ variant: "outline", className: "w-fit" })}>Data &amp; privacy</Link>
-      <Link href="/privacy" className="w-fit text-sm underline underline-offset-4">How Murph uses your data</Link>
-    </section>
+    <footer className="text-sm text-muted-foreground">
+      <Link href="/settings#data-privacy" className="inline-flex min-h-11 items-center underline-offset-4 hover:underline">Data &amp; privacy</Link>
+    </footer>
   );
 }
 
@@ -253,98 +252,84 @@ export function ConnectionRow({
   const importInProgress = isImportInProgress(connection);
 
   return (
-    <li className="p-5 sm:p-7">
-      <article>
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-          <div className="flex min-w-0 items-start gap-3">
-            <span className="mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
-              <FileTextIcon aria-hidden="true" className="size-4" />
-            </span>
-            <div className="min-w-0">
-              <h3 className="font-serif text-xl font-medium leading-6 tracking-tight text-foreground text-pretty">
-                {connection.displayName}
-              </h3>
-              <p className="mt-1 font-mono text-[10px] uppercase tracking-[0.1em] text-muted-foreground">
-                Connected <time dateTime={connection.connectedAt}>{formatDate(connection.connectedAt)}</time>
-              </p>
-            </div>
-          </div>
-          <div className="flex items-center gap-2 pl-12 sm:pl-0">
-            <Badge variant={presentation.badgeVariant}>{presentation.label}</Badge>
-            {importInProgress ? (
-              <Spinner aria-hidden="true" role="presentation" className="size-3.5 text-muted-foreground" />
-            ) : null}
-          </div>
-        </div>
-
-        <div
-          aria-atomic="true"
-          aria-live="polite"
-          className="mt-5 space-y-5 sm:pl-12"
-          role="status"
-        >
-          <span className="sr-only">
-            {presentation.label}. {importInProgress ? "Loading." : ""}
-          </span>
-          <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
-            {presentation.detail}
+    <li className="py-7">
+      <article className="relative">
+        <h3 className="pr-24 font-serif text-2xl font-medium leading-tight tracking-tight text-foreground text-pretty">
+          {connection.displayName}
+        </h3>
+        <div aria-atomic="true" aria-live="polite" className="mt-2 text-sm leading-6 text-muted-foreground" role="status">
+          <p>
+            {latestRun && !importInProgress ? <>{latestRun.importedCount.toLocaleString()} {latestRun.importedCount === 1 ? "record" : "records"} added. </> : null}
+            {importInProgress ? <Spinner aria-hidden="true" role="presentation" className="mr-2 inline size-3.5" /> : null}
+            <span className={presentation.badgeVariant === "destructive" ? "text-destructive" : presentation.badgeVariant === "default" ? "sr-only" : undefined}>{presentation.label}</span>
+            {importInProgress ? <span className="sr-only">. Loading.</span> : null}
           </p>
-          {connection.status !== "disconnected" ? <p className="text-sm leading-6 text-muted-foreground">
-            {connection.nextSyncAt ? <>Daily updates on. Next check around <time dateTime={connection.nextSyncAt}>{formatDate(connection.nextSyncAt)}</time>.</> : connection.status === "needs_reauth" ? "Daily updates stopped. Reconnect to continue." : "One-time import."}
-            {connection.lastCheckedAt ? <> Last checked <time dateTime={connection.lastCheckedAt}>{formatDate(connection.lastCheckedAt)}</time>.</> : null}
-          </p> : null}
-          {latestRun && !importInProgress ? (
-            <ImportCounts
-              importedCount={latestRun.importedCount}
-              reviewCount={latestRun.reviewCount}
-              skippedExistingCount={latestRun.skippedExistingCount ?? 0}
-            />
-          ) : null}
+          {importInProgress ? <p>{presentation.detail}</p> : null}
         </div>
 
-        <div className="mt-4 flex flex-wrap items-center gap-3 sm:ml-12">
-          {latestRun && (latestRun.labResultCount ?? 0) > 0 ? (
-            <Link href="/biomarkers" className={buttonVariants({ size: "sm", variant: "outline" })}>View lab results</Link>
-          ) : null}
-          {!importInProgress && connection.canImport ? (
-            <Link href="/records/connect?launch=clinical-records" className={buttonVariants({ size: "sm", variant: "outline" })}>
-              {connection.status === "disconnected" || connection.status === "needs_reauth" ? "Reconnect" : "Import again"}
-            </Link>
-          ) : null}
-          {connection.importsRemaining === 0 ? <p className="text-sm text-muted-foreground">This source has reached its import limit. Saved records remain available.</p> : null}
-          {connection.status !== "disconnected" ? (
-          <Button
-            className="text-muted-foreground hover:text-destructive"
-            disabled={disabled}
-            onClick={onDisconnect}
-            size="sm"
-            type="button"
-            variant="ghost"
-          >
-            <UnplugIcon aria-hidden="true" />
-            Disconnect
-          </Button>
-          ) : null}
-        </div>
+        {latestRun && (latestRun.labResultCount ?? 0) > 0 ? (
+          <Link href="/biomarkers" className={buttonVariants({ size: "lg", className: "mt-5" })}>View lab results</Link>
+        ) : <ImportAgainLink connection={connection} primary />}
+
+        <ConnectionDetails connection={connection} disabled={disabled} onDisconnect={onDisconnect} />
       </article>
     </li>
   );
 }
 
-function ImportCounts({ importedCount, reviewCount, skippedExistingCount }: { importedCount: number; reviewCount: number; skippedExistingCount: number }) {
+function ConnectionDetails({ connection, disabled, onDisconnect }: {
+  connection: ClinicalRecordConnectionContract;
+  disabled: boolean;
+  onDisconnect: () => void;
+}) {
+  const latestRun = connection.latestRun;
+  const importInProgress = isImportInProgress(connection);
+  const skippedExistingCount = latestRun?.skippedExistingCount ?? 0;
   return (
-    <div className="flex flex-col gap-2">
-      <p className="text-sm font-medium text-foreground">{importedCount.toLocaleString()} {importedCount === 1 ? "record" : "records"} added</p>
-      {reviewCount > 0 || skippedExistingCount > 0 ? (
-        <details className="max-w-xl text-sm leading-6 text-muted-foreground">
-          <summary className="w-fit cursor-pointer underline-offset-4 hover:underline">Import details</summary>
-          <div className="mt-2 flex flex-col gap-1">
+    <details className="group text-sm">
+      <summary className="absolute -top-2 right-0 flex min-h-11 cursor-pointer list-none items-center gap-1 rounded-sm text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ring [&::-webkit-details-marker]:hidden">
+        Manage
+        <ChevronDownIcon aria-hidden="true" className="size-4 transition-transform group-open:rotate-180 motion-reduce:transition-none" />
+      </summary>
+      <div className="mt-6 flex max-w-xl flex-col gap-3 border-t border-border pt-5 leading-6 text-muted-foreground">
+        {!importInProgress ? <p>{describeConnection(connection).detail}</p> : null}
+        {latestRun && !importInProgress ? (
+          <>
             {skippedExistingCount > 0 ? <p>{skippedExistingCount.toLocaleString()} already in Murph.</p> : null}
-            {reviewCount > 0 ? <p>{reviewCount.toLocaleString()} {reviewCount === 1 ? "item" : "items"} saved for reference. These are kept in your vault but aren’t shown as results.</p> : null}
-          </div>
-        </details>
-      ) : null}
-    </div>
+            {latestRun.reviewCount > 0 ? <p>{latestRun.reviewCount.toLocaleString()} {latestRun.reviewCount === 1 ? "item" : "items"} saved for reference. These are kept in your vault but aren’t shown as results.</p> : null}
+          </>
+        ) : null}
+        <p>Connected <time dateTime={connection.connectedAt}>{formatDate(connection.connectedAt)}</time>.</p>
+        {connection.status !== "disconnected" ? <p>
+          {connection.nextSyncAt ? <>Daily updates on. Next check around <time dateTime={connection.nextSyncAt}>{formatDate(connection.nextSyncAt)}</time>.</> : connection.status === "needs_reauth" ? "Daily updates stopped. Reconnect to continue." : "One-time import."}
+          {connection.lastCheckedAt ? <> Last checked <time dateTime={connection.lastCheckedAt}>{formatDate(connection.lastCheckedAt)}</time>.</> : null}
+        </p> : null}
+        {(latestRun?.labResultCount ?? 0) > 0 ? <ImportAgainLink connection={connection} /> : null}
+        {connection.importsRemaining === 0 ? <p>This source has reached its import limit. Saved records remain available.</p> : null}
+        <p>Disconnect stops future imports. Records already saved in Murph stay there.</p>
+        <Link href="/privacy" className="w-fit underline underline-offset-4">How Murph uses your data</Link>
+        {connection.status !== "disconnected" ? (
+          <Button className="w-fit" disabled={disabled} onClick={onDisconnect} size="sm" type="button" variant="outline">
+            Disconnect
+          </Button>
+        ) : null}
+      </div>
+    </details>
+  );
+}
+
+function ImportAgainLink({ connection, primary = false }: {
+  connection: ClinicalRecordConnectionContract;
+  primary?: boolean;
+}) {
+  if (isImportInProgress(connection) || !connection.canImport) return null;
+  return (
+    <Link
+      href="/records/connect?launch=clinical-records"
+      className={buttonVariants({ size: "lg", variant: primary ? "default" : "link", className: primary ? "mt-5" : "w-fit" })}
+    >
+      {connection.status === "disconnected" || connection.status === "needs_reauth" ? "Reconnect" : "Import again"}
+    </Link>
   );
 }
 

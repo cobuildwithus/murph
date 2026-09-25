@@ -15491,7 +15491,11 @@ describeRealCodex('real Codex Journal connected account eligibility e2e', () => 
 })
 
 describeRealCodex('real Codex Journal connected calendar capture e2e', () => {
-  it.each([false, true])('vault pass recovery saves a linked calendar follow-up and deduplicates a retry (partial save: %s)', async (partialSave) => {
+  it.each([
+    { partialSave: false, requestedReview: false },
+    { partialSave: false, requestedReview: true },
+    { partialSave: true, requestedReview: true },
+  ])('health-purpose calendar capture preserves context and deduplicates eligible follow-ups (partial: $partialSave, requested: $requestedReview)', async ({ partialSave, requestedReview }) => {
     const config = await resolveRealCodexE2eConfig()
     const automation = MURPH_MANAGED_AUTOMATIONS.find(
       (candidate) => candidate.slug === 'journal-connected-context-morning',
@@ -15683,6 +15687,9 @@ describeRealCodex('real Codex Journal connected calendar capture e2e', () => {
           'Scheduled occurrence context:',
           '- Current local date: 2026-08-31.',
           retry ? '- Retry the same morning occurrence; preserve its existing effects.' : '- Current local time: 08:00 Europe/Warsaw.',
+          requestedReview
+            ? 'Recent member request: After my next tennis session, ask about knee stiffness one hour after it ends so we can decide whether to adjust my next session. No outcome has been reported yet.'
+            : 'Current member context: No symptom, unresolved recovery question, health goal needing an outcome review, or request for a follow-up is present.',
           '- Complete the normal scheduled decision.',
         ].join('\n\n'),
         reasoningEffort: resolveMurphManagedAutomationSeed(automation.automationId)
@@ -15725,23 +15732,26 @@ describeRealCodex('real Codex Journal connected calendar capture e2e', () => {
         expect(journalWrites[0]).not.toMatch(/dentist|dinner|Alex/iu)
       }
       expect(JSON.stringify(savedNotes)).not.toMatch(/dentist|dinner|Alex/iu)
-      expect((await listAutomations({ vaultRoot: workingDirectory })).items).toHaveLength(1)
-      expect(automationRequests).toHaveLength(1)
-      expect(automationRequests[0]).toMatchObject({ contextReferences: [{ entityKind: 'event', entityId: savedNotes[0]?.entityId }] })
-      const followupRequest = automationRequests[0]
-      if (!followupRequest || followupRequest.action !== 'save') {
-        throw new Error('Expected one saved calendar follow-up.')
+      expect((await listAutomations({ vaultRoot: workingDirectory })).items).toHaveLength(requestedReview ? 1 : 0)
+      expect(automationRequests).toHaveLength(requestedReview ? 1 : 0)
+      if (requestedReview) {
+        expect(automationRequests[0]).toMatchObject({ contextReferences: [{ entityKind: 'event', entityId: savedNotes[0]?.entityId }] })
+        const followupRequest = automationRequests[0]
+        if (!followupRequest || followupRequest.action !== 'save') {
+          throw new Error('Expected one saved calendar follow-up.')
+        }
+        expect(followupRequest).toMatchObject({
+          action: 'save',
+          schedule: { kind: 'at' },
+        })
+        // The explicitly requested offset after the 19:00 end is 20:00
+        // local / 18:00Z. Comparing instants also accepts equivalent offsets.
+        if (followupRequest.schedule?.kind !== 'at') throw new Error('Expected a one-shot follow-up.')
+        expect(Date.parse(followupRequest.schedule.at)).toBe(
+          Date.parse('2026-08-31T19:00:00+02:00') + 60 * 60 * 1_000,
+        )
+        expect(followupRequest.instructions).toMatch(/knee|stiffness/iu)
       }
-      expect(followupRequest).toMatchObject({
-        action: 'save',
-        schedule: { kind: 'at' },
-      })
-      // The event ends at 19:00 Warsaw: one hour after it is 20:00
-      // local / 18:00Z. Comparing instants also accepts equivalent offsets.
-      if (followupRequest.schedule?.kind !== 'at') throw new Error('Expected a one-shot follow-up.')
-      expect(Date.parse(followupRequest.schedule.at)).toBe(
-        Date.parse('2026-08-31T19:00:00+02:00') + 60 * 60 * 1_000,
-      )
       expect((await getKnowledgePage({ vault: workingDirectory, slug: 'journal-connected-context' })).page.body).toContain(
         'calendar_evt_tennis',
       )
@@ -15754,8 +15764,8 @@ describeRealCodex('real Codex Journal connected calendar capture e2e', () => {
       expect(parseAssistantNotificationDecision(repeated.finalMessage).kind).toBe('skip')
       const repeatedNotes = (await readVaultRawTolerant(workingDirectory)).events.filter(event => event.kind === 'note')
       expect(repeatedNotes.map(event => event.entityId)).toEqual(savedNotes.map(event => event.entityId))
-      expect((await listAutomations({ vaultRoot: workingDirectory })).items).toHaveLength(1)
-      expect(automationRequests).toHaveLength(1)
+      expect((await listAutomations({ vaultRoot: workingDirectory })).items).toHaveLength(requestedReview ? 1 : 0)
+      expect(automationRequests).toHaveLength(requestedReview ? 1 : 0)
       const executedWindows = connectedAppRequests.filter(request => request.operation === 'execute')
       process.stdout.write(`[journal-calendar-windows] ${JSON.stringify(executedWindows.map(request => request.input.arguments))}\n`)
       expect(executedWindows).toHaveLength(2)
@@ -15776,6 +15786,149 @@ describeRealCodex('real Codex Journal connected calendar capture e2e', () => {
       await removeRealCodexTemporaryPaths(config.temporaryPaths)
     }
   }, 720_000)
+})
+
+describeRealCodex('real Codex lodging destination evidence e2e', () => {
+  it.each(['explicit destination', 'unknown destination', 'repair imported destination'] as const)(
+    'grounds lodging geography in the full confirmation: %s', async (scenario) => {
+      const config = await resolveRealCodexE2eConfig()
+      const automation = MURPH_MANAGED_AUTOMATIONS.find(candidate => candidate.slug === 'journal-connected-context-morning')
+      if (!automation) throw new Error('Missing managed Journal automation.')
+      const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-lodging-evidence-e2e-'))
+      const requests: Array<{ operation: string; input: Record<string, unknown> }> = []
+      const automationRequests: AssistantHostedAutomationToolRequest[] = []
+      try {
+        const binDirectory = path.join(workingDirectory, 'bin')
+        const commandLogPath = path.join(workingDirectory, 'commands.log')
+        await materializeJournalConnectedContextVaultCli({
+          binDirectory, commandLogPath, vaultRoot: workingDirectory,
+          ledgerText: JSON.stringify({ version: 1, optOuts: { global: false, accounts: [], providers: [], categories: [] },
+            activeAccounts: [{ id: 'gmail_lodging', provider: 'gmail' }] }),
+        })
+        let existingEventId: string | null = null
+        if (scenario === 'repair imported destination') {
+          const saved = await upsertEvent({ vaultRoot: workingDirectory, payload: {
+            kind: 'note', noteType: 'journal-plan', source: 'import', title: 'Palm Bay lodging',
+            occurredAt: '2026-11-10T12:00:00Z', timeZone: 'America/New_York',
+            tags: ['planned', 'timing-all-day'], note: 'Confirmed stay November 10–12.',
+            externalRef: { system: 'connected-context', resourceType: 'plan', resourceId: 'gmail_lodging:mail_lodging_synthetic' },
+            plan: { endsAt: '2026-11-12T00:00:00-05:00', status: 'planned',
+              lastVerifiedAt: '2026-10-31T07:00:00Z', category: 'travel', accountId: 'gmail_lodging' },
+          } })
+          existingEventId = saved.eventId
+          await upsertKnowledgePage({ vault: workingDirectory, slug: 'journal-connected-context', body: [
+            JSON.stringify({ version: 1, optOuts: { global: false, accounts: [], providers: [], categories: [] },
+              activeAccounts: [{ id: 'gmail_lodging', provider: 'gmail' }] }),
+            '', '## Sources', '',
+            JSON.stringify([{ accountId: 'gmail_lodging', sourceId: 'mail_lodging_synthetic', eventId: saved.eventId, revision: 1 }]),
+          ].join('\n') })
+        }
+        const memoryBefore = await readMemoryDocument(workingDirectory)
+        const result = await executeRealCodexAppServerTurn({
+          allowFinishWithoutReply: false,
+          approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+          codexHome: config.codexHome, fixtureBinDirectory: binDirectory,
+          abortSignal: AbortSignal.timeout(600_000),
+          developerInstructions: buildWeeklyHealthInsightDeveloperInstructions({
+            currentLocalDate: '2026-11-01', currentTimeZone: 'Europe/Warsaw',
+            hostedAutomationAvailable: true, scheduledOccurrenceAt: '2026-11-01T07:00:00Z',
+          }),
+          dynamicTools: [MURPH_AUTOMATION_TOOL, MURPH_CONNECTED_APPS_MANAGE_TOOL,
+            MURPH_CONNECTED_APPS_SEARCH_TOOL, MURPH_CONNECTED_APPS_EXECUTE_TOOL],
+          env: { ...config.env, [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: resolveAssistantSkillsRoot(),
+            PATH: `${binDirectory}:${config.env.PATH ?? ''}` },
+          hostedToolContext: {
+            automationTool: { request: async request => {
+              automationRequests.push(request)
+              throw new Error('Date-only lodging must not create a timed follow-up.')
+            } },
+            computerToolsAvailable: false,
+            connectedApps: { request: async request => {
+              requests.push({ operation: request.operation, input: request.input })
+              if (request.operation === 'manage') return { result: { accounts: [{
+                alias: 'Personal', id: 'gmail_lodging', status: 'ACTIVE', toolkit: 'gmail',
+              }] } }
+              if (request.operation === 'search') return { result: { success: true, tool_schemas: {
+                GMAIL_SEARCH_EMAILS: { input_schema: { type: 'object', additionalProperties: false,
+                  properties: { query: { type: 'string' } }, required: ['query'] } },
+                GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID: { input_schema: { type: 'object', additionalProperties: false,
+                  properties: { message_id: { type: 'string' } }, required: ['message_id'] } },
+              } } }
+              if (request.operation !== 'execute') throw new Error('Unexpected provider operation.')
+              expect(request.input.account).toBe('gmail_lodging')
+              if (request.input.toolSlug === 'GMAIL_SEARCH_EMAILS') return { result: { messages: [{
+                id: 'mail_lodging_synthetic', subject: 'Confirmed lodging: November 10–12',
+                snippet: 'Palm Bay Hideaway. Your stay is confirmed. Open the reservation for details.',
+              }] } }
+              expect(request.input.toolSlug).toBe('GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID')
+              expect(request.input.arguments).toEqual({ message_id: 'mail_lodging_synthetic' })
+              return { result: { id: 'mail_lodging_synthetic', subject: 'Confirmed lodging: November 10–12',
+                body: [
+                  'Reservation confirmed. Listing name: Palm Bay Hideaway.',
+                  'Check-in date: 2026-11-10. Checkout date: 2026-11-12.',
+                  'Booking calendar timezone: Europe/Lisbon. Check-in and checkout clock times are not supplied.',
+                  ...(scenario !== 'unknown destination'
+                    ? ['Property address: 41 Example Lane, Porto, Portugal.']
+                    : ['Property address and destination details are not supplied in this confirmation.']),
+                  'Provider corporate office: Miami, Florida, USA. Booking reference SYNTH-782.',
+                ].join('\n'),
+              } }
+            } },
+            currentHostedDeliveryContext: () => null, currentHostedMailboxItemIds: () => [],
+            sendVaultFile: async () => { throw new Error('Unexpected file send.') }, vaultFileSendAvailable: false,
+          },
+          model: config.model, modelProvider: config.modelProvider,
+          prompt: [automation.instructions, 'Scheduled occurrence context:',
+            '- Current local date: 2026-11-01.', '- Current local time: 08:00 Europe/Warsaw.',
+            '- Complete the normal scheduled decision.'].join('\n\n'),
+          reasoningEffort: resolveMurphManagedAutomationSeed(automation.automationId)?.assistantTargetOverride?.reasoningEffort ?? 'low',
+          sandbox: 'workspace-write', workingDirectory,
+        })
+        const decision = parseAssistantNotificationDecision(result.finalMessage)
+        expect(decision.kind, result.finalMessage).toBe('skip')
+        const fullReads = requests.filter(request => request.operation === 'execute'
+          && request.input.toolSlug === 'GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID')
+        expect(fullReads).toHaveLength(1)
+        expect(automationRequests).toHaveLength(0)
+        const vault = await readVaultRawTolerant(workingDirectory)
+        const notes = vault.events.filter(event => event.kind === 'note')
+        process.stdout.write(`[lodging-destination-evidence] ${JSON.stringify({ scenario, finalMessage: result.finalMessage,
+          notes: notes.map(note => ({ title: note.title, body: note.body, timeZone: note.attributes.timeZone, plan: note.attributes.plan })), fullReads: fullReads.length })}\n`)
+        expect(notes).toHaveLength(1)
+        if (existingEventId) {
+          expect(notes[0]?.entityId).toBe(existingEventId)
+          expect(notes[0]?.attributes.lifecycle).toMatchObject({ revision: 2 })
+        }
+        expect(await readMemoryDocument(workingDirectory)).toMatchObject({ exists: memoryBefore.exists, records: memoryBefore.records })
+        expect(notes[0]).toMatchObject({ attributes: { noteType: 'journal-plan' } })
+        const saved = JSON.stringify(notes)
+        expect(saved).not.toMatch(/Palm Bay|Florida|Miami|Example Lane|SYNTH-782/iu)
+        if (scenario !== 'unknown destination') expect(saved).toMatch(/Porto/iu)
+        else {
+          expect(saved).toMatch(/(?:destination|location)[^.!?]*(?:unknown|unspecified|unconfirmed|not (?:provided|supplied|specified|confirmed))/iu)
+          expect(saved).not.toMatch(/Porto/iu)
+        }
+        const upcoming = await refreshJournalTestContext(workingDirectory, '2026-11-01T07:00:00Z')
+        expect(upcoming.entries).toHaveLength(1)
+        expect(upcoming.entries[0]).toMatchObject({ timeZone: 'Europe/Lisbon', timing: 'all_day' })
+        const trip = upcoming.entries[0]!
+        const localDate = (instant: string) => new Intl.DateTimeFormat('en-CA', {
+          timeZone: 'Europe/Lisbon', year: 'numeric', month: '2-digit', day: '2-digit',
+        }).format(new Date(instant))
+        expect(localDate(trip.startsAt)).toBe('2026-11-10')
+        expect(localDate(trip.endsAt)).toBe('2026-11-12')
+        const commands = (await readFile(commandLogPath, 'utf8')).split('\n').filter(Boolean)
+        expect(commands.filter(command => command.includes('event note add') && !isRecordedVaultHelpCommand(command))).toHaveLength(existingEventId ? 0 : 1)
+        expect(commands.filter(command => command.includes('event edit') && !isRecordedVaultHelpCommand(command))).toHaveLength(existingEventId ? 1 : 0)
+        expect(commands.some(command => /memory (?:upsert|append|add)|habitat (?:upsert|add)/u.test(command))).toBe(false)
+        expect((await getKnowledgePage({ vault: workingDirectory, slug: 'journal-connected-context' })).page.body).toContain('mail_lodging_synthetic')
+      } finally {
+        await removeRealCodexTemporaryPath(workingDirectory)
+        await removeRealCodexTemporaryPaths(config.temporaryPaths)
+      }
+    }, 720_000,
+  )
 })
 
 describeRealCodex('real Codex Journal connected email travel capture e2e', () => {
@@ -18674,6 +18827,58 @@ describeRealCodex('real Codex automation context before questions e2e', () => {
       }
     }
   }, 900_000)
+})
+
+describeRealCodex('real Codex health-purpose scheduled follow-ups', () => {
+  it.each([
+    {
+      scenario: 'skips a legacy automatic logistics check without wellness filler',
+      instructions: 'Automatically created from a saved rail itinerary. Ask whether the journey went as planned. No member requested this check-in and no health question or decision is attached. The trip outcome is unknown.',
+      expectedKind: 'skip',
+      expectedText: null,
+    },
+    {
+      scenario: 'preserves a requested non-health reminder',
+      instructions: 'The member explicitly asked for this one-time reminder: remind me to return the library books today. It is due now and there is no evidence of completion or cancellation.',
+      expectedKind: 'send_message',
+      expectedText: /library|books/iu,
+    },
+    {
+      scenario: 'asks the specific unresolved health question',
+      instructions: 'The member requested a knee-stiffness review after their tennis session to decide whether to reduce the next session. This review is due now. The session ended, but no stiffness outcome is present in conversation or passive records. Ask about knee stiffness, not attendance.',
+      expectedKind: 'send_message',
+      expectedText: /knee|stiffness/iu,
+    },
+  ])('health-purpose execution $scenario', async ({ scenario, instructions, expectedKind, expectedText }) => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-health-purpose-e2e-'))
+    try {
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never',
+        baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions: buildScheduledAutomationDeveloperInstructions('direct', 'none'),
+        dynamicTools: [],
+        env: config.env,
+        model: config.model,
+        modelProvider: config.modelProvider,
+        prompt: instructions,
+        reasoningEffort: 'low',
+        sandbox: 'read-only',
+        workingDirectory,
+      })
+      const decision = parseAssistantNotificationDecision(result.finalMessage)
+      process.stdout.write(`${JSON.stringify({ scenario, model: config.model, decision })}\n`)
+      expect(decision.kind).toBe(expectedKind)
+      if (decision.kind === 'send_message') {
+        expect(decision.text).toMatch(expectedText!)
+        expect(decision.text).not.toMatch(/did you (?:attend|arrive)|went as planned|hydration|jet lag/iu)
+      }
+    } finally {
+      await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+    }
+  }, 360_000)
 })
 
 describeRealCodex('real Codex recurring reminder conversation e2e', () => {

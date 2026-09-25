@@ -3,6 +3,14 @@ in [the import-speed plan](exec-plans/completed/2026-09-24-garmin-import-speed.m
 
 # Murph Agent Docs Index
 
+Scheduled assistant real-model CI removal is recorded in
+[the CI removal plan](exec-plans/completed/2026-09-25-scheduled-ci-repair.md).
+
+Completed device polling-hint cleanup and the hourly-preflight investigation are
+recorded in [stale device wakes](exec-plans/completed/2026-09-24-stale-device-wakes.md).
+The runtime mailbox contract remains in
+[`hosted-runtime-protocol.md`](references/hosted-runtime-protocol.md).
+
 [CLI read validation telemetry](exec-plans/completed/2026-09-25-cli-read-validation-telemetry.md)
 records the locally verified implementation; [PR #3707](https://github.com/cobuildwithus/murph/pull/3707)
 owns delivery status. The contract remains in `docs/hosted-runtime-log-database.md`.
@@ -616,8 +624,15 @@ its active/retained target and namespace-routing proof is owned by the testing C
 
 Provider-search delivery is recorded in
 [`2026-09-15-records-connect-polish.md`](exec-plans/completed/2026-09-15-records-connect-polish.md).
+
 The separate registration activation and composed import proof remain active in
 [`2026-09-16-epic-import-live-verification.md`](exec-plans/active/2026-09-16-epic-import-live-verification.md).
+
+Medical records presentation simplification and responsive interaction proof:
+[`records simplification`](exec-plans/completed/2026-09-25-records-simplify.md).
+
+Further medical records reduction to one contextual action and Manage:
+[`records distillation`](exec-plans/completed/2026-09-25-records-distill.md).
 
 The channel-scoped inactivity pause and local proof are recorded in
 [`2026-09-17-imessage-proactivity-pause.md`](exec-plans/completed/2026-09-17-imessage-proactivity-pause.md).
@@ -776,3 +791,9 @@ snapshot cleanup bookkeeping are tracked in
 Request-local Worker entry and Web callback latency attribution is owned by
 `apps/cloudflare/README.md`; the focused implementation record is
 [`runtime latency attribution`](exec-plans/completed/2026-09-25-runtime-latency-attribution.md).
+
+Lodging destination evidence and focused assistant proof are tracked in
+[`lodging destination evidence`](exec-plans/completed/2026-09-25-lodging-location-evidence.md).
+
+Health-purpose connected-plan follow-ups and legacy suppression are tracked in
+[`health-purpose check-ins`](exec-plans/completed/2026-09-25-health-purpose-checkins.md).
