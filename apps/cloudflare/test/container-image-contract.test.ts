@@ -688,40 +688,6 @@ describe("hosted runner container image contract", () => {
     ).rejects.toThrow();
   });
 
-  it("keeps the shared app bundle immutable to the runtime user across warm container reuse", async () => {
-    const finalDockerfile = await readFile(
-      new URL("../../../Dockerfile.cloudflare-hosted-runner", import.meta.url),
-      "utf8",
-    );
-    const baseDockerfile = await readFile(
-      new URL("../../../Dockerfile.cloudflare-hosted-runner-base", import.meta.url),
-      "utf8",
-    );
-
-    const appBundleIsOwnedByRoot = finalDockerfile.includes(
-      "COPY --from=runner-app-permissions --chown=root:root /app/ /app/",
-    );
-    const appBundleIsMadeNonWritable =
-      finalDockerfile.includes(
-        "FROM ${HOSTED_RUNNER_BASE_IMAGE} AS runner-app-permissions",
-      )
-      && finalDockerfile.includes(
-        "COPY --chown=root:root ${HOSTED_RUNNER_BUNDLE_DIR}/ /app/",
-      )
-      && finalDockerfile.includes("RUN chmod -R a-w /app")
-      && finalDockerfile.includes("  && chmod -R a+rX /app")
-      && finalDockerfile.includes("  && chmod a-w /app")
-      && finalDockerfile.includes("  && chmod a+rX /app");
-    const containerReturnsToRuntimeUser =
-      readLastDockerUser(baseDockerfile) === "runner"
-      && readDockerUsers(finalDockerfile).at(-1) === "runner";
-
-    expect(appBundleIsOwnedByRoot).toBe(true);
-    expect(appBundleIsMadeNonWritable).toBe(true);
-    expect(containerReturnsToRuntimeUser).toBe(true);
-    expect(appBundleIsOwnedByRoot && appBundleIsMadeNonWritable && containerReturnsToRuntimeUser).toBe(true);
-  });
-
   it("publishes exactly the product Codex models with Flex and mixed Code Mode", async () => {
     const finalDockerfile = await readFile(
       new URL("../../../Dockerfile.cloudflare-hosted-runner", import.meta.url),

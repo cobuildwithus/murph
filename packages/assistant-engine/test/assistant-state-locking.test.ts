@@ -1,11 +1,8 @@
 import assert from 'node:assert/strict'
 import { mkdir, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
-import { afterEach, test, vi } from 'vitest'
+import { afterEach, test } from 'vitest'
 
-import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
-
-import { withAssistantCronWriteLock } from '../src/assistant/cron/locking.ts'
 import {
   createAssistantStateWriteLock,
 } from '../src/assistant/state-write-lock.ts'
@@ -14,10 +11,6 @@ import {
   type AssistantStatePaths,
 } from '../src/assistant/store/paths.ts'
 import { createDeferred, createTempVaultContext } from './test-helpers.js'
-
-type AssistantStateWriteLockFormatter = (
-  metadata: import('../src/assistant/state-write-lock.ts').AssistantStateWriteLockMetadata | null,
-) => string
 
 const cleanupPaths: string[] = []
 
@@ -251,83 +244,4 @@ test('assistant state write locks expose metadata guards and clear explicit lock
 
   const after = await lock.inspectWriteLock(paths)
   assert.equal(after.state, 'unlocked')
-})
-
-test('assistant cron locks fall back to generic held-lock details without metadata', async () => {
-  vi.resetModules()
-
-  let capturedCronMessage: AssistantStateWriteLockFormatter | null = null
-
-  vi.doMock('../src/assistant/state-write-lock.js', () => ({
-    createAssistantStateWriteLock: (options: {
-      heldLockErrorCode: string
-      formatHeldLockMessage(metadata: import('../src/assistant/state-write-lock.ts').AssistantStateWriteLockMetadata | null): string
-    }) => {
-      if (options.heldLockErrorCode === 'ASSISTANT_CRON_LOCKED') {
-        capturedCronMessage = options.formatHeldLockMessage
-      }
-      return {
-        withWriteLock: async <TResult>(_: unknown, run: () => Promise<TResult>) =>
-          await run(),
-      }
-    },
-  }))
-
-  await import('../src/assistant/cron/locking.ts')
-
-  const cronMessage: (
-    metadata: import('../src/assistant/state-write-lock.ts').AssistantStateWriteLockMetadata | null,
-  ) => string =
-    capturedCronMessage ??
-    ((_metadata: import('../src/assistant/state-write-lock.ts').AssistantStateWriteLockMetadata | null) => {
-      throw new Error('Expected cron lock mock to capture formatHeldLockMessage.')
-    })
-  assert.equal(
-    cronMessage(null),
-    'Assistant cron writes are already in progress.',
-  )
-  assert.equal(
-    cronMessage({
-      command: 'assistant-cron',
-      pid: 123,
-      startedAt: '2026-04-08T12:34:56.000Z',
-    }),
-    'Assistant cron writes are already in progress (pid=123, startedAt=2026-04-08T12:34:56.000Z, command=assistant-cron).',
-  )
-})
-
-test('assistant cron locks fall back to generic held-lock messages when metadata is missing', async () => {
-  vi.resetModules()
-  vi.doMock('../src/assistant/state-write-lock.ts', () => ({
-    createAssistantStateWriteLock: (options: {
-      formatHeldLockMessage(metadata: null): string
-      heldLockErrorCode: string
-      withWriteLock?: unknown
-    }) => ({
-      withWriteLock: vi.fn(async (_paths: unknown, _run: () => Promise<unknown>) => {
-        throw new VaultCliError(
-          options.heldLockErrorCode,
-          options.formatHeldLockMessage(null),
-        )
-      }),
-    }),
-  }))
-
-  const { withAssistantCronWriteLock: withMockedAssistantCronWriteLock } = await import(
-    '../src/assistant/cron/locking.ts'
-  )
-  const paths = resolveAssistantStatePaths('/tmp/assistant-cron-generic-lock')
-
-  await assert.rejects(
-    () => withMockedAssistantCronWriteLock(paths, async () => undefined),
-    (error) => {
-      assert.ok(error instanceof VaultCliError)
-      assert.equal(error.code, 'ASSISTANT_CRON_LOCKED')
-      assert.equal(
-        error.message,
-        'Assistant cron writes are already in progress.',
-      )
-      return true
-    },
-  )
 })

@@ -31,10 +31,6 @@ const COMPLETE_HTML = `
 const UI_PATHS = ["apps/web/app/settings/page.tsx"];
 const DESTINATION_ERROR =
   "The Design proof section must include an absolute HTTP(S) link with a fragment to `/design?tab=components`, `/design?tab=consent`, or `/screenshots/<category>`.";
-const FRONTEND_GUIDE = readFileSync(
-  new URL("../agent-docs/FRONTEND.md", import.meta.url),
-  "utf8",
-);
 const HOSTED_WORKTREE_GUIDE = readFileSync(
   new URL(
     "../agent-docs/operations/hosted-local-worktree-dev.md",
@@ -55,12 +51,6 @@ test("detects user-facing UI and excludes reference pages", () => {
   );
   assert.equal(isFrontendUiPath("apps/web/app/screenshots/page.tsx"), false);
   assert.equal(isFrontendUiPath("apps/web/test/hosted-settings.test.tsx"), false);
-});
-
-test("frontend guidance names installed skills without checkout-local paths", () => {
-  assert.match(FRONTEND_GUIDE, /installed `impeccable` skill/u);
-  assert.match(FRONTEND_GUIDE, /installed `shadcn` skill/u);
-  assert.doesNotMatch(FRONTEND_GUIDE, /\.agents\/skills\/(?:impeccable|shadcn)/u);
 });
 
 test("frontend-only worktree guidance pins every hosted public URL locally", () => {

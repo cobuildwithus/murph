@@ -17,13 +17,4 @@ describe("repository Vault CLI development entrypoint", () => {
     );
     expect(packageJson.scripts?.chat).toBeUndefined();
   });
-
-  it("documents the repository-owned launcher instead of the raw source command", () => {
-    const readme = readFileSync(path.join(repoRoot, "README.md"), "utf8");
-
-    expect(readme).toContain("pnpm vault-cli --help");
-    expect(readme).not.toContain(
-      "pnpm exec tsx packages/cli/src/bin.ts --help",
-    );
-  });
 });

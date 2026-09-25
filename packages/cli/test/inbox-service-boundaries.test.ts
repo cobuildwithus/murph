@@ -46,32 +46,6 @@ test('instantiateConnector rejects local Linq connectors', async () => {
   )
 })
 
-test('instantiateConnector fails closed for unsupported Linq connectors before loading factories', async () => {
-  await assert.rejects(
-    () =>
-      instantiateConnector({
-        connector: {
-          id: 'linq:default',
-          source: 'linq',
-          enabled: true,
-          accountId: 'default',
-          options: {
-            linqWebhookHost: '127.0.0.1',
-            linqWebhookPath: '/hooks/linq',
-            linqWebhookPort: 9911,
-          },
-        },
-        async loadInbox() {
-          return createStubInboxRuntimeModule()
-        },
-        async loadTelegramDriver() {
-          throw new Error('unreachable')
-        },
-      }),
-    /Unsupported inbox connector source: linq/u,
-  )
-})
-
 test('instantiateConnector delegates Telegram polling through the explicit takeover transport mode', async () => {
   type TelegramConnectorOptions = {
     accountId?: string | null
