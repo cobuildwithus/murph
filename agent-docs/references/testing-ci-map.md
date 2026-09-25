@@ -914,7 +914,8 @@ pnpm test:assistant:live -- --test 'compact-table debug: .*nine separate items.*
 pnpm test:assistant:live -- --test 'compact-table debug: .*nine separate items.*code-only'
 pnpm test:assistant:live -- --test 'compact-table debug: .*concise comparison.*native'
 pnpm test:assistant:live -- --test 'compact-table debug: .*concise comparison.*code-only'
-pnpm test:assistant:live -- --test 'shared schema: honors the canonical song limit'
+pnpm test:assistant:live -- --test 'canonical song limit.*Sol code-only'
+pnpm test:assistant:live -- --test 'canonical song limit.*Luna deferred mixed' --model gpt-6-luna
 ```
 
 The song journey uses production prompt layers and a complete isolated owning

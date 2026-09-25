@@ -23,6 +23,7 @@ import {
 export const MURPH_GENERATE_SONG_TOOL = {
   namespace: 'murph',
   name: 'generate_song',
+  deferLoading: true,
   description: [
     'Generate one original song or instrumental track and attach it as a native voice memo to the final response.',
     'On success, the native response media is already attached to the final response; the return value is a text receipt, not audio or an image-generation object.',

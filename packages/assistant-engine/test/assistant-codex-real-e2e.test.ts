@@ -13783,9 +13783,12 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
 })
 
 describeRealCodex('real Codex generated-music fallback e2e', () => {
-  it('shared schema: honors the canonical song limit in a subscription Terra code-only journey', async () => {
+  it.each([
+    { label: 'Sol code-only', model: 'gpt-6-sol', toolMode: 'code_mode_only' as const },
+    { label: 'Luna deferred mixed', model: 'gpt-6-luna', toolMode: undefined },
+  ])('shared schema: honors the canonical song limit in a subscription $label journey', async ({ model, toolMode }) => {
     const config = await resolveRealCodexE2eConfig({
-      sourceEnv: { ...process.env, MURPH_REAL_CODEX_AUTH: 'subscription', MURPH_REAL_CODEX_MODEL: 'gpt-6-sol' },
+      sourceEnv: { ...process.env, MURPH_REAL_CODEX_AUTH: 'subscription', MURPH_REAL_CODEX_MODEL: model },
     })
     const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-shared-schema-song-'))
     const isolatedHomePaths: string[] = []
@@ -13802,7 +13805,7 @@ describeRealCodex('real Codex generated-music fallback e2e', () => {
       const codexCommand = normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
         ?? path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../node_modules/.bin/codex')
       const modelCatalogJson = await writeHostedOpenAiMixedModeModelCatalogJson({
-        codexCommand, directory: home.codexHome, toolMode: 'code_mode_only',
+        codexCommand, directory: home.codexHome, ...(toolMode ? { toolMode } : {}),
       })
       const layers = buildAssistantSystemPromptLayers({
         assistantCliContract: null,
@@ -13868,7 +13871,7 @@ describeRealCodex('real Codex generated-music fallback e2e', () => {
       const attempts = readDynamicToolAttempts(result.jsonEvents)
       const completedDynamicActions = actions.filter((action) => action.kind === 'dynamic')
       process.stdout.write(`[shared-schema-song-journey] ${JSON.stringify({
-        model: config.model, toolMode: 'code-only', attempts: attempts.length,
+        model: config.model, toolMode: toolMode ?? 'mixed', attempts: attempts.length,
         completedDynamicActionCount: completedDynamicActions.length,
         completedDynamicActions: completedDynamicActions.slice(0, 4).map(({ tool, success }) => ({ tool, success })),
         generations: generations.length, attachments: result.responseMedia.length,

@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-09-24
-Updated: 2026-09-24
+Updated: 2026-09-25
 
 ## Goal
 
@@ -19,7 +19,7 @@ then verify the production canary without changing its 20-second reply budget.
 
 ## Scope
 
-Goal-setup and follow-through instructions, routing, and focused regression evidence. No model, transport,
+Goal-setup and follow-through instructions, routing, native tool loading, and focused regression evidence. No model, transport,
 canary threshold, or production credential changes.
 
 ## Evidence and decisions
@@ -153,3 +153,46 @@ canary threshold, or production credential changes.
   about 13.7 seconds; its reply correctly placed the start on Monday and the
   relative review on the following Friday without another consent question.
   This is local behavior evidence, not a passing deployed canary.
+
+## Secondary-tool loading follow-up
+
+- PR #3704 merged; protected runtime deployment, live fleet convergence, and Web
+  admission passed. A subsequent canary passed with first proposal/acceptance
+  replies at 12.4/14.0 seconds and canonical Goal counts 0/0/1. Those were progress
+  replies: acceptance completion still took about 51 seconds. Other same-release
+  runs failed at 45 seconds for proposal and 40 seconds for acceptance.
+- Commands account for only a few seconds. Complete production requests include
+  about 167 KB of eager tool guidance. Keep the canonical JSON supplement, runtime
+  validation, availability, and authorization; use native deferred discovery for
+  eight specialized media, feedback, family, phone-call, and physical-note tools.
+- Outcome: reduce unrelated initial model context while preserving specialist
+  actions and ordinary accepted-plan persistence.
+- Reaches: private and group initial tool exposure. Progress, reply targeting,
+  cancellation/recovery, device and personalization tools stay eager. No new
+  state owner, provider call, model setting, permission, or schema is introduced.
+- Proof: real pinned native complete-input capture, whole-inventory schema guards,
+  a real Luna deferred song discovery/attachment journey, and the natural goal
+  proposal/acceptance journey. Production completion latency remains unproven.
+- Synthetic hosted capability fixtures, identical prompt/history, complete first
+  Luna request excluding only the transport cache key: private 266,395 to 221,094
+  bytes (-45,301; -17.0%); group 217,749 to 177,366 (-40,383; -18.5%). No exact Luna
+  tokenizer is available. These are request-size measurements, not latency claims.
+- Existing thread-contract fingerprints already force one bounded-transcript
+  reconstruction for changed descriptors; subsequent turns resume normally.
+  Deployment adds no persistent-schema or inter-service compatibility requirement.
+
+- Candidate proof: 18 native input-contract checks and 165 focused policy/tool/
+  planner checks pass, as do assistant-engine typecheck, prepared runtime build,
+  complexity, and diff checks. Only direct/group route fingerprints changed.
+- Real Luna deferred mixed-mode song proof passes in 7.3 seconds: one generation,
+  one attachment, canonical duration limit honored, no forbidden effects; Ready.
+- Natural goal replay passes: zero proposal writes, then one custom Goal and one
+  linked active habit with no automation. Proposal 24.3 seconds, acceptance 14.3
+  seconds locally. Its smaller local capability inventory is not a production
+  latency benchmark. Both replies are truthful and require no extra date consent;
+  Ready. The broader production latency outcome remains pending.
+- Parent candidate review: eight literal loading flags only; canonical schemas,
+  runtime handlers, availability/consent gates, and cancellation/recovery policy
+  are unchanged. This prompt-primary change uses the existing completion-review
+  exemption; no independent backend/protocol change is introduced. No new public
+  speed claim is warranted from input-size evidence alone.
