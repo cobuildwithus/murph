@@ -65,6 +65,19 @@ family, and exact canonical ids retain precedence over aliases. Collection
 reads that still need projection freshness should use filtered APIs such as
 `listCanonicalEntities()` rather than materializing the complete vault model.
 
+Event listing uses `listCanonicalEventEntities()` to reuse an already-fresh
+indexed projection without forcing a rebuild. If missing, stale, unsupported or
+wearable-only, it takes the same reentrant canonical write lock, rechecks freshness,
+and reads `readCanonicalEntityFamilySource(vaultRoot, "event")` when still needed.
+The lock covers strict source capture, lifecycle collapse, visibility and selection;
+no cache is published or certified fresh. Kind/date predicates match the existing
+indexed operation, including its date fallback. The result is unlimited and in
+canonical order so the usecase applies tag/experiment filters before its limit.
+Event-source errors remain strict; malformed unrelated families no longer block
+this event-only read. Explicit global readers retain their existing strict errors
+and rebuild policy. No other collection endpoint changes. Manifest/status checks
+still inspect shared freshness, and repeated stale event reads reread the ledger.
+
 Narrow health collection reads should query that projection by family/kind/date
 before decoding records. Exact blood-test and immunization lookups use the
 bounded event-family source reader so a stale projection cannot turn one-record

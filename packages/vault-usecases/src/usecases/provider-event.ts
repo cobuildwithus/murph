@@ -689,12 +689,10 @@ export async function listEventRecords(input: {
 }) {
   const tags = normalizeRepeatableFlagOption(input.tag, 'tag')
   const query = await loadProviderEventQueryRuntime()
-  const records = await query.listCanonicalEntities(input.vault, {
-    family: 'event',
+  const records = await query.listCanonicalEventEntities(input.vault, {
     kinds: input.kind ? [input.kind] : undefined,
     from: input.from,
     to: input.to,
-    limit: null,
   })
   const readModel = query.createVaultReadModel({
     entities: records,

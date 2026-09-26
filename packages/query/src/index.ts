@@ -507,6 +507,15 @@ export async function listCanonicalEntities(
   return mod.listCanonicalEntitiesRuntime(vaultRoot, filters);
 }
 
+/** Event-only listing: reuse a fresh index, otherwise read the locked family. */
+export async function listCanonicalEventEntities(
+  vaultRoot: string,
+  filters: Pick<QueryCanonicalEntityFilters, "kinds" | "from" | "to"> = {},
+): Promise<CanonicalEntity[]> {
+  const mod = await import("./query-projection.ts");
+  return mod.listCanonicalEventEntitiesRuntime(vaultRoot, filters);
+}
+
 export async function listMetricPointsBatch(
   vaultRoot: string,
   filtersList: readonly QueryMetricPointFilters[],

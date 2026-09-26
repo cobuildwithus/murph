@@ -791,3 +791,8 @@ Health-purpose connected-plan follow-ups and legacy suppression are tracked in
 Web build fonts are bundled locally; source and license provenance is owned by
 `apps/web/README.md` under "Bundled Web fonts". Implementation proof is tracked
 in [`local Web fonts`](exec-plans/completed/2026-09-25-local-web-fonts.md).
+
+Event-list family-local implementation and pending performance validation are
+tracked in [the active event-list candidate plan](exec-plans/active/2026-09-25-event-list-candidate.md).
+`packages/query/README.md` owns its read policy; `packages/vault-usecases/README.md`
+owns the public-path tests and baseline/head benchmark commands.
