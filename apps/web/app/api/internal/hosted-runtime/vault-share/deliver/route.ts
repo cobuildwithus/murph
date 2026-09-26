@@ -106,13 +106,13 @@ export const POST = withJsonError(async (request: Request) => {
     // expected cohort. If that cohort changes between pages, never acknowledge
     // completion: the durable caller must restart against the new generation.
     if (continuation !== undefined) {
-      throw createHostedVaultShareDeliveryDeferredError();
+      throw createHostedVaultShareDeliveryDeferredError("pagination_generation_changed");
     }
     if (await hasUnmaterializedHostedVaultShareProjectionGeneration({
       grantorMemberId,
       projectionScope: body.projectionScope,
     })) {
-      throw createHostedVaultShareDeliveryDeferredError();
+      throw createHostedVaultShareDeliveryDeferredError("stale_generation_unmaterialized");
     }
     return jsonOk(NO_ACTIVE_SHARE_RESPONSE);
   }
@@ -130,7 +130,7 @@ export const POST = withJsonError(async (request: Request) => {
       grantorMemberId,
       projectionScope: body.projectionScope,
     })) {
-      throw createHostedVaultShareDeliveryDeferredError();
+      throw createHostedVaultShareDeliveryDeferredError("inactive_generation_unmaterialized");
     }
     return jsonOk(NO_ACTIVE_SHARE_RESPONSE);
   }
@@ -205,7 +205,7 @@ export const POST = withJsonError(async (request: Request) => {
     );
   }
   if (deliveryDeferred) {
-    throw createHostedVaultShareDeliveryDeferredError();
+    throw createHostedVaultShareDeliveryDeferredError("replacement_no_active_share");
   }
 
   return jsonOk(buildHostedVaultShareDeliverPageResponse(
@@ -239,7 +239,21 @@ function createHostedVaultShareDeliveryError(
   });
 }
 
-function createHostedVaultShareDeliveryDeferredError(): Error {
+function createHostedVaultShareDeliveryDeferredError(
+  reason:
+    | "pagination_generation_changed"
+    | "stale_generation_unmaterialized"
+    | "inactive_generation_unmaterialized"
+    | "replacement_no_active_share",
+): Error {
+  try {
+    console.warn("Hosted vault-share delivery deferred.", {
+      schema: "murph.hosted-vault-share-delivery-deferred.v1",
+      reason,
+    });
+  } catch {
+    // Best-effort telemetry must not change the deferred response.
+  }
   return hostedOnboardingError({
     code: "HOSTED_VAULT_SHARE_DELIVERY_DEFERRED",
     httpStatus: 503,

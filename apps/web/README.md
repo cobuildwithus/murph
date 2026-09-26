@@ -1425,6 +1425,19 @@ messages, causes, and other details are never projected. The field distinguishes
 the existing preparation checks without adding events, I/O, retries, or state.
 Provider redelivery success alone does not identify the original stale fact.
 
+### Vault-share delivery deferral diagnostics
+
+`POST /api/internal/hosted-runtime/vault-share/deliver` emits at most one
+best-effort warning per deferred request with schema
+`murph.hosted-vault-share-delivery-deferred.v1`. Its only other field, `reason`,
+is `pagination_generation_changed`, `stale_generation_unmaterialized`,
+`inactive_generation_unmaterialized`, or `replacement_no_active_share`.
+The last value identifies a guarded replacement result, not its deeper cause.
+Successful requests emit no new diagnostic. The record contains no identifiers,
+projection kinds, content, versions, counts, credentials or error prose; the
+existing request log supplies correlation. Logging failure preserves the same
+generic retryable response. No new reads, writes, retries or network work occur.
+
 ### Workspace read timing
 
 `GET /api/internal/hosted-workspace` records content-free
