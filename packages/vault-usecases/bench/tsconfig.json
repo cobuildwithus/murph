@@ -7,5 +7,5 @@
     "incremental": false,
     "noEmit": true
   },
-  "include": ["wearable-sources.ts"]
+  "include": ["wearable-sources.ts", "event-list.ts"]
 }

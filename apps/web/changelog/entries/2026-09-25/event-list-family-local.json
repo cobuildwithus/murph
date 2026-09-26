@@ -1,0 +1,17 @@
+{
+  "publishedOn": "2026-09-25",
+  "order": 100,
+  "item": {
+    "id": "event-list-family-local",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Event lists stay focused",
+    "summary": "Review saved events even when unrelated saved records are malformed.",
+    "details": "Event filters and corrections stay intact. Listing events does not require rebuilding unrelated summaries or search data.",
+    "relevanceTags": [
+      "journal",
+      "reliability"
+    ],
+    "sourcePullRequests": []
+  }
+}
