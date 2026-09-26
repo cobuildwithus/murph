@@ -1,6 +1,6 @@
 # PR ReviewGPT Completion Loops
 
-Last verified: 2026-09-04
+Last verified: 2026-09-25
 
 Use this runbook only when `completion-workflow.md` selects final ReviewGPT or
 the user requests it. It owns the managed-browser review, exact-head packaging,
@@ -51,6 +51,10 @@ draft-only or send-without-wait run intentionally retains its target because
 the prepared draft or conversation is the user-facing result. Never implement
 this cleanup as a profile-wide tab sweep or close a target that the current run
 did not create.
+
+Synchronous prompt insertion uses the configured draft timeout so healthy large
+multiline inserts can finish. Other page commands retain their shorter deadline;
+insertion still fails when its configured budget expires.
 
 Normal reviews use regular Chat, never ChatGPT Work. The package confirms that
 surface before model selection, before staging, and immediately before send. A
@@ -141,6 +145,40 @@ owner and paced polling rule. If identity or model evidence remains missing,
 report that gap without treating a visible answer as a pass. Close only any
 remaining task-owned recovery tab after capture; shared lanes remain untouched.
 Confirmed capability limits retain the separate lane-recovery rule below.
+
+An accepted send can briefly expose a `WEB:<uuid>` conversation URL. New captures
+retain the exact original target and verified committed-turn receipt in that
+case. Once that target obtains its canonical URL, use the unchanged metadata
+with `thread export`; never resend to obtain a different receipt. A missing
+original target cannot be recreated from the transient ID. Older digest-only
+captures retain their strict comparison and do not gain weaker recovery rules.
+
+### Include an authorized companion repository
+
+For a review whose scope includes another repository, pass one
+`--companion-snapshot` JSON descriptor per companion through `pnpm review:gpt`.
+Each descriptor contains `repo` (the local checkout), `head` (its full commit
+SHA), and `prUrl` (its same-repository GitHub PR). The companion must be clean,
+match the live PR head, and declare its committed canonical config and guarded
+packager. Include only repository scopes authorized for that review.
+
+ReviewGPT runs each companion's own guarded packager and retains its full-snapshot
+review-round metadata. It checks the exact head before and after packaging and
+stages each unchanged archive as a separate named attachment. It does not accept
+arbitrary ZIP paths or reuse the primary repository's packaging overrides. All
+expected attachments must survive onto the exact accepted user turn before the
+review receipt can be used. This adds context to the existing review owner; it
+does not start a separate review or satisfy another PR's exact-head gate.
+
+### Review patched ReviewGPT dependency source
+
+When a PR changes the locked ReviewGPT dependency patch, the canonical packager
+adds all registry package files under `review-gpt-pr-context/dependencies/`.
+It verifies the reviewed commit’s registry integrity before expanding bounded
+regular files and records file hashes plus the exact patch in that context.
+Use the included reconstruction instructions to inspect complete dependency
+owners. This source is part of the guarded snapshot; no inline encoded package
+or separate unguarded archive is needed.
 
 ## Finding Disposition Boundary
 
