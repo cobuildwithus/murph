@@ -140,6 +140,7 @@ import {
   resolveHostedAssistantLinqReactionDeliveryContextFromCandidatesForRequest,
   type HostedAssistantLinqDeliveryContext,
 } from "./linq-delivery-context.ts";
+import { buildHostedLinqLinkDelayNotice } from "./linq-link-delay-notice.ts";
 import {
   requireHostedProviderFetch,
   requireHostedProviderFetchDependencies,
@@ -3310,6 +3311,52 @@ async function confirmHostedAcceptedLinqReactionDelivery(input: {
   return confirmation.delivery;
 }
 
+async function maybeSendHostedLinqLinkDelayNotice(input:
+  Parameters<typeof deliverHostedPreparedAssistantDelivery>[0] & {
+    intent: AssistantOutboxIntent;
+    previousIntent: AssistantOutboxIntent | null;
+  },
+): Promise<void> {
+  const { intent } = input;
+  const delivery = intent.delivery;
+  if (
+    input.assistantDeliveryEffect.deliveryPhase !== "foreground_current_turn"
+    || intent.threadIsDirect !== true
+    || intent.channel !== "linq"
+    || intent.status !== "retryable"
+    || !intent.nextAttemptAt
+    || intent.deliveryConfirmationPending
+    || input.previousIntent?.delivery
+    || delivery?.channel !== "linq"
+    || delivery.kind === "message-reaction"
+    || delivery.providerMessageIds?.length !== 1
+  ) {
+    return;
+  }
+
+  // The newly persisted partial receipt owns this best-effort notice. Replays
+  // already have that receipt, so they only retry the original delivery.
+  try {
+    await createHostedAssistantLinqSendDependency({
+      assertLiveness: input.assertLiveness,
+      effectsPort: input.effectsPort,
+      linqEnv: input.linqEnv,
+      linqDeliveryContexts: input.linqDeliveryContexts,
+      platform: input.platform,
+      providerFetch: input.providerFetch,
+      signal: input.signal,
+    })({
+      idempotencyKey: `assistant-link-delay:${intent.intentId}`,
+      message: buildHostedLinqLinkDelayNotice(intent.intentId),
+      target: delivery.target,
+      targetKind: delivery.targetKind,
+    });
+  } catch {
+    // A failed notice must neither change the original retry nor enqueue more
+    // notices when the messaging transport is itself unavailable.
+  }
+}
+
 async function deliverHostedPreparedAssistantDelivery(input: {
   deliveryTraceContext?: HostedDeliveryTraceContext | null;
   actionApprovalPort: HostedRuntimeActionApprovalPort | null;
@@ -4119,6 +4166,12 @@ async function deliverHostedPreparedAssistantDelivery(input: {
           }
         : {}),
       vault: input.vaultRoot,
+    });
+    await maybeSendHostedLinqLinkDelayNotice({
+      ...input,
+      intent: dispatched.intent,
+      linqDeliveryContexts,
+      previousIntent: mirrorState.intent,
     });
     const resetDispatchResult = await maybeResetHostedPreparedDeliveryAfterPreProviderAbort({
       assistantDeliveryEffect: input.assistantDeliveryEffect,
