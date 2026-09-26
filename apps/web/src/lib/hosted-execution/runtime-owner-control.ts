@@ -19,9 +19,13 @@ export async function executeHostedRuntimeOwnerCommand(input: CommandInput): Pro
     const result = await resolveHostedLegacyMaterialization({ ...input.command, prisma: input.prisma, userId: input.userId });
     return parseHostedRuntimeOwnerResponse({ cutover: result.cutover, status: "observed", owner: projectOwner(result.owner) });
   }
-  // Provider authorization also selects the backend. An explicit legacy result
-  // can route to UserRunner; stale or draining authority never falls back.
-  const authorization = input.command.operation === "authorize_provider" || input.command.operation === "authorize_effect";
+  if (input.command.operation === "authorize_provider") {
+    // Route from the gate already locked by authorization, without a second read.
+    const result = await authorizeHostedRuntimeProvider({ ...input.command, prisma: input.prisma, userId: input.userId });
+    return parseHostedRuntimeOwnerResponse({ cutover: result.cutover,
+      status: result.owner ? "authorized" : "blocked", owner: projectOwner(result.owner) });
+  }
+  const authorization = input.command.operation === "authorize_effect";
   const backend = authorization ? await readHostedRuntimeMemberBackend(input.prisma, input.userId) : null;
   if (backend !== null && backend !== "postgres") {
     return parseHostedRuntimeOwnerResponse({ cutover: backend, status: "blocked", owner: null });
@@ -31,7 +35,7 @@ export async function executeHostedRuntimeOwnerCommand(input: CommandInput): Pro
   return parseHostedRuntimeOwnerResponse({ cutover, status: result.status, owner: projectOwner(result.owner) });
 }
 
-async function executeCommand(input: Omit<CommandInput, "command"> & { command: Exclude<HostedRuntimeOwnerCommand, { operation: "resolve_legacy" }> }): Promise<CommandResult> {
+async function executeCommand(input: Omit<CommandInput, "command"> & { command: Exclude<HostedRuntimeOwnerCommand, { operation: "resolve_legacy" | "authorize_provider" }> }): Promise<CommandResult> {
   const { prisma, userId, command } = input;
   switch (command.operation) {
     case "reconcile":
@@ -47,10 +51,6 @@ async function executeCommand(input: Omit<CommandInput, "command"> & { command: 
     }
     case "target_retired":
       return mutated(await recordHostedRuntimeTargetRetired({ ...command, prisma, userId }));
-    case "authorize_provider": {
-      const owner = await authorizeHostedRuntimeProvider({ ...command, prisma, userId });
-      return { ...authorized(owner !== null), owner };
-    }
     default:
       return executeIdentityCommand({ ...input, command });
   }

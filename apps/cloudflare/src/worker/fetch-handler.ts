@@ -27,11 +27,15 @@ export function createWorkerFetchHandler(input: {
     url: URL;
   }>[];
 }) {
+  let firstRequest = true;
   return async function handleWorkerFetch(
     request: Request,
     env: WorkerEnvironmentSource,
     executionCtx?: WorkerExecutionContext,
   ): Promise<Response> {
+    const fetchStartedAtEpochMs = Date.now();
+    const fetchIsFirstRequest = firstRequest;
+    firstRequest = false;
     const url = new URL(request.url);
     const publicResponse = await handleDeclarativeRoute(input.publicRoutes, { env, request, url });
     if (publicResponse) {
@@ -44,6 +48,8 @@ export function createWorkerFetchHandler(input: {
       await handleDeclarativeRoute(input.internalRoutes, {
         env,
         environment,
+        fetchStartedAtEpochMs,
+        fetchIsFirstRequest,
         ...(executionCtx ? { executionCtx } : {}),
         request,
         url,

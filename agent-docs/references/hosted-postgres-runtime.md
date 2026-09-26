@@ -161,8 +161,9 @@ their retained owner rows exist only for cleanup.
 
 Provider effects still authenticate their exact runtime identity or credential,
 apply provider operation policy, and enforce managed spending limits. The same
-Web authorization response selects Postgres or explicitly legacy routing; no
-separate backend-discovery request precedes it. Draining, stale, or failed
+Web authorization response selects Postgres or explicitly legacy routing from its
+already-locked cutover gate; no separate routing query or backend-discovery request
+precedes provider authorization. Draining, stale, or failed
 Postgres authorization never falls back to legacy. No positive-allowance cache
 or standalone UserRunner callback preflight is added. Deploy Web's combined
 backend-selection/authorization response before its Worker consumer: older Web

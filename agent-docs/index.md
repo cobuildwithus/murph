@@ -782,11 +782,26 @@ Signup-wide native contact-card sharing and daily attempt suppression are owned 
 `operations/imessage-deliverability.md`; implementation and receipt-order proof
 are tracked in `exec-plans/completed/2026-09-24-signup-contact-card.md`.
 
+Early Linq text typing reuses the existing staging-to-turn handoff owned by
+`packages/assistant-runtime/README.md`; implementation and synthetic proof are
+tracked in [`warm typing latency`](exec-plans/completed/2026-09-25-warm-typing-latency.md).
+
+Actual message-processing latency reductions in checkpoint wake discovery and
+snapshot cleanup bookkeeping are tracked in
+[`message processing latency`](exec-plans/completed/2026-09-25-message-processing-latency.md).
+
+Request-local Worker entry and Web callback latency attribution is owned by
+`apps/cloudflare/README.md`; the focused implementation record is
+[`runtime latency attribution`](exec-plans/completed/2026-09-25-runtime-latency-attribution.md).
+
 Lodging destination evidence and focused assistant proof are tracked in
 [`lodging destination evidence`](exec-plans/completed/2026-09-25-lodging-location-evidence.md).
 
 Health-purpose connected-plan follow-ups and legacy suppression are tracked in
 [`health-purpose check-ins`](exec-plans/completed/2026-09-25-health-purpose-checkins.md).
+
+Further removal of duplicate provider routing reads and unchanged-snapshot cleanup
+bookkeeping is tracked in [`runtime latency work removal`](exec-plans/completed/2026-09-25-runtime-latency-work-removal.md).
 
 Web build fonts are bundled locally; source and license provenance is owned by
 `apps/web/README.md` under "Bundled Web fonts". Implementation proof is tracked

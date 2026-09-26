@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from "node:util";
 import type { HostedExecutionRuntimeAuthority } from "@murphai/hosted-execution/auth";
 import { parseHostedExecutionSnapshotRef, parseHostedBrowserVaultReplicaRef, isHostedWorkspaceSnapshotV2Ref } from "@murphai/hosted-execution/parsers";
 import { HOSTED_RUNTIME_SNAPSHOT_RECOVERY_RETENTION_MS } from "@murphai/hosted-execution/runtime-resources";
@@ -6,7 +7,7 @@ import type { PrismaClient } from "@prisma/client";
 import { requireHostedRuntimeCallbackTx } from "../hosted-execution/runtime-owner";
 import { requireRuntimeResourcesPublishableTx, recordRuntimeOrphansTx, snapshotOrphanCandidates, replicaOrphanCandidate } from "../hosted-execution/runtime-orphans";
 import { getPrisma } from "../prisma";
-import { runWithPrismaOperationTimings, type PrismaOperationTiming } from "../prisma-operation-timing";
+import { runWithPrismaOperationTimings, type PrismaOperationTiming, type PrismaPoolAcquisitionTiming } from "../prisma-operation-timing";
 import { buildHostedWebhookDbTimingLogDetails } from "../hosted-onboarding/webhook-db-timing";
 import {
   checkpointHostedWorkspaceTx,
@@ -22,6 +23,7 @@ export async function checkpointHostedRuntimeWorkspace(
   input: Omit<Parameters<typeof checkpointHostedWorkspaceTx>[0], "tx"> & RuntimePublication,
 ) {
   const operations: PrismaOperationTiming[] = [];
+  const poolAcquisitions: PrismaPoolAcquisitionTiming[] = [];
   const startedAtMs = Date.now();
   let callbackStartedAtMs: number | null = null;
   let callbackFinishedAtMs: number | null = null;
@@ -34,10 +36,12 @@ export async function checkpointHostedRuntimeWorkspace(
           const owner = await requireHostedRuntimeCallbackTx(tx, input.userId, input.runtimeAuthority
             ? { ...input.runtimeAuthority, userId: input.userId }
             : null);
-          if (owner) await requireRuntimeResourcesPublishableTx(tx, input.userId, snapshotOrphanCandidates(parseHostedExecutionSnapshotRef(input.snapshotRef)));
+          const snapshot = parseHostedExecutionSnapshotRef(input.snapshotRef);
+          if (owner) await requireRuntimeResourcesPublishableTx(tx, input.userId, snapshotOrphanCandidates(snapshot));
           const result = await checkpointHostedWorkspaceTx({ ...input, tx });
-          if (owner && result.status === "updated") {
-            const snapshot = parseHostedExecutionSnapshotRef(input.snapshotRef);
+          // A status-only checkpoint creates no new resource obligation.
+          // Publication/migration already registered the unchanged archive.
+          if (owner && result.status === "updated" && !isDeepStrictEqual(snapshot, result.replacedSnapshotRef)) {
             const candidates = snapshotOrphanCandidates(snapshot);
             const previous = result.replacedSnapshotRef;
             // Only a newly accepted archive with explicit retention evidence earns
@@ -63,12 +67,13 @@ export async function checkpointHostedRuntimeWorkspace(
           callbackFinishedAtMs = Date.now();
         }
       }),
+      poolAcquisitions,
     );
     completed = true;
     return result;
   } finally {
     const finishedAtMs = Date.now();
-    if (finishedAtMs - startedAtMs >= 1_000) {
+    if (finishedAtMs - startedAtMs >= 250) {
       try {
         console.info("Hosted workspace slow checkpoint database timing.", {
           completed,
@@ -81,6 +86,10 @@ export async function checkpointHostedRuntimeWorkspace(
             ? null
             : finishedAtMs - callbackFinishedAtMs,
           ...buildHostedWebhookDbTimingLogDetails(operations),
+          poolAcquisitionCount: poolAcquisitions.length,
+          poolAcquireMs: poolAcquisitions.slice(0, 24).map(sample => Math.round(sample.ms)),
+          poolBeforeAcquire: poolAcquisitions.slice(0, 24).map(({ idleConnections, totalConnections, waitingRequests }) =>
+            ({ idleConnections, totalConnections, waitingRequests })),
         });
       } catch {
         // Diagnostic output must not change checkpoint success or failure.

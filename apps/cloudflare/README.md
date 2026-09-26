@@ -833,6 +833,24 @@ could increase only its bounded coalesced-hint count before readiness consumed
 it. Current runtime preparation no longer forwards hint observations; stored
 fields remain readable by the latency schema and report.
 
+For warm direct wakes, generic orchestration leaves can describe a competing
+Temporal request. Use the direct response durations and correlate the Worker
+completion log by orchestration attempt. Its request-local
+`workerFetchStartedAtEpochMs`, auth timestamps and route receipt distinguish
+fetch-handler routing from the preceding platform interval. `workerFetchIsFirstRequest`
+means the first default-fetch invocation through that handler instance; it does
+not measure isolate startup time or prove that the platform delay was a cold start.
+
+Web owner and checkpoint callbacks emit `Hosted runtime callback timing.` for
+first calls, failures, or handler/signed-arrival durations of at least 250 ms.
+Authentication and work use a local monotonic clock. Signed-request age is read
+only after verification and includes transport, startup and cross-host clock
+skew. Owner logs include bounded database/pool samples; checkpoint publication
+owns its separate database and pool timing log at the same 250 ms threshold.
+Pool acquisition overlaps query/transaction timing; these numbers are not additive.
+These records contain no request body, URL, member ID or credential. Provider
+egress logs already split authority validation from upstream provider duration.
+
 The remaining report deduplicates causal rows by runtime attempt and keeps direct
 cold starts separate from Temporal recovery. A direct sample must be the only
 row in its runtime attempt whose Web direct-ensure orchestration id exactly
