@@ -58,8 +58,6 @@ age of an executed run; this system adds no product-state receipt database.
   send-to-reply and inter-reply budgets remain 20 seconds; canonical observation
   time is excluded. The workflow has a 55-minute cap covering reset, all three
   observations, replies, setup, and final exact-deployment verification.
-- Assistant real-model journeys run daily on protected main and by manual recovery.
-  Every admitted run still requires all three real-provider journeys.
 - Stripe runs its protected sandbox browser matrix daily. Hermetic billing checks
   remain on every eligible PR and main push; a scheduled run requires live success.
   After the browser
@@ -74,10 +72,15 @@ age of an executed run; this system adds no product-state receipt database.
   empty canonical steps view. The browser stays connected while the ordinary
   callback-owned Temporal/runtime pipeline imports data. Provider day/value/unit
   and Garmin activity-summary provenance must match canonical query output.
-  Missing real data fails; the test invents no sandbox samples and forces no
-  ensure-processing call. Only after comparison, UI disconnect, and final owned
-  cleanup does the suite write its private temporary receipt. This proves pull
-  and canonical ingestion; it does not claim provider webhook-delivery proof.
+  A successful empty provider response is accepted for the new canary account
+  as `no_provider_data`; canonical ingestion is explicitly untested in that
+  outcome. Nonempty responses still require a real match, and provider,
+  authentication, malformed-data, cancellation, and cleanup failures remain
+  failures. The test invents no samples and forces no ensure-processing call.
+  Only after the data outcome, UI disconnect, and final owned cleanup does the
+  suite write its version-2 private receipt (`matched` or `no_provider_data`).
+  Only `matched` proves pull and canonical ingestion. Neither outcome claims
+  provider webhook-delivery proof.
 
 ## Garmin execution boundary
 
@@ -103,13 +106,16 @@ The private executor owns managed Temporal, the worker package, local PostgreSQL
 runner, dedicated Garmin browser profile, and sandbox provider authority. Its
 new `junction-wearable-canary` Environment must be separately provisioned by an
 authorized operator with the existing dedicated sandbox credentials. Local
-agents must not retrieve or copy those credentials. Missing configuration or
-missing real provider data fails closed.
+agents must not retrieve or copy those credentials. Missing configuration fails closed. A successful empty provider result is
+reported separately from matched canonical data.
 
 ## Safe rollout and recovery
 
-1. Land the private executor with canonical-data receipt validation. It must
-   reject an older public revision that supports only connection proof.
+1. Land the private receipt reader before the public producer. The reader
+   accepts the deployed version-1 matched receipt and version-2 explicit data
+   outcomes; it rejects connection-only receipts and extra provider fields.
+   Then land the public version-2 producer. Rolling the reader back requires
+   rolling back the producer first; old readers reject version-2 receipts.
 2. Let every prior provider-bearing public Garmin run finish naturally before
    the first private provider run. Cross-repository concurrency group names alone
    do not serialize an old public executor with the new private executor.

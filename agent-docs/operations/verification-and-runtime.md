@@ -417,7 +417,9 @@ remain external to the checkout.
 
 The public live wearable workflow dispatches protected-main source to the
 private hosted-runtime executor. It runs daily and on manual
-recovery; it accepts only an exact completed canonical-data receipt. The public
+recovery; it requires an exact completed journey and cleanup receipt. The
+private receipt distinguishes matched canonical data from a successful empty
+provider response; empty-account success does not prove ingestion. The public
 controller has no provider credentials, private checkout, or artifact access.
 See [Live provider canaries](live-provider-canaries.md) for the execution,
 credential-provisioning, and safe migration contract.

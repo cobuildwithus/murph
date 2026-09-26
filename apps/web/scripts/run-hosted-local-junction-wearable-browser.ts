@@ -594,19 +594,7 @@ async function completeExternalAuthorization(
         continue;
       }
     } else {
-      await fillVisible(page, [
-        'input[type="email"]',
-        'input[autocomplete="email"]',
-        'input[autocomplete="username"]',
-        'input[name*="email" i]',
-        'input[name="username"]',
-      ], config.email);
-      if (config.password) {
-        await fillVisible(page, [
-          'input[type="password"]',
-          'input[autocomplete="current-password"]',
-        ], config.password);
-      }
+      if (await fillAuthorizationCredentials(page, config)) continue;
 
       const otpInput = await findVisibleEditable(page, [
         'input[autocomplete="one-time-code"]',
@@ -867,15 +855,45 @@ function isExpectedJunctionCallbackResponse(
     && url.pathname === "/api/device-sync/connect/junction/callback";
 }
 
+// A route transition restarts the caller's trust and challenge validation before
+// it attempts any other credential field on the replacement page.
+async function fillAuthorizationCredentials(page: Page, config: BrowserConfig): Promise<boolean> {
+  if (await fillVisible(page, [
+    'input[type="email"]',
+    'input[autocomplete="email"]',
+    'input[autocomplete="username"]',
+    'input[name*="email" i]',
+    'input[name="username"]',
+  ], config.email)) return true;
+  if (!config.password) return false;
+  return fillVisible(page, [
+    'input[type="password"]',
+    'input[autocomplete="current-password"]',
+  ], config.password);
+}
+
 async function fillVisible(
   page: Page,
   selectors: readonly string[],
   value: string,
-): Promise<void> {
+): Promise<boolean> {
+  const formUrl = page.url();
   const input = await findVisibleEditable(page, selectors);
-  if (input && await input.inputValue() !== value) {
-    await input.fill(value);
+  if (page.url() !== formUrl) return true;
+  if (!input) return false;
+  try {
+    if (await input.inputValue() !== value) {
+      // A restored provider session can leave the login form while its fields
+      // are being inspected. Never fill a locator rebound on the next page.
+      if (page.url() !== formUrl) return true;
+      await input.fill(value);
+    }
+  } catch (error) {
+    if (page.url() === formUrl) throw error;
+    // The authorization loop validates the new route and its consent surface.
+    return true;
   }
+  return page.url() !== formUrl;
 }
 
 async function findVisibleEditable(

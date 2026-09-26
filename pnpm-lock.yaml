@@ -67,6 +67,9 @@ patchedDependencies:
   '@cobuild/review-gpt@0.5.147':
     hash: 37b0e197d17c188f1320469b8bf0064733da77177f60f6742d0e53fe0010e4a3
     path: patches/@cobuild__review-gpt@0.5.147.patch
+  frog@1.1.0:
+    hash: 753e3dd3975254bf8793addb8f0e8df9b2d0ede4f44603f0f876763171938f3a
+    path: patches/frog@1.1.0.patch
   incur@0.4.5:
     hash: 0205cee2a49c283710c432d91b890aeea525b3aa30bcef68fa16b293f71de8a3
     path: patches/incur@0.4.5.patch
@@ -122,7 +125,7 @@ importers:
         version: 4.1.6(vitest@4.1.6)
       frog:
         specifier: 1.1.0
-        version: 1.1.0
+        version: 1.1.0(patch_hash=753e3dd3975254bf8793addb8f0e8df9b2d0ede4f44603f0f876763171938f3a)
       pg:
         specifier: 8.20.0
         version: 8.20.0
@@ -19077,7 +19080,7 @@ snapshots:
 
   fresh@2.0.0: {}
 
-  frog@1.1.0:
+  frog@1.1.0(patch_hash=753e3dd3975254bf8793addb8f0e8df9b2d0ede4f44603f0f876763171938f3a):
     dependencies:
       '@clack/prompts': 1.7.0
       '@octokit/rest': 22.0.1
