@@ -1,6 +1,6 @@
 # Classify hosted completion receipts without changing execution
 
-Status: active
+Status: completed
 Created: 2026-09-28
 Updated: 2026-09-28
 
@@ -100,8 +100,27 @@ Candidate evidence:
 - New reader accepts old booleans and drops unknown diagnostic text. Original
   reader validates only completed, so additive reasons remain accepted.
 
-Final pushed-head ReviewGPT and required CI remain pending. This change does not
+Final pushed-head ReviewGPT passed; required CI on the final plan-closeout head
+remains a merge gate. This change does not
 resolve transport timeouts or prove message delivery. Follow-up telemetry should
 aggregate runtimeCompletionReceiptOutcome and runtimeCompletionReceiptReason,
 keeping timeout exceptions separate and correlating accepted work with durable
 outcomes only through approved read-only diagnostics.
+
+
+## Completion evidence
+
+ReviewGPT round 1 passed on f100ee9ed933894abe71792df4dc10989df95c11,
+with no qualifying Critical, High or Complexity Collapse findings and no accepted
+findings left unresolved. The canonical full/sensitive snapshot matched all eight
+changed files, the exact PR head and immutable first-reviewed head. Selected model
+was 6Pro on the configured Hercules lane; response capture completed after more
+than seven minutes, exceeding the current three-minute minimum, with exact-turn
+identity, response hash and REVIEW_COMPLETE marker validated. The substantive
+review traced the composed owners and reported 74 passing differential checks;
+it explicitly did not rerun the repository suite. Parent review accepts the result.
+
+The final edit closes this plan only; no production or test changes follow the
+reviewed candidate. Exact-final-head CI and canonical deployment remain separate
+external gates. Merge/deployment state is reported in the PR and task handoff.
+Completed: 2026-09-28
