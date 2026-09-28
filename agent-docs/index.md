@@ -796,4 +796,4 @@ Vault-share deferral diagnostic work is tracked in
 [`vault-share deferral observability`](exec-plans/completed/2026-09-25-vault-share-deferral-observability.md).
 
 The E2E MinIO cleanup ownership repair is tracked in
-[`2026-09-28-minio-e2e-cleanup-ownership.md`](exec-plans/active/2026-09-28-minio-e2e-cleanup-ownership.md).
+[`2026-09-28-minio-e2e-cleanup-ownership.md`](exec-plans/completed/2026-09-28-minio-e2e-cleanup-ownership.md).
