@@ -529,7 +529,8 @@ is recorded in [`2026-09-18-ios-canary-deployment-continuity.md`](exec-plans/com
 | `agent-docs/operations/imessage-deliverability.md` | Phone-number messaging policy, iMessage-only inactivity and canonical requested-Ask exemptions, and direct duplicate handoff identity. | Phone-number messaging policy | High | 2026-09-17 |
 | `agent-docs/operations/local-storage-lifecycle.md` | Local rebuildable-storage lifecycle, guarded retirement, and dependency hook setup. | Local rebuildable-storage lifecycle | High | 2026-09-11 |
 | `agent-docs/operations/hosted-local-worktree-dev.md` | Local hosted runtime workflow, call-scoped cancellation, and exact-child startup/exit cleanup ownership. | Local hosted runtime workflow | Medium | 2026-09-05 |
-| `agent-docs/operations/pr-reviewgpt-loop.md` | PR review for realistic serious bugs and material Complexity Collapse, with a three-round review cap, exact tracked archive inputs, no base-update limit, response timing and evidence requirements, same-session waiting or paced polling by default, exact-metadata recovery after capture failure, and invalid-first-attempt baseline recovery. | Final PR ReviewGPT loop | Medium | 2026-09-11 |
+| `agent-docs/exec-plans/completed/2026-09-25-frog-reviewgpt-recovery.md` | Exact accepted ReviewGPT request recovery, guarded dependency context, and accepted final-finding remediation evidence. | Completed execution plan | Low | 2026-09-28 |
+| `agent-docs/operations/pr-reviewgpt-loop.md` | PR review for realistic serious bugs and material Complexity Collapse, with a three-round review cap, exact tracked archive inputs, no base-update limit, response timing and evidence requirements, same-session waiting or paced polling by default, exact-metadata and transient-URL recovery, guarded companion snapshots, and invalid-first-attempt baseline recovery. | Final PR ReviewGPT loop | Medium | 2026-09-25 |
 | `agent-docs/operations/device-sync-ingestion-invariants.md` | Device-sync push/pull ingestion, daily recovery, checkpoint-owned continuation preflight, bounded deferral of future history, pending-start history scans, bounded completion-marker retention, and operation-local source admission reuse. | Device-sync ingestion contract | High | 2026-09-20 |
 | `agent-docs/PLANS.md` | Execution-plan lifecycle and storage rules. | Plan workflow | Medium | 2026-03-31 |
 | `agent-docs/exec-plans/completed/2026-09-13-cli-validation-diagnostics.md` | Bounded optional schema diagnostics, three existing knowledge source classifications and consumer-first rollout contract. | CLI diagnostics execution plan | High | 2026-09-13 |
@@ -561,6 +562,8 @@ is recorded in [`2026-09-18-ios-canary-deployment-continuity.md`](exec-plans/com
 | `agent-docs/exec-plans/completed/2026-09-28-frog-log-presence.md` | Boolean presence metadata classification and raw-payload rejection regression proof. | Historical tooling evidence | Low | 2026-09-28 |
 | `agent-docs/exec-plans/completed/2026-09-23-gpt6-defaults.md` | GPT-6 managed inference defaults and focused model-selection proof. | Completed execution plan | Medium | 2026-09-23 |
 | `agent-docs/exec-plans/completed/2026-09-23-vault-share-background.md` | Isolated checkpoint projection that continues across foreground replies; ownership and verification. | Hosted vault-share background execution | Medium | 2026-09-23 |
+| `agent-docs/exec-plans/completed/2026-09-28-junction-record-window.md` | Bounded recovery for oversized Junction hourly-feature days. | Device-sync recovery plan | Medium | 2026-09-28 |
+| `agent-docs/exec-plans/completed/2026-09-28-checkpoint-failure-stage-telemetry.md` | Fixed-vocabulary checkpoint rejection-stage observation and response-preservation proof. | Completed telemetry implementation evidence | Low | 2026-09-28 |
 | `agent-docs/exec-plans/active/` | Task-owned in-flight execution plans. | Active plan lifecycle | Medium | 2026-08-20 |
 | `agent-docs/exec-plans/completed/2026-09-17-research-scout-failure-telemetry.md` | Three exact research error codes, parent-native verification and old-reader compatibility; rollout tracked separately. | Historical implementation evidence | Medium | 2026-09-17 |
 | `agent-docs/exec-plans/completed/2026-09-15-vercel-memory-headroom.md` | Vercel typecheck OOM recovery verification, native compiler memory comparisons, and compilation-only esbuild memory target. | Build memory investigation and local proof | Medium | 2026-09-15 |
@@ -793,5 +796,13 @@ Web build fonts are bundled locally; source and license provenance is owned by
 `apps/web/README.md` under "Bundled Web fonts". Implementation proof is tracked
 in [`local Web fonts`](exec-plans/completed/2026-09-25-local-web-fonts.md).
 
+Event-list family-local implementation, accepted synthetic measurements and local
+verification are recorded in [the completed event-list plan](exec-plans/completed/2026-09-25-event-list-candidate.md).
+The [baseline investigation](exec-plans/completed/2026-09-25-event-list-baseline.md)
+is superseded historical evidence. `packages/query/README.md` owns the read policy;
+`packages/vault-usecases/README.md` owns public-path tests and benchmark commands.
 Vault-share deferral diagnostic work is tracked in
 [`vault-share deferral observability`](exec-plans/completed/2026-09-25-vault-share-deferral-observability.md).
+
+Hosted CI PostgreSQL registry provenance is tracked in
+[`2026-09-28-postgres-ci-registry.md`](exec-plans/completed/2026-09-28-postgres-ci-registry.md).
