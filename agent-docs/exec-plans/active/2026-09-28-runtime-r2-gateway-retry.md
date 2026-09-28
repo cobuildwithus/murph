@@ -56,3 +56,9 @@ unknown surfaces, and overriding Work usage/breadcrumbs. The actual owned Chat
 tab also passes; all diagnostic tabs were closed. Existing model/duration,
 configuration and bootstrap tests pass (26 tests). The retry of the original
 required CI run passed. No substantive review was submitted on that head.
+
+The same UI also removed model-picker test IDs. Accessible menu/trigger
+selectors preserve concrete model proof and the existing power-slider handling.
+An unsent synthetic draft selected the explicit model summary successfully; its
+owned tab was closed. Ten model-control tests reject effort-only labels, other
+models and unavailable controls. Earlier attempts remain pre-submission failures.

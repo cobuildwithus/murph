@@ -22,3 +22,8 @@ Extend the existing dependency patch to recognize pressed-state buttons in both 
 ## Context
 
 This blocks the required repository review gate before a hosted runtime correction can ship. Synthetic browser fixtures can prove both radio and button controls, unknown surfaces and active Work rejection.
+
+The same UI removed model-picker test IDs. The accessible trigger is a button
+labelled Select ChatGPT model, and its menu exposes a Select model item with an
+explicit model summary. These selectors restore discovery without admitting
+effort-only labels as model proof. An unsent synthetic draft verifies selection.
