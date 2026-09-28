@@ -416,7 +416,9 @@ describeRealCodex('real natural goal canary journey', () => {
         })}\n`)
         return { result, commands }
       }
-      const { result: preview } = await timedMessage('goal-proposal')
+      const { result: preview, commands: previewCommands } = await timedMessage('goal-proposal')
+      expect(previewCommands.filter((command) => /^commons goal list(?: |$)/u.test(command) && !isRecordedVaultHelpCommand(command))).toHaveLength(1)
+      expect(previewCommands.filter((command) => /^commons goal show(?: |$)/u.test(command) && !isRecordedVaultHelpCommand(command))).toEqual([])
       expect(preview.response).toMatch(/walk/iu)
       expect(preview.response).toMatch(/lunch/iu)
       expect(preview.response).toMatch(/twenty|20/iu)
@@ -424,6 +426,7 @@ describeRealCodex('real natural goal canary journey', () => {
       expect((await readVaultRawTolerant(fixture.vault)).regimens).toHaveLength(0)
 
       const { result: accepted, commands } = await timedMessage('accept-goal')
+      expect(commands.filter((command) => /^commons goal (list|show)(?: |$)/u.test(command) && !isRecordedVaultHelpCommand(command))).toEqual([])
       expect(commands.filter((command) => /^goal save /u.test(command) && !isRecordedVaultHelpCommand(command))).toHaveLength(1)
       expect(commands.filter((command) => /^regimen save /u.test(command) && !isRecordedVaultHelpCommand(command))).toHaveLength(1)
       expect(commands.filter((command) => /^(goal show|regimen show|automation )/u.test(command) && !isRecordedVaultHelpCommand(command))).toEqual([])
