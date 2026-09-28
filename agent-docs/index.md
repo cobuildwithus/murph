@@ -808,3 +808,6 @@ Vault-share deferral diagnostic work is tracked in
 
 Hosted CI PostgreSQL registry provenance is tracked in
 [`2026-09-28-postgres-ci-registry.md`](exec-plans/completed/2026-09-28-postgres-ci-registry.md).
+
+The E2E MinIO cleanup ownership repair is tracked in
+[`2026-09-28-minio-e2e-cleanup-ownership.md`](exec-plans/completed/2026-09-28-minio-e2e-cleanup-ownership.md).
