@@ -458,6 +458,7 @@ if [[ "$review_gpt_context_mode" != "same_thread_delta" ]] \
 fi
 if [[ "$review_gpt_context_mode" != "same_thread_delta" ]]; then
   repo_tools_join_lines COBUILD_AUDIT_CONTEXT_SCAN_SPECS \
+    ".agents/skills" \
     "agent-docs/product-specs" \
     "config" \
     "packages" \

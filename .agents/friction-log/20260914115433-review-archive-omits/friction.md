@@ -22,3 +22,7 @@ Package a PR changing .agents/skills/research-supplements/scripts/supplement-db-
 ## Context
 
 Discovered while reviewing a behavior-preserving ordered-rule refactor. The integration tests and typecheck pass locally; the missing archive evidence invalidates the external review, not the implementation.
+
+## Resolution
+
+The full-snapshot review wrapper now scans tracked skill sources, so unchanged local imports accompany changed skill code without per-review path overrides. An actual-wrapper archive regression covers the changed source and test plus their unchanged skill imports, while preserving environment-file, cache, dependency-directory, and unrelated friction-log exclusions. Same-thread correction packaging remains unchanged.
