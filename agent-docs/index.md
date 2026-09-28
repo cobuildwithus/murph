@@ -802,3 +802,6 @@ is superseded historical evidence. `packages/query/README.md` owns the read poli
 `packages/vault-usecases/README.md` owns public-path tests and benchmark commands.
 Vault-share deferral diagnostic work is tracked in
 [`vault-share deferral observability`](exec-plans/completed/2026-09-25-vault-share-deferral-observability.md).
+
+Hosted CI PostgreSQL registry provenance is tracked in
+[`2026-09-28-postgres-ci-registry.md`](exec-plans/completed/2026-09-28-postgres-ci-registry.md).
