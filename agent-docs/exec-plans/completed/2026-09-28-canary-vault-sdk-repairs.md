@@ -1,6 +1,6 @@
 # Diagnose and repair canary delays, vault sharing, and Android SDK setup
 
-Status: active
+Status: completed
 Created: 2026-09-28
 Updated: 2026-09-28
 
@@ -152,6 +152,23 @@ authority, durable accepted work, meaningful canary budgets, and provider privac
 ## Candidate handoff
 
 - PR #3751 owns the custom-goal correction. Both final live journeys and actual
-  replies pass parent review. Final ReviewGPT and exact-head CI are pending.
+  replies pass parent review. Final ReviewGPT passes; exact-head CI is pending.
 - Functional merge/deployment remains with the human owner. No production
   mutations, configuration changes, recovery, or provider sends were performed.
+
+## Outcome and remaining boundaries
+
+- Final ReviewGPT round 1: PASS on
+  `0bb0e96e987c35fd78cf9ca27cbfa352245664e6`; no accepted findings. Parent
+  final review confirms the same functional patch and focused proof.
+- The final closeout changes this explanatory plan only; it does not change
+  runtime behavior and is covered by the review-loop documentation exemption.
+- Remaining canary latency needs further outcome/timing observation after the
+  human-owned functional merge and canonical deployment. The final local
+  proposal still took 30.4 seconds; the 20-second threshold remains intact.
+- Android's proven SDK correction remains in another owner's PR #3720; explicit
+  handoff and its final review are pending. Historical vault deferrals remain
+  uncorrelated to exact outcomes, with existing reason telemetry available.
+- No production write, merge, deployment, send, replay, or recovery occurred.
+  Preserve these follow-ups in the production-sweep automation memory.
+Completed: 2026-09-28
