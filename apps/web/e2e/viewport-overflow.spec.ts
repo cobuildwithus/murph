@@ -363,6 +363,44 @@ test("calendar links wrap maximum unbroken event text", async ({ page }) => {
   }
 });
 
+async function freezeAnimationsForOverflowMeasurement(page: Page): Promise<void> {
+  // Playwright's style helper races every page CSP console error, including
+  // unrelated blocked scripts. Observe this stylesheet's own application.
+  const applied = await page.evaluate(() => {
+    const style = document.createElement("style");
+    style.textContent =
+      "*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}";
+    document.head.appendChild(style);
+    return style.sheet !== null;
+  });
+  expect(applied, "Animation-freeze stylesheet should apply").toBe(true);
+}
+
+for (const allowStyle of [true, false]) {
+  test(`animation freeze preserves CSP: styles ${allowStyle ? "allowed" : "blocked"}`, async ({ page }) => {
+    await page.setContent(`<meta http-equiv="Content-Security-Policy" content="script-src 'none'; style-src ${allowStyle ? "'unsafe-inline'" : "'none'"}"><body>synthetic viewport</body>`);
+    await page.evaluate(() => {
+      const appendChild = document.head.appendChild.bind(document.head);
+      document.head.appendChild = (node) => {
+        if (node instanceof HTMLStyleElement) {
+          const script = document.createElement("script");
+          script.textContent = 'document.body.dataset.blockedScriptExecuted = "true"';
+          appendChild(script);
+        }
+        return appendChild(node);
+      };
+    });
+    if (allowStyle) {
+      await freezeAnimationsForOverflowMeasurement(page);
+      await expect(page.locator("body")).toHaveCSS("animation-name", "none");
+      await expect(page.locator("body")).toHaveCSS("transition-property", "none");
+    } else {
+      await expect(freezeAnimationsForOverflowMeasurement(page)).rejects.toThrow("Animation-freeze stylesheet should apply");
+    }
+    await expect(page.locator("body")).not.toHaveAttribute("data-blocked-script-executed", "true");
+  });
+}
+
 for (const route of ROUTES) {
   for (const width of WIDTHS) {
     test(`no horizontal overflow: ${route} @ ${width}px`, async ({ page }) => {
@@ -390,10 +428,7 @@ for (const route of ROUTES) {
 
       // Freeze animation/transition after the document exists, then allow two
       // frames for the resulting layout to settle before measurement.
-      await page.addStyleTag({
-        content:
-          "*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}",
-      });
+      await freezeAnimationsForOverflowMeasurement(page);
 
       // Web fonts change text width (and therefore min-content), so wait for
       // them and a couple of frames before measuring or the result drifts.
