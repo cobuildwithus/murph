@@ -60,6 +60,7 @@ const validationFields = [
   ["automation list", ["limit", "status"]],
   ["event payload-schema", ["kind", "for"]],
   ["knowledge show", ["slug"]],
+  ["measurement entry list", ["metric", "from", "to", "limit"]],
   ["food search-labels", ["query", "limit"]],
   ["knowledge upsert", ["body", "slug", "title", "pageType", "status", "clearLibraryLinks",
     "relatedSlug", "librarySlug", "sourcePath"]],
