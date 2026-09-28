@@ -1,6 +1,6 @@
 # Focused sleep-list projection read
 
-Status: active; parent deterministic and benchmark proof passed, corrected live proof pending
+Status: active; draft PR #3752, live proof passed; final ReviewGPT and exact-head CI pending
 Created: 2026-09-28
 Updated: 2026-09-28
 
@@ -64,29 +64,32 @@ unchanged shared-owner rollback, reset and cross-process behavior.
 Patch 1 has no runtime change and no candidate-only default assertions. Patch 2
 changes only sleep's fresh-row acquisition/composition, adds candidate phase and
 partial/global publication proof, and documents the precise query contract.
-The modest member changelog uses an empty `sourcePullRequests` placeholder until
-the parent requests the author's real PR-number update. No measured claim is made.
-The dependency-free benchmark-validator tests and syntax checks ran in this
-archive. The archive lacks installed workspace dependencies and its lockfile; its Node 22 runtime is below the benchmark's Node 24.14.1 minimum.
-Frog reports it is not installed; no machine-setup friction entry was invented.
-Parent reports independently built public baseline/candidate packages, focused
-deterministic checks and types passing. Base/base and base/candidate each completed
-54 pairs with exact output parity and expected phase counts. Synthetic cold/stale
-reads improved; fresh sleep cost more and mixed totals were noisy, not a total
-workflow or production speedup claim.
+Parent verified and applied patches 01-05. Draft PR #3752 now supplies the
+changelog's `sourcePullRequests: [3752]`; member-facing copy is unchanged.
+Candidate `c6f6fe538e42` was reconciled with main
+`7b97cbe7d646b92c9d8987b4fb6dbf9a2b04916a` by merge `51530202764`, preserving
+both independent index entries and the exact combined benchmark include array.
+The production runtime diff remains the same two lines relative to that main.
 
-Parent reports revision 04's deterministic JSON/TOON companion and assistant
-typecheck passed. The next live run completed targeted help and one correctly
-scoped Oura sleep read with a parent-reviewed Ready-quality reply, but stopped at
-the native shell-wrapper assertion before output/canonical checks. This follow-up
-admits direct commands or the observed single `/bin/zsh -c` wrapper, with cheap
-deterministic accept/reject coverage. No prompt, CLI, runtime, result, canonical,
-reply or effect assertion is relaxed. The benchmark include array also preserves
-the sleep/source entries and adds `event-list.ts` from PR #3728; the parent merges
-that source unchanged through its ordinary main reconciliation.
+Parent's earlier baseline/candidate proof stands: independently built public
+packages, base/base and base/candidate reports each complete at 54 pairs, exact
+output parity and expected removed/global-promotion phase counts. Synthetic cold
+sleep wall medians were 502.57 -> 353.04 ms (7 measured pairs; before range
+463.58-752.59 ms, after 336.08-484.05 ms); stale sleep was 352.84 -> 239.60 ms.
+Full sleep output remained 13,806 bytes. Fresh sleep was roughly 2-3 ms higher;
+mixed totals were noisy with no demonstrated total improvement. No production
+speedup claim is made.
 
-Parent reruns the focused deterministic contract and assistant typecheck, then the
-same live journey on the same subscription. Full live completion, final review
-and CI remain pending; the good reply alone is not a passing journey. This is
-proof-only, with no new member changelog item. Keep this plan active. Completed
-plans are historical evidence, not authority.
+After patch 05, the same default subscription with `gpt-6-sol` passed every live
+assertion: one targeted sleep-list help, one date-scoped Oura read, correct public
+output, unchanged canonical bytes and no unrelated actions/effects. Parent rated
+the actual-sleep reply (7 hours 30 minutes, night ending January 3) `Ready`.
+Deterministic JSON/TOON contract plus direct/wrapped cases: 3 passed; assistant
+typecheck passed. Post-main public query build, three package typechecks and
+dedicated benchmark types passed; focused sleep plus independent event regression:
+18 passed. Earlier shared-owner proof had 55 passed and 1 opt-in skipped; the
+post-merge shared-owner suite is still running and its verdict remains pending.
+
+Final ReviewGPT and exact-head CI remain pending. Parent returns verified outcomes
+for author-only closure; keep this plan active. No PR merge or deployment is
+authorized. Completed plans are historical evidence, not authority.

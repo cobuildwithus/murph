@@ -9,7 +9,7 @@
     "summary": "Murph can read your sleep history without first preparing unrelated health summaries.",
     "details": "Sleep answers still use your current wearable records, including corrections. Preparing other health views happens when those views are needed.",
     "relevanceTags": ["sleep", "wearables"],
-    "sourcePullRequests": [],
+    "sourcePullRequests": [3752],
     "tryIt": {
       "label": "Review last night's sleep",
       "prompt": "How long did I sleep last night?"
