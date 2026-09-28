@@ -27,3 +27,9 @@ The same UI removed model-picker test IDs. The accessible trigger is a button
 labelled Select ChatGPT model, and its menu exposes a Select model item with an
 explicit model summary. These selectors restore discovery without admitting
 effort-only labels as model proof. An unsent synthetic draft verifies selection.
+
+## Resolution
+
+Upstream PR #3713 supplies the complete semantic control, committed-message
+capture and dependency-context repair. This branch adopts that exact upstream
+patch and lockfile; no separate dependency workaround remains in the PR.

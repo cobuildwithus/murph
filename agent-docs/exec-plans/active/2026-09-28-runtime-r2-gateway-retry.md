@@ -62,3 +62,11 @@ selectors preserve concrete model proof and the existing power-slider handling.
 An unsent synthetic draft selected the explicit model summary successfully; its
 owned tab was closed. Ten model-control tests reject effort-only labels, other
 models and unavailable controls. Earlier attempts remain pre-submission failures.
+
+Upstream PR #3713 now owns the complete ReviewGPT UI, capture and dependency
+context repair. Reconcile the base by taking its exact patch and lockfile; remove
+the temporary branch-only tooling test with the superseded workaround. The
+combined tooling checks pass (50 tests), as do repository tools and Cloudflare
+typechecks. Required CI passed on the pre-reconciliation candidate. The earlier
+submitted attempt returned INVALID for missing dependency implementation; no
+valid substantive round exists. Retry round one on Mountain as requested.
