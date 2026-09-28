@@ -560,6 +560,7 @@ is recorded in [`2026-09-18-ios-canary-deployment-continuity.md`](exec-plans/com
 | `agent-docs/exec-plans/completed/2026-09-24-web-opening-aspiration.md` | Third Web reply and canonical identity handoff verification. | Completed implementation evidence | Medium | 2026-09-24 |
 | `agent-docs/exec-plans/completed/2026-09-23-gpt6-defaults.md` | GPT-6 managed inference defaults and focused model-selection proof. | Completed execution plan | Medium | 2026-09-23 |
 | `agent-docs/exec-plans/completed/2026-09-23-vault-share-background.md` | Isolated checkpoint projection that continues across foreground replies; ownership and verification. | Hosted vault-share background execution | Medium | 2026-09-23 |
+| `agent-docs/exec-plans/active/2026-09-28-junction-record-window.md` | Bounded recovery for oversized Junction hourly-feature days. | Device-sync recovery plan | Medium | 2026-09-28 |
 | `agent-docs/exec-plans/active/` | Task-owned in-flight execution plans. | Active plan lifecycle | Medium | 2026-08-20 |
 | `agent-docs/exec-plans/completed/2026-09-17-research-scout-failure-telemetry.md` | Three exact research error codes, parent-native verification and old-reader compatibility; rollout tracked separately. | Historical implementation evidence | Medium | 2026-09-17 |
 | `agent-docs/exec-plans/completed/2026-09-15-vercel-memory-headroom.md` | Vercel typecheck OOM recovery verification, native compiler memory comparisons, and compilation-only esbuild memory target. | Build memory investigation and local proof | Medium | 2026-09-15 |

@@ -1,0 +1,17 @@
+{
+  "publishedOn": "2026-09-28",
+  "order": 100,
+  "item": {
+    "id": "dense-device-history-recovery",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Better recovery for dense device history",
+    "summary": "Connected-device history can continue in smaller windows when a day contains too many heart-rate samples to collect at once.",
+    "details": "Imports keep their existing safety limits and only publish complete windows. Oversized hourly responses remain retryable rather than publishing partial data.",
+    "relevanceTags": [
+      "devices",
+      "heart-rate"
+    ],
+    "sourcePullRequests": []
+  }
+}
