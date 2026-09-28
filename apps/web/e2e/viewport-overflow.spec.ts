@@ -657,12 +657,12 @@ test("Goal guide source hover changes only the hovered source", async ({ page })
     links.slice(0, 2).map((link) => getComputedStyle(link).textDecorationColor),
   );
   await sources.first().hover();
-  const after = await sources.evaluateAll((links) =>
-    links.slice(0, 2).map((link) => getComputedStyle(link).textDecorationColor),
-  );
-
-  expect(after[0]).not.toBe(before[0]);
-  expect(after[1]).toBe(before[1]);
+  await expect
+    .poll(() => sources.first().evaluate((link) => getComputedStyle(link).textDecorationColor))
+    .not.toBe(before[0]);
+  expect(
+    await sources.nth(1).evaluate((link) => getComputedStyle(link).textDecorationColor),
+  ).toBe(before[1]);
 });
 
 test("homepage footer link columns stay separate at the sm breakpoint", async ({
