@@ -794,3 +794,6 @@ in [`local Web fonts`](exec-plans/completed/2026-09-25-local-web-fonts.md).
 
 Vault-share deferral diagnostic work is tracked in
 [`vault-share deferral observability`](exec-plans/completed/2026-09-25-vault-share-deferral-observability.md).
+
+Domain-origin browser proof is tracked in
+[`2026-09-28-passkey-smoke-origin.md`](exec-plans/completed/2026-09-28-passkey-smoke-origin.md).
