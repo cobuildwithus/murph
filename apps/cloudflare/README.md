@@ -638,20 +638,52 @@ Cloudflare keeps only the wake-payload decryption lane plus the worker-owned cal
 
 ## CLI access for operational reads
 
-Prefer Cloudflare's `cf` CLI for supported API reads, especially historical
-Workers and Containers logs. Wrangler remains the repository's pinned tool for
-Worker development, deployment, type generation, and live tailing. Cloudflare
-currently labels `cf` a technical preview; verify command parity before changing
-CI or deployment helpers. See [Cloudflare's CLI guidance](https://developers.cloudflare.com/agent-setup/codex/).
+Cloudflare's `cf` CLI is Murph's default for direct Cloudflare API operations,
+including diagnostics, resource inspection, and explicitly authorized management.
+Start command discovery with `cf cli search`, then inspect the selected command's
+`--help` and `cf schema` before execution. Search queries must describe only the
+action and resource type: omit account/resource identifiers, domains, names,
+and private incident details. Search results are suggestions, not authorization;
+choose read-only operations for diagnostic tasks.
 
-Install the reviewed CLI version separately from the workspace dependencies:
+Install the reviewed open-beta version separately from workspace dependencies:
 
 ```sh
-npm install --global cf@0.11.0
+npm install --global cf@1.0.0-beta.5
 cf --version
+cf cli search "look at messages stuck in my queue"
+cf cli search "query historical worker observability logs"
 cf observability telemetry query --help
 cf schema observability telemetry query
 ```
+
+Use the JSON output to select only the fields needed for the task. Check existing
+authentication privately with `cf auth whoami`; use `cf auth login` when needed.
+Keep the version pinned in any future automation and reverify commands when
+upgrading. The earlier `cf@0.11.0` preview predates this search-first release.
+See [Cloudflare's launch and migration guidance](https://blog.cloudflare.com/cloudflare-cf-cli-launch/)
+and [the official CLI repository](https://github.com/cloudflare/cf).
+
+### Existing Wrangler workflow exceptions
+
+Use `cf` for new direct operations. Existing package scripts and the hosted-local
+harness still use pinned Wrangler for Worker/Containers development, secret
+provisioning, deployment status, and the staged deployment contract in
+[DEPLOY.md](./DEPLOY.md). Continue invoking those repository entrypoints until
+their migration is tested; do not alias `wrangler` to `cf`, mechanically rename
+commands/config files, or bypass version-upload, native rollout, and smoke gates
+with a bare `cf deploy`.
+
+`cf migrate apps/cloudflare/wrangler.jsonc --dry-run --no-install` provides a
+non-writing migration preview. With the reviewed beta, its Wrangler-bundler path
+requires Wrangler 4.100.0 or newer for `wrangler/experimental-config`; Murph
+currently pins 4.93.0. A full migration must update that dependency and lockfile,
+prove generated-config and binding parity, then validate the hosted-local and
+private Murph Cloud deployment flows. Cloudflare supports Wrangler delegation
+for existing esbuild builds during the beta. This CLI preference does not claim
+that those workflows have already migrated.
+
+### Historical logs and authentication
 
 For operator-authorized historical-log reads, use scoped OAuth authentication:
 
