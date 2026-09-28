@@ -278,7 +278,7 @@ function inspectHostSupportReleaseGraph(source) {
     webTests,
     /^      matrix: \$\{\{ fromJSON\(needs\.release-verification-plan-linux\.outputs\.hosted_web_test_matrix\) \}\}$/mu,
   );
-  assert.match(webTests, /^        image: public\.ecr\.aws\/docker\/library\/postgres:17$/mu);
+  assert.match(webTests, /^        image: postgres:17$/mu);
   assert.match(webTests, /^      MURPH_HOSTED_WEB_TEST_SHARD: \$\{\{ matrix\.shard \}\}$/mu);
   assert.match(webTests, /^      MURPH_HOSTED_WEB_VERIFY_LANE: test-shard$/mu);
   assert.match(webTests, /^      MURPH_HOSTED_WEB_VERIFY_SKIP_TYPECHECK: "1"$/mu);
@@ -302,7 +302,7 @@ function inspectHostSupportReleaseGraph(source) {
   assert.match(webPostgres, /^      fail-fast: false$/mu);
   assert.match(webPostgres, /^      max-parallel: 4$/mu);
   assert.match(webPostgres, /^      matrix:\n        shard: \[1, 2, 3, 4\]$/mu);
-  assert.match(webPostgres, /^        image: public\.ecr\.aws\/docker\/library\/postgres:17$/mu);
+  assert.match(webPostgres, /^        image: postgres:17$/mu);
   assert.match(webPostgres, /^          POSTGRES_DB: murph_test_gate$/mu);
   assert.match(webPostgres, /--health-cmd "pg_isready -U postgres -d murph_test_gate"/u);
   assert.match(webPostgres, /^          - 5432:5432$/mu);
@@ -771,6 +771,13 @@ test("Release checks accepts exactly docs-proof or full-shard receipts", async (
 
 test("required Stripe boundary accepts docs-only skipped and full proof modes", async () => {
   const source = await workflow("hosted-stripe-billing.yml");
+  const live = jobBlock(source, "live-stripe-browser");
+  assert.match(live, /^    runs-on: ubuntu-24.04$/mu);
+  assert.match(live, /^        image: postgres:17$/mu);
+  assert.match(live, /^          POSTGRES_DB: murph_hosted_stripe_billing$/mu);
+  assert.match(live, /--health-cmd "pg_isready -U postgres -d murph_hosted_stripe_billing"/u);
+  assert.match(live, /^          - 5432:5432$/mu);
+  assert.doesNotMatch(live, /^\s+credentials:|docker login/mu);
   const base = {
     EVENT_NAME: "pull_request",
     HERMETIC_RESULT: "skipped",

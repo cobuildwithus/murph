@@ -110,11 +110,13 @@ import {
   parsePersonalPatternVocabulary,
   buildPersonalPatternReport,
   buildJournalView,
+  getQueryProjectionStatus,
   readVaultRawTolerant,
   type CanonicalEntity,
 } from '@murphai/query'
 import { importDeviceProviderSnapshot } from '@murphai/importers'
 import { showAssistantPersonality } from '@murphai/vault-usecases/preferences'
+import { createIntegratedVaultServices } from '@murphai/vault-usecases/vault-services'
 import {
   logLiveWorkoutSet,
   saveWorkoutFormat,
@@ -695,6 +697,133 @@ describeRealCodex('real clinical document extraction journeys', () => {
       }
     }, 360_000)
   }
+})
+
+describeRealCodex('real Codex event-list family isolation', () => {
+  it('event-list isolation recalls two saved facts despite malformed goal frontmatter', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-event-isolation-e2e-'))
+    const vaultRoot = path.join(workingDirectory, 'vault')
+    const binDirectory = path.join(workingDirectory, 'bin')
+    const commandLogPath = path.join(workingDirectory, 'commands.log')
+    try {
+      const assistantCliContract = buildAssistantCliSurfaceContract(
+        await readAssistantCliLlmsFullManifestFromCliEntry({
+          cliEntryPath: fileURLToPath(new URL('../../cli/dist/bin.js', import.meta.url)),
+          workingDirectory: fileURLToPath(new URL('../../../', import.meta.url)),
+        }),
+      )
+      const developerInstructions = buildAssistantSystemPrompt({
+        assistantCliContract,
+        assistantHostedAutomationAvailable: false,
+        assistantContextSnapshotPrompt: null,
+        assistantHostedDeviceConnectAvailable: false,
+        assistantHostedDeviceConnectProviders: [],
+        assistantKnowledgeToolsAvailable: false,
+        channel: 'linq',
+        cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+        conversationScope: 'direct',
+        currentInstant: '2026-04-11T12:00:00.000Z',
+        currentLocalDate: '2026-04-11',
+        currentTimeZone: 'America/New_York',
+        hostedRuntime: true,
+        modelBehaviorProfile: 'gpt5-agentic',
+        onboardingGuidance: false,
+        turnTrigger: null,
+      })
+      // Fail before the model runs if the generated index or normal discovery
+      // guidance is missing from either the contract or its composed prompt.
+      for (const instructions of [assistantCliContract, developerInstructions]) {
+        expect(instructions).toMatch(/^- `event`: .*`list`/mu)
+        expect(instructions).toContain('read `vault-cli <command> --help`')
+      }
+      await initializeVault({ vaultRoot, timezone: 'America/New_York' })
+      for (const [title, day, tag] of [
+        ['The spare key is in the blue pouch.', '2026-04-10', 'trip-log'],
+        ['The museum tickets are in the green folder.', '2026-04-10', 'trip-log'],
+        ['Leave the red suitcase at home.', '2026-04-10', 'other'],
+        ['The ferry leaves at noon.', '2026-04-09', 'trip-log'],
+      ] as const) {
+        await upsertEvent({ vaultRoot, payload: {
+          kind: 'note', source: 'manual', title, note: title, tags: [tag],
+          occurredAt: `${day}T14:00:00Z`, timeZone: 'America/New_York',
+        } })
+      }
+      const goalPath = 'bank/goals/synthetic-broken.md'
+      await mkdir(path.dirname(path.join(vaultRoot, goalPath)), { recursive: true })
+      await writeFile(path.join(vaultRoot, goalPath), '---\ntitle: Synthetic incomplete goal\n')
+      // Fixture positive control, before the assistant turn: the same malformed
+      // source as the deterministic suite really does block a global read.
+      await expect(createIntegratedVaultServices().query.list({
+        vault: vaultRoot, requestId: 'synthetic-event-isolation-preflight', limit: 40,
+      })).rejects.toMatchObject({ code: 'QUERY_SOURCE_INVALID', details: {
+        querySource: true, relativePath: goalPath, issue: 'frontmatter_invalid',
+      } })
+      await writeFile(commandLogPath, '')
+      // No result fixture: this existing recorder executes the shipped CLI,
+      // whose event command calls integrated query.listEvents unchanged.
+      await materializeRealWorkoutVaultCli({ binDirectory, commandLogPath, vaultRoot })
+      const canonicalBefore = await snapshotRealCodexCanonicalVault(vaultRoot)
+      const writesBefore = await listWriteOperationMetadataPaths(vaultRoot)
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never',
+        allowFinishWithoutReply: false,
+        baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions,
+        // The turn helper resolves the production dynamic tools; no test-only
+        // tool guidance, repaired data, or hand-authored event output is injected.
+        env: config.env,
+        fixtureBinDirectory: binDirectory,
+        groupConversation: false,
+        model: config.model,
+        modelProvider: config.modelProvider,
+        prompt: "What are the two saved event notes tagged trip-log on April 10, 2026? Remind me of both facts briefly; don't change anything.",
+        reasoningEffort: 'low',
+        sandbox: 'workspace-write',
+        workingDirectory,
+      })
+      const actions = readCapabilityRoutingActions(result.jsonEvents)
+      const reads = actions.filter((action) => action.kind === 'command'
+        && /\bvault-cli\b[^;\n]*\bevent\s+list\b/u.test(action.command)
+        && !isRecordedVaultHelpCommand(action.command))
+      const reply = result.finalMessage.trim()
+      process.stdout.write(`[event-list-isolation-e2e] ${JSON.stringify({
+        scenario: 'malformed-goal-event-recall', eventReads: reads.length, reply,
+      })}\n`)
+      const commands = expandRecordedVaultCommands((await readFile(commandLogPath, 'utf8'))
+        .split('\n').filter(Boolean)).filter((command) =>
+        !isRecordedVaultHelpCommand(command) && !/^--(?:llms(?:-full)?|version)(?:\s|$)/u.test(command)
+      )
+      expect(commands).toHaveLength(1)
+      expect(commands[0]).toMatch(/^event list(?:\s|$)/u)
+      expect(reads).toHaveLength(1)
+      const read = reads[0]
+      if (!read || read.kind !== 'command') throw new Error('Expected the real event-list command result.')
+      expect(read.ok).toBe(true)
+      // The recorder captures executed arguments without shell quotes. Check
+      // meaningful selection independently of the CLI's chosen output format.
+      const filters = [...(commands[0] ?? '').matchAll(/(?:^|\s)--(kind|from|to|tag)(?:=|\s+)(\S+)/gu)]
+        .map(([, flag, value]) => `${flag}=${value}`).sort()
+      expect(filters).toEqual(['from=2026-04-10', 'kind=note', 'tag=trip-log', 'to=2026-04-10'])
+      expect(read.output).toContain('The spare key is in the blue pouch.')
+      expect(read.output).toContain('The museum tickets are in the green folder.')
+      expect(read.output).not.toMatch(/red suitcase|ferry|noon/iu)
+      expect(readDynamicToolAttempts(result.jsonEvents)).toEqual([])
+      expect(await snapshotRealCodexCanonicalVault(vaultRoot)).toEqual(canonicalBefore)
+      expect(await listWriteOperationMetadataPaths(vaultRoot)).toEqual(writesBefore)
+      expect(await listAssistantOutboxIntents(vaultRoot)).toEqual([])
+      expect((await getQueryProjectionStatus(vaultRoot)).exists).toBe(false)
+      expect(reply).toMatch(/(?:spare )?key[^.!?\n]{0,60}blue pouch/iu)
+      expect(reply).toMatch(/(?:museum )?tickets[^.!?\n]{0,60}green folder/iu)
+      expect(reply).not.toMatch(/red suitcase|ferry|noon/iu)
+      expect(reply).not.toMatch(/repair|rebuild|fix(?:ed|ing)?|corrupt|malformed|frontmatter|QUERY_SOURCE_INVALID|bank\/|sqlite|projection|unable|cannot|can['’]t|could(?: not|n['’]t)|(?:I|we)(?:['’]ve| have)? (?:updated|changed|deleted)/iu)
+      expect(reply.length).toBeLessThanOrEqual(400)
+    } finally {
+      await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+    }
+  }, 360_000)
 })
 
 describeRealCodex('real model canonical production journeys', () => {

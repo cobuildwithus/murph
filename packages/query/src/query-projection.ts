@@ -48,6 +48,7 @@ import {
 } from "./wearables.ts";
 import {
   listCanonicalSourceManifest,
+  readCanonicalEntityFamilySource,
   readVaultSourceStrict,
   readVaultSourceTolerant,
   type VaultSourceSnapshot,
@@ -149,6 +150,51 @@ export async function listCanonicalEntitiesRuntime(
 ): Promise<import("./canonical-entities.ts").CanonicalEntity[]> {
   const location = await ensureFreshQueryProjection(vaultRoot);
   return listStoredCanonicalEntities(location, filters);
+}
+
+/** No global publication for an event list; limits follow tag/experiment filters
+ * in the usecase. Other collection readers keep their existing projection policy.
+ */
+export async function listCanonicalEventEntitiesRuntime(
+  vaultRoot: string,
+  filters: Pick<QueryCanonicalEntityFilters, "kinds" | "from" | "to"> = {},
+): Promise<import("./canonical-entities.ts").CanonicalEntity[]> {
+  const location = currentQueryProjectionLocation(vaultRoot);
+  const readFreshEntities = async () => {
+    const status = await timeCliPhase("query-freshness", async () => {
+      const manifest = await timeCliPhase("query-manifest", () => listCanonicalSourceManifest(vaultRoot));
+      return timeCliPhase("query-status", () => readProjectionStatus(location, manifest));
+    });
+    return status?.fresh
+      ? listStoredCanonicalEntities(location, { ...filters, family: "event", limit: null })
+      : null;
+  };
+  const indexed = await readFreshEntities();
+  if (indexed !== null) return indexed;
+
+  // Do not join a pending reader: it may be waiting for our reentrant lock.
+  const endWait = startCliPhase("query-wait");
+  try {
+    return await withCanonicalWriteLock(vaultRoot, async () => {
+      endWait();
+      // A global reader may have published while this reader waited.
+      const indexed = await readFreshEntities();
+      if (indexed !== null) return indexed;
+      const entities = await timeCliPhase("query-source-read", () =>
+        readCanonicalEntityFamilySource(vaultRoot, "event"));
+      return entities.filter((entity) => {
+        if (filters.kinds?.length && (entity.kind === null || !filters.kinds.includes(entity.kind))) return false;
+        // Match the indexed COALESCE(date, substr(occurred_at, 1, 10)) predicate,
+        // without changing source-owner ordering, lifecycle or visibility.
+        const date = entity.date ?? entity.occurredAt?.slice(0, 10) ?? null;
+        if (filters.from && (date === null || date < filters.from)) return false;
+        if (filters.to && (date === null || date > filters.to)) return false;
+        return true;
+      });
+    });
+  } finally {
+    endWait();
+  }
 }
 
 export async function loadProjectedVaultSourceTolerant(
