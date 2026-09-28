@@ -143,7 +143,7 @@ test("GPT-6 models are available on Pulse and identify the active fallback accur
   const luna = document.querySelector('input[id="assistant-model-gpt-6-luna"]');
   assert.deepEqual(
     [...document.querySelectorAll("input")].map((input) => input.getAttribute("value")),
-    ["gpt-6-sol", "gpt-6-luna", "gpt-6-astra"],
+    ["gpt-6-luna", "gpt-6-sol", "gpt-6-astra"],
   );
   assert.ok(sol?.hasAttribute("checked"));
   assert.equal(sol?.hasAttribute("disabled"), false);

@@ -127,7 +127,7 @@ Current providers:
   40 ordinary one-day resources plus `workout_stream`. A full-job continuation owns one resource
   and one closed UTC day. An ordinary collection permits at most three sequential
   pages with one attempt and an eight-second timeout per page, limiting provider
-  wait to 24 seconds. A page-heavy hourly/session feature retries as one complete
+  wait to 24 seconds. An hourly/session feature exceeding either the page or record cap retries as one complete
   hour; daily aggregates remain day-atomic. Workout streams use the same bounded
   three-page index and carry only at-most-32 completed workout identities between
   serial stream reads. Each reduced unit is imported before the scalar resource
