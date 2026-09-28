@@ -8,7 +8,12 @@
     "title": "Custom goals keep your outcome",
     "summary": "When no public goal exactly matches your request, Murph keeps your plan tied to the outcome you asked for.",
     "details": "Related public goals no longer become the source of your custom plan. You still review the plan before it is saved, including whether you want reminders.",
-    "relevanceTags": ["goals", "planning"],
-    "sourcePullRequests": []
+    "relevanceTags": [
+      "goals",
+      "planning"
+    ],
+    "sourcePullRequests": [
+      3751
+    ]
   }
 }

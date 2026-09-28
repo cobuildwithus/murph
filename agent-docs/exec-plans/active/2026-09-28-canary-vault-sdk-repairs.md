@@ -142,9 +142,16 @@ authority, durable accepted work, meaningful canary budgets, and provider privac
   and docs-drift checks pass. Changelog generation and ten archive tests pass.
 - Exact public-template control passed resolution, grounding order and no-write
   checks but asked two questions in the initial candidate. Unchanged baseline
-  passed with one; final refined-candidate control is pending. No claim that
+  passed with one; final refined-candidate control passes with one question and the required safety context. No claim that
   the earlier control failure was proven pre-existing.
 - Android remains a proven duplicate of PR #3720; handoff is still pending.
   Vault generation/retry behavior passed 410 focused tests; historical deferred
   attempts lack exact outcome correlation. Existing reason observation remains
   the follow-up route, with no new functional share change justified.
+
+## Candidate handoff
+
+- PR #3751 owns the custom-goal correction. Both final live journeys and actual
+  replies pass parent review. Final ReviewGPT and exact-head CI are pending.
+- Functional merge/deployment remains with the human owner. No production
+  mutations, configuration changes, recovery, or provider sends were performed.
