@@ -22,3 +22,10 @@ Run the existing Host Support workflow on an unchanged synthetic branch while th
 ## Context
 
 Observed during verification of a telemetry-only route change. Both CLI matrices and the hermetic billing boundary pass independently. A later exact-head retry is needed to distinguish recovery of the external pull boundary from any test failure.
+
+## Resolution
+
+The three public CI service references now use the official upstream PostgreSQL
+17 image. Public manifests matched at verification time. Existing service
+configuration, health probes, workflow permissions and required gates are
+preserved; source-owner policy tests cover all affected service references.
