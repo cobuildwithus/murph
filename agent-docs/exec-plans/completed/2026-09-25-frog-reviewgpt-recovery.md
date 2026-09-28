@@ -1,8 +1,8 @@
 # Adopt proven ReviewGPT recovery fixes
 
-Status: active
+Status: completed
 Created: 2026-09-25
-Updated: 2026-09-25
+Updated: 2026-09-28
 
 ## Goal
 
@@ -77,3 +77,13 @@ Updated: 2026-09-25
 
 - Candidate `6df0788646aa40a6ee9b429d432de87463c4a151` passed all 37 applicable CI checks. Its complete-source review successfully staged, sent, and captured the exact response, but returned `INVALID`: the reviewer could not materialize the large inline registry tarball, so no substantive verdict was reached.
 - The canonical packager now expands the locked ReviewGPT registry source into its invocation-owned review context when that dependency patch changes. It derives the version and SHA-512 from the reviewed commit, downloads only that public package under time/size limits, rejects unsafe archive members, and records every source-file hash. All source files remain visible to the existing ZIP privacy checks. Eleven focused tests cover delivery and refusal paths; real registry proof expands all 41 files and strict application of the committed patch reproduces all 41 installed files. This replaces inline source encoding without adding an arbitrary attachment path.
+
+
+## Accepted final findings remediation — 2026-09-28
+
+- The user resumed remediation and shipping after the valid round-one findings at immutable head `aa7852586b841bbffe5dc7c2b9c6bd52090c06ef`.
+- Authoritative ReviewGPT source commit `0f2b97475f2661c47b93e7049248bcd94b73bd35` reuses shared canonical turn text/identity in both artifact lookup and activation, returns already-confirmed attachment proof before another browser read, and allows only validated pending transient receipts. Raw/encoded transient recovery compares the same decoded ID and origin while preserving original-target and exact-turn validation; completed captures still require a canonical URL.
+- Four focused cases fail on the prior source; all 14 pass after repair, including semantic/hybrid/legacy layouts, no redundant read after acceptance, missing/ambiguous attachment refusal, raw/encoded pending recovery, changed origin/ID/target rejection, and completed-capture restrictions. Owner typecheck and all 314 tests pass; parent independently reviewed the implementation and tests.
+- Regenerated the existing registry patch through pnpm. Reconstructed previous and current packages differ only in the README, staging source, and source/emitted download owner. The stricter Murph response-duration gate is preserved. Frozen installation, the same 14 owner tests against the installed package, 20 existing installed regressions, root tooling typecheck, dependency policy, ignored-build inspection, complexity and whitespace checks pass.
+- Final round two preserves the original substantive baseline and dispositions. Final review, exact-head CI, merge, installation on main, and matched report closure remain separate completion gates; none are claimed by this implementation record.
+Completed: 2026-09-28
