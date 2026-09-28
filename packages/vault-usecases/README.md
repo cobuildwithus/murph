@@ -55,7 +55,7 @@ byte-identical crash replay; conflicting bytes at the same retrieval identity
 fail closed. Raw evidence commits before canonical projection, so a canonical
 write failure can be retried without fetching or rewriting provider data.
 
-## Event-list candidate and paired benchmark
+## Event listing and paired benchmark
 
 `event list` keeps the same filters, canonical order, visibility, lifecycle
 collapse, post-filter limit and complete envelope. Its query-owned operation
@@ -156,8 +156,8 @@ source details. Tests also assert no global computation or partial publication,
 and cover canonical freshness, parked commit/rollback,
 reentrancy and a global publication while waiting. The existing query lock suite
 also owns cross-process writer proof. Family isolation changes a prior tool error
-into a successful result, so it also needs the focused real-Codex journey after
-deterministic checks pass:
+into a successful result; its focused real-Codex regression command, after
+deterministic checks, is:
 
 ```sh
 pnpm test:assistant:live -- --test "event-list isolation recalls two saved facts despite malformed goal frontmatter"
@@ -167,6 +167,6 @@ The opt-in journey uses production assembled instructions, dynamic tools and the
 shipped CLI over a synthetic vault. It requires exactly one successful event-list
 read with the requested kind/date/tag filters, both saved facts in a concise
 reply, no unrelated data commands, no canonical writes or delivery, and no repair
-claims. Inspect its compact synthetic scenario/reply line before marking UX
-`Ready`; an authored or skipped journey is not a live pass. The active candidate
-plan tracks the pending isolated measurements and live reply review.
+claims. The [completed verification record](../../agent-docs/exec-plans/completed/2026-09-25-event-list-candidate.md)
+contains the accepted isolated measurements and full-context live PASS with
+parent UX `Ready` review. Reruns still require inspection of the synthetic reply.
