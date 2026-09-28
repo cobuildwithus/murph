@@ -441,7 +441,7 @@ jobs:
       matrix: ${{ fromJSON(needs.release-verification-plan-linux.outputs.hosted_web_test_matrix) }}
     services:
       postgres:
-        image: public.ecr.aws/docker/library/postgres:17
+        image: postgres:17
         env:
           POSTGRES_DB: murph_search_test
           POSTGRES_PASSWORD: postgres
@@ -502,7 +502,7 @@ jobs:
         shard: [1, 2, 3, 4]
     services:
       postgres:
-        image: public.ecr.aws/docker/library/postgres:17
+        image: postgres:17
         env:
           POSTGRES_DB: murph_test_gate
           POSTGRES_PASSWORD: postgres
