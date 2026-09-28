@@ -21,12 +21,15 @@ afterEach(() => {
   vi.useRealTimers()
 })
 
-test('elevenlabs runtime posts text-to-speech requests and returns MP3 bytes', async () => {
+test.each(['eleven_multilingual_v2', 'eleven_v3', 'eleven_v4'])(
+  'elevenlabs runtime sends %s to its supported speech endpoint and returns MP3 bytes', async (modelId) => {
   const audioBytes = new Uint8Array([1, 2, 3])
   const fetchImplementation = vi.fn(async (url: string, init) => {
     assert.equal(
       url,
-      'https://api.elevenlabs.io/v1/text-to-speech/voice_123?output_format=mp3_44100_128',
+      modelId === 'eleven_v4'
+        ? 'https://api.elevenlabs.io/v1/text-to-dialogue?output_format=mp3_44100_128'
+        : 'https://api.elevenlabs.io/v1/text-to-speech/voice_123?output_format=mp3_44100_128',
     )
     assert.equal(init.method, 'POST')
     assert.equal(init.redirect, 'error')
@@ -34,10 +37,10 @@ test('elevenlabs runtime posts text-to-speech requests and returns MP3 bytes', a
     assert.equal(headers.get('accept'), 'audio/mpeg')
     assert.equal(headers.get('content-type'), 'application/json')
     assert.equal(headers.get('xi-api-key'), 'elevenlabs-key')
-    assert.deepEqual(JSON.parse(String(init.body)), {
-      model_id: 'eleven_multilingual_v2',
-      text: 'Short memo.',
-    })
+    assert.deepEqual(JSON.parse(String(init.body)), modelId === 'eleven_v4' ? {
+      inputs: [{ text: 'Short memo.', voice_id: 'voice_123' }],
+      model_id: modelId,
+    } : { model_id: modelId, text: 'Short memo.' })
     return new Response(audioBytes, {
       headers: {
         'content-type': 'audio/mpeg',
@@ -50,7 +53,7 @@ test('elevenlabs runtime posts text-to-speech requests and returns MP3 bytes', a
     generateElevenLabsSpeech({
       apiKey: ' elevenlabs-key ',
       fetchImplementation,
-      modelId: ' eleven_multilingual_v2 ',
+      modelId: ` ${modelId} `,
       text: ' Short memo. ',
       voiceId: ' voice_123 ',
     }),
@@ -198,7 +201,10 @@ test('elevenlabs runtime resolves env defaults and keeps HTTP failures secret-sa
   expect(resolveElevenLabsVoiceId({
     MURPH_ELEVENLABS_VOICE_ID: ' voice ',
   })).toBe('voice')
-  expect(resolveElevenLabsModelId({})).toBe('eleven_multilingual_v2')
+  expect(resolveElevenLabsModelId({})).toBe('eleven_v4')
+  expect(resolveElevenLabsModelId({ MURPH_ELEVENLABS_MODEL_ID: ' eleven_multilingual_v2 ' }))
+    .toBe('eleven_multilingual_v2')
+  expect(resolveElevenLabsModelId({ MURPH_ELEVENLABS_MODEL_ID: ' ' })).toBe('eleven_v4')
 
   const fetchImplementation = vi.fn(async () =>
     new Response('provider said private text failed', { status: 429 }))
