@@ -142,6 +142,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.ar
   if (mode === "seed") await seedEventListBenchmark(vault);
   else {
     assert.ok(scenario);
-    console.log(JSON.stringify(await runTrial(vault, scenario)));
+    const report = await runTrial(vault, scenario);
+    console.log(JSON.stringify(report));
   }
 }
