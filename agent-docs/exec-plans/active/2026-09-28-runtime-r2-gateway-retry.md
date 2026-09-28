@@ -41,7 +41,18 @@ classifier and pass after its two-line correction. All 280 runner-platform tests
 pass, including the 30-case HTTP/upload-mode/outcome matrix and existing abort,
 expiry, transport, and authority checks. All 10 changelog rendering tests pass.
 Cloudflare typecheck passes after ordinary Prisma generation (existing Frog
-issue #2378); no new workaround or friction record is needed. Complexity is
+issue #2378). Complexity is
 unchanged at 27 for the existing upload function; no control flow was added.
 The Web-only ESLint config ignores Cloudflare paths, so it supplies no lint
 proof; TypeScript and the configured complexity guard cover the changed owner.
+
+## Review tooling recovery
+
+The installed review probe recognized only radio controls, so pressed-state
+Chat/Work buttons caused a false Work rejection before submission. Extend the
+existing dependency patch at its two selectors. A synthetic browser replay
+reproduces the original failure and passes ten cases for button/radio selection,
+unknown surfaces, and overriding Work usage/breadcrumbs. The actual owned Chat
+tab also passes; all diagnostic tabs were closed. Existing model/duration,
+configuration and bootstrap tests pass (26 tests). The retry of the original
+required CI run passed. No substantive review was submitted on that head.

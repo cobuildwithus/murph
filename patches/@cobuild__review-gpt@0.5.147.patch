@@ -180,6 +180,24 @@ diff --git a/src/prepare-chatgpt-draft.js b/src/prepare-chatgpt-draft.js
  }
  
  function formatDurationMs(durationMs) {
+@@ -2606,7 +2605,7 @@
+         y: Math.round(rect.top + rect.height / 2),
+       };
+     };
+-    const controls = Array.from(document.querySelectorAll('[role="radio"]')).filter(visible);
++    const controls = Array.from(document.querySelectorAll('[role="radio"], button[aria-pressed]')).filter(visible);
+     const chatControl = controls.find((node) => matchesLabel(node, 'chat')) || null;
+     const workControl = controls.find((node) => matchesLabel(node, 'work')) || null;
+     const workUsageVisible = Array.from(
+@@ -2614,7 +2613,7 @@
+     ).some(visible);
+     const workBreadcrumbVisible = Array.from(document.querySelectorAll('body *')).some((node) => {
+       if (!(node instanceof HTMLElement) || node.children.length > 0 || !visible(node)) return false;
+-      if (node.closest('[role="radio"]')) return false;
++      if (node.closest('[role="radio"], button[aria-pressed]')) return false;
+       const rect = node.getBoundingClientRect();
+       return rect.top >= 0 && rect.top < 120 && normalize(node.textContent) === 'work';
+     });
 @@ -5668,7 +5667,6 @@
            responseMarker,
            responseElapsedMs: Date.now() - responseWaitStartedAt,
