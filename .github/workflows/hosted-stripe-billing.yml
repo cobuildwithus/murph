@@ -149,7 +149,7 @@ jobs:
       queue: max
     services:
       postgres:
-        image: public.ecr.aws/docker/library/postgres:17
+        image: postgres:17
         env:
           POSTGRES_DB: murph_hosted_stripe_billing
           POSTGRES_PASSWORD: postgres

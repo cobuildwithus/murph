@@ -19,7 +19,8 @@ const tsx = import.meta.resolve('tsx')
 const key = '0123456789abcdef0123456789abcdef'
 const sentinels = ['SYNTHETIC_SECRET_TOKEN', 'SYNTHETIC_HEALTH_HISTORY', 'SYNTHETIC_PRIVATE_PATH',
   'SYNTHETIC_MEMORY_VALUE', 'mem_synthetic_missing', 'bank/memory.md', 'synthetic-invalid',
-  'SYNTHETIC_INVALID_SLUG!', 'synthetic-page', 'SYNTHETIC_KNOWLEDGE_VALUE']
+  'SYNTHETIC_INVALID_SLUG!', 'synthetic-page', 'SYNTHETIC_KNOWLEDGE_VALUE',
+  'SYNTHETIC_MEASUREMENT_METRIC', 'SYNTHETIC_INVALID_DATE', '2001-02-30']
 
 async function tree(directory: string): Promise<unknown> {
   const names = (await readdir(directory, { withFileTypes: true })).sort((a, b) => a.name.localeCompare(b.name))
@@ -135,6 +136,18 @@ const cases: Case[] = [
     command: 'event payload-schema' },
   { name: 'event schema explicit for', argv: ['event', 'payload-schema', '--kind', 'note', '--for', 'import-jsonl'],
     command: 'event payload-schema' },
+  { name: 'measurement entry missing metric', argv: ['measurement', 'entry', 'list'],
+    command: 'measurement entry list', code: 'VALIDATION_ERROR', field: 'metric',
+    validation: { field: 'metric', code: 'invalid_type', missing: true } },
+  { name: 'measurement entry invalid from', argv: ['measurement', 'entry', 'list', '--metric', 'SYNTHETIC_MEASUREMENT_METRIC', '--from', 'SYNTHETIC_INVALID_DATE'],
+    command: 'measurement entry list', code: 'VALIDATION_ERROR', field: 'from',
+    validation: { field: 'from', code: 'invalid_format', missing: false } },
+  { name: 'measurement entry invalid to', argv: ['measurement', 'entry', 'list', '--metric', 'SYNTHETIC_MEASUREMENT_METRIC', '--to', '2001-02-30'],
+    command: 'measurement entry list', code: 'VALIDATION_ERROR', field: 'to',
+    validation: { field: 'to', code: 'custom', missing: false } },
+  { name: 'measurement entry invalid limit', argv: ['measurement', 'entry', 'list', '--metric', 'SYNTHETIC_MEASUREMENT_METRIC', '--limit', '201'],
+    command: 'measurement entry list', code: 'VALIDATION_ERROR', field: 'limit',
+    validation: { field: 'limit', code: 'too_big', missing: false } },
   { name: 'automation invalid limit', argv: ['automation', 'list', '--limit', '201'],
     command: 'automation list', code: 'VALIDATION_ERROR', field: 'limit',
     validation: { field: 'limit', code: 'too_big', missing: false } },
