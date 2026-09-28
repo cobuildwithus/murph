@@ -798,5 +798,13 @@ Web build fonts are bundled locally; source and license provenance is owned by
 `apps/web/README.md` under "Bundled Web fonts". Implementation proof is tracked
 in [`local Web fonts`](exec-plans/completed/2026-09-25-local-web-fonts.md).
 
+Event-list family-local implementation, accepted synthetic measurements and local
+verification are recorded in [the completed event-list plan](exec-plans/completed/2026-09-25-event-list-candidate.md).
+The [baseline investigation](exec-plans/completed/2026-09-25-event-list-baseline.md)
+is superseded historical evidence. `packages/query/README.md` owns the read policy;
+`packages/vault-usecases/README.md` owns public-path tests and benchmark commands.
 Vault-share deferral diagnostic work is tracked in
 [`vault-share deferral observability`](exec-plans/completed/2026-09-25-vault-share-deferral-observability.md).
+
+Hosted CI PostgreSQL registry provenance is tracked in
+[`2026-09-28-postgres-ci-registry.md`](exec-plans/completed/2026-09-28-postgres-ci-registry.md).
