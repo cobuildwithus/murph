@@ -9,9 +9,11 @@ import {
   parseHostedWorkspaceReadResponse,
 } from "@murphai/hosted-execution/parsers";
 import { Prisma } from "@prisma/client";
+import { NextResponse } from "next/server";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { readRawBodyBuffer } from "../src/lib/http";
+import { hostedOnboardingError } from "../src/lib/hosted-onboarding/errors";
 import { HOSTED_RUNTIME_LATENCY_TRACE_BODY_LIMIT_BYTES } from "@murphai/hosted-execution/runtime-control";
 
 const FIXED_NOW = "2026-04-26T00:00:00.000Z";
@@ -2418,6 +2420,194 @@ describe("hosted runtime internal web routes", () => {
     expect(workspace.hostedAssistantPriorityUntil).toBe(!group && provider === "openai"
       ? "2026-09-24T12:00:00.000Z" : undefined);
     expect(workspace.hostedAssistantSubagentModelOverridesAllowed).toBe(!["individual Pulse", "Family Pulse"].includes(_name));
+  });
+
+  describe("checkpoint failure observations", () => {
+    const path = "/api/internal/hosted-workspace/checkpoint";
+    const failureMessage = "Hosted workspace checkpoint failed.";
+    const failureSchema = "murph.hosted-workspace.checkpoint.failure.v1";
+    const checkpointRequest = (body: Record<string, unknown> = {}, search = "") =>
+      jsonRequest(`${path}${search}`, {
+        attemptId: UNSAFE_SENTINEL,
+        expectedWorkspaceVersion: "4",
+        leaseGeneration: "9",
+        reason: "canonical_runtime_commit",
+        snapshotRef: createBundleRef(UNSAFE_SENTINEL),
+        ...body,
+      }, runtimeWriteFenceHeaders());
+    const diagnostics = () => vi.mocked(console.warn).mock.calls.filter(
+      ([message]) => message === failureMessage,
+    );
+
+    beforeEach(() => {
+      vi.spyOn(console, "warn").mockImplementation(() => undefined);
+      vi.spyOn(console, "error").mockImplementation(() => undefined);
+      mocks.checkpointHostedWorkspace.mockResolvedValue({
+        status: "updated",
+        replacedSnapshotRef: null,
+        workspace: buildWorkspaceRecord(),
+      });
+    });
+
+    it("distinguishes independent schema and publication failures with identical HTTP 400 responses", async () => {
+      const malformed = await workspaceCheckpointRoute.POST(checkpointRequest({
+        reason: UNSAFE_SENTINEL,
+      }));
+      expect(mocks.checkpointHostedWorkspace).not.toHaveBeenCalled();
+      mocks.checkpointHostedWorkspace.mockRejectedValueOnce(new TypeError(UNSAFE_SENTINEL));
+      const publication = await workspaceCheckpointRoute.POST(checkpointRequest());
+
+      expect(malformed.status).toBe(400);
+      expect(publication.status).toBe(malformed.status);
+      expect([...malformed.headers]).toEqual([
+        ["cache-control", "no-store"],
+        ["content-type", "application/json"],
+      ]);
+      expect([...publication.headers]).toEqual([...malformed.headers]);
+      expect(await malformed.clone().json()).toEqual({
+        error: { code: "INVALID_REQUEST", message: "Invalid request." },
+      });
+      expect(await publication.text()).toBe(await malformed.text());
+      expect(mocks.checkpointHostedWorkspace).toHaveBeenCalledOnce();
+      expect(mocks.after).not.toHaveBeenCalled();
+      // A later successful request must not inherit or overwrite either observation.
+      expect((await workspaceCheckpointRoute.POST(checkpointRequest())).status).toBe(200);
+      expect(diagnostics()).toEqual([
+        [failureMessage, { schema: failureSchema, stage: "request_schema", errorClass: "type_error" }],
+        [failureMessage, { schema: failureSchema, stage: "publication", errorClass: "type_error" }],
+      ]);
+    });
+
+    it.each([
+      ["non-object JSON", "request_body", () => new Request(`https://join.example.test${path}`, {
+        method: "POST",
+        body: JSON.stringify([UNSAFE_SENTINEL]),
+      })],
+      ["signed authority/body mismatch", "runtime_authority", () => checkpointRequest({},
+        "?runtimeAuthority=1&runtimeAttempt=attempt_routes_1&runtimeGeneration=9&runtimeWorkspaceVersion=4",
+      )],
+      ["missing workspace invariant", "publication", () => {
+        mocks.checkpointHostedWorkspace.mockResolvedValueOnce({ status: "updated", workspace: null });
+        return checkpointRequest();
+      }],
+      ["response schema after publication", "response", () => {
+        mocks.checkpointHostedWorkspace.mockResolvedValueOnce({
+          status: "updated",
+          workspace: buildWorkspaceRecord({ version: UNSAFE_SENTINEL, nextWakeAt: FIXED_NOW }),
+        });
+        return checkpointRequest();
+      }],
+      ["JSON response construction", "response", () => {
+        mocks.checkpointHostedWorkspace.mockResolvedValueOnce({
+          status: "updated",
+          workspace: buildWorkspaceRecord({ nextWakeAt: FIXED_NOW }),
+        });
+        vi.spyOn(NextResponse, "json").mockImplementationOnce(() => {
+          throw new TypeError(UNSAFE_SENTINEL);
+        });
+        return checkpointRequest();
+      }],
+    ] as const)("observes %s at %s", async (_case, stage, request) => {
+      const response = await workspaceCheckpointRoute.POST(request());
+      expect(response.status).toBe(400);
+      expect(await response.json()).toEqual({
+        error: { code: "INVALID_REQUEST", message: "Invalid request." },
+      });
+      expect(diagnostics()).toEqual([
+        [failureMessage, { schema: failureSchema, stage, errorClass: "type_error" }],
+      ]);
+      expect(mocks.checkpointHostedWorkspace).toHaveBeenCalledTimes(
+        stage === "publication" || stage === "response" ? 1 : 0,
+      );
+      // Response construction still follows post-commit signal scheduling.
+      expect(mocks.after).toHaveBeenCalledTimes(stage === "response" ? 1 : 0);
+      expect(mocks.signalHostedRuntimeRecheckRuntime).not.toHaveBeenCalled();
+    });
+
+    it("observes malformed JSON without changing its INVALID_JSON response", async () => {
+      const response = await workspaceCheckpointRoute.POST(new Request(`https://join.example.test${path}`, {
+        method: "POST",
+        body: `{${UNSAFE_SENTINEL}`,
+      }));
+      expect(response.status).toBe(400);
+      expect(await response.json()).toEqual({ error: { code: "INVALID_JSON", message: "Invalid JSON." } });
+      expect(diagnostics()).toEqual([
+        [failureMessage, { schema: failureSchema, stage: "request_body", errorClass: "error" }],
+      ]);
+      expect(mocks.checkpointHostedWorkspace).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ["type_error", new TypeError(UNSAFE_SENTINEL), 400],
+      ["range_error", new RangeError(UNSAFE_SENTINEL), 400],
+      ["error", new Error(UNSAFE_SENTINEL), 500],
+      ["non_error", { message: UNSAFE_SENTINEL }, 500],
+    ] as const)("logs only the %s error class", async (errorClass, error, status) => {
+      Object.assign(error, {
+        name: UNSAFE_SENTINEL,
+        stack: UNSAFE_SENTINEL,
+        cause: { [UNSAFE_SENTINEL]: UNSAFE_SENTINEL },
+        [UNSAFE_SENTINEL]: UNSAFE_SENTINEL,
+      });
+      mocks.checkpointHostedWorkspace.mockRejectedValueOnce(error);
+      const response = await workspaceCheckpointRoute.POST(checkpointRequest());
+      expect(response.status).toBe(status);
+      expect(diagnostics()).toEqual([
+        [failureMessage, { schema: failureSchema, stage: "publication", errorClass }],
+      ]);
+      expect(JSON.stringify(diagnostics())).not.toContain(UNSAFE_SENTINEL);
+    });
+
+    it.each(["updated", "conflict"] as const)("keeps %s checkpoint responses quiet", async (status) => {
+      mocks.checkpointHostedWorkspace.mockResolvedValueOnce({
+        status,
+        replacedSnapshotRef: null,
+        workspace: buildWorkspaceRecord({ nextWakeAt: FIXED_NOW }),
+      });
+      const response = await workspaceCheckpointRoute.POST(checkpointRequest());
+      expect(response.status).toBe(200);
+      expect(response.headers.get("cache-control")).toBe("no-store");
+      expect(parseHostedWorkspaceCheckpointResponse(await response.json())).toMatchObject({
+        checkpointed: status === "updated",
+        ...(status === "conflict" ? { checkpointConflictReason: "workspace_version" } : {}),
+        workspace: { version: "4", nextWakeAt: FIXED_NOW },
+      });
+      expect(mocks.after).toHaveBeenCalledTimes(status === "updated" ? 1 : 0);
+      await mocks.after.mock.calls[0]?.[0]();
+      expect(diagnostics()).toEqual([]);
+    });
+
+    it("does not diagnose pre-auth rejection or continue to parsing/publication", async () => {
+      mocks.requireHostedCloudflareCallbackRequest.mockRejectedValueOnce(hostedOnboardingError({
+        code: "HOSTED_CLOUDFLARE_CALLBACK_UNAUTHORIZED",
+        httpStatus: 401,
+        message: "Unauthorized hosted Cloudflare callback.",
+      }));
+      const request = checkpointRequest({ reason: UNSAFE_SENTINEL });
+      const response = await workspaceCheckpointRoute.POST(request);
+      expect(response.status).toBe(401);
+      expect(request.bodyUsed).toBe(false);
+      expect(mocks.checkpointHostedWorkspace).not.toHaveBeenCalled();
+      expect(mocks.after).not.toHaveBeenCalled();
+      expect(diagnostics()).toEqual([]);
+    });
+
+    it("preserves the original failure when the new diagnostic throws", async () => {
+      vi.mocked(console.warn).mockImplementation((message) => {
+        if (message === failureMessage) throw new Error(UNSAFE_SENTINEL);
+      });
+      mocks.checkpointHostedWorkspace.mockRejectedValueOnce(new TypeError(UNSAFE_SENTINEL));
+      const response = await workspaceCheckpointRoute.POST(checkpointRequest());
+      expect(response.status).toBe(400);
+      expect(await response.json()).toEqual({
+        error: { code: "INVALID_REQUEST", message: "Invalid request." },
+      });
+      expect(diagnostics()).toEqual([
+        [failureMessage, { schema: failureSchema, stage: "publication", errorClass: "type_error" }],
+      ]);
+      expect(mocks.checkpointHostedWorkspace).toHaveBeenCalledOnce();
+      expect(mocks.after).not.toHaveBeenCalled();
+    });
   });
 
   it("reads workspace state and checkpoints with the workspace CAS fence", async () => {

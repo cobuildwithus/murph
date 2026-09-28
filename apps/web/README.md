@@ -112,6 +112,32 @@ is additive and Web-only: older deployments and readers tolerate its absence,
 and recovery uses a fresh revert or forward-fix commit on `main` so the replacement
 deployment receives current production admission.
 
+## Checkpoint failure observability
+
+After callback authentication succeeds, the Web checkpoint route emits at most
+one additional failure record: `Hosted workspace checkpoint failed.` with
+schema `murph.hosted-workspace.checkpoint.failure.v1`. Metadata contains only
+`schema`, `stage`, and `errorClass`. The five stages are `request_body`,
+`request_schema`, `runtime_authority`, `publication`, and `response`.
+`publication` includes the missing-workspace invariant; `response` starts after
+existing post-commit wake scheduling and covers parsing and JSON construction.
+Error classes are `type_error`, `range_error`, `error`, and `non_error`.
+
+The record contains no identifiers, versions, request values, paths, raw errors,
+messages, stacks, causes, or arbitrary metadata. Success, CAS conflict, and
+pre-authentication rejection add no observation. Diagnostic failure is isolated;
+the original error continues to the existing response mapper. Later asynchronous
+wake-signal failures retain their existing separate observation.
+
+Query natural production Vercel traffic by the exact message and schema, from
+the Web deployment-ready timestamp onward, and aggregate only by stage and
+error class. Existing Vercel request correlation joins the record to the callback;
+a later checkpoint alone does not establish acceptance of the earlier source
+state. No synthetic production failure is needed. Old and new Web/Worker/runtime
+combinations preserve identical request and response contracts; only new Web
+emits this optional log. A fresh revert or forward-fix must pass current Web
+production admission; restoring an old deployment is not the recovery path.
+
 ## Health-data withdrawal rollback floor
 
 Deploy the consent-aware Cloudflare Worker before the Web deployment that can
