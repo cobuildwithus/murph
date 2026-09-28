@@ -110,11 +110,13 @@ import {
   parsePersonalPatternVocabulary,
   buildPersonalPatternReport,
   buildJournalView,
+  getQueryProjectionStatus,
   readVaultRawTolerant,
   type CanonicalEntity,
 } from '@murphai/query'
 import { importDeviceProviderSnapshot } from '@murphai/importers'
 import { showAssistantPersonality } from '@murphai/vault-usecases/preferences'
+import { createIntegratedVaultServices } from '@murphai/vault-usecases/vault-services'
 import {
   logLiveWorkoutSet,
   saveWorkoutFormat,
@@ -414,7 +416,9 @@ describeRealCodex('real natural goal canary journey', () => {
         })}\n`)
         return { result, commands }
       }
-      const { result: preview } = await timedMessage('goal-proposal')
+      const { result: preview, commands: previewCommands } = await timedMessage('goal-proposal')
+      expect(previewCommands.filter((command) => /^commons goal list(?: |$)/u.test(command) && !isRecordedVaultHelpCommand(command))).toHaveLength(1)
+      expect(previewCommands.filter((command) => /^commons goal show(?: |$)/u.test(command) && !isRecordedVaultHelpCommand(command))).toEqual([])
       expect(preview.response).toMatch(/walk/iu)
       expect(preview.response).toMatch(/lunch/iu)
       expect(preview.response).toMatch(/twenty|20/iu)
@@ -422,6 +426,7 @@ describeRealCodex('real natural goal canary journey', () => {
       expect((await readVaultRawTolerant(fixture.vault)).regimens).toHaveLength(0)
 
       const { result: accepted, commands } = await timedMessage('accept-goal')
+      expect(commands.filter((command) => /^commons goal (list|show)(?: |$)/u.test(command) && !isRecordedVaultHelpCommand(command))).toEqual([])
       expect(commands.filter((command) => /^goal save /u.test(command) && !isRecordedVaultHelpCommand(command))).toHaveLength(1)
       expect(commands.filter((command) => /^regimen save /u.test(command) && !isRecordedVaultHelpCommand(command))).toHaveLength(1)
       expect(commands.filter((command) => /^(goal show|regimen show|automation )/u.test(command) && !isRecordedVaultHelpCommand(command))).toEqual([])
@@ -695,6 +700,133 @@ describeRealCodex('real clinical document extraction journeys', () => {
       }
     }, 360_000)
   }
+})
+
+describeRealCodex('real Codex event-list family isolation', () => {
+  it('event-list isolation recalls two saved facts despite malformed goal frontmatter', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-event-isolation-e2e-'))
+    const vaultRoot = path.join(workingDirectory, 'vault')
+    const binDirectory = path.join(workingDirectory, 'bin')
+    const commandLogPath = path.join(workingDirectory, 'commands.log')
+    try {
+      const assistantCliContract = buildAssistantCliSurfaceContract(
+        await readAssistantCliLlmsFullManifestFromCliEntry({
+          cliEntryPath: fileURLToPath(new URL('../../cli/dist/bin.js', import.meta.url)),
+          workingDirectory: fileURLToPath(new URL('../../../', import.meta.url)),
+        }),
+      )
+      const developerInstructions = buildAssistantSystemPrompt({
+        assistantCliContract,
+        assistantHostedAutomationAvailable: false,
+        assistantContextSnapshotPrompt: null,
+        assistantHostedDeviceConnectAvailable: false,
+        assistantHostedDeviceConnectProviders: [],
+        assistantKnowledgeToolsAvailable: false,
+        channel: 'linq',
+        cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+        conversationScope: 'direct',
+        currentInstant: '2026-04-11T12:00:00.000Z',
+        currentLocalDate: '2026-04-11',
+        currentTimeZone: 'America/New_York',
+        hostedRuntime: true,
+        modelBehaviorProfile: 'gpt5-agentic',
+        onboardingGuidance: false,
+        turnTrigger: null,
+      })
+      // Fail before the model runs if the generated index or normal discovery
+      // guidance is missing from either the contract or its composed prompt.
+      for (const instructions of [assistantCliContract, developerInstructions]) {
+        expect(instructions).toMatch(/^- `event`: .*`list`/mu)
+        expect(instructions).toContain('read `vault-cli <command> --help`')
+      }
+      await initializeVault({ vaultRoot, timezone: 'America/New_York' })
+      for (const [title, day, tag] of [
+        ['The spare key is in the blue pouch.', '2026-04-10', 'trip-log'],
+        ['The museum tickets are in the green folder.', '2026-04-10', 'trip-log'],
+        ['Leave the red suitcase at home.', '2026-04-10', 'other'],
+        ['The ferry leaves at noon.', '2026-04-09', 'trip-log'],
+      ] as const) {
+        await upsertEvent({ vaultRoot, payload: {
+          kind: 'note', source: 'manual', title, note: title, tags: [tag],
+          occurredAt: `${day}T14:00:00Z`, timeZone: 'America/New_York',
+        } })
+      }
+      const goalPath = 'bank/goals/synthetic-broken.md'
+      await mkdir(path.dirname(path.join(vaultRoot, goalPath)), { recursive: true })
+      await writeFile(path.join(vaultRoot, goalPath), '---\ntitle: Synthetic incomplete goal\n')
+      // Fixture positive control, before the assistant turn: the same malformed
+      // source as the deterministic suite really does block a global read.
+      await expect(createIntegratedVaultServices().query.list({
+        vault: vaultRoot, requestId: 'synthetic-event-isolation-preflight', limit: 40,
+      })).rejects.toMatchObject({ code: 'QUERY_SOURCE_INVALID', details: {
+        querySource: true, relativePath: goalPath, issue: 'frontmatter_invalid',
+      } })
+      await writeFile(commandLogPath, '')
+      // No result fixture: this existing recorder executes the shipped CLI,
+      // whose event command calls integrated query.listEvents unchanged.
+      await materializeRealWorkoutVaultCli({ binDirectory, commandLogPath, vaultRoot })
+      const canonicalBefore = await snapshotRealCodexCanonicalVault(vaultRoot)
+      const writesBefore = await listWriteOperationMetadataPaths(vaultRoot)
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never',
+        allowFinishWithoutReply: false,
+        baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions,
+        // The turn helper resolves the production dynamic tools; no test-only
+        // tool guidance, repaired data, or hand-authored event output is injected.
+        env: config.env,
+        fixtureBinDirectory: binDirectory,
+        groupConversation: false,
+        model: config.model,
+        modelProvider: config.modelProvider,
+        prompt: "What are the two saved event notes tagged trip-log on April 10, 2026? Remind me of both facts briefly; don't change anything.",
+        reasoningEffort: 'low',
+        sandbox: 'workspace-write',
+        workingDirectory,
+      })
+      const actions = readCapabilityRoutingActions(result.jsonEvents)
+      const reads = actions.filter((action) => action.kind === 'command'
+        && /\bvault-cli\b[^;\n]*\bevent\s+list\b/u.test(action.command)
+        && !isRecordedVaultHelpCommand(action.command))
+      const reply = result.finalMessage.trim()
+      process.stdout.write(`[event-list-isolation-e2e] ${JSON.stringify({
+        scenario: 'malformed-goal-event-recall', eventReads: reads.length, reply,
+      })}\n`)
+      const commands = expandRecordedVaultCommands((await readFile(commandLogPath, 'utf8'))
+        .split('\n').filter(Boolean)).filter((command) =>
+        !isRecordedVaultHelpCommand(command) && !/^--(?:llms(?:-full)?|version)(?:\s|$)/u.test(command)
+      )
+      expect(commands).toHaveLength(1)
+      expect(commands[0]).toMatch(/^event list(?:\s|$)/u)
+      expect(reads).toHaveLength(1)
+      const read = reads[0]
+      if (!read || read.kind !== 'command') throw new Error('Expected the real event-list command result.')
+      expect(read.ok).toBe(true)
+      // The recorder captures executed arguments without shell quotes. Check
+      // meaningful selection independently of the CLI's chosen output format.
+      const filters = [...(commands[0] ?? '').matchAll(/(?:^|\s)--(kind|from|to|tag)(?:=|\s+)(\S+)/gu)]
+        .map(([, flag, value]) => `${flag}=${value}`).sort()
+      expect(filters).toEqual(['from=2026-04-10', 'kind=note', 'tag=trip-log', 'to=2026-04-10'])
+      expect(read.output).toContain('The spare key is in the blue pouch.')
+      expect(read.output).toContain('The museum tickets are in the green folder.')
+      expect(read.output).not.toMatch(/red suitcase|ferry|noon/iu)
+      expect(readDynamicToolAttempts(result.jsonEvents)).toEqual([])
+      expect(await snapshotRealCodexCanonicalVault(vaultRoot)).toEqual(canonicalBefore)
+      expect(await listWriteOperationMetadataPaths(vaultRoot)).toEqual(writesBefore)
+      expect(await listAssistantOutboxIntents(vaultRoot)).toEqual([])
+      expect((await getQueryProjectionStatus(vaultRoot)).exists).toBe(false)
+      expect(reply).toMatch(/(?:spare )?key[^.!?\n]{0,60}blue pouch/iu)
+      expect(reply).toMatch(/(?:museum )?tickets[^.!?\n]{0,60}green folder/iu)
+      expect(reply).not.toMatch(/red suitcase|ferry|noon/iu)
+      expect(reply).not.toMatch(/repair|rebuild|fix(?:ed|ing)?|corrupt|malformed|frontmatter|QUERY_SOURCE_INVALID|bank\/|sqlite|projection|unable|cannot|can['’]t|could(?: not|n['’]t)|(?:I|we)(?:['’]ve| have)? (?:updated|changed|deleted)/iu)
+      expect(reply.length).toBeLessThanOrEqual(400)
+    } finally {
+      await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+    }
+  }, 360_000)
 })
 
 describeRealCodex('real model canonical production journeys', () => {
@@ -15786,6 +15918,149 @@ describeRealCodex('real Codex Journal connected calendar capture e2e', () => {
       await removeRealCodexTemporaryPaths(config.temporaryPaths)
     }
   }, 720_000)
+})
+
+describeRealCodex('real Codex lodging destination evidence e2e', () => {
+  it.each(['explicit destination', 'unknown destination', 'repair imported destination'] as const)(
+    'grounds lodging geography in the full confirmation: %s', async (scenario) => {
+      const config = await resolveRealCodexE2eConfig()
+      const automation = MURPH_MANAGED_AUTOMATIONS.find(candidate => candidate.slug === 'journal-connected-context-morning')
+      if (!automation) throw new Error('Missing managed Journal automation.')
+      const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-lodging-evidence-e2e-'))
+      const requests: Array<{ operation: string; input: Record<string, unknown> }> = []
+      const automationRequests: AssistantHostedAutomationToolRequest[] = []
+      try {
+        const binDirectory = path.join(workingDirectory, 'bin')
+        const commandLogPath = path.join(workingDirectory, 'commands.log')
+        await materializeJournalConnectedContextVaultCli({
+          binDirectory, commandLogPath, vaultRoot: workingDirectory,
+          ledgerText: JSON.stringify({ version: 1, optOuts: { global: false, accounts: [], providers: [], categories: [] },
+            activeAccounts: [{ id: 'gmail_lodging', provider: 'gmail' }] }),
+        })
+        let existingEventId: string | null = null
+        if (scenario === 'repair imported destination') {
+          const saved = await upsertEvent({ vaultRoot: workingDirectory, payload: {
+            kind: 'note', noteType: 'journal-plan', source: 'import', title: 'Palm Bay lodging',
+            occurredAt: '2026-11-10T12:00:00Z', timeZone: 'America/New_York',
+            tags: ['planned', 'timing-all-day'], note: 'Confirmed stay November 10–12.',
+            externalRef: { system: 'connected-context', resourceType: 'plan', resourceId: 'gmail_lodging:mail_lodging_synthetic' },
+            plan: { endsAt: '2026-11-12T00:00:00-05:00', status: 'planned',
+              lastVerifiedAt: '2026-10-31T07:00:00Z', category: 'travel', accountId: 'gmail_lodging' },
+          } })
+          existingEventId = saved.eventId
+          await upsertKnowledgePage({ vault: workingDirectory, slug: 'journal-connected-context', body: [
+            JSON.stringify({ version: 1, optOuts: { global: false, accounts: [], providers: [], categories: [] },
+              activeAccounts: [{ id: 'gmail_lodging', provider: 'gmail' }] }),
+            '', '## Sources', '',
+            JSON.stringify([{ accountId: 'gmail_lodging', sourceId: 'mail_lodging_synthetic', eventId: saved.eventId, revision: 1 }]),
+          ].join('\n') })
+        }
+        const memoryBefore = await readMemoryDocument(workingDirectory)
+        const result = await executeRealCodexAppServerTurn({
+          allowFinishWithoutReply: false,
+          approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+          codexHome: config.codexHome, fixtureBinDirectory: binDirectory,
+          abortSignal: AbortSignal.timeout(600_000),
+          developerInstructions: buildWeeklyHealthInsightDeveloperInstructions({
+            currentLocalDate: '2026-11-01', currentTimeZone: 'Europe/Warsaw',
+            hostedAutomationAvailable: true, scheduledOccurrenceAt: '2026-11-01T07:00:00Z',
+          }),
+          dynamicTools: [MURPH_AUTOMATION_TOOL, MURPH_CONNECTED_APPS_MANAGE_TOOL,
+            MURPH_CONNECTED_APPS_SEARCH_TOOL, MURPH_CONNECTED_APPS_EXECUTE_TOOL],
+          env: { ...config.env, [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: resolveAssistantSkillsRoot(),
+            PATH: `${binDirectory}:${config.env.PATH ?? ''}` },
+          hostedToolContext: {
+            automationTool: { request: async request => {
+              automationRequests.push(request)
+              throw new Error('Date-only lodging must not create a timed follow-up.')
+            } },
+            computerToolsAvailable: false,
+            connectedApps: { request: async request => {
+              requests.push({ operation: request.operation, input: request.input })
+              if (request.operation === 'manage') return { result: { accounts: [{
+                alias: 'Personal', id: 'gmail_lodging', status: 'ACTIVE', toolkit: 'gmail',
+              }] } }
+              if (request.operation === 'search') return { result: { success: true, tool_schemas: {
+                GMAIL_SEARCH_EMAILS: { input_schema: { type: 'object', additionalProperties: false,
+                  properties: { query: { type: 'string' } }, required: ['query'] } },
+                GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID: { input_schema: { type: 'object', additionalProperties: false,
+                  properties: { message_id: { type: 'string' } }, required: ['message_id'] } },
+              } } }
+              if (request.operation !== 'execute') throw new Error('Unexpected provider operation.')
+              expect(request.input.account).toBe('gmail_lodging')
+              if (request.input.toolSlug === 'GMAIL_SEARCH_EMAILS') return { result: { messages: [{
+                id: 'mail_lodging_synthetic', subject: 'Confirmed lodging: November 10–12',
+                snippet: 'Palm Bay Hideaway. Your stay is confirmed. Open the reservation for details.',
+              }] } }
+              expect(request.input.toolSlug).toBe('GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID')
+              expect(request.input.arguments).toEqual({ message_id: 'mail_lodging_synthetic' })
+              return { result: { id: 'mail_lodging_synthetic', subject: 'Confirmed lodging: November 10–12',
+                body: [
+                  'Reservation confirmed. Listing name: Palm Bay Hideaway.',
+                  'Check-in date: 2026-11-10. Checkout date: 2026-11-12.',
+                  'Booking calendar timezone: Europe/Lisbon. Check-in and checkout clock times are not supplied.',
+                  ...(scenario !== 'unknown destination'
+                    ? ['Property address: 41 Example Lane, Porto, Portugal.']
+                    : ['Property address and destination details are not supplied in this confirmation.']),
+                  'Provider corporate office: Miami, Florida, USA. Booking reference SYNTH-782.',
+                ].join('\n'),
+              } }
+            } },
+            currentHostedDeliveryContext: () => null, currentHostedMailboxItemIds: () => [],
+            sendVaultFile: async () => { throw new Error('Unexpected file send.') }, vaultFileSendAvailable: false,
+          },
+          model: config.model, modelProvider: config.modelProvider,
+          prompt: [automation.instructions, 'Scheduled occurrence context:',
+            '- Current local date: 2026-11-01.', '- Current local time: 08:00 Europe/Warsaw.',
+            '- Complete the normal scheduled decision.'].join('\n\n'),
+          reasoningEffort: resolveMurphManagedAutomationSeed(automation.automationId)?.assistantTargetOverride?.reasoningEffort ?? 'low',
+          sandbox: 'workspace-write', workingDirectory,
+        })
+        const decision = parseAssistantNotificationDecision(result.finalMessage)
+        expect(decision.kind, result.finalMessage).toBe('skip')
+        const fullReads = requests.filter(request => request.operation === 'execute'
+          && request.input.toolSlug === 'GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID')
+        expect(fullReads).toHaveLength(1)
+        expect(automationRequests).toHaveLength(0)
+        const vault = await readVaultRawTolerant(workingDirectory)
+        const notes = vault.events.filter(event => event.kind === 'note')
+        process.stdout.write(`[lodging-destination-evidence] ${JSON.stringify({ scenario, finalMessage: result.finalMessage,
+          notes: notes.map(note => ({ title: note.title, body: note.body, timeZone: note.attributes.timeZone, plan: note.attributes.plan })), fullReads: fullReads.length })}\n`)
+        expect(notes).toHaveLength(1)
+        if (existingEventId) {
+          expect(notes[0]?.entityId).toBe(existingEventId)
+          expect(notes[0]?.attributes.lifecycle).toMatchObject({ revision: 2 })
+        }
+        expect(await readMemoryDocument(workingDirectory)).toMatchObject({ exists: memoryBefore.exists, records: memoryBefore.records })
+        expect(notes[0]).toMatchObject({ attributes: { noteType: 'journal-plan' } })
+        const saved = JSON.stringify(notes)
+        expect(saved).not.toMatch(/Palm Bay|Florida|Miami|Example Lane|SYNTH-782/iu)
+        if (scenario !== 'unknown destination') expect(saved).toMatch(/Porto/iu)
+        else {
+          expect(saved).toMatch(/(?:destination|location)[^.!?]*(?:unknown|unspecified|unconfirmed|not (?:provided|supplied|specified|confirmed))/iu)
+          expect(saved).not.toMatch(/Porto/iu)
+        }
+        const upcoming = await refreshJournalTestContext(workingDirectory, '2026-11-01T07:00:00Z')
+        expect(upcoming.entries).toHaveLength(1)
+        expect(upcoming.entries[0]).toMatchObject({ timeZone: 'Europe/Lisbon', timing: 'all_day' })
+        const trip = upcoming.entries[0]!
+        const localDate = (instant: string) => new Intl.DateTimeFormat('en-CA', {
+          timeZone: 'Europe/Lisbon', year: 'numeric', month: '2-digit', day: '2-digit',
+        }).format(new Date(instant))
+        expect(localDate(trip.startsAt)).toBe('2026-11-10')
+        expect(localDate(trip.endsAt)).toBe('2026-11-12')
+        const commands = (await readFile(commandLogPath, 'utf8')).split('\n').filter(Boolean)
+        expect(commands.filter(command => command.includes('event note add') && !isRecordedVaultHelpCommand(command))).toHaveLength(existingEventId ? 0 : 1)
+        expect(commands.filter(command => command.includes('event edit') && !isRecordedVaultHelpCommand(command))).toHaveLength(existingEventId ? 1 : 0)
+        expect(commands.some(command => /memory (?:upsert|append|add)|habitat (?:upsert|add)/u.test(command))).toBe(false)
+        expect((await getKnowledgePage({ vault: workingDirectory, slug: 'journal-connected-context' })).page.body).toContain('mail_lodging_synthetic')
+      } finally {
+        await removeRealCodexTemporaryPath(workingDirectory)
+        await removeRealCodexTemporaryPaths(config.temporaryPaths)
+      }
+    }, 720_000,
+  )
 })
 
 describeRealCodex('real Codex Journal connected email travel capture e2e', () => {

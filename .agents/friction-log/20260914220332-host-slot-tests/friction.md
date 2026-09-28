@@ -22,3 +22,11 @@ Clear the inherited held-slot marker in the test harness default environment, wh
 ## Context
 
 The canonical direct-main acceptance command reaches these tests under its own acquired host slot. Both the test and admission implementation were unchanged by the candidate being verified.
+
+## Resolution
+
+The test environment now removes the inherited held-slot marker before applying
+per-case overrides. The automatic-admission regression supplies an ambient marker
+and still requires an acquired test slot; the existing reentrant case retains
+its explicit bypass. The full slot suite also passes with the marker inherited
+from its parent command.

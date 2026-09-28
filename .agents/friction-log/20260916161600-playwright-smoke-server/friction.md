@@ -22,3 +22,10 @@ Run `apps/web/e2e/pr-legacy-approval-repair-design-proof.spec.ts` with `page.got
 ## Context
 
 Cost one full dev-server cycle while proving the inline approval passkey repair on PR #3504.
+
+## Resolution
+
+The shared smoke configuration now binds and health-checks localhost and uses
+that domain as its browser base URL. The approval proof no longer rewrites
+the hostname. A real Chromium virtual-passkey regression fails on the original
+IP origin and passes through the canonical localhost smoke-server lifecycle.

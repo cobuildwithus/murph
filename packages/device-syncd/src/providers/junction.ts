@@ -10258,7 +10258,8 @@ function isFullJobTimeseriesContinuation(job: DeviceSyncJobRecord): boolean {
 
 function isJunctionTimeseriesWindowTooLarge(error: unknown): boolean {
   return isDeviceSyncError(error)
-    && error.code === "JUNCTION_API_WINDOW_TOO_LARGE";
+    && (error.code === "JUNCTION_API_WINDOW_TOO_LARGE"
+      || error.code === "JUNCTION_API_RECORD_LIMIT");
 }
 
 function resolveNextFullJobTimeseriesContinuation(input: {

@@ -15,6 +15,7 @@ export interface ToolFailureDiagnostic {
   deviceAction?: AssistantHostedDeviceToolRequest['action']
   deviceErrorCode?: DeviceToolFailureCode
   deviceHttpStatus?: number
+  connectedAppsHttpStatus?: number
 }
 
 // Exactly the source-owned codes recognized by the device adapter, not a
@@ -74,6 +75,31 @@ function readDeviceFailureErrorDetails(error: unknown): Pick<
     }
   } catch {
     return {}
+  }
+}
+
+/** Private status evidence only at the connected-app adapter's caught failure. */
+export function withConnectedAppsToolFailureDetails(
+  result: MurphDynamicToolExecutionResult,
+  error: unknown,
+): MurphDynamicToolExecutionResult {
+  if (result.rpcResult.success || !result.failureDiagnostic) return result
+  // Match device telemetry's own-data discipline without changing its reader.
+  // Reject proxies before descriptors; never inspect causes, context or prose.
+  if (typeof error !== 'object' || error === null || types.isProxy(error)) return result
+  try {
+    const read = (key: 'status' | 'statusCode'): unknown => {
+      const descriptor = Object.getOwnPropertyDescriptor(error, key)
+      return descriptor && Object.hasOwn(descriptor, 'value') ? descriptor.value : undefined
+    }
+    const status = read('status') ?? read('statusCode')
+    if (typeof status !== 'number' || !Number.isInteger(status) || status < 100 || status > 599) return result
+    return {
+      ...result,
+      failureDiagnostic: { ...result.failureDiagnostic, connectedAppsHttpStatus: status },
+    }
+  } catch {
+    return result
   }
 }
 

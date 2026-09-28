@@ -306,8 +306,12 @@ and recurring habits are preserved, including on retries. Source opt-outs still
 apply, and uncertain context does not authorize a mutation.
 Scheduled outdoor reminders independently resolve current member location and
 canonical travel, including recent segments after arrival leaves the upcoming
-projection. Plans remain conditional evidence. No separate reconciliation store,
-location store, or scheduler is introduced.
+projection. Plans remain conditional evidence. Lodging destinations require
+explicit source geography; property names and scenic amenities cannot establish a city. Capture
+reads the exact confirmation when a snippet is insufficient, preserves confirmed
+bookings with unknown destinations, and repairs unsupported imported geography
+through the same revision-checked event owner while preserving member corrections.
+No separate reconciliation store, location store, or scheduler is introduced.
 Each canonical Journal plan note owns end time, planned/tentative/canceled state, verification
 time, category, and optional connected account; existing event fields own start,
 timezone, title, source identity, revision, and detailed logistics. Typed note
@@ -4740,6 +4744,10 @@ encrypted-route backfill reaches readiness. Linq route owners take the member ro
 UPDATE`: this still serializes them with activation and each other, while
 remaining compatible with the foreign-key `KEY SHARE` taken when Linq, Telegram,
 or another channel appends mailbox work after changing the shared routing row.
+Prepared direct Linq admission uses the same lock mode with `SKIP LOCKED`,
+so unrelated referencing-row inserts do not exhaust its two preparation
+attempts. Competing member writers and deletion still fail the prepared lock;
+identity, root, and route checks remain inside the admission transaction.
 This avoids a second lock namespace and avoids a routing-row/member-row
 cross-channel deadlock. The effective proactive limit is the lower of the hard
 50-conversation ceiling and the line's configured

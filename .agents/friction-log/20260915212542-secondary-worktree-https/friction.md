@@ -22,3 +22,9 @@ Leave a root development Caddy proxy listening on the canonical local HTTPS orig
 ## Context
 
 This blocks authenticated provider OAuth tests even though the isolated Web and Worker services start successfully. Reconfiguring the other session's proxy requires an explicit handoff; terminating unrelated Caddy processes is not an acceptable workaround.
+
+## Verified current variant
+
+A composed reproduction confirmed that missing Caddy lets direct Web and Worker health pass while the advertised HTTPS proxy still returns 502 from a stale upstream. Automatic proxy startup now rejects missing Caddy or the repository Caddyfile when the canonical HTTPS origin is advertised. Explicit proxy skipping and ordinary direct HTTP behavior are preserved.
+
+The historical report does not establish whether Caddy was available on that session's PATH. This repair addresses the verified missing-required-proxy variant; it does not claim the original stale-proxy cause or authorize taking over another session's proxy.
