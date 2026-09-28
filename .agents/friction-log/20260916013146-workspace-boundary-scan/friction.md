@@ -22,3 +22,12 @@ Run `pnpm --dir apps/cloudflare runner:bundle` and, during generated health-comm
 ## Context
 
 The race obscures validation of an import-boundary correction and forces sequential verification despite independent source checks.
+
+## Resolution
+
+The scanner excludes the Health Commons generator's hidden PID-and-UUID
+replacement directories before traversal. It still inspects the published
+generated tree and ordinary source directories, including similarly named
+directories outside that staging format. Focused filesystem coverage verifies
+both replacement suffixes and preserves stable-source discovery; disappearance
+of ordinary source directories still fails instead of being silently ignored.

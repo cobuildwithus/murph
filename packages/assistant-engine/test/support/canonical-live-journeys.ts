@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -75,6 +75,14 @@ function canonicalCodexLauncher(): string {
 }
 
 export async function createCanonicalLiveFixture(config: CanonicalLiveConfig, channel: 'telegram' | 'linq' = 'telegram'): Promise<CanonicalLiveFixture> {
+  try {
+    await access(CLI_ENTRYPOINT)
+  } catch (error) {
+    if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
+      throw new Error('Canonical live journeys require the built CLI. Run pnpm build:test-runtime:prepared first.', { cause: error })
+    }
+    throw error
+  }
   const root = await mkdtemp(path.join(tmpdir(), 'murph-canonical-live-'))
   const vault = path.join(root, 'vault')
   const bin = path.join(root, '.local', 'bin')

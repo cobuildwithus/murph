@@ -6,6 +6,9 @@ in [the import-speed plan](exec-plans/completed/2026-09-24-garmin-import-speed.m
 [Batch/status failure telemetry](exec-plans/completed/2026-09-28-more-failure-telemetry.md)
 records the patch handoff; its contract remains in `docs/hosted-runtime-log-database.md`.
 
+Bounded snapshot PUT gateway retries are specified in the
+[hosted runtime protocol](references/hosted-runtime-protocol.md).
+
 Scheduled assistant real-model CI removal is recorded in
 [the CI removal plan](exec-plans/completed/2026-09-25-scheduled-ci-repair.md).
 
