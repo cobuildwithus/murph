@@ -69,7 +69,7 @@ describe('host support workflow guards', () => {
     expect(workflow).toContain(
       'MURPH_SUPPLEMENT_SEARCH_TEST_DB_URL: postgresql://postgres:postgres@127.0.0.1:5432/murph_search_test',
     )
-    expect(workflow).toContain('image: public.ecr.aws/docker/library/postgres:17')
+    expect(workflow).toContain('image: postgres:17')
     expect(workflow).toContain('POSTGRES_DB: murph_search_test')
     expect(workflow).toContain('POSTGRES_USER: postgres')
     expect(workflow).toContain('MURPH_VERIFY_STEP_PARALLEL: "1"')
