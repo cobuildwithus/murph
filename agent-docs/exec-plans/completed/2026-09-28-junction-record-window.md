@@ -1,6 +1,6 @@
 # Recover oversized Junction feature windows
 
-Status: active
+Status: completed
 Created: 2026-09-28
 
 ## Outcome and scope
@@ -37,5 +37,9 @@ Resource-only job recovery and increasing collection limits are out of scope.
   Device-sync and hosted Web typechecks passed.
 - [x] Parent candidate review, complexity (debt 315 to 315; max 96 to 96),
   documentation drift/gardening and whitespace checks passed.
-- [ ] Exact-head CI, mergeability, scoped commit and PR.
-- [ ] Authorized merge and protected hosted deployment with read-only verification.
+- [x] Scoped implementation commit and draft PR #3749.
+- Exact-head CI, mergeability and authorized protected deployment are release
+  gates tracked in the PR and automation handoff after this implementation plan
+  closes; no deployment or production recovery is claimed by this plan.
+Updated: 2026-09-28
+Completed: 2026-09-28

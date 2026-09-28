@@ -12,6 +12,8 @@
       "devices",
       "heart-rate"
     ],
-    "sourcePullRequests": []
+    "sourcePullRequests": [
+      3749
+    ]
   }
 }
