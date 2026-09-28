@@ -1531,6 +1531,24 @@ the existing response contract. After deployment, compare first-operation crypto
 and control-connection records with webhook-to-typing milestones. Local import
 benchmarks alone do not establish production latency savings.
 
+### Vercel source previews
+
+For an authorized source preview, run from the repository root of the task
+checkout already linked to the hosted Web Vercel project. Keep the project's
+configured root directory at `apps/web` so the upload includes workspace owners
+and Vercel builds the Web app:
+
+```sh
+vercel deploy --yes --target=preview --archive=tgz --no-wait
+```
+
+Use archive mode for this monorepo: its source tree can exceed Vercel's
+[15,000-file CLI upload limit](https://vercel.com/docs/limits#files).
+The [archive option](https://vercel.com/docs/cli/deploy#archive) compresses the
+deployment source before upload. The command uses the existing project link
+and credentials; `--no-wait` returns before the build finishes, so verify the
+preview's completed build before using it as review evidence.
+
 ### Vercel setup
 
 Set these under `Settings -> Environment Variables` in the Vercel project that
