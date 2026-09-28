@@ -19,98 +19,131 @@ import { createHostedRuntimeCallbackTiming } from "@/src/lib/hosted-execution/ru
 const HOSTED_WORKSPACE_CHECKPOINT_CALLBACK_BODY_LIMIT_BYTES = 256 * 1024;
 const runWithTiming = createHostedRuntimeCallbackTiming("checkpoint");
 
+type CheckpointFailureStage =
+  | "request_body"
+  | "request_schema"
+  | "runtime_authority"
+  | "publication"
+  | "response";
+
 export const POST = withJsonError((request: Request) => runWithTiming(request, async (timing) => {
   const userId = await requireHostedCloudflareCallbackRequest(request, {
     runtimeAuthority: "caller_transaction",
     maxBodyBytes: HOSTED_WORKSPACE_CHECKPOINT_CALLBACK_BODY_LIMIT_BYTES,
   });
   timing.authenticated();
-  const body = parseHostedWorkspaceCheckpointRequest(await readOptionalJsonObject(request));
-  const result = await checkpointHostedRuntimeWorkspace({
-    runtimeAuthority: readHostedRuntimeCallbackAuthority(request, {
+  let failureStage: CheckpointFailureStage = "request_body";
+  try {
+    const requestBody = await readOptionalJsonObject(request);
+    failureStage = "request_schema";
+    const body = parseHostedWorkspaceCheckpointRequest(requestBody);
+    failureStage = "runtime_authority";
+    const runtimeAuthority = readHostedRuntimeCallbackAuthority(request, {
       attemptId: body.attemptId,
       leaseGeneration: body.leaseGeneration,
       workspaceVersion: body.expectedWorkspaceVersion,
-    }),
-    expectedVersion: body.expectedWorkspaceVersion,
-    ...(body.handledConversationMailboxItemIds === undefined
-      ? {}
-      : {
-          handledConversationMailboxItemIds:
-            body.handledConversationMailboxItemIds,
-        }),
-    ...("inboxMediaRetentionWakeAt" in body
-      ? { inboxMediaRetentionWakeAt: body.inboxMediaRetentionWakeAt }
-      : {}),
-    // Legacy runtimes omit the capability group. Persist that as an explicit
-    // all-null epoch so a rollback fails open instead of retaining stale gates.
-    nextDefaultProcessingWakeAt:
-      body.nextDefaultProcessingWakeAt ?? null,
-    nextDefaultProcessingWakeReason:
-      body.nextDefaultProcessingWakeReason ?? null,
-    reason: body.reason,
-    snapshotRef: body.snapshotRef,
-    systemMailboxProgressGeneration:
-      body.systemMailboxProgressGeneration ?? null,
-    userId,
-    ...("nextWakeAt" in body ? { nextWakeAt: body.nextWakeAt } : {}),
-    ...("nextWakeReason" in body ? { nextWakeReason: body.nextWakeReason } : {}),
-    ...("redactedStatus" in body ? { redactedStatusJson: body.redactedStatus } : {}),
-  });
-
-  if (!result.workspace) {
-    throw new TypeError("Hosted workspace checkpoint requires an existing workspace row.");
-  }
-
-  if (
-    result.status === "updated"
-    && !result.canSkipRuntimeRecheck
-    && (
-      result.workspace.nextWakeAt !== null
-      || result.workspace.inboxMediaRetentionWakeAt !== null
-    )
-  ) {
-    const version = result.workspace.version;
-    const signalWake = () => signalWorkspaceWakeBestEffort(userId, version);
-    try {
-      after(signalWake);
-    } catch {
-      void signalWake();
-    }
-  }
-
-  return jsonOk(parseHostedWorkspaceCheckpointResponse({
-    checkpointed: result.status === "updated",
-    ...(result.status === "conflict"
-      ? { checkpointConflictReason: "workspace_version" }
-      : {}),
-    ...(result.conversationInputAhead === undefined
-      ? {}
-      : { conversationInputAhead: result.conversationInputAhead }),
-    ...(result.status === "updated"
-      ? { replacedSnapshotRef: result.replacedSnapshotRef }
-      : {}),
-    workspace: {
-      browserVaultReplicaRef: result.workspace.browserVaultReplicaRef,
-      checkpointedAt: result.workspace.checkpointedAt,
-      createdAt: result.workspace.createdAt,
-      inboxMediaRetentionWakeAt: result.workspace.inboxMediaRetentionWakeAt,
+    });
+    failureStage = "publication";
+    const result = await checkpointHostedRuntimeWorkspace({
+      runtimeAuthority,
+      expectedVersion: body.expectedWorkspaceVersion,
+      ...(body.handledConversationMailboxItemIds === undefined
+        ? {}
+        : {
+            handledConversationMailboxItemIds:
+              body.handledConversationMailboxItemIds,
+          }),
+      ...("inboxMediaRetentionWakeAt" in body
+        ? { inboxMediaRetentionWakeAt: body.inboxMediaRetentionWakeAt }
+        : {}),
+      // Legacy runtimes omit the capability group. Persist that as an explicit
+      // all-null epoch so a rollback fails open instead of retaining stale gates.
       nextDefaultProcessingWakeAt:
-        result.workspace.nextDefaultProcessingWakeAt,
+        body.nextDefaultProcessingWakeAt ?? null,
       nextDefaultProcessingWakeReason:
-        result.workspace.nextDefaultProcessingWakeReason,
-      nextWakeAt: result.workspace.nextWakeAt,
-      nextWakeReason: result.workspace.nextWakeReason,
-      redactedStatus: result.workspace.redactedStatusJson,
-      snapshotRef: result.workspace.snapshotRef,
+        body.nextDefaultProcessingWakeReason ?? null,
+      reason: body.reason,
+      snapshotRef: body.snapshotRef,
       systemMailboxProgressGeneration:
-        result.workspace.systemMailboxProgressGeneration,
-      updatedAt: result.workspace.updatedAt,
-      userId: result.workspace.userId,
-      version: result.workspace.version,
-    },
-  }));
+        body.systemMailboxProgressGeneration ?? null,
+      userId,
+      ...("nextWakeAt" in body ? { nextWakeAt: body.nextWakeAt } : {}),
+      ...("nextWakeReason" in body ? { nextWakeReason: body.nextWakeReason } : {}),
+      ...("redactedStatus" in body ? { redactedStatusJson: body.redactedStatus } : {}),
+    });
+
+    if (!result.workspace) {
+      throw new TypeError("Hosted workspace checkpoint requires an existing workspace row.");
+    }
+
+    if (
+      result.status === "updated"
+      && !result.canSkipRuntimeRecheck
+      && (
+        result.workspace.nextWakeAt !== null
+        || result.workspace.inboxMediaRetentionWakeAt !== null
+      )
+    ) {
+      const version = result.workspace.version;
+      const signalWake = () => signalWorkspaceWakeBestEffort(userId, version);
+      try {
+        after(signalWake);
+      } catch {
+        void signalWake();
+      }
+    }
+
+    failureStage = "response";
+    return jsonOk(parseHostedWorkspaceCheckpointResponse({
+      checkpointed: result.status === "updated",
+      ...(result.status === "conflict"
+        ? { checkpointConflictReason: "workspace_version" }
+        : {}),
+      ...(result.conversationInputAhead === undefined
+        ? {}
+        : { conversationInputAhead: result.conversationInputAhead }),
+      ...(result.status === "updated"
+        ? { replacedSnapshotRef: result.replacedSnapshotRef }
+        : {}),
+      workspace: {
+        browserVaultReplicaRef: result.workspace.browserVaultReplicaRef,
+        checkpointedAt: result.workspace.checkpointedAt,
+        createdAt: result.workspace.createdAt,
+        inboxMediaRetentionWakeAt: result.workspace.inboxMediaRetentionWakeAt,
+        nextDefaultProcessingWakeAt:
+          result.workspace.nextDefaultProcessingWakeAt,
+        nextDefaultProcessingWakeReason:
+          result.workspace.nextDefaultProcessingWakeReason,
+        nextWakeAt: result.workspace.nextWakeAt,
+        nextWakeReason: result.workspace.nextWakeReason,
+        redactedStatus: result.workspace.redactedStatusJson,
+        snapshotRef: result.workspace.snapshotRef,
+        systemMailboxProgressGeneration:
+          result.workspace.systemMailboxProgressGeneration,
+        updatedAt: result.workspace.updatedAt,
+        userId: result.workspace.userId,
+        version: result.workspace.version,
+      },
+    }));
+  } catch (error) {
+    reportCheckpointFailure(failureStage, error);
+    throw error;
+  }
 }));
+
+function reportCheckpointFailure(stage: CheckpointFailureStage, error: unknown): void {
+  try {
+    console.warn("Hosted workspace checkpoint failed.", {
+      errorClass: error instanceof TypeError ? "type_error"
+        : error instanceof RangeError ? "range_error"
+        : error instanceof Error ? "error" : "non_error",
+      schema: "murph.hosted-workspace.checkpoint.failure.v1",
+      stage,
+    });
+  } catch {
+    // Failure telemetry must never replace the original checkpoint failure.
+  }
+}
 
 async function signalWorkspaceWakeBestEffort(userId: string, version: string): Promise<void> {
   try {

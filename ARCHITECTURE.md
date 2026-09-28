@@ -4744,6 +4744,10 @@ encrypted-route backfill reaches readiness. Linq route owners take the member ro
 UPDATE`: this still serializes them with activation and each other, while
 remaining compatible with the foreign-key `KEY SHARE` taken when Linq, Telegram,
 or another channel appends mailbox work after changing the shared routing row.
+Prepared direct Linq admission uses the same lock mode with `SKIP LOCKED`,
+so unrelated referencing-row inserts do not exhaust its two preparation
+attempts. Competing member writers and deletion still fail the prepared lock;
+identity, root, and route checks remain inside the admission transaction.
 This avoids a second lock namespace and avoids a routing-row/member-row
 cross-channel deadlock. The effective proactive limit is the lower of the hard
 50-conversation ceiling and the line's configured

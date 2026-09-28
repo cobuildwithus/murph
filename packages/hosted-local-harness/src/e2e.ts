@@ -1139,7 +1139,6 @@ async function cleanupHostedLocalE2eRunnerArtifacts(
     await import("./dev-hosted-local/runtime.ts");
   const {
     cleanupHostedLocalMinioBuildContainersBestEffort,
-    cleanupHostedLocalMinioE2eContainersBestEffort,
   } =
     await import("./dev-hosted-local/minio.ts");
 
@@ -1162,5 +1161,4 @@ async function cleanupHostedLocalE2eRunnerArtifacts(
   if (buildId) {
     await cleanupHostedLocalMinioBuildContainersBestEffort(env, buildId);
   }
-  await cleanupHostedLocalMinioE2eContainersBestEffort(env);
 }

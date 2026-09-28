@@ -34,3 +34,11 @@ on the preceding equivalent-source head and on a same-head workflow rerun.
 This blocked completion of an unrelated vault-storage PR after a documentation
 closeout commit. Web source, browser tests and workflow configuration were
 unchanged between the passing and failing heads. No assertion was weakened.
+
+## Resolution
+
+The hover assertion now polls within Playwright's existing assertion deadline
+before checking that the adjacent source keeps its original color. A synthetic
+Chromium fixture reproduces the immediate-read failure with a delayed color
+transition. Replaying the actual assertion passes for the isolated hover and
+still rejects a missing hover effect or a color change on the adjacent source.

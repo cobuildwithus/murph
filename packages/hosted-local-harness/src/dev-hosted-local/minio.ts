@@ -524,27 +524,6 @@ export async function cleanupHostedLocalMinioBuildContainersBestEffort(
   );
 }
 
-export async function cleanupHostedLocalMinioE2eContainersBestEffort(
-  env: NodeJS.ProcessEnv,
-): Promise<void> {
-  const listedContainerIds = await runDockerCaptureBestEffort(env, [
-    "ps",
-    "-aq",
-    "--filter",
-    `label=${HOSTED_LOCAL_MINIO_ROLE_LABEL}`,
-    "--filter",
-    `label=${HOSTED_LOCAL_MINIO_E2E_LABEL}`,
-  ]);
-  if (!listedContainerIds.trim()) {
-    return;
-  }
-  await runDockerBestEffort(env, [
-    "rm",
-    "-f",
-    ...listedContainerIds.trim().split(/\s+/u),
-  ]);
-}
-
 function inferHostedLocalMinioBuildIdFromContainerName(containerName: string): string | null {
   if (!containerName.startsWith(HOSTED_LOCAL_MINIO_CONTAINER_NAME_PREFIX)) {
     return null;

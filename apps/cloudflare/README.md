@@ -22,6 +22,12 @@ Cloudflare-hosted execution plane for the hosted Murph path.
 
 ## Focused tests
 
+Hosted-local failure status retains at most eight recent runtime log metadata
+entries, selected only from the existing level, component, phase and event-code
+enums. The formatter omits timestamps, identifiers, free-form errors and all log
+payloads; raw stream text still uses its existing redaction path. Unknown enum
+values contribute no metadata entry.
+
 Hosted-local barrier and fault-injection controls use the existing member-keyed
 RunnerContainer test RPCs to update test-isolate memory before allocation.
 They do not reconcile the runtime owner or select a physical runner. Shutdown,

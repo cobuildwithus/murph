@@ -444,7 +444,7 @@ test("Junction programmatic timeseries overrides fetch exactly the requested res
   assert.deepEqual([...new Set(importedTimeseriesResources)].sort(), ["heartrate", "steps"]);
 });
 
-test("Junction page-heavy timeseries adapt to a smaller complete window before the parent budget", async () => {
+test.each(["page", "record"] as const)("Junction %s-heavy timeseries adapt to a smaller complete window before the parent budget", async (limit) => {
   const requests: string[] = [];
   const importedSnapshots: unknown[] = [];
   const provider = createJunctionDeviceSyncProvider({
@@ -488,6 +488,18 @@ test("Junction page-heavy timeseries adapt to a smaller complete window before t
         await new Promise<void>((resolve) => setTimeout(resolve, 5));
         const searchParams = new URL(url).searchParams;
         if (searchParams.get("start_date") === "2026-04-02") {
+          if (limit === "record") {
+            return createJsonResponse({
+              groups: { garmin: [{
+                data: Array.from({ length: 25_001 }, (_, index) => ({
+                  timestamp: new Date(Date.parse("2026-04-02T00:00:00.000Z") + index * 1_000).toISOString(),
+                  unit: "bpm",
+                  value: 72,
+                })),
+                source: { provider: "garmin", type: "watch" },
+              }] },
+            });
+          }
           return createJsonResponse({
             groups: {},
             next_cursor: searchParams.get("next_cursor") === "page-3"
@@ -551,12 +563,12 @@ test("Junction page-heavy timeseries adapt to a smaller complete window before t
   clearTimeout(parentBudget);
 
   assert.equal(parent.signal.aborted, false);
-  assert.equal(requests.length, 3);
+  assert.equal(requests.length, limit === "page" ? 3 : 1);
   assert.equal(requests.every((url) => url.includes("/v2/timeseries/")), true);
   assert.equal(importedSnapshots.length, 0);
   const hourlyContinuation = requireValue(
     adaptiveResult.scheduledJobs?.[0],
-    "A page-heavy feature day should retry as a complete hour.",
+    "An oversized feature day should retry as a complete hour.",
   );
   assert.deepEqual(hourlyContinuation.payload, {
     emptyBackfillAttempts: 1,
@@ -583,6 +595,47 @@ test("Junction page-heavy timeseries adapt to a smaller complete window before t
     windowEnd: "2026-04-03T00:00:00.000Z",
     windowStart: "2026-04-02T00:00:00.000Z",
   });
+});
+
+test.each([
+  { resource: "heartrate", hours: 1 },
+  { resource: "steps", hours: 24 },
+])("Junction record limits preserve the $resource $hours-hour boundary", async ({ resource, hours }) => {
+  let imports = 0;
+  let requests = 0;
+  const provider = createJunctionProvider(async (input) => {
+    assert.match(readUrl(input), new RegExp(`/timeseries/junction-user-1/${resource}/grouped`));
+    requests += 1;
+    return createJsonResponse({
+      groups: { garmin: [{
+        data: Array.from({ length: 25_001 }, () => ({
+          timestamp: "2026-04-02T00:30:00.000Z",
+          unit: resource === "heartrate" ? "bpm" : "count",
+          value: 72,
+        })),
+        source: { provider: "garmin", type: "watch" },
+      }] },
+    });
+  }, { summaryResources: [], timeseriesResources: [resource] });
+
+  await assert.rejects(
+    executeJunctionJob(
+      provider,
+      createJunctionJobContext({
+        importSnapshot: async () => { imports += 1; return { imported: true }; },
+      }),
+      createJob("reconcile", {
+        timeseriesCursor: "2026-04-02T00:00:00.000Z",
+        timeseriesResourceCursor: resource,
+        ...(hours === 1 ? { timeseriesWindowHours: 1 } : {}),
+        windowStart: "2026-04-02T00:00:00.000Z",
+        windowEnd: "2026-04-03T00:00:00.000Z",
+      }),
+    ),
+    { code: "JUNCTION_API_RECORD_LIMIT", retryable: true },
+  );
+  assert.equal(requests, 1);
+  assert.equal(imports, 0);
 });
 
 test("Junction deployed full-job progress resumes once and emits only scalar successors", async () => {
