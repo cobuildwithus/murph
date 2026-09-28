@@ -1,6 +1,6 @@
 # Focused sleep-list projection read
 
-Status: active; draft PR #3752, live proof passed; final ReviewGPT and exact-head CI pending
+Status: completed
 Created: 2026-09-28
 Updated: 2026-09-28
 
@@ -55,16 +55,17 @@ unchanged shared-owner rollback, reset and cross-process behavior.
    its printed reply: one correct Oura sleep data read, no unrelated reads,
    writes or sends, truthful duration rather than time in bed. Default TOON is
    preserved; targeted syntax help and explicitly requested JSON remain allowed.
-4. Parent owns final review, PR and exact-head CI; return validation facts for
-   author-only plan closure. No merge or deploy is authorized. Request the
-   author's `sourcePullRequests` replacement after a PR exists; do not invent a source PR or measured production claim.
+4. Parent completed final review; PR #3752 records the changelog source reference.
+   Completion workflow step 7 archives this plan through `scripts/finish-task`;
+   step 8 still requires exact-head CI and mergeability on the final docs-only
+   commit. No PR merge or deployment is authorized.
 
-## Handoff state
+## Closeout and remaining PR gate
 
 Patch 1 has no runtime change and no candidate-only default assertions. Patch 2
 changes only sleep's fresh-row acquisition/composition, adds candidate phase and
 partial/global publication proof, and documents the precise query contract.
-Parent verified and applied patches 01-05. Draft PR #3752 now supplies the
+Parent verified and applied patches 01-05. PR #3752 supplies the
 changelog's `sourcePullRequests: [3752]`; member-facing copy is unchanged.
 Candidate `c6f6fe538e42` was reconciled with main
 `7b97cbe7d646b92c9d8987b4fb6dbf9a2b04916a` by merge `51530202764`, preserving
@@ -87,9 +88,32 @@ the actual-sleep reply (7 hours 30 minutes, night ending January 3) `Ready`.
 Deterministic JSON/TOON contract plus direct/wrapped cases: 3 passed; assistant
 typecheck passed. Post-main public query build, three package typechecks and
 dedicated benchmark types passed; focused sleep plus independent event regression:
-18 passed. Earlier shared-owner proof had 55 passed and 1 opt-in skipped; the
-post-merge shared-owner suite is still running and its verdict remains pending.
+18 passed. Post-merge source-health/canonical-writer/codec proof: 59 passed,
+1 opt-in measurement skipped, superseding the earlier 55-pass shared run.
+Parent ran installed-dependency suites locally on Node 24.14.1.
 
-Final ReviewGPT and exact-head CI remain pending. Parent returns verified outcomes
-for author-only closure; keep this plan active. No PR merge or deployment is
-authorized. Completed plans are historical evidence, not authority.
+Parent verified final ReviewGPT round 1 `PASS` on
+`f83801e1f7b704b91fb9a755d4c1b56f7ce08537`, with no qualifying findings:
+[review conversation](https://chatgpt.com/c/6abaedd5-d21c-83ea-b536-f8cc5d204e90).
+Exact committed turn/hash, requested `gpt-6-pro` / selected `6Pro`, full snapshot
+1/1, round metadata and 14 postimages were verified. Capture exceeded the
+180-second minimum: submission 22:44:33Z, still waiting at 22:49:41Z before capture.
+The reviewer traced CLI/service/vault-share and shared owners and passed all
+6 benchmark-validator tests; installed-dependency suites were unavailable there
+(Node 22, no installed dependencies), not substituted for the parent's local proof.
+Parent final diff review: `Ready`.
+
+Implementation, local proof and external review are complete; required GitHub CI
+is queued/running, not passed. Parent will push the final docs-only closeout after
+`scripts/finish-task`, then require green CI on that exact final commit and verify
+mergeability. Parent proved a clean merge-tree against main
+`506fd170644b6490a85c95e881d85d9f281fc56b` without modifying the candidate;
+final-head verification remains required. [PR #3752](https://github.com/cobuildwithus/murph/pull/3752)
+owns the pending CI gate and any follow-up. No PR merge or deployment is authorized
+or performed.
+
+Parent retired baseline and temporary tooling detached worktrees cleanly; the
+open-PR worktree is retained. Known ReviewGPT tooling friction was deduplicated;
+no new Frog entry. This record closes implementation and review, not CI or release.
+Completed plans are historical evidence, not current operating authority.
+Completed: 2026-09-28
