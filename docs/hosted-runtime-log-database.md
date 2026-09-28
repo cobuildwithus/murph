@@ -1410,6 +1410,49 @@ separate. Propose a behavior correction only after at least two matching
 action/code observations and a deterministic reproduction at the responsible
 owner; telemetry alone does not establish the original cause.
 
+### Batch read attribution and connected-app failure status
+
+Parsed batch children for exactly `knowledge show`, `event show` and
+`event payload-schema` use the existing `vault-cli knowledge` / `vault-cli event`
+profile labels. Known knowledge children contribute the existing optional
+`knowledgeCounts` from parsed argv operation, success and structured error code;
+counters never parse stdout or data, in either compact or noncompact mode. Direct
+and batch contributions merge in either order, including direct failures. Unknown
+batch paths still use `other`; malformed envelopes retain the outer batch fallback.
+The v2 profile, safe integer sums, child/family caps, timing and byte semantics are
+unchanged. Missing-page counts describe expected rejections, not bad model behavior.
+
+The outer connected-app execution catch may add only `connectedAppsHttpStatus`
+to its existing private failure diagnostic/classification row. It is an integer
+100..599 from an own data `status`, falling back to own data `statusCode` only
+when status is nullish. The observer rejects proxies before descriptors and does
+not invoke accessors, follow prototypes/context/causes, coerce values, or retain
+codes, names, messages, arguments, payloads, identifiers or URLs. Invalid or absent
+status is omitted. Ordinary, ambiguous-write and official-alert caught failures
+retain their exact RPC text, error category and retry posture. No field is taken
+from successful/oversized results, local preflight/admission refusals, or the
+separate local disconnect-cleanup failure. This does not repair pre-existing
+RPC error projection or infer transport failure from absent status.
+
+No new event, profile label or schema is required. The unchanged issue reporter,
+sanitizer and record parser accept the optional numeric detail (six keys in a
+connected-app classification row, below the existing 24-key cap). Existing usage
+readers already accept these labels and optional knowledge counters. Old producers
+and records remain valid; this patch does not backfill historical attribution.
+Deploy compatible readers first wherever they are not already present, then the
+producer runtime. Verify exact reader release and Worker/runner bundle versions,
+including warm containers, before comparing natural emissions across a fixed,
+bounded prior/latest window. Do not induce failures or mutate production data.
+
+Group future connected-app classification failures by the bounded status, keeping
+413 separate from status-absent/unknown evidence. A 413 on an otherwise-valid
+oversized request belongs to the efficiency investigation, not a presumed prompt
+bug; unrelated Web status observations do not establish request correlation.
+Use batch knowledge counters to identify missing-page rejections. Keep completion
+rows as the existing call denominator, not extra failures, and do not add profile
+counts to overlapping native CLI counts. Unresolved connection loss remains
+unresolved. This rollout grants no automatic rollback or production mutation.
+
 ### Finite CLI failure counts (optional, same timing identity)
 
 Each non-successful invocation from a new producer contributes at most one

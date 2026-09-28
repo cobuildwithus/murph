@@ -3,6 +3,9 @@ in [the import-speed plan](exec-plans/completed/2026-09-24-garmin-import-speed.m
 
 # Murph Agent Docs Index
 
+[Batch/status failure telemetry](exec-plans/completed/2026-09-28-more-failure-telemetry.md)
+records the patch handoff; its contract remains in `docs/hosted-runtime-log-database.md`.
+
 Bounded snapshot PUT gateway retries are specified in the
 [hosted runtime protocol](references/hosted-runtime-protocol.md).
 
