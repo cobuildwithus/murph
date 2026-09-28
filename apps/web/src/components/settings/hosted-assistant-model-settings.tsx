@@ -82,18 +82,18 @@ function isAssistantRoutingChoice(
 
 const MODEL_OPTIONS = [
   {
-    artwork: "sol",
-    description: "Deep health intelligence",
-    model: HOSTED_ASSISTANT_GPT_6_SOL_MODEL,
-    name: "Sol",
-    usage: "Balanced usage",
-  },
-  {
     artwork: "luna",
     description: "Fast health intelligence",
     model: HOSTED_ASSISTANT_GPT_6_LUNA_MODEL,
     name: "Luna",
     usage: "Low usage",
+  },
+  {
+    artwork: "sol",
+    description: "Deep health intelligence",
+    model: HOSTED_ASSISTANT_GPT_6_SOL_MODEL,
+    name: "Sol",
+    usage: "Balanced usage",
   },
   {
     artwork: "astra",
