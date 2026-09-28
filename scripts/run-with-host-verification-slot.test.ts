@@ -13,7 +13,7 @@ import {
 import os from "node:os";
 import path from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 const repoRoot = path.resolve(import.meta.dirname, "..");
 const wrapperPath = path.join(repoRoot, "scripts", "run-with-host-verification-slot.mjs");
@@ -25,6 +25,7 @@ const holderSource = `
   process.stdin.resume();
 `;
 afterEach(async () => {
+  vi.unstubAllEnvs();
   for (const child of children) {
     child.stdin?.end();
     if (child.exitCode === null && child.signalCode === null) {
@@ -74,6 +75,7 @@ describe("shared-host verification slots", () => {
   });
 
   it("automatically admits Codex commands and propagates the normalized mode", () => {
+    vi.stubEnv("MURPH_VERIFY_HOST_SLOT_HELD", "1");
     const stateRoot = makeTempRoot();
     const source = `
       const { existsSync } = require("node:fs");
@@ -307,6 +309,7 @@ function slotEnv(
   const {
     CI: _ci,
     CODEX_THREAD_ID: _codexThreadId,
+    MURPH_VERIFY_HOST_SLOT_HELD: _hostSlotHeld,
     MURPH_VERIFY_SHARED_HOST: _sharedHostMode,
     ...baseEnv
   } = process.env;

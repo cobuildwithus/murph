@@ -110,7 +110,9 @@ pnpm dev:worktree <slug>
 
 The helper still binds Web, Worker, Temporal, and MinIO to their isolated
 worktree ports. It starts Caddy for `https://local.withmurph.ai:3443` and prints
-that browser URL after startup. The app session, Oura callback, and other
+that browser URL after startup. When this canonical HTTPS origin is advertised,
+automatic proxy startup requires Caddy on `PATH` and the repository `Caddyfile`;
+a missing dependency or configuration stops startup. The app session, Oura callback, and other
 browser-facing URLs use the same hostname. It rejects other public Web origins
 so an inherited hosted URL cannot redirect local mutations or callbacks to a
 remote environment.

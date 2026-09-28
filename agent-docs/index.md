@@ -414,6 +414,7 @@ is recorded in [`2026-09-18-ios-canary-deployment-continuity.md`](exec-plans/com
 | `docs/device-provider-contribution-kit.md` | Maintainer guide for adding wearable providers. | Provider contribution workflow | Medium | 2026-05-13 |
 | `docs/device-provider-compatibility-matrix.md` | Canonical provider planning matrix and evidence expectations. | Device-provider normalization planning | Medium | 2026-07-14 |
 | `docs/hosted-auth-migration.md` | Staged Privy removal, encrypted Better Auth backend, Ops import, approved credential changes, saved-key recovery, shared account connections, temporary Ops unused-signup cleanup, session/native continuity, conditional iPhone update policy and retirement gates. | Hosted auth migration rollout | High | 2026-09-10 |
+| `agent-docs/exec-plans/completed/2026-09-28-passkey-smoke-origin.md` | Domain-origin browser proof for the passkey smoke harness. | Historical browser proof implementation | Low | 2026-09-28 |
 | `docs/hosted-contact-privacy-rotation.md` | Hosted blind-index keyring seam and future rotation constraints. | Hosted contact-privacy rotation seam | Medium | 2026-07-16 |
 | `docs/hosted-linq-db-home-lines-migration.md` | Database-backed Linq home-line assignment, provider inventory freshness, and bounded Serializable snapshot recovery. | Hosted Linq line ownership and rollout | High | 2026-09-11 |
 | `docs/hosted-account-data-deletion-export.md` | Hosted account data export and deletion workflow, store coverage, security checks, retention limits, and the authenticated canary diagnostic-retention exception. | Hosted account privacy workflow | High | 2026-05-13 |
@@ -426,6 +427,7 @@ is recorded in [`2026-09-18-ios-canary-deployment-continuity.md`](exec-plans/com
 | `agent-docs/PRODUCT_SENSE.md` | Product posture, scope, member workspace troubleshooting, and complete unfiltered private workspace archives. | Current product behavior | High | 2026-09-17 |
 | `agent-docs/PRODUCT_CONSTITUTION.md` | Internal product constitution and tradeoff rules. | Product principles | High | 2026-07-15 |
 | `agent-docs/FRONTEND.md` | Frontend implementation guidance for `apps/web`. | Current frontend implementation guidance | Medium | 2026-08-31 |
+| `agent-docs/exec-plans/completed/2026-09-28-viewport-animation-csp.md` | Viewport animation setup and CSP regression proof. | Historical browser proof implementation | Low | 2026-09-28 |
 | `agent-docs/product-marketing-context.md` | Product/marketing decisions. | Product/marketing decisions | High | 2026-07-15 |
 | `agent-docs/user-interviews.md` | User research method. | User research method | Medium | 2026-07-12 |
 | `agent-docs/QUALITY_SCORE.md` | Current quality posture by area. | Current repo quality posture | Medium | 2026-04-06 |
@@ -531,7 +533,7 @@ is recorded in [`2026-09-18-ios-canary-deployment-continuity.md`](exec-plans/com
 | `agent-docs/operations/completion-workflow.md` | Parent-owned completion evidence, final ReviewGPT eligibility and recovery before the first valid review, verified-base mergeability, and Draft-before-push ordering; specialist passes are retired. | Completion workflow | High | 2026-09-11 |
 | `agent-docs/operations/imessage-deliverability.md` | Phone-number messaging policy, iMessage-only inactivity and canonical requested-Ask exemptions, and direct duplicate handoff identity. | Phone-number messaging policy | High | 2026-09-17 |
 | `agent-docs/operations/local-storage-lifecycle.md` | Local rebuildable-storage lifecycle, guarded retirement, and dependency hook setup. | Local rebuildable-storage lifecycle | High | 2026-09-11 |
-| `agent-docs/operations/hosted-local-worktree-dev.md` | Local hosted runtime workflow, call-scoped cancellation, and exact-child startup/exit cleanup ownership. | Local hosted runtime workflow | Medium | 2026-09-05 |
+| `agent-docs/operations/hosted-local-worktree-dev.md` | Local hosted runtime workflow, required canonical HTTPS proxy dependencies, call-scoped cancellation, and exact-child startup/exit cleanup ownership. | Local hosted runtime workflow | Medium | 2026-09-28 |
 | `agent-docs/exec-plans/completed/2026-09-25-frog-reviewgpt-recovery.md` | Exact accepted ReviewGPT request recovery, guarded dependency context, and accepted final-finding remediation evidence. | Completed execution plan | Low | 2026-09-28 |
 | `agent-docs/operations/pr-reviewgpt-loop.md` | PR review for realistic serious bugs and material Complexity Collapse, with a three-round review cap, exact tracked archive inputs, no base-update limit, response timing and evidence requirements, same-session waiting or paced polling by default, exact-metadata and transient-URL recovery, guarded companion snapshots, and invalid-first-attempt baseline recovery. | Final PR ReviewGPT loop | Medium | 2026-09-25 |
 | `agent-docs/operations/device-sync-ingestion-invariants.md` | Device-sync push/pull ingestion, daily recovery, checkpoint-owned continuation preflight, bounded deferral of future history, pending-start history scans, bounded completion-marker retention, and operation-local source admission reuse. | Device-sync ingestion contract | High | 2026-09-20 |
@@ -562,6 +564,7 @@ is recorded in [`2026-09-18-ios-canary-deployment-continuity.md`](exec-plans/com
 | `agent-docs/exec-plans/completed/2026-09-18-food-search-ranking.md` | PR #3564: implementation and final review complete; 134-test PostgreSQL 17 owner passed; final exact-head CI gate remains on the open PR. | Completed implementation evidence | Medium | 2026-09-18 |
 | `agent-docs/exec-plans/completed/2026-09-18-automation-list-validation-telemetry.md` | Finite automation-list validation attribution, parent native/local proof and old-reader compatibility; final PR records review, CI and deployment outcomes. | Historical implementation evidence | Medium | 2026-09-18 |
 | `agent-docs/exec-plans/completed/2026-09-24-web-opening-aspiration.md` | Third Web reply and canonical identity handoff verification. | Completed implementation evidence | Medium | 2026-09-24 |
+| `agent-docs/exec-plans/completed/2026-09-28-frog-log-presence.md` | Boolean presence metadata classification and raw-payload rejection regression proof. | Historical tooling evidence | Low | 2026-09-28 |
 | `agent-docs/exec-plans/completed/2026-09-23-gpt6-defaults.md` | GPT-6 managed inference defaults and focused model-selection proof. | Completed execution plan | Medium | 2026-09-23 |
 | `agent-docs/exec-plans/completed/2026-09-23-vault-share-background.md` | Isolated checkpoint projection that continues across foreground replies; ownership and verification. | Hosted vault-share background execution | Medium | 2026-09-23 |
 | `agent-docs/exec-plans/completed/2026-09-28-junction-record-window.md` | Bounded recovery for oversized Junction hourly-feature days. | Device-sync recovery plan | Medium | 2026-09-28 |
@@ -585,6 +588,7 @@ is recorded in [`2026-09-18-ios-canary-deployment-continuity.md`](exec-plans/com
 | `agent-docs/prompts/seam-audits/` | One-pass bespoke seam prompts governed by a shared review-only, evidence, correction, and zero-finding contract. | Seam-audit prompt library | Low | 2026-07-13 |
 | `apps/web/README.md` | Hosted Web setup, runtime ownership, build/deploy contracts, and bounded legacy phone-call deletion execution. | `apps/web/**` | Medium | 2026-09-10 |
 | `apps/cloudflare/README.md` | Hosted execution-plane overview, runtime contract, pinned native Codex build/update ownership, search-first `cf` API operations, pinned open-beta setup, existing Wrangler workflow exceptions, and retired member shell-hint transport. | `apps/cloudflare/**` | Medium | 2026-09-28 |
+| `agent-docs/exec-plans/completed/2026-09-28-terminal-log-metadata.md` | Bounded hosted-local failure metadata and closed-enum diagnostic regression proof. | Historical harness evidence | Low | 2026-09-28 |
 | `apps/cloudflare/scripts/benchmark-workspace-restore.md` | Synthetic encrypted restore benchmark, measurement controls, and local/Linux limitations. | Cloudflare workspace restore | Medium | 2026-09-04 |
 | `apps/cloudflare/DEPLOY.md` | Current deployment procedure for hosted execution, consumer-first Web runtime admission, single-pool capacity, isolated artifact smoke, compatible native gradual rollout, and member shell-hint transport retirement. | Hosted deploy flow | Medium | 2026-09-10 |
 | `packages/assistant-runtime/README.md` | Headless hosted runtime, durable completion, and Browser Vault wake qualification. | `packages/assistant-runtime/**` | Medium | 2026-09-11 |
@@ -808,3 +812,6 @@ Vault-share deferral diagnostic work is tracked in
 
 Hosted CI PostgreSQL registry provenance is tracked in
 [`2026-09-28-postgres-ci-registry.md`](exec-plans/completed/2026-09-28-postgres-ci-registry.md).
+
+The E2E MinIO cleanup ownership repair is tracked in
+[`2026-09-28-minio-e2e-cleanup-ownership.md`](exec-plans/completed/2026-09-28-minio-e2e-cleanup-ownership.md).

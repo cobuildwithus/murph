@@ -22,3 +22,7 @@ Run findRawHealthLogPayloadMatches on synthetic TypeScript containing console.in
 ## Context
 
 This false positive blocked an internal timing-only change in the release verification lane. The task uses the explicit boolean local without weakening the guard.
+
+## Resolution
+
+The guard now accepts strict comparisons against null or undefined because their result is always boolean. Regression tests retain rejection of direct payloads, payload-returning logical and conditional expressions, adjacent payload properties, and nested logging calls.

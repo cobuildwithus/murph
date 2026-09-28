@@ -22,3 +22,10 @@ Have the existing harness failure formatter or artifact collector include a boun
 ## Context
 
 This obstructs diagnosis of a required predeploy gate. Retrying the same pinned candidate can establish whether the failure persists, but does not recover the missing exception or prove its cause.
+
+## Resolution
+
+The structured failure formatter now includes at most eight entries containing
+only existing closed-enum level, component, phase and event-code values. Payloads,
+free-form error text, timestamps and identifiers remain omitted. Synthetic tests
+cover both terminal-output paths, the bound and rejection of unknown enum values.

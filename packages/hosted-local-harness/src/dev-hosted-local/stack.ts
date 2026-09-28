@@ -26,6 +26,7 @@ import {
   DEFAULT_WEB_PORT,
   DEFAULT_WORKER_PERSIST_DIR,
   DEFAULT_WORKER_PORT,
+  HOSTED_LOCAL_HTTPS_ORIGIN,
   HOSTED_LOCAL_WORKTREE_ROOT,
   HOSTED_LOCAL_RUNNER_BUNDLE_ROOT,
   HOSTED_LOCAL_DEPLOY_SMOKE_USE_BUILD_ID_ENV,
@@ -2600,14 +2601,25 @@ function maybeStartTlsProxy(input: {
     return null;
   }
 
+  const requiresManagedHttps = input.runtimeEnv.HOSTED_WEB_BASE_URL?.trim()
+    === HOSTED_LOCAL_HTTPS_ORIGIN;
   const caddyfilePath = path.join(repoRoot, "Caddyfile");
   if (!existsSync(caddyfilePath)) {
+    if (requiresManagedHttps) {
+      throw new Error("Canonical local HTTPS requires the repository Caddyfile. Restore it before starting the stack.");
+    }
     return null;
   }
 
   try {
     execFileSync("which", ["caddy"], { stdio: "ignore" });
   } catch {
+    if (requiresManagedHttps) {
+      throw new Error(
+        "Canonical local HTTPS requires Caddy on PATH. Install Caddy before starting the stack, "
+        + "or use MURPH_DEV_SKIP_TLS_PROXY=1 for direct HTTP work without browser authentication or OAuth.",
+      );
+    }
     (input.stderrTarget ?? process.stderr).write(
       "[tls-proxy] Caddyfile found but `caddy` is not on PATH; skipping local HTTPS proxy. Install with `brew install caddy` to enable.\n",
     );
