@@ -26,13 +26,31 @@ const completeItems = [
   "Agent judgment: Further extraction would split one cohesive policy owner without reducing current risk.",
 ];
 
-test("accepts a completed complexity judgment for authored source", () => {
+for (const command of ["pnpm complexity:diff", "pnpm --silent complexity:diff"]) {
+  test(`accepts a completed complexity judgment naming ${command}`, () => {
+    assert.deepEqual(
+      validatePrComplexitySummary({
+        changedPaths: ["packages/core/src/value.ts"],
+        prBodyHtml: section(
+          completeItems[0].replace("pnpm complexity:diff", command),
+          ...completeItems.slice(1),
+        ),
+      }),
+      [],
+    );
+  });
+}
+
+test("does not treat arbitrary pnpm options as an executed complexity guard", () => {
   assert.deepEqual(
     validatePrComplexitySummary({
       changedPaths: ["packages/core/src/value.ts"],
-      prBodyHtml: section(...completeItems),
+      prBodyHtml: section(
+        completeItems[0].replace("pnpm complexity:diff", "pnpm --help complexity:diff"),
+        ...completeItems.slice(1),
+      ),
     }),
-    [],
+    ["Name `pnpm complexity:diff` in `Guard:` for authored JavaScript or TypeScript changes."],
   );
 });
 
