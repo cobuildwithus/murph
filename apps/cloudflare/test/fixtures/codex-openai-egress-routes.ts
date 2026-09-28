@@ -5,11 +5,11 @@
  * source-tree review rather than trusting one platform's binary layout.
  */
 export const PINNED_CODEX_OPENAI_EGRESS_INVENTORY = {
-  upstreamCommit: "b412ff32c417f855c2b2d1581b77058eed87c84b",
+  upstreamCommit: "064c6b8c737f5b41d171fdda80bd9ef10ad06eb3",
   upstreamSourceRoot: "codex-rs/codex-api/src",
-  upstreamSourceTree: "cec6091ac1321a179f1e0694bef88746e6f44f0e",
-  upstreamTag: "rust-v0.156.1",
-  version: "0.156.1",
+  upstreamSourceTree: "26c7039c960602c8638759d74133307a54c72be9",
+  upstreamTag: "rust-v0.158.0",
+  version: "0.158.0",
   baseRelativeProviderRoutes: [
     "alpha/search",
     "guardian",
@@ -204,6 +204,18 @@ export const PINNED_CODEX_OPENAI_EGRESS_INVENTORY = {
     },
   ],
   nonProviderBinaryCandidates: [
+    {
+      candidate: "/v1/livea",
+      disposition: "binary_false_positive",
+      owner: "codex",
+      reason: "The rebuilt 0.158.0 Darwin CLI joins /v1/live to adjacent Rust Display-error text starting with a. realtime_websocket/methods.rs constructs only the reviewed /v1/live endpoint.",
+    },
+    {
+      candidate: "/v1/logsint",
+      disposition: "binary_false_positive",
+      owner: "dependency",
+      reason: "The rebuilt 0.158.0 Darwin CLI joins the OTLP /v1/logs literal to the adjacent intValue protobuf field. The pinned opentelemetry-otlp exporter uses only /v1/logs on its configured telemetry origin.",
+    },
     {
       candidate: "/v1/liveuse",
       disposition: "binary_false_positive",
