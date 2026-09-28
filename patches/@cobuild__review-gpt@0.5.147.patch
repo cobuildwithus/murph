@@ -1,7 +1,1277 @@
+diff --git a/README.md b/README.md
+index 55e1688d22eb49109303644c11fb684780aa0314..5097c46029293df07eb6377f99855758da535468 100644
+--- a/README.md
++++ b/README.md
+@@ -82,7 +82,7 @@ Each run can:
+ - optionally wait for the final response with `--wait`
+ - optionally switch into the dedicated Deep Research flow with `--deep-research`
+ 
+-Normal reviews are kept on regular Chat so they do not consume or appear in ChatGPT Work. On the new-chat page, ReviewGPT switches the Chat/Work control to Chat before it stages anything. It refuses an existing Work conversation and checks the surface again before staging and immediately before auto-send. Deep Research uses its dedicated surface and is unchanged.
++Normal reviews are kept on regular Chat so they do not consume or appear in ChatGPT Work. On the new-chat page, ReviewGPT recognizes Chat/Work radio controls and buttons with `aria-pressed`, and switches the control to Chat before it stages anything. After that single click it polls for confirmed Chat within a 12-second bound; a still-Work render does not cause another click or staging approval. It refuses an existing Work conversation and checks the surface again before staging and immediately before auto-send. The model picker also recognizes its semantic model trigger and selected-model menu row; a bare Pro effort label still does not prove GPT-6 Pro. Deep Research uses its dedicated surface and is unchanged.
+ 
+ This package does not own project prompts. Presets, aliases, and preset groups live in the consuming repository, typically through `scripts/review-gpt.config.sh`.
+ 
+@@ -146,13 +146,26 @@ Set `repo_context_url="https://github.com/owner/repo"` in config when connector-
+ 
+ Each run stages `codebase.zip` as the fidelity artifact. Set `snapshot_attachment_name="review-gpt.repo-snapshot.zip"` in your repo config when a consumer needs a different attachment name. The value must be a `.zip` filename, not a path.
+ 
++For a cross-repository review, repeat `--companion-snapshot` with a JSON descriptor for each companion:
++
++```bash
++cobuild-review-gpt --config scripts/review-gpt.config.sh --preset pr-review --wait \
++  --companion-snapshot '{"repo":"../companion","head":"0123456789abcdef0123456789abcdef01234567","prUrl":"https://github.com/example/companion/pull/123"}'
++```
++
++Each companion must be a clean checkout at the supplied full commit SHA, with a matching same-repository GitHub PR and origin. ReviewGPT verifies the local and remote PR heads before and after packaging. It loads that checkout's committed `scripts/review-gpt.config.sh` and requires an explicit, committed `package_script` inside the same repository. The packager runs in its own repository with its own PR URL and first-round final-review metadata; it does not inherit the primary review's round or packaging overrides.
++
++This option supports canonical guarded packagers that accept `--zip`, `--name`, and `--out-dir` and emit `ZIP: <path> (<size>)`. Their ZIP must contain exactly one `review-gpt-pr-context/review-round.json` (optionally under an archive root), with `schemaVersion: 1`, `contextMode: "full_snapshot"`, and `currentReviewedHead` equal to the requested head. If present, `contextAnchorHead` must also match. Existing consumer preflights and privacy checks still run. Companion uploads additionally reject credential-shaped paths even when the primary run allows them. Arbitrary ZIP inputs, uncommitted packagers, remote-head drift, and delta-only companion packets fail closed.
++
++The untouched ZIP bytes are copied from a fresh generated output directory to unique `companion-1.codebase.zip`, `companion-2.codebase.zip`, etc. attachments. The prompt identifies each companion's repository, exact head, and PR without including its local path. Companion files use the same attachment confirmation, response capture, and generated-attachment cleanup as the primary snapshot; the original packager output remains available locally. This option requires artifacts to be enabled and does not start another browser or review owner.
++
+ Repomix is disabled by default. Set `repomix_attachment_format="zip"` to stage `repo.repomix.zip` or `repomix_attachment_format="xml"` to stage the raw XML. The compressed attachment contains `repo.repomix.xml` at the root of the archive.
+ 
+ Draft staging confirms attachments before placing the review prompt in the composer. Confirmation requires the expected filenames to be visible in the composer's own attachment tiles, matched tolerantly against the `name(2).ext` or `name(YYYYMMDD-HHMMSS).ext` forms ChatGPT gives uploaded files. Hidden file-input state and generic upload UI movement are not enough, because neither leaves the model with a readable artifact.
+ 
+ Auto-send also verifies those filenames on the exact user turn ChatGPT committed. If a staged ZIP disappears during submission, the run fails before the long response wait, retains every generated local attachment, records the accepted thread when it can prove it, and never resends automatically.
+ 
+-ReviewGPT keeps only one stable local copy of each generated attachment while staging. Non-wait auto-send removes generated attachments after the exact committed user turn confirms every expected filename; waited runs remove them after response capture finishes. Draft-only runs retain them: the draft has not been sent, and deleting a staged file while the browser is still reading it cancels the upload. Dry runs and failed or unconfirmed staging attempts also keep the local artifact for inspection. This cleanup applies only to files generated by ReviewGPT for that run; it never deletes arbitrary user-supplied attachments.
++ReviewGPT keeps one stable staging copy of each generated attachment. Non-wait auto-send removes generated attachments after the exact committed user turn confirms every expected filename; waited runs remove them after response capture finishes. Draft-only runs retain them: the draft has not been sent, and deleting a staged file while the browser is still reading it cancels the upload. Dry runs and failed or unconfirmed staging attempts also keep the local artifact for inspection. This cleanup applies only to files generated by ReviewGPT for that run; it never deletes arbitrary user-supplied attachments.
+ 
+ Set `attach_artifacts=0`, or pass `--no-artifacts` / `--no-zip`, to skip the codebase ZIP and any explicitly enabled Repomix artifact. In that mode `review-gpt` does not run the repo packager.
+ 
+@@ -290,6 +303,37 @@ Thread helpers ship through the main CLI:
+ 
+ `thread export`, `thread download`, `thread diagnose`, and `thread wake` require a full ChatGPT conversation URL such as `https://chatgpt.com/c/<thread-id>`. The plain home URL is rejected before browser automation starts.
+ 
++Thread capture recognizes semantic user and assistant message units as well as legacy role markup. Send confirmation and export share their message IDs, and attachment verification stays scoped to the complete user message, including attachment siblings.
++
++Accepted sends that briefly retain a `WEB:<uuid>` conversation URL preserve
++hashed committed-turn metadata and their exact original target. Once that target
++has a canonical URL, `thread export` accepts the unchanged metadata and either the
++original transient URL or the canonical URL. It verifies the original target and
++turn before capture; a missing target cannot be recreated from a transient ID.
++Never resend an already accepted request to work around this state.
++A fully proven attached user turn persists its receipt without an additional
++browser read; incomplete attachment hydration still requires exact-turn proof.
++
++If a waited capture ended before storing its assistant identity, `thread download`
++with `--capture-metadata` and `--artifact-index` can complete that identity from a
++verified, idle, completed exact response. It does not overwrite the input receipt.
++Recovery still rejects different turns, changed response content, or ambiguous
++artifact controls. New captures derive code blocks from their code content so
++language badges and code-block controls do not alter identity after rehydration.
++Table cell boundaries remain part of the response identity, including when code
++blocks are present; legacy digest-only captures retain their original strict
++comparison.
++Capture, artifact lookup and activation share the same canonical message identity
++and text extraction, including semantic message containers. Malformed percent
++escapes in link filenames retain their raw label rather than aborting recovery;
++valid filename escapes are decoded exactly once.
++
++Browser socket connections and individual recovery commands have a 10-second
++deadline. URL-only recovery probes duplicate tabs for responsiveness within that
++budget; exact capture recovery never substitutes an existing duplicate or closes
++an unowned tab. Artifact capture subscribes to download completion before clicking
++and waits for exact turn hydration before activating a rehydrated control.
++
+ For long-running ChatGPT work, these commands read an existing conversation from the same managed Chromium session, retain the latest assistant text response for the latest user request, only accept patch and file artifacts that belong to that latest request, prefer the final assistant turn within that latest request, and can optionally hand off to a follow-up interactive Codex session later.
+ 
+ Examples:
+diff --git a/README.md.orig b/README.md.orig
+new file mode 100644
+index 0000000000000000000000000000000000000000..7bb5ae3fdbf612e03dce85f7a4f23a2437cdfa14
+--- /dev/null
++++ b/README.md.orig
+@@ -0,0 +1,497 @@
++# @cobuild/review-gpt
++
++`@cobuild/review-gpt` bundles your repo context, opens ChatGPT in a managed Chromium-family browser, and stages a draft with the right review context attached or selected.
++
++It is designed to be installed in any repository that wants a repeatable `review:gpt` workflow. You keep prompts and presets in the consuming repo, while this package handles packaging, browser automation, response capture, and thread follow-up.
++
++The CLI is implemented with `incur`, so it also ships with built-in shell completions plus agent-facing `--llms`, `skills add`, and `mcp add` integrations while preserving the existing `cobuild-review-gpt` command surface.
++
++## Skills
++
++This repo also hosts installable Codex skills under `skills/`.
++
++Current skill:
++
++- `work-with-pro`: work with a ChatGPT Pro thread for repo tasks. Prefer `watch-only` when the user already has a prepared thread URL with repo context attached. Default to immediate polling with `thread wake --delay 0s --poll-interval 1m`, only use a later first check when the user explicitly asks for one, and do not nudge an existing thread unless the user explicitly authorizes that. Use `send-and-wake` through `review-gpt`, which owns repo-context packaging. If `review-gpt` is missing, stop with a clear setup instruction.
++
++Install from the public repo with:
++
++```bash
++npx skills add https://github.com/cobuildwithus/review-gpt --skill work-with-pro
++```
++
++## Why Use It
++
++- turns "open ChatGPT and attach the right repo context" into one command
++- packages `codebase.zip` from your curated repo manifest, can optionally derive a matching Repomix artifact, or can skip file attachments for connector-only review context
++- keeps project prompts local to each repo instead of centralizing them in the package
++- defaults to draft-only staging, so nothing is sent unless you ask for `--send` or `--wait`
++- can capture the final assistant response to stdout or a file
++- includes delayed send plus thread export, download, and delayed wake helpers for long-running ChatGPT work
++
++## Quick Start
++
++Install it in the repo where you want to use it:
++
++```bash
++pnpm add -D @cobuild/review-gpt
++```
++
++Add a repo-local script:
++
++```json
++{
++  "scripts": {
++    "review:gpt": "cobuild-review-gpt --config scripts/review-gpt.config.sh"
++  }
++}
++```
++
++Create a shell config that registers the prompts your repo wants to expose:
++
++```bash
++#!/usr/bin/env bash
++browser_binary_path="/Applications/Brave Browser.app/Contents/MacOS/Brave Browser"
++
++review_gpt_register_preset "architecture" "scripts/prompts/architecture.md" \
++  "Architecture review with emphasis on boundaries and coupling."
++review_gpt_register_preset "bugs" "scripts/prompts/bugs.md" \
++  "Behavioral regressions, edge cases, and missing tests." \
++  "regressions"
++review_gpt_register_preset_group "full-review" "Run the main review passes." \
++  "architecture" "bugs"
++```
++
++Then run it:
++
++```bash
++pnpm review:gpt --preset architecture
++```
++
++On first run with a fresh managed browser profile, use headful mode, sign in to ChatGPT in the opened window once, then rerun the command. The same persistent profile can run headless afterward.
++
++## How It Works
++
++Each run can:
++
++- resolve prompt content from repo-local presets plus optional inline `--prompt` text or `--prompt-file`
++- build `codebase.zip` from your repo context and, when explicitly enabled, derive `repo.repomix.zip` or `repo.repomix.xml` from the same packaged manifest
++- skip artifact packaging entirely when `--no-artifacts`, `--no-zip`, or `attach_artifacts=0` is used
++- open ChatGPT and stage a draft with the selected app connector plus any configured repo context URL and file attachments
++- optionally auto-submit with `--send`
++- optionally wait for the final response with `--wait`
++- optionally switch into the dedicated Deep Research flow with `--deep-research`
++
++Normal reviews are kept on regular Chat so they do not consume or appear in ChatGPT Work. On the new-chat page, ReviewGPT recognizes Chat/Work radio controls and buttons with `aria-pressed`, and switches the control to Chat before it stages anything. After that single click it polls for confirmed Chat within a 12-second bound; a still-Work render does not cause another click or staging approval. It refuses an existing Work conversation and checks the surface again before staging and immediately before auto-send. The model picker also recognizes its semantic model trigger and selected-model menu row; a bare Pro effort label still does not prove GPT-6 Pro. Deep Research uses its dedicated surface and is unchanged.
++
++This package does not own project prompts. Presets, aliases, and preset groups live in the consuming repository, typically through `scripts/review-gpt.config.sh`.
++
++### Credential Safety
++
++Review context is uploaded to ChatGPT, so every packaged ZIP is inspected before it is attached. A run fails with the offending paths listed when the ZIP contains dotenv files (`.env`, `.env.local`; `.env.example` and other `*.example`/`*.sample`/`*.template`/`*.dist` names are fine), SSH/AWS/GnuPG directories, `.npmrc`/`.netrc`/`.envrc`-style credential files, or private keys and certificates (`.pem`, `.key`, `.p8`, `.p12`, and similar). Runs also default `COBUILD_AUDIT_CONTEXT_EXCLUDE_SENSITIVE=1` for the package script so the `@cobuild/repo-tools` packager filters the same shapes; set it explicitly to opt out.
++
++Set `REVIEW_GPT_ALLOW_SENSITIVE_ARTIFACTS=1` to downgrade the failure to a warning when a match is a false positive.
++
++## Common Commands
++
++```bash
++# Run a named preset
++cobuild-review-gpt --config scripts/review-gpt.config.sh --preset architecture
++
++# Schedule a named preset for later
++cobuild-review-gpt delay --config scripts/review-gpt.config.sh --delay 50m --preset architecture
++
++# Positional preset shorthand
++cobuild-review-gpt architecture --config scripts/review-gpt.config.sh
++
++# Add extra inline instructions
++cobuild-review-gpt --config scripts/review-gpt.config.sh \
++  --preset bugs \
++  --prompt "Focus on auth edge cases and rollback behavior"
++
++# Use a prompt file with the normal repo artifacts attached
++cobuild-review-gpt --config scripts/review-gpt.config.sh \
++  --prompt-file prompts/release-review.md
++
++# Auto-send and wait for a captured response
++cobuild-review-gpt --config scripts/review-gpt.config.sh \
++  --wait \
++  --response-file review-output.md
++
++# Include or exclude configured test paths
++cobuild-review-gpt --config scripts/review-gpt.config.sh --with-tests --preset bugs
++cobuild-review-gpt --config scripts/review-gpt.config.sh --no-tests --preset bugs
++
++# Select a ChatGPT app connector before staging the draft
++cobuild-review-gpt --config scripts/review-gpt.config.sh --app-connector github --preset architecture
++
++# Use a connector-only review with no artifact files
++cobuild-review-gpt --config scripts/review-gpt.config.sh --connector github --no-artifacts --preset architecture
++
++# Deep Research mode
++cobuild-review-gpt --config scripts/review-gpt.config.sh --deep-research --wait
++
++# Re-open an existing thread
++cobuild-review-gpt --config scripts/review-gpt.config.sh --chat 69a86c41-cca8-8327-975a-1716caa599cf
++cobuild-review-gpt --config scripts/review-gpt.config.sh --chat-url https://chatgpt.com/c/69a86c41-cca8-8327-975a-1716caa599cf
++```
++
++Model selection defaults to `gpt-6-pro`; `--model pro` also targets GPT-6 Pro. ReviewGPT verifies the explicit `6 Pro` composer label. The picker's `Latest` row is only a navigation choice: its selection alone is not model proof. When Latest is selected at lower power, ReviewGPT moves the combined five-position Power control to Pro, then verifies the explicit `6 Pro` label before sending. Older versions and a bare `Pro` effort label cannot satisfy a GPT-6 Pro request. Response-model metadata is checked when available; GPT-6 Pro accepts the `gpt-6-pro` response slug and rejects older Pro or Thinking slugs.
++
++Explicit `--model gpt-5.6-sol` retains the previous Sol target, including its Advanced picker and response-slug aliases. Other versioned aliases such as `gpt-5.5`, `gpt-5.5-thinking`, and `gpt-5.5-pro`, plus the plain tier aliases `instant` and `thinking`, retain their existing picker behavior. Plain `gpt-5.5` targets Instant. Non-Pro aliases do not match Pro rows, and obsolete `Extended Pro` labels are not accepted as Pro proof. Older model targets leave the separate Effort control and slider unchanged. If the requested model is disabled, rate-limited, or unavailable, the run fails instead of silently continuing on the current model. Thinking defaults to `current` and does not open an independent thinking menu. Explicit `xhigh` and legacy `extended` thinking targets remain unsupported. Deep Research uses its dedicated page and ignores normal model and thinking forcing.
++
++App connector selection defaults to `current`, which keeps the current ChatGPT composer state. Use `--app-connector github` or its alias `--connector github` to open the composer add menu, enter `More`, and select the GitHub app connector before the prompt and files are staged. Deep Research mode uses its dedicated page and ignores app connector forcing.
++
++Set `repo_context_url="https://github.com/owner/repo"` in config when connector-only runs should include a specific repository URL in the staged prompt.
++
++Each run stages `codebase.zip` as the fidelity artifact. Set `snapshot_attachment_name="review-gpt.repo-snapshot.zip"` in your repo config when a consumer needs a different attachment name. The value must be a `.zip` filename, not a path.
++
++For a cross-repository review, repeat `--companion-snapshot` with a JSON descriptor for each companion:
++
++```bash
++cobuild-review-gpt --config scripts/review-gpt.config.sh --preset pr-review --wait \
++  --companion-snapshot '{"repo":"../companion","head":"0123456789abcdef0123456789abcdef01234567","prUrl":"https://github.com/example/companion/pull/123"}'
++```
++
++Each companion must be a clean checkout at the supplied full commit SHA, with a matching same-repository GitHub PR and origin. ReviewGPT verifies the local and remote PR heads before and after packaging. It loads that checkout's committed `scripts/review-gpt.config.sh` and requires an explicit, committed `package_script` inside the same repository. The packager runs in its own repository with its own PR URL and first-round final-review metadata; it does not inherit the primary review's round or packaging overrides.
++
++This option supports canonical guarded packagers that accept `--zip`, `--name`, and `--out-dir` and emit `ZIP: <path> (<size>)`. Their ZIP must contain exactly one `review-gpt-pr-context/review-round.json` (optionally under an archive root), with `schemaVersion: 1`, `contextMode: "full_snapshot"`, and `currentReviewedHead` equal to the requested head. If present, `contextAnchorHead` must also match. Existing consumer preflights and privacy checks still run. Companion uploads additionally reject credential-shaped paths even when the primary run allows them. Arbitrary ZIP inputs, uncommitted packagers, remote-head drift, and delta-only companion packets fail closed.
++
++The untouched ZIP bytes are copied from a fresh generated output directory to unique `companion-1.codebase.zip`, `companion-2.codebase.zip`, etc. attachments. The prompt identifies each companion's repository, exact head, and PR without including its local path. Companion files use the same attachment confirmation, response capture, and generated-attachment cleanup as the primary snapshot; the original packager output remains available locally. This option requires artifacts to be enabled and does not start another browser or review owner.
++
++Repomix is disabled by default. Set `repomix_attachment_format="zip"` to stage `repo.repomix.zip` or `repomix_attachment_format="xml"` to stage the raw XML. The compressed attachment contains `repo.repomix.xml` at the root of the archive.
++
++Draft staging confirms attachments before placing the review prompt in the composer. Confirmation requires the expected filenames to be visible in the composer's own attachment tiles, matched tolerantly against the `name(2).ext` or `name(YYYYMMDD-HHMMSS).ext` forms ChatGPT gives uploaded files. Hidden file-input state and generic upload UI movement are not enough, because neither leaves the model with a readable artifact.
++
++Auto-send also verifies those filenames on the exact user turn ChatGPT committed. If a staged ZIP disappears during submission, the run fails before the long response wait, retains every generated local attachment, records the accepted thread when it can prove it, and never resends automatically.
++
++ReviewGPT keeps one stable staging copy of each generated attachment. Non-wait auto-send removes generated attachments after the exact committed user turn confirms every expected filename; waited runs remove them after response capture finishes. Draft-only runs retain them: the draft has not been sent, and deleting a staged file while the browser is still reading it cancels the upload. Dry runs and failed or unconfirmed staging attempts also keep the local artifact for inspection. This cleanup applies only to files generated by ReviewGPT for that run; it never deletes arbitrary user-supplied attachments.
++
++Set `attach_artifacts=0`, or pass `--no-artifacts` / `--no-zip`, to skip the codebase ZIP and any explicitly enabled Repomix artifact. In that mode `review-gpt` does not run the repo packager.
++
++## Repo Configuration
++
++The config file is a sourced shell file that can override defaults, register preset mappings, and adjust path settings.
++
++Optional config override:
++
++```bash
++snapshot_attachment_name="review-gpt.repo-snapshot.zip"
++repomix_attachment_format="xml"   # optional; default is "none"
++app_connector="github"            # optional; default is "current"
++repo_context_url="https://github.com/owner/repo"
++attach_artifacts=0                # optional; default is 1
++idle_draft_timeout_ms="30m"        # close hidden, inactive unsent drafts; use 0 to disable
++minimum_marked_response_ms="5m"    # positive trust threshold for marked concrete-model reviews
++repomix_ignore_patterns=(
++  "dist/**"
++  "coverage/**"
++)
++```
++
++`repomix_attachment_format` and `repomix_ignore_patterns` are opt-in. ReviewGPT builds Repomix from the packaged manifest only when the format is `zip` or `xml`; add ignore patterns only when your consuming repo deliberately excludes a subset of those packaged files.
++
++`review-gpt` packages repo context through its installed `@cobuild/repo-tools` dependency by default. Keep `package_script` only for an intentional repo-specific override.
++
++Config helpers exposed by the package:
++
++- `review_gpt_register_preset <name> <file> <description> [alias ...]`
++- `review_gpt_register_dir_preset <name> <filename> <description> [alias ...]`
++- `review_gpt_register_preset_group <name> <description> <preset ...>`
++
++Each consuming repo must register its own presets. If the config does not register any presets, `--list-presets` reports none configured and any `--preset` use fails.
++
++Recommended repo entry point:
++
++```json
++{
++  "scripts": {
++    "review:gpt": "cobuild-review-gpt --config scripts/review-gpt.config.sh"
++  }
++}
++```
++
++Use the package binary directly. Avoid repo-local wrapper scripts unless you have a concrete repo-specific need beyond passing `--config`.
++
++The CLI still accepts preset shorthand tokens for the top-level command. `cobuild-review-gpt architecture` behaves like `cobuild-review-gpt --preset architecture`, while `thread wake ...` remains unchanged.
++
++## Runtime Extras
++
++In addition to the review workflow, the incur runtime also exposes:
++
++- `cobuild-review-gpt completions <bash|zsh|fish>`
++- `cobuild-review-gpt --llms`
++- `cobuild-review-gpt skills add`
++- `cobuild-review-gpt mcp add`
++
++## Browser Notes
++
++- `browser_binary_path` is the preferred config knob for the browser executable. `browser_chrome_path` remains supported for backward compatibility.
++- Chromium-family browsers are supported as long as the binary is Chromium-compatible. Chrome, Brave, Chromium, Edge, and Vivaldi all work with the managed-profile launch flow.
++- The launcher also checks `CHROME_PATH`, `BROWSER_BINARY_PATH`, and `--browser-path` for one-off browser overrides.
++- The managed browser profile defaults to `$HOME/.review-gpt/managed-chromium`. If an older `$HOME/.oracle/remote-chrome` profile already exists, the launcher reuses it automatically instead of forcing a new sign-in.
++- You can override the managed profile location with `managed_browser_user_data_dir` and the profile name with `managed_browser_profile`.
++- Managed browsers default to `managed_browser_background_mode="balanced"`: Chromium keeps its normal background timer, renderer, and occluded-window scheduling. ReviewGPT pins only the target it is actively capturing. If a specific browser version still freezes background capture, set `managed_browser_background_mode="unthrottled"` to restore all three legacy backgrounding opt-outs.
++- Managed browsers default to `managed_browser_display_mode="headful"`. Set `managed_browser_display_mode="headless"` or pass `--headless` to run the same persistent signed-in profile without visible browser UI. Headless mode keeps CDP bound to loopback and uses a desktop-sized viewport; it does not disable ChatGPT's renderer or page JavaScript and is not a low-resource guarantee, so benchmark it before making it the local default.
++- Managed headful browsers default to `managed_browser_launch_mode="foreground"`. Set it to `"background"` to start the browser without activating it on macOS. Model and connector selection use targeted CDP input with emulated page focus and never activate the browser window. Background startup clears restored tabs from the dedicated managed profile and keeps one ChatGPT home tab while reviews run. Use foreground mode once if the profile needs an interactive sign-in.
++- Managed browsers stay open by default. Set `managed_browser_close_after_wait="true"` to close the browser after the last concurrent `--wait` response capture succeeds. Each process holds a short machine-local lease, so concurrent ReviewGPT runs share the browser safely and close it only after the final run releases it. ReviewGPT keeps the browser open after failures for exact-thread recovery, and also keeps it open when a page outside the managed home/startup set remains active.
++- Display mode is selected when the managed browser process starts. An already-running endpoint keeps its current mode until that exact managed browser instance exits normally.
++- A newly started managed browser keeps one ChatGPT page available for first-run sign-in. If that profile is already locked while its debugging endpoint is unavailable, startup fails closed instead of forwarding another window into the existing browser process.
++- Draft automation creates a fresh ChatGPT browser target for each run and does not foreground the page. If the browser debugging endpoint cannot create a new target, the command fails instead of reusing an existing ChatGPT tab.
++- Before a send is accepted, direct runs close their exact owned target on handled failure and ordinary `SIGINT`, `SIGTERM`, or `SIGHUP` interruption. Once a send is accepted, ReviewGPT preserves that exact target for capture or wake recovery; successful waited capture closes it. Send-without-wait runs retain their target intentionally. Draft-only runs retain their target for 30 minutes by default, then a single lightweight coordinator per browser lane closes the exact target once it is both hidden and no longer generating. A visible or busy draft is deferred for another check. Override the grace period with `--idle-draft-timeout` or `idle_draft_timeout_ms`; set either to `0` to keep unsent drafts indefinitely.
++- After auto-send, ReviewGPT reports a thread URL only after the same canonical `/c/<thread-id>` location appears across separate polling cycles. Provisional browser routes such as `WEB:<id>` are ignored.
++- On first run with a fresh managed profile, use headful mode to sign in once before enabling headless mode.
++- If the first authentication probe reports that the managed ChatGPT page is signed out, ReviewGPT hard-refreshes that page once with cache bypass and checks again before asking you to sign in. This covers transient unauthenticated startup state without hiding a persistently signed-out profile.
++
++## Response Capture
++
++- `--wait` implies auto-send and waits up to `120m` for the response by default. Browser setup keeps its separate `10m` draft timeout (`40m` in Deep Research mode), so a stalled setup still fails promptly without cutting off a healthy long-running review. Override response capture with `--wait-timeout` and browser setup with `--timeout`.
++- When `--wait` is enabled, `review-gpt` stays attached until the assistant finishes or the wait timeout is hit. Deep Research runs can stay quiet for a long time before the final report arrives.
++- Waited runs retain their generated local attachment files until response capture ends, so a large upload cannot be invalidated by immediate post-send cleanup. If ChatGPT accepts the prompt but response capture later fails, ReviewGPT exits nonzero while preserving the canonical thread URL. Inspect or resume that thread before retrying so the same review is not sent twice.
++- Every confirmed send reports the selected browser endpoint and a replayable `thread wake` command containing that endpoint and exact thread URL. Send also atomically persists a private capture sidecar (beside `--response-file`, or in the run's temporary staging directory) with the accepted target and committed user-turn identity. Prior recovery metadata remains in place until a new send is accepted and its replacement sidecar is durable. A waited completion atomically upgrades it with the exact assistant turn, response digest, and artifact controls. Deep Research captures separately bind the parent assistant turn that owns artifacts and the final iframe report content, so wake can validate both sources before export. Content-derived prompt, response, artifact-label, artifact-href, parent-anchor, and iframe-report identities are stored only as hashes; raw text prefixes, data URL contents, and signed artifact routes are not retained.
++- A waited capture that loses its page websocket first reconnects to the originally accepted target ID. If that target no longer exists, ReviewGPT may create one replacement target at the exact canonical thread URL, but it never selects or navigates another existing tab. The replacement is accepted only after the stored thread and committed-turn identity validate, and recovery never resends or extends the original response deadline. If that identity cannot be proved, capture fails closed and the replayable wake command is the recovery path.
++- A response is only captured after it stays unchanged across consecutive quiet polls (no busy status, no stop control) for several seconds, so interim assistant status messages emitted before long tool/connector work are not mistaken for the final reply.
++- Waited concrete-model runs check ChatGPT response-model metadata when available. ReviewGPT does not ask the assistant to identify itself or require a `MODEL_CONFIRMATION` line. Missing metadata produces no model-verification evidence; a present incompatible model slug still fails. The `gpt-5.6-sol` alias accepts `gpt-5-6-pro`, `gpt-5-6-thinking`, and `gpt-5.6-sol-wm` backend slugs without reinterpreting an explicitly requested Thinking model. The response must belong to the exact user turn committed by this run. An ephemeral per-run nonce at the start of the sent prompt disambiguates concurrent lanes and prevents duplicate protocol insertion; it is never written to attestation evidence. A completed concrete-GPT capture with matching platform metadata emits a versioned `REVIEW_GPT_MODEL_VERIFICATION` JSON record with `requestedModel`, `responseModelSlug`, and `responseSha256`; the digest covers the exact normalized UTF-8 response-file bytes. Elapsed time and assistant self-descriptions do not claim platform-model evidence. With `--response-file`, the mandatory response is written atomically with owner-only permissions before completion is emitted. The evidence sidecar is optional: a sidecar-only persistence failure produces a warning, omits the verification record, and never invalidates or repeats the completed response. Exact-target cleanup remains bounded; cleanup uncertainty after a completed capture is reported separately and does not turn that capture into a retryable model failure. A new waited response-file attempt removes only the derived sidecar before browser work, and partial or failed captures never create attestation evidence.
++- A visible “Capabilities reduced until…” notice is a rate limit even when ChatGPT keeps answering or Pro is unselectable. ReviewGPT checks before model selection, before sending, and during response capture and wake. It fails with `REVIEW_GPT_RATE_LIMITED` before accepting completion or model evidence. The reset time is included in the driver error. The calling agent should exclude that lane for the current retry sequence and start a fresh full review on another configured, signed-in browser lane with the same requested model and review context. Never move an existing conversation across lanes or accept a reduced-capability answer. Try each allowed lane at most once; if none is available, report the limit and wait for recovery. ReviewGPT itself operates one configured browser per invocation; lane selection belongs to the caller.
++- `--response-marker <text>` makes capture contract-based instead of heuristic: the wait only accepts a response containing that exact text, so prompts that instruct the assistant to end its final message with the marker are immune to interim status messages even across minutes-long quiet gaps. A marked concrete-model response may complete before the trust threshold only when the same snapshot exposes compatible concrete platform-model metadata; otherwise the duration floor still applies. A too-fast unverified response fails closed, preserves the diagnostic response in `--response-file`, and emits no model-verification attestation. The threshold defaults to 5 minutes and can be raised or lowered with `--minimum-marked-response-time <duration>` or `minimum_marked_response_ms`; it must remain positive and cannot disable the fallback gate. If the marker never appears, capture fails after writing the best snapshot when one was configured.
++- Browsers throttle background tabs, which can freeze the DOM the capture reads mid-stream. The capture session pins focus emulation and an active page lifecycle only for its owned page over CDP, then releases emulated focus before retaining or closing the page. While generation is active, ReviewGPT samples the large live response DOM once per minute and hard-refreshes the exact accepted thread with cache bypassed every 10 minutes; after generation becomes quiet, it returns to short stability polls. This keeps capture reliable without forcing every profile tab to run unthrottled or continuously rescanning UI that no caller consumes.
++- Deep Research auto-send gives the product up to 60 seconds to auto-start, then only falls back to the approval-card `Start` action if that gate is still present.
++- Captured assistant output is printed between `REVIEW_GPT_RESPONSE_BEGIN` and `REVIEW_GPT_RESPONSE_END` markers so callers can parse it reliably.
++- `--response-file <path>` writes the captured assistant response to a file after the run finishes.
++
++## Delayed Runs
++
++Use `delay` when you want the normal top-level review flow to start later without switching into the thread-wake follow-up workflow.
++
++Examples:
++
++```bash
++# Schedule a delayed new send
++cobuild-review-gpt delay \
++  --config scripts/review-gpt.config.sh \
++  --delay 50m \
++  --preset bugs
++
++# Re-check an existing thread later with the built-in delayed follow-up prompt
++cobuild-review-gpt delay \
++  --config scripts/review-gpt.config.sh \
++  --delay 50m \
++  --chat-url https://chatgpt.com/c/69a86c41-cca8-8327-975a-1716caa599cf
++```
++
++Notes:
++
++- `delay` waits before launching the normal `review-gpt` review flow. It is for delayed sends or delayed same-thread follow-ups.
++- Existing-thread delayed follow-ups default to `--wait` and to a response file inside `output-packages/review-gpt-delay/...` unless you override those flags.
++- `thread wake` is different: it revisits an existing thread later, exports the latest assistant text, downloads artifacts from the latest request when they exist, and can hand off into Codex.
++
++## Thread Follow-Up
++
++Thread helpers ship through the main CLI:
++
++- `cobuild-review-gpt thread export --chat-url <url> --capture-metadata <response.capture.json> --output <path>`
++- `cobuild-review-gpt thread download --chat-url <url> --capture-metadata <response.capture.json> --artifact-index <n> --output-dir <dir>`
++- `cobuild-review-gpt thread diagnose --chat-url <url> --log-file <path> [--receipt-path <path>]`
++- `cobuild-review-gpt thread wake --delay 70m --chat-url <url> --session-id <id>`
++- `cobuild-review-gpt thread wake --detach --delay 0s --poll-interval 1m --chat-url <url> --session-id <id>`
++- `cobuild-review-gpt thread wake --delay 0s --no-poll-until-complete --chat-url <url> --session-id <id>`
++- `cobuild-review-gpt thread wake --delay 0s --poll-interval 1m --poll-jitter 1m --chat-url <url> --session-id <id>`
++- `cobuild-review-gpt thread wake --delay 0s --resume-prompt "<instructions>" --chat-url <url> --session-id <id>`
++- `cobuild-review-gpt thread wake --delay 0s --tab-lifecycle keep --chat-url <url> --session-id <id>`
++- `cobuild-review-gpt thread wake --delay 0s --recursive-depth 1 --recursive-prompt "<instructions>" --chat-url <url> --session-id <id>`
++- `cobuild-review-gpt thread wake --delay 0s --poll-timeout 120m --recursive-depth 1 --chat-url <url> --session-id <id>`
++
++`thread export`, `thread download`, `thread diagnose`, and `thread wake` require a full ChatGPT conversation URL such as `https://chatgpt.com/c/<thread-id>`. The plain home URL is rejected before browser automation starts.
++
++Thread capture recognizes semantic user and assistant message units as well as legacy role markup. Send confirmation and export share their message IDs, and attachment verification stays scoped to the complete user message, including attachment siblings.
++
++Accepted sends that briefly retain a `WEB:<uuid>` conversation URL preserve
++hashed committed-turn metadata and their exact original target. Once that target
++has a canonical URL, `thread export` accepts the unchanged metadata and either the
++original transient URL or the canonical URL. It verifies the original target and
++turn before capture; a missing target cannot be recreated from a transient ID.
++Never resend an already accepted request to work around this state.
++A fully proven attached user turn persists its receipt without an additional
++browser read; incomplete attachment hydration still requires exact-turn proof.
++
++If a waited capture ended before storing its assistant identity, `thread download`
++with `--capture-metadata` and `--artifact-index` can complete that identity from a
++verified, idle, completed exact response. It does not overwrite the input receipt.
++Recovery still rejects different turns, changed response content, or ambiguous
++artifact controls. New captures derive code blocks from their code content so
++language badges and code-block controls do not alter identity after rehydration;
++legacy digest-only captures retain their original strict comparison.
++Capture, artifact lookup and activation share the same canonical message identity
++and text extraction, including semantic message containers.
++
++Browser socket connections and individual recovery commands have a 10-second
++deadline. URL-only recovery probes duplicate tabs for responsiveness within that
++budget; exact capture recovery never substitutes an existing duplicate or closes
++an unowned tab. Artifact capture subscribes to download completion before clicking
++and waits for exact turn hydration before activating a rehydrated control.
++
++For long-running ChatGPT work, these commands read an existing conversation from the same managed Chromium session, retain the latest assistant text response for the latest user request, only accept patch and file artifacts that belong to that latest request, prefer the final assistant turn within that latest request, and can optionally hand off to a follow-up interactive Codex session later.
++
++Examples:
++
++```bash
++cobuild-review-gpt thread export \
++  --chat-url https://chatgpt.com/c/69c71d43-0e38-8330-9df8-c4e10f5bf536 \
++  --output output-packages/thread.json
++
++cobuild-review-gpt thread download \
++  --chat-url https://chatgpt.com/c/69c71d43-0e38-8330-9df8-c4e10f5bf536 \
++  --artifact-index 0 \
++  --output-dir output-packages/downloads
++
++cobuild-review-gpt thread diagnose \
++  --chat-url https://chatgpt.com/c/69c71d43-0e38-8330-9df8-c4e10f5bf536 \
++  --log-file output-packages/chatgpt-watch/run/recursive-review-send.log \
++  --receipt-path output-packages/chatgpt-watch/run/recursive-followup.json
++
++cobuild-review-gpt thread wake \
++  --delay 70m \
++  --chat-url https://chatgpt.com/c/69c71d43-0e38-8330-9df8-c4e10f5bf536 \
++  --session-id 019d36e3-f6a2-7873-910a-2bdbd4f9748c
++
++cobuild-review-gpt thread wake \
++  --delay 0s \
++  --poll-interval 1m \
++  --poll-jitter 1m \
++  --chat-url https://chatgpt.com/c/69c71d43-0e38-8330-9df8-c4e10f5bf536 \
++  --session-id 019d36e3-f6a2-7873-910a-2bdbd4f9748c
++
++cobuild-review-gpt thread wake \
++  --delay 0s \
++  --no-poll-until-complete \
++  --chat-url https://chatgpt.com/c/69c71d43-0e38-8330-9df8-c4e10f5bf536 \
++  --session-id 019d36e3-f6a2-7873-910a-2bdbd4f9748c
++
++cobuild-review-gpt thread wake \
++  --delay 0s \
++  --chat-url https://chatgpt.com/c/69c71d43-0e38-8330-9df8-c4e10f5bf536 \
++  --session-id 019d36e3-f6a2-7873-910a-2bdbd4f9748c \
++  --tab-lifecycle keep
++
++cobuild-review-gpt thread wake \
++  --delay 0s \
++  --chat-url https://chatgpt.com/c/69c71d43-0e38-8330-9df8-c4e10f5bf536 \
++  --session-id 019d36e3-f6a2-7873-910a-2bdbd4f9748c \
++  --resume-prompt "After applying the returned patch, run pnpm review:gpt --send --chat-url {{chat_url}} and ask for final bug and simplification feedback."
++
++cobuild-review-gpt thread wake \
++  --delay 0s \
++  --poll-interval 1m \
++  --poll-timeout 120m \
++  --chat-url https://chatgpt.com/c/69c71d43-0e38-8330-9df8-c4e10f5bf536 \
++  --session-id 019d36e3-f6a2-7873-910a-2bdbd4f9748c \
++  --recursive-depth 1
++
++cobuild-review-gpt thread wake \
++  --delay 0s \
++  --chat-url https://chatgpt.com/c/69c71d43-0e38-8330-9df8-c4e10f5bf536 \
++  --session-id 019d36e3-f6a2-7873-910a-2bdbd4f9748c \
++  --recursive-depth 1 \
++  --recursive-prompt "Wait for the thread response, then implement the returned plan as a clean long-term patch with tests and return a .patch attachment."
++```
++
++Resume notes:
++
++- `cobuild-review-gpt thread wake` does not touch the managed browser until the configured `--delay` has elapsed, so scheduling a 60m or 100m follow-up does not immediately reopen or navigate the ChatGPT tab.
++- `--detach` launches the wake loop as its own background process, writes `wake.log` beside `status.json`, and returns immediately with the detached PID plus output paths. Use it when the current shell, terminal, parent agent, or PTY may exit before the wake finishes.
++- Polling is enabled by default and has no implicit overall expiry. After the initial delay, an exact `--capture-metadata` wake inspects the retained hydrated target before any reload so an in-memory replacement artifact remains recoverable. If that target disappeared, wake may create one replacement at the exact captured thread URL and bind it only after the stored thread and turn identity validate; it never substitutes a different existing tab. During continued polling, wake hard-refreshes that same exact tab with cache bypassed every 10 minutes and still fails closed if its stored thread or turn identity no longer validates; bounded stale-state detection can trigger an earlier one-time fallback reload. A wake without capture metadata retains the compatibility behavior of reloading before its first export. Wake keeps re-exporting until it sees a stable final state: assistant-owned artifacts end the wait immediately, while no-artifact replies must expose ChatGPT's completed-turn copy control or terminal status and stay unchanged across consecutive idle polls after busy status and stop controls disappear. Wake reuses the current same-thread tab when one already exists, keeps it available throughout export and artifact download, and closes that exact harvested target only after the final response and every requested artifact are persisted locally. A failed wake closes only ordinary targets it created; a validated replacement for a missing captured target, reused send target, or user tab stays available for recovery. Any artifact download error retains the tab and the replay commands for recovery. Use `--tab-lifecycle keep` to retain every target, or `--tab-lifecycle close-created` to close only ordinary targets created during that wake. `--poll-interval` defaults to `1m`, `--poll-jitter` defaults to `1m` so the normal retry cadence lands between 60 and 120 seconds, and polling also adds a small hidden startup spread before the first export so several simultaneous wake runs do not all hit ChatGPT at once. `--poll-timeout` can bound that wait, and `--no-poll-until-complete` restores the old one-shot behavior.
++- Wake treats ChatGPT's own visible assistant failure controls, such as `Thinking failed` or `Stopped thinking`, as terminal generation failures instead of retaining them as prose-only responses.
++- Every successful wake export writes `assistant-response.md` and `assistant-response.meta.json` beside `thread.json`, even when artifacts are also downloaded. Prose-only replies can hand off to Codex from this retained response file without needing a `.patch` or `.diff` attachment.
++- When the final assistant response declares `Patch artifact: <filename>.patch`, waited capture and `thread wake` require that exact assistant-owned downloadable filename. A different notes or support attachment cannot substitute for the declared patch; ReviewGPT preserves the response, records failure, and does not launch the Codex handoff.
++- Polling tolerates a few transient thread-export failures before the first successful snapshot, and after a good snapshot exists it keeps polling until the overall timeout instead of aborting immediately on a short flaky stretch.
++- Wake records the last assistant preview, busy reason, retained text response paths, artifact labels, and download outcomes in `status.json` for debugging.
++- `thread wake` reuses an existing tab only when it is already on the same `/c/<thread-id>` conversation, and treats same-thread URLs with extra query parameters as the same thread.
++- After the delay elapses, thread export inspects the current ChatGPT tab first, only navigates or reloads when needed, and still requires real conversation signals before capture so generic ChatGPT chrome does not masquerade as a ready thread. Thread download keeps the hydrated thread tab alive and activates the visible attachment control inside the page before falling back to a native browser click.
++- Thread export and download scope artifact discovery to the conversation body, ignore ChatGPT conversation links that only look like attachments, and only consider assistant-owned downloadable controls that appear after the latest user message in the thread. Within that latest request, they prefer the final assistant turn, download every assistant-owned final-turn control by artifact index instead of gating on patch-shaped labels, and still carry forward human-readable artifact labels for wake/debug handoff when ChatGPT exposes them.
++- `--capture-metadata` replaces latest-visible rediscovery with exact selection: export and download require the captured endpoint, thread, committed turn, assistant response digest, and artifact identity to resolve exactly once. A missing target may be rehydrated only at the exact captured thread URL and is rebound only after identity validation. That exact assistant identity remains authoritative even if a later user turn exists. Older-branch, ambiguous, or mismatched identities fail closed instead of downloading a same-named artifact from another response.
++- Thread export now preserves the full assistant turn text in saved snapshots instead of clipping assistant messages to a 20k-character preview.
++- `thread download` still honors native browser downloads when ChatGPT emits them, but it also falls back to authenticated estuary fetches for inline assistant download controls such as combined patch buttons and native-download cases where the browser never materializes the file on disk. Every downloaded artifact must be a non-empty file; when one final assistant artifact is paired with one declared SHA-256 digest, download verifies that digest before success. Failed native-download attempts clean up zero-byte files they created, and `thread wake` retries each artifact download once before failing nonzero without launching a child handoff.
++- `cobuild-review-gpt thread wake` resolves the local `codex` executable itself, so `launchd`, `tmux`, `nohup`, and similar runs do not depend on your interactive shell `PATH`.
++- `cobuild-review-gpt thread wake` captures the current working directory and launches a fresh `codex exec` child with `-C` set to that repo directory, seeded with the built-in wake prompt, the exported thread JSON, the retained assistant text response, and every downloaded assistant artifact from the latest request.
++- Wake now launches the follow-up through `codex exec --json` with `CODEX_HOME` pinned to the resolved owner home, so the prompt is submitted directly without PTY keystroke injection.
++- Wake verifies launch from the child JSON event stream, then records `childSessionId`, `childSessionPersistence`, `childRolloutPath`, `launcherPid`, `eventsPath`, `resumeOutputPath`, and `stderrPath` in `status.json` for debugging. If launch evidence times out, ReviewGPT terminates and reaps the exact detached child process group it created before returning failure. `childSessionPersistence: "pending"` means the child already started but its canonical ID-bearing session-log filename was not visible yet.
++- Once that follow-up Codex session is verified and handed off successfully, `thread wake` writes `state: "succeeded"` and exits instead of waiting for the spawned Codex run to finish.
++- The built-in wake prompt always includes the watched ChatGPT thread URL so the resumed Codex session can reuse it for follow-up `review:gpt --send` commands.
++- `thread diagnose` captures a structured failure bundle for same-thread send and wake problems: matching managed-browser tabs, which tab selection would currently win, a sanitized command log copy, an optional sanitized recursive receipt copy, and a fresh sanitized thread export under `output-packages/review-gpt-diagnostics/`.
++- `--recursive-depth <n>` adds a built-in same-thread review loop on top of the normal wake handoff. When `n > 0`, wake now generates `recursive-followup.sh` inside the wake output directory. The resumed child runs that helper after verification; it sends the built-in bug-and-simplification review with an explicit `300s` timeout, writes `recursive-followup.json` plus `recursive-review-send.log`, and, on success, arms one more detached `thread wake` on the same URL with the counter decremented. When the counter reaches `0`, the next child applies the returned review patch and stops.
++- Top-level auto-send on an existing conversation now auto-captures the same diagnostics bundle on managed-browser send failure, and recursive same-thread follow-up helpers do the same automatically before they exit non-zero. Recursive receipts now record the diagnostics output and status paths.
++- `--recursive-prompt` overrides that built-in same-thread review prompt. The same override is baked into `recursive-followup.sh` and forwarded to descendant recursive wakes so one custom recursive workflow can run across the whole chain.
++- Recursive wakes now use deterministic nested output directories such as `recursive-depth-0` under the current wake directory instead of scattering timestamped descendant runs elsewhere. `status.json` records the generated recursive helper paths and the expected descendant `status.json` path so second-hop debugging does not require filesystem scanning.
++- Wake also writes `wake-commands.sh` beside `thread.json` and `status.json`; those direct `node .../bin.mjs thread export|download` commands bypass `pnpm exec`, so a stale consumer workspace install does not block thread re-export or attachment re-download during follow-up debugging.
++- `--resume-prompt` appends extra instructions to the built-in Codex wake prompt instead of replacing the default export/download/apply guidance, and supports `{{chat_url}}` plus `{{chat_id}}` placeholders for the watched thread.
++- Auto-send now re-checks the final composer and thread state once more before declaring `commit-timeout`, so ambiguous send confirmations do not break recursive wake chains when the message actually landed.
++- Wake uses explicit `--codex-home` first, otherwise trusts the inherited `CODEX_HOME` captured by the detached process. Neither path reads historical session contents.
++- If neither home is available, wake falls back to filename and shell-snapshot metadata across conventional local Codex homes. It never opens session transcripts or history during ownership discovery; ambiguous or legacy layouts fail with an instruction to pass `--codex-home`.
++- The supplied `--session-id` records lineage and supports that metadata-only fallback. Wake starts a fresh interactive session in the selected home instead of mutating the original session ID.
++- `--full-auto` is now opt-in on `thread wake`; without it, the launched Codex session behaves like a normal manual interactive launch.
++- Wake stores the exported thread, all downloaded assistant artifacts, `wake-commands.sh`, and `status.json` alongside the follow-up launch.
++- `--skip-resume` still exports the thread and downloads any assistant-owned artifacts, but it does not launch the follow-up Codex session.
++- If you do not use `--detach`, keep long wake runs under `nohup`, `tmux`, `screen`, `launchd`, or another supervisor so the foreground wake process survives terminal exit.
++
++## Local Package Iteration
++
++For local package iteration, prefer package-manager linking or a local file dependency rather than wrapper-script fallbacks:
++
++```bash
++pnpm add -D file:../review-gpt
++# or
++pnpm link --global ../review-gpt
++pnpm link --global @cobuild/review-gpt
++```
++
++## Release
++
++This package is published as `@cobuild/review-gpt` on npm.
++
++Release ownership note: release, version-bump, and publish actions are user-operated by default. Agents should not run release flows unless explicitly instructed in the current chat turn.
++
++```bash
++pnpm run release:check
++pnpm run release:dry-run
++pnpm run release:patch
++# or: pnpm run release:minor
++# or: pnpm run release:major
++# or: pnpm run release:alpha
++```
++
++The local release script:
++
++- requires a clean git working tree on `main`
++- verifies package scope `@cobuild/review-gpt`
++- supports `check`, `pre*` bumps with `--preid`, and strict exact semver input
++- uses `pnpm` versioning so `pnpm-lock.yaml` stays authoritative and `package-lock.json` is not recreated
++- bumps version and updates `CHANGELOG.md`
++- creates release commit `release: v<version>`, tags `v<version>`, and pushes `main` plus tags
++- after push, waits for npm publish visibility and then attempts to update sibling repos under the configured sync root that depend directly on `@cobuild/review-gpt`
++
++Release helpers resolve `@cobuild/repo-tools` from the installed dependency in `node_modules` first and fall back to the sibling `repo-tools` checkout in this workspace when testing unreleased shared tooling before the next publish.
++
++If downstream sync fails after a successful publish, the release command now warns and exits successfully so a completed publish is not misreported as a failed release. You can rerun the sync manually.
++
++You can skip the post-release sibling sync with `--no-sync-upstreams` or `REVIEW_GPT_SKIP_UPSTREAM_SYNC=1`.
++
++Manual sync command:
++
++```bash
++pnpm run sync:repos -- --version "$(node -p "require('./package.json').version")" --wait-for-publish
++```
++
++Publishing is tag-driven in GitHub Actions at `.github/workflows/release.yml`:
++
++- validates tag format and version match with `package.json`
++- runs tests and checks, creates a tarball, and creates a GitHub Release with Codex-style notes
++- publishes to npm via Trusted Publishing, including prerelease channel tags such as `alpha`, `beta`, and `rc`
++
++Before first automated publish, configure npm Trusted Publisher for `@cobuild/review-gpt` to allow `cobuildwithus/review-gpt` GitHub Actions to publish.
++
++Changelog helpers:
++
++```bash
++pnpm run changelog:update -- 0.1.1
++pnpm run release:notes -- 0.1.1 /tmp/release-notes.md
++```
+diff --git a/dist/bin.mjs b/dist/bin.mjs
+index 67034907d9f566a1607eb04513688779f8af38a2..a08a2193251d0d9884bda680a5516c2a3402d2ab 100644
+--- a/dist/bin.mjs
++++ b/dist/bin.mjs
+@@ -18,6 +18,7 @@ const cli = Cli.create('cobuild-review-gpt', {
+     }),
+     options: z.object({
+         config: z.string().optional().describe('Optional shell config file for repo-specific defaults and presets.'),
++        companionSnapshot: z.array(z.string()).optional().describe('Attach a guarded companion snapshot. Repeatable JSON: {"repo":"../companion","head":"<full SHA>","prUrl":"https://github.com/owner/repo/pull/123"}. Requires a clean exact-head repository with its committed canonical config and packager.'),
+         preset: z.array(z.string()).optional().describe('Preset(s) to include. Repeatable, comma-separated, or passed as bare preset tokens.'),
+         prompt: z.array(z.string()).optional().describe('Append custom prompt text inline. Repeatable.'),
+         promptFile: z.array(z.string()).optional().describe('Append prompt content from a local file. Repeatable.'),
+diff --git a/dist/chatgpt-dom-snapshot-shared.js b/dist/chatgpt-dom-snapshot-shared.js
+index a95281de86b711e992ad10ccafa17c8df4385103..bb338b767cb28ff9fd8508c5efd6b8cf7889e893 100644
+--- a/dist/chatgpt-dom-snapshot-shared.js
++++ b/dist/chatgpt-dom-snapshot-shared.js
+@@ -1,4 +1,5 @@
+ const CHATGPT_ASSISTANT_TURN_SELECTOR = [
++  '[data-chatgpt-search-message-ids][data-chatgpt-search-unit-key$=":assistant"]:has(> [data-conversation-role="assistant"])',
+   'article[data-message-author-role="assistant"]',
+   'div[data-message-author-role="assistant"]',
+   'section[data-message-author-role="assistant"]',
+@@ -11,6 +12,7 @@ const CHATGPT_ASSISTANT_TURN_SELECTOR = [
+ ].join(', ');
+ 
+ const CHATGPT_USER_TURN_SELECTOR = [
++  '[data-chatgpt-search-message-ids][data-chatgpt-search-unit-key$=":user"]:has([data-user-message-bubble="true"])',
+   'article[data-message-author-role="user"]',
+   'div[data-message-author-role="user"]',
+   'section[data-message-author-role="user"]',
+@@ -71,6 +73,37 @@ function normalizeComparableText(value) {
+     .trim();
+ }
+ 
++// Code-block chrome (language badges and copy controls) can disappear after
++// rehydration. Derive those blocks from their code node, while retaining all
++// surrounding response text and exact code content in the capture identity.
++function readChatGptTurnText(node) {
++  const raw = () => String(node?.innerText || node?.textContent || '').trim();
++  if (!node?.querySelector?.('pre code') || !node.childNodes) return raw();
++  const read = (element) => {
++    if (element.nodeType === 3) return element.textContent || '';
++    const tag = String(element.tagName || '').toUpperCase();
++    if (tag === 'BR') return '\n';
++    if (tag === 'PRE') {
++      const code = element.querySelector?.('code');
++      if (code) return '\n' + String(code.textContent || '') + '\n';
++    }
++    const text = Array.from(element.childNodes || []).map(read).join('');
++    if (tag === 'TD' || tag === 'TH') return text + '\t';
++    return /^(P|DIV|SECTION|ARTICLE|LI|TR|H[1-6]|BLOCKQUOTE)$/.test(tag)
++      ? '\n' + text + '\n'
++      : text;
++  };
++  return normalizeResponseText(read(node));
++}
++
++function readChatGptTurnIdentity(node, role, index, signature) {
++  for (const attribute of ['data-message-id', 'data-chatgpt-search-message-ids', 'data-turn-id', 'data-testid', 'id']) {
++    const value = String(node?.getAttribute?.(attribute) || '').trim();
++    if (value) return attribute + ':' + value;
++  }
++  return role + ':index:' + index + ':signature:' + signature;
++}
++
+ function canonicalizeChatGptTurnNodes(nodes) {
+   const orderedNodes = Array.from(nodes || []).filter(Boolean);
+   const groups = [];
+@@ -84,7 +117,7 @@ function canonicalizeChatGptTurnNodes(nodes) {
+     }
+   };
+   const identityRank = (node) => {
+-    const attributes = ['data-message-id', 'data-turn-id', 'data-testid', 'id'];
++    const attributes = ['data-message-id', 'data-chatgpt-search-message-ids', 'data-turn-id', 'data-testid', 'id'];
+     const attributeIndex = attributes.findIndex((attribute) =>
+       Boolean(String(node?.getAttribute?.(attribute) || '').trim()),
+     );
+@@ -122,6 +155,14 @@ function canonicalizeChatGptTurnNodes(nodes) {
+   return groups;
+ }
+ 
++function deriveChatGptHrefLabel(href, baseHref) {
++  if (!href) return '';
++  let pathname = String(href);
++  try { pathname = new URL(href, baseHref).pathname; } catch {}
++  const leaf = pathname.split('/').filter(Boolean).at(-1) || '';
++  try { return decodeURIComponent(leaf); } catch { return leaf; }
++}
++
+ function collectChatGptTurnAttachmentTexts(nodes, baseHref, selector) {
+   const attachmentTexts = [];
+   const seenAttachmentTexts = new Set();
+@@ -129,12 +170,7 @@ function collectChatGptTurnAttachmentTexts(nodes, baseHref, selector) {
+     const attachmentNodes = Array.from(node.querySelectorAll?.(selector) || []);
+     for (const element of attachmentNodes) {
+       const href = String(element.href || element.getAttribute?.('href') || '');
+-      let hrefLabel = '';
+-      if (href) {
+-        try {
+-          hrefLabel = decodeURIComponent(new URL(href, baseHref).pathname.split('/').filter(Boolean).at(-1) || '');
+-        } catch {}
+-      }
++      const hrefLabel = deriveChatGptHrefLabel(href, baseHref);
+       const attachmentText = [
+         element.getAttribute?.('aria-label'),
+         element.getAttribute?.('title'),
+@@ -305,7 +341,7 @@ function buildDeepResearchResponseInspectionSource() {
+ // Read only visible product UI, never quoted prompts or assistant content.
+ function collectChatGptCapabilityLimitText() {
+   // ChatGPT also puts this footer inside the assistant turn, beside its rendered message.
+-  const excluded = '[data-message-author-role], [data-turn="user"], [data-testid*="conversation-turn-user"], .markdown, [contenteditable="true"], textarea, pre, code, blockquote';
++  const excluded = '[data-chatgpt-search-message-ids][data-chatgpt-search-unit-key$=":user"], [data-message-author-role], [data-turn="user"], [data-testid*="conversation-turn-user"], .markdown, [contenteditable="true"], textarea, pre, code, blockquote';
+   const nodes = document.body?.querySelectorAll('div, span, p, footer, [role="alert"], [role="status"]') || [];
+   for (const node of nodes) {
+     if (node.closest?.(excluded) || node.querySelector?.(excluded)) continue;
+@@ -354,6 +390,8 @@ function buildChatGptCaptureStateExpression({
+   const assistantFailureButtonTextsLiteral = JSON.stringify(Array.from(CHATGPT_ASSISTANT_FAILURE_BUTTON_TEXTS));
+   const normalizeComparableTextSource = normalizeComparableText.toString();
+   const canonicalizeChatGptTurnNodesSource = canonicalizeChatGptTurnNodes.toString();
++  const readChatGptTurnTextSource = readChatGptTurnText.toString();
++  const normalizeResponseTextSource = normalizeResponseText.toString();
+   const threadStatusTextIndicatesBusySource = threadStatusTextIndicatesBusy.toString();
+ 
+   return `(() => {
+@@ -369,6 +407,8 @@ function buildChatGptCaptureStateExpression({
+     const desiredChatId = ${desiredChatIdLiteral};
+     const normalizeComparableText = ${normalizeComparableTextSource};
+     const canonicalizeChatGptTurnNodes = ${canonicalizeChatGptTurnNodesSource};
++    const normalizeResponseText = ${normalizeResponseTextSource};
++    const readChatGptTurnText = ${readChatGptTurnTextSource};
+     const threadStatusTextIndicatesBusy = ${threadStatusTextIndicatesBusySource};
+     const visible = (node) => {
+       if (!node || typeof node.getBoundingClientRect !== 'function') return false;
+@@ -377,22 +417,8 @@ function buildChatGptCaptureStateExpression({
+       return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden';
+     };
+     const assistantSnapshots = [];
+-    const turnIdentity = (node, role, index, signature) => {
+-      const attributes = ['data-message-id', 'data-turn-id', 'data-testid', 'id'];
+-      for (const attribute of attributes) {
+-        const value = String(node?.getAttribute?.(attribute) || '').trim();
+-        if (value) return attribute + ':' + value;
+-      }
+-      return role + ':index:' + index + ':signature:' + signature;
+-    };
+-    const deriveHrefLabel = (href) => {
+-      if (!href) return '';
+-      try {
+-        return decodeURIComponent(new URL(href, location.href).pathname.split('/').filter(Boolean).at(-1) || '');
+-      } catch {
+-        return decodeURIComponent(String(href).split('/').filter(Boolean).at(-1) || '');
+-      }
+-    };
++    const turnIdentity = ${readChatGptTurnIdentity.toString()};
++    const deriveHrefLabel = (href) => (${deriveChatGptHrefLabel.toString()})(href, location.href);
+     const hasDownloadableHref = (href) => {
+       if (!href) return false;
+       const normalizedHref = String(href).trim();
+@@ -440,7 +466,7 @@ function buildChatGptCaptureStateExpression({
+     const assistantNodesAfterLastUserSet = new Set(assistantNodesAfterLastUser);
+     const finalAssistantNode = assistantNodesAfterLastUser.at(-1) || (!lastUserNode ? assistantNodes.at(-1) || null : null);
+     for (const [assistantTurnIndex, node] of assistantNodes.entries()) {
+-      const text = String(node?.innerText || node?.textContent || '').trim();
++      const text = readChatGptTurnText(node);
+       const signature = normalizeComparableText(text).slice(0, 320);
+       if (!text || !signature) continue;
+       const precedingUserNode = userNodes
+@@ -517,7 +543,7 @@ function buildChatGptCaptureStateExpression({
+     const patchTextSource =
+       assistantNodesAfterLastUser.length > 0 || lastUserNode
+         ? assistantNodesAfterLastUser
+-            .map((node) => String(node?.innerText || node?.textContent || '').trim())
++            .map((node) => readChatGptTurnText(node))
+             .filter(Boolean)
+             .join('\\n\\n')
+         : bodyText;
+@@ -527,9 +553,7 @@ function buildChatGptCaptureStateExpression({
+         const assistantTurnGroup = assistantTurnGroupFor(rawAssistantContainer);
+         const assistantContainer = assistantTurnGroup?.node || rawAssistantContainer;
+         const assistantTurnIndex = assistantContainer ? assistantNodes.indexOf(assistantContainer) : -1;
+-        const assistantText = String(
+-          assistantContainer?.innerText || assistantContainer?.textContent || '',
+-        ).trim();
++        const assistantText = readChatGptTurnText(assistantContainer);
+         const assistantSignature = normalizeComparableText(assistantText).slice(0, 320);
+         const assistantTurnId = assistantContainer
+           ? turnIdentity(assistantContainer, 'assistant', assistantTurnIndex, assistantSignature)
+@@ -614,6 +638,8 @@ function buildChatGptCaptureStateExpression({
+ }
+ 
+ module.exports = {
++  deriveChatGptHrefLabel,
++  readChatGptTurnIdentity,
+   collectChatGptCapabilityLimitText,
+   assertChatGptCapabilitiesAvailable,
+   CHATGPT_ASSISTANT_TURN_SELECTOR,
+@@ -629,6 +655,7 @@ module.exports = {
+   chatGptTextIndicatesRateLimit,
+   normalizeComparableText,
+   normalizeResponseText,
++  readChatGptTurnText,
+   sanitizeDeepResearchResponseText,
+   threadStatusTextIndicatesBusy,
+ };
+diff --git a/dist/chatgpt-thread-lib.d.mts b/dist/chatgpt-thread-lib.d.mts
+index fe8a43d027b979e4e39d7998bfa2bc9807aa9f28..412791d840f0bcc339b40759d9b3e99734985017 100644
+--- a/dist/chatgpt-thread-lib.d.mts
++++ b/dist/chatgpt-thread-lib.d.mts
+@@ -56,10 +56,12 @@ export type ThreadAttachmentDownloadSelector = {
+ export declare function conversationUrlsReferToSameThread(candidateUrl: string, chatUrl: string): boolean;
+ export declare function pickBestThreadTarget(targets: CdpTarget[], chatUrl: string): CdpTarget | null;
+ export declare function sleep(ms: number): Promise<void>;
++export declare function recoverVerifiedDownloadFile(filePath: string, beforeFiles: Map<string, number>, expectedContentSha256: string): Promise<string | null>;
+ export declare function fetchJson<T>(url: string, options?: {
+     timeoutMs?: number;
+ }): Promise<T>;
+ export declare class CdpClient {
++    private readonly commandTimeoutMs;
+     private readonly eventListeners;
+     private readonly closeListeners;
+     private nextId;
+@@ -67,7 +69,7 @@ export declare class CdpClient {
+     private terminalError;
+     readonly ready: Promise<void>;
+     private readonly ws;
+-    constructor(url: string);
++    constructor(url: string, commandTimeoutMs?: number);
+     private failPending;
+     private onTerminalError;
+     close(): void;
+@@ -93,7 +95,10 @@ export declare function extractAssistantDownloadTargets(snapshot: Partial<Thread
+     href?: string | null;
+     label: string;
+ }>;
++export declare function resolveCapturedConversation(browserEndpoint: string, chatUrl: string, capture: ThreadCaptureIdentity): Promise<ThreadCaptureIdentity>;
+ export declare function captureThreadTargetSnapshot(browserEndpoint: string, chatUrl: string, captureIdentity: ThreadCaptureIdentity, options?: CaptureThreadTargetOptions): Promise<CapturedThreadTarget>;
++export declare function completeDownloadCaptureIdentity(capture: ThreadCaptureIdentity, snapshot: ThreadSnapshot): ThreadCaptureIdentity;
++export declare function recoverPendingDownloadCapture(browserEndpoint: string, chatUrl: string, capture: ThreadCaptureIdentity, timeoutMs: number): Promise<ThreadCaptureIdentity>;
+ export declare function exportThreadSnapshot(browserEndpoint: string, chatUrl: string, outputPath: string, options?: ExportThreadSnapshotOptions): Promise<ExportedThreadSnapshot>;
+ export declare function downloadThreadAttachment(browserEndpoint: string, chatUrl: string, attachmentText: string, outputDir: string, timeoutMs?: number, selector?: ThreadAttachmentDownloadSelector, options?: {
+     captureIdentity?: ThreadCaptureIdentity;
+diff --git a/dist/chatgpt-thread-lib.mjs b/dist/chatgpt-thread-lib.mjs
+index 42496f760c6dcecb9ce7e8f6f88e51218ccce7d6..bddf84f0a2f14d86798ca49e5ccf7ec95bec4d24 100644
+--- a/dist/chatgpt-thread-lib.mjs
++++ b/dist/chatgpt-thread-lib.mjs
+@@ -2,10 +2,10 @@ import { access, mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/p
+ import { createHash } from 'node:crypto';
+ import { createRequire } from 'node:module';
+ import path from 'node:path';
+-import { buildCaptureThreadSnapshotExpression, deriveAttachmentLabel, extractAssistantArtifactButtons, extractAssistantDownloadButtons, hasThreadPayload, isPatchArtifactAttachment, mergeDeepResearchReportSnapshot, normalizeThreadSnapshot, normalizeAttachmentValue, scopeThreadSnapshotToCaptureIdentity, } from './chatgpt-thread-snapshot-lib.mjs';
++import { buildCaptureThreadSnapshotExpression, assistantSnapshotLooksTerminal, snapshotIndicatesBusy, completeThreadCaptureIdentity, deriveAttachmentLabel, extractAssistantArtifactButtons, extractAssistantDownloadButtons, hasThreadPayload, isPatchArtifactAttachment, mergeDeepResearchReportSnapshot, normalizeThreadSnapshot, normalizeAttachmentValue, scopeThreadSnapshotToCaptureIdentity, } from './chatgpt-thread-snapshot-lib.mjs';
+ export { assistantSnapshotLooksIncomplete, assistantSnapshotLooksTerminal, completeThreadCaptureIdentity, extractAssistantArtifactLabels, hasThreadPayload, isCaptureIdentityDigest, normalizeThreadSnapshot, parseThreadCaptureIdentity, scopeThreadSnapshotToCaptureIdentity, snapshotBusyReason, snapshotHasAssistantArtifacts, snapshotHasPatchArtifacts, snapshotIndicatesBusy, threadStatusTextIndicatesComplete, threadStatusTextIndicatesBusy, } from './chatgpt-thread-snapshot-lib.mjs';
+ const require = createRequire(import.meta.url);
+-const { CHATGPT_ASSISTANT_TURN_SELECTOR, CHATGPT_USER_TURN_SELECTOR, buildDeepResearchResponseInspectionSource, canonicalizeChatGptTurnNodes, } = require('./chatgpt-dom-snapshot-shared.js');
++const { CHATGPT_ASSISTANT_TURN_SELECTOR, CHATGPT_USER_TURN_SELECTOR, buildDeepResearchResponseInspectionSource, canonicalizeChatGptTurnNodes, normalizeResponseText, readChatGptTurnText, readChatGptTurnIdentity, deriveChatGptHrefLabel, } = require('./chatgpt-dom-snapshot-shared.js');
+ export const DEFAULT_BROWSER_ENDPOINT = 'http://127.0.0.1:9222';
+ const BROWSER_ENDPOINT_REQUEST_TIMEOUT_MS = 10_000;
+ const TARGET_READY_TIMEOUT_MS = 60_000;
+@@ -137,6 +137,20 @@ async function removeEmptyDownloadFilesCreatedSince(dirPath, beforeFiles) {
+         .filter(([filePath, size]) => size === 0 && beforeFiles.get(filePath) !== 0)
+         .map(([filePath]) => rm(filePath, { force: true })));
+ }
++export async function recoverVerifiedDownloadFile(filePath, beforeFiles, expectedContentSha256) {
++    if (!/^[a-f0-9]{64}$/u.test(expectedContentSha256) || beforeFiles.has(filePath))
++        return null;
++    try {
++        const info = await stat(filePath);
++        if (!info.isFile() || info.size <= 0)
++            return null;
++        const digest = createHash('sha256').update(await readFile(filePath)).digest('hex');
++        return digest === expectedContentSha256 ? filePath : null;
++    }
++    catch {
++        return null;
++    }
++}
+ export async function fetchJson(url, options = {}) {
+     const timeoutMs = options.timeoutMs ?? BROWSER_ENDPOINT_REQUEST_TIMEOUT_MS;
+     if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+@@ -165,6 +179,7 @@ export async function fetchJson(url, options = {}) {
+     }
+ }
+ export class CdpClient {
++    commandTimeoutMs;
+     eventListeners = new Set();
+     closeListeners = new Set();
+     nextId = 1;
+@@ -172,15 +187,27 @@ export class CdpClient {
+     terminalError = null;
+     ready;
+     ws;
+-    constructor(url) {
++    constructor(url, commandTimeoutMs = BROWSER_ENDPOINT_REQUEST_TIMEOUT_MS) {
++        this.commandTimeoutMs = commandTimeoutMs;
++        if (!Number.isFinite(commandTimeoutMs) || commandTimeoutMs <= 0) {
++            throw new Error('CDP command timeout must be positive.');
++        }
+         this.ws = new WebSocket(url);
+         this.ready = new Promise((resolve, reject) => {
+             let opened = false;
++            const connectTimer = setTimeout(() => {
++                const error = new Error('Timed out opening CDP socket.');
++                reject(error);
++                this.failPending(error);
++                this.ws.close();
++            }, commandTimeoutMs);
+             this.ws.addEventListener('open', () => {
+                 opened = true;
++                clearTimeout(connectTimer);
+                 resolve();
+             }, { once: true });
+             this.ws.addEventListener('error', () => {
++                clearTimeout(connectTimer);
+                 const error = new Error(opened ? 'CDP socket errored unexpectedly.' : 'CDP socket failed to open.');
+                 if (!opened) {
+                     reject(error);
+@@ -188,6 +215,7 @@ export class CdpClient {
+                 this.failPending(error);
+             }, { once: true });
+             this.ws.addEventListener('close', () => {
++                clearTimeout(connectTimer);
+                 const error = new Error(opened ? 'CDP socket closed unexpectedly.' : 'CDP socket closed before opening.');
+                 if (!opened) {
+                     reject(error);
+@@ -275,16 +303,24 @@ export class CdpClient {
+         const id = this.nextId;
+         this.nextId += 1;
+         return await new Promise((resolve, reject) => {
++            const commandTimer = setTimeout(() => {
++                const error = new Error(`Timed out executing CDP command ${method}.`);
++                this.failPending(error);
++                this.ws.close();
++            }, this.commandTimeoutMs);
+             const removeTerminalListener = this.onTerminalError((error) => {
+                 this.pending.delete(id);
++                clearTimeout(commandTimer);
+                 reject(error);
+             });
+             this.pending.set(id, {
+                 reject: (error) => {
++                    clearTimeout(commandTimer);
+                     removeTerminalListener();
+                     reject(error);
+                 },
+                 resolve: (value) => {
++                    clearTimeout(commandTimer);
+                     removeTerminalListener();
+                     resolve(value);
+                 },
+@@ -294,6 +330,7 @@ export class CdpClient {
+             }
+             catch (error) {
+                 this.pending.delete(id);
++                clearTimeout(commandTimer);
+                 removeTerminalListener();
+                 reject(normalizeError(error, `Failed to send CDP command ${method}.`));
+             }
+@@ -359,7 +396,30 @@ export async function closeTarget(browserEndpoint, targetId) {
+ }
+ async function findMatchingTarget(browserEndpoint, chatUrl) {
+     const targets = await fetchJson(`${browserEndpoint}/json/list`);
+-    return pickBestThreadTarget(targets, chatUrl);
++    const candidates = targets.filter((target) => target.type === 'page' &&
++        Boolean(target.webSocketDebuggerUrl) && scoreThreadTargetUrl(target.url, chatUrl) >= 0);
++    if (candidates.length <= 1)
++        return pickBestThreadTarget(candidates, chatUrl);
++    // Probe only URL-based discovery. Exact captured targets retain their strict
++    // identity path and never silently substitute another existing tab.
++    const deadline = Date.now() + BROWSER_ENDPOINT_REQUEST_TIMEOUT_MS;
++    while (candidates.length > 0 && Date.now() < deadline) {
++        const candidate = pickBestThreadTarget(candidates, chatUrl);
++        candidates.splice(candidates.indexOf(candidate), 1);
++        const client = new CdpClient(candidate.webSocketDebuggerUrl, Math.max(1, Math.min(2_000, deadline - Date.now())));
++        try {
++            const href = await client.evaluate('location.href');
++            if (conversationUrlsReferToSameThread(href, chatUrl))
++                return candidate;
++        }
++        catch {
++            // A stale renderer is not evidence that the responsive duplicate vanished.
++        }
++        finally {
++            client.close();
++        }
++    }
++    throw new Error('No responsive browser target for the requested conversation.');
+ }
+ async function findTargetById(browserEndpoint, targetId) {
+     const targets = await fetchJson(`${browserEndpoint}/json/list`);
+@@ -390,14 +450,7 @@ async function readThreadContentState(client) {
+     attachmentButtonCount: (() => {
+       const root = document.querySelector('main') ?? document.body;
+       if (!root) return 0;
+-      const deriveHrefLabel = (href) => {
+-        if (!href) return '';
+-        try {
+-          return decodeURIComponent(new URL(href, location.href).pathname.split('/').filter(Boolean).at(-1) || '');
+-        } catch {
+-          return decodeURIComponent(String(href).split('/').filter(Boolean).at(-1) || '');
+-        }
+-      };
++      const deriveHrefLabel = (href) => (${deriveChatGptHrefLabel.toString()})(href, location.href);
+       const isConversationHref = (href) => {
+         if (!href) return false;
+         try {
+@@ -458,6 +511,9 @@ async function findAttachmentClickTargetWithSelector(client, attachmentText, sel
+     const assistantTurnSelectorLiteral = JSON.stringify(CHATGPT_ASSISTANT_TURN_SELECTOR);
+     const userTurnSelectorLiteral = JSON.stringify(CHATGPT_USER_TURN_SELECTOR);
+     const canonicalizeChatGptTurnNodesSource = canonicalizeChatGptTurnNodes.toString();
++    const readChatGptTurnIdentitySource = readChatGptTurnIdentity.toString();
++    const readChatGptTurnTextSource = readChatGptTurnText.toString();
++    const normalizeResponseTextSource = normalizeResponseText.toString();
+     const artifactIndex = Number.isInteger(selector.artifactIndex) && Number(selector.artifactIndex) >= 0
+         ? Number(selector.artifactIndex)
+         : -1;
+@@ -472,14 +528,7 @@ async function findAttachmentClickTargetWithSelector(client, attachmentText, sel
+     const expectedHrefSpecified = Object.prototype.hasOwnProperty.call(selector, 'href');
+     return await client.evaluate(`(() => {
+     const root = document.querySelector('main') ?? document.body;
+-    const deriveHrefLabel = (href) => {
+-      if (!href) return '';
+-      try {
+-        return decodeURIComponent(new URL(href, location.href).pathname.split('/').filter(Boolean).at(-1) || '');
+-      } catch {
+-        return decodeURIComponent(String(href).split('/').filter(Boolean).at(-1) || '');
+-      }
+-    };
++    const deriveHrefLabel = (href) => (${deriveChatGptHrefLabel.toString()})(href, location.href);
+     const hasDownloadableHref = (href) => {
+       if (!href) return false;
+       const normalizedHref = String(href).trim();
+@@ -495,6 +544,8 @@ async function findAttachmentClickTargetWithSelector(client, attachmentText, sel
+     const assistantTurnSelector = ${assistantTurnSelectorLiteral};
+     const userTurnSelector = ${userTurnSelectorLiteral};
+     const canonicalizeChatGptTurnNodes = ${canonicalizeChatGptTurnNodesSource};
++    const normalizeResponseText = ${normalizeResponseTextSource};
++    const readChatGptTurnText = ${readChatGptTurnTextSource};
+     const assistantTurnGroups = canonicalizeChatGptTurnNodes(
+       Array.from(root.querySelectorAll(assistantTurnSelector)),
+     );
+@@ -513,13 +564,7 @@ async function findAttachmentClickTargetWithSelector(client, attachmentText, sel
+     const assistantNodesAfterLastUser = assistantNodes.filter((node) => isAfterLastUserNode(node));
+     const assistantNodesAfterLastUserSet = new Set(assistantNodesAfterLastUser);
+     const finalAssistantNode = assistantNodesAfterLastUser.at(-1) || (!lastUserNode ? assistantNodes.at(-1) || null : null);
+-    const turnIdentity = (node, role, index, signature) => {
+-      for (const attribute of ['data-message-id', 'data-turn-id', 'data-testid', 'id']) {
+-        const value = String(node?.getAttribute?.(attribute) || '').trim();
+-        if (value) return attribute + ':' + value;
+-      }
+-      return role + ':index:' + index + ':signature:' + signature;
+-    };
++    const turnIdentity = ${readChatGptTurnIdentitySource};
+     const sanitizedTurnIdentity = (value) => {
+       const raw = String(value || '');
+       const marker = ':signature:';
+@@ -534,7 +579,7 @@ async function findAttachmentClickTargetWithSelector(client, attachmentText, sel
+     };
+     const normalize = (value) => String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').replace(/\\s+/g, ' ').trim();
+     const capturedAssistantNodes = assistantNodes.filter((node, index) => {
+-      const signature = normalize(node?.innerText || node?.textContent || '').slice(0, 320);
++      const signature = normalize(readChatGptTurnText(node)).slice(0, 320);
+       const liveTurnId = turnIdentity(node, 'assistant', index, signature);
+       const idMatches = !${JSON.stringify(assistantTurnId)} || liveTurnId === ${JSON.stringify(assistantTurnId)} || sanitizedTurnIdentity(liveTurnId) === ${JSON.stringify(assistantTurnId)};
+       const indexMatches = ${assistantTurnIndex} < 0 || index === ${assistantTurnIndex};
+@@ -625,6 +670,9 @@ async function clickAttachmentWithSelector(client, attachmentText, timeoutMs, se
+     const assistantTurnSelectorLiteral = JSON.stringify(CHATGPT_ASSISTANT_TURN_SELECTOR);
+     const userTurnSelectorLiteral = JSON.stringify(CHATGPT_USER_TURN_SELECTOR);
+     const canonicalizeChatGptTurnNodesSource = canonicalizeChatGptTurnNodes.toString();
++    const readChatGptTurnTextSource = readChatGptTurnText.toString();
++    const normalizeResponseTextSource = normalizeResponseText.toString();
++    const readChatGptTurnIdentitySource = readChatGptTurnIdentity.toString();
+     const artifactIndex = Number.isInteger(selector.artifactIndex) && Number(selector.artifactIndex) >= 0
+         ? Number(selector.artifactIndex)
+         : -1;
+@@ -639,14 +687,7 @@ async function clickAttachmentWithSelector(client, attachmentText, timeoutMs, se
+     const expectedHrefSpecified = Object.prototype.hasOwnProperty.call(selector, 'href');
+     const activated = await client.evaluate(`(() => {
+     const root = document.querySelector('main') ?? document.body;
+-    const deriveHrefLabel = (href) => {
+-      if (!href) return '';
+-      try {
+-        return decodeURIComponent(new URL(href, location.href).pathname.split('/').filter(Boolean).at(-1) || '');
+-      } catch {
+-        return decodeURIComponent(String(href).split('/').filter(Boolean).at(-1) || '');
+-      }
+-    };
++    const deriveHrefLabel = (href) => (${deriveChatGptHrefLabel.toString()})(href, location.href);
+     const hasDownloadableHref = (href) => {
+       if (!href) return false;
+       const normalizedHref = String(href).trim();
+@@ -662,6 +703,8 @@ async function clickAttachmentWithSelector(client, attachmentText, timeoutMs, se
+     const assistantTurnSelector = ${assistantTurnSelectorLiteral};
+     const userTurnSelector = ${userTurnSelectorLiteral};
+     const canonicalizeChatGptTurnNodes = ${canonicalizeChatGptTurnNodesSource};
++    const normalizeResponseText = ${normalizeResponseTextSource};
++    const readChatGptTurnText = ${readChatGptTurnTextSource};
+     const assistantTurnGroups = canonicalizeChatGptTurnNodes(
+       Array.from(root.querySelectorAll(assistantTurnSelector)),
+     );
+@@ -680,13 +723,7 @@ async function clickAttachmentWithSelector(client, attachmentText, timeoutMs, se
+     const assistantNodesAfterLastUser = assistantNodes.filter((node) => isAfterLastUserNode(node));
+     const assistantNodesAfterLastUserSet = new Set(assistantNodesAfterLastUser);
+     const finalAssistantNode = assistantNodesAfterLastUser.at(-1) || (!lastUserNode ? assistantNodes.at(-1) || null : null);
+-    const turnIdentity = (node, role, index, signature) => {
+-      for (const attribute of ['data-message-id', 'data-turn-id', 'data-testid', 'id']) {
+-        const value = String(node?.getAttribute?.(attribute) || '').trim();
+-        if (value) return attribute + ':' + value;
+-      }
+-      return role + ':index:' + index + ':signature:' + signature;
+-    };
++    const turnIdentity = ${readChatGptTurnIdentitySource};
+     const sanitizedTurnIdentity = (value) => {
+       const raw = String(value || '');
+       const marker = ':signature:';
+@@ -701,7 +738,7 @@ async function clickAttachmentWithSelector(client, attachmentText, timeoutMs, se
+     };
+     const normalize = (value) => String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').replace(/\\s+/g, ' ').trim();
+     const capturedAssistantNodes = assistantNodes.filter((node, index) => {
+-      const signature = normalize(node?.innerText || node?.textContent || '').slice(0, 320);
++      const signature = normalize(readChatGptTurnText(node)).slice(0, 320);
+       const liveTurnId = turnIdentity(node, 'assistant', index, signature);
+       const idMatches = !${JSON.stringify(assistantTurnId)} || liveTurnId === ${JSON.stringify(assistantTurnId)} || sanitizedTurnIdentity(liveTurnId) === ${JSON.stringify(assistantTurnId)};
+       const indexMatches = ${assistantTurnIndex} < 0 || index === ${assistantTurnIndex};
+@@ -1108,14 +1145,54 @@ export function extractAssistantDownloadTargets(snapshot) {
+         label: attachment.label,
+     }));
+ }
++export async function resolveCapturedConversation(browserEndpoint, chatUrl, capture) {
++    const capturedUrl = parseUrl(capture.chatUrl);
++    let capturedId = '';
++    try {
++        capturedId = decodeURIComponent(extractChatId(capturedUrl?.pathname ?? '') ?? '');
++    }
++    catch { /* rejected below */ }
++    if (!/^WEB:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu.test(capturedId))
++        return capture;
++    if (capture.browserEndpoint !== browserEndpoint)
++        throw new Error('Capture metadata browser endpoint does not match the requested endpoint.');
++    const targets = await fetchJson(`${browserEndpoint}/json/list`);
++    const matches = targets.filter((target) => target.type === 'page' && target.id === capture.targetId && Boolean(target.webSocketDebuggerUrl));
++    if (matches.length !== 1)
++        throw new Error('Accepted transient capture requires its original browser target; refusing replacement or resend.');
++    const liveUrl = parseUrl(matches[0].url ?? '');
++    const liveId = extractChatId(liveUrl?.pathname ?? '');
++    if (!liveUrl || liveUrl.origin !== capturedUrl?.origin || !liveId || !/^[A-Za-z0-9_-]+$/u.test(liveId)) {
++        throw new Error('Accepted transient conversation has not obtained a canonical URL. Retry unchanged capture metadata; do not resend.');
++    }
++    const canonicalUrl = `${liveUrl.origin}/c/${liveId}`;
++    const requestedUrl = parseUrl(chatUrl);
++    let requestedId = '';
++    try {
++        requestedId = decodeURIComponent(extractChatId(requestedUrl?.pathname ?? '') ?? '');
++    }
++    catch { /* rejected below */ }
++    const matchesAcceptedTransient = requestedUrl?.origin === capturedUrl?.origin && requestedId === capturedId;
++    if (!matchesAcceptedTransient && !conversationUrlsReferToSameThread(chatUrl, canonicalUrl)) {
++        throw new Error('Requested conversation does not match the exact accepted target.');
++    }
++    // This is a location candidate, not identity approval. The caller still waits
++    // for the recorded exact user turn before exporting or activating an artifact.
++    return { ...capture, chatUrl: canonicalUrl };
++}
+ export async function captureThreadTargetSnapshot(browserEndpoint, chatUrl, captureIdentity, options = {}) {
++    const originalChatUrl = captureIdentity.chatUrl;
++    captureIdentity = await resolveCapturedConversation(browserEndpoint, chatUrl, captureIdentity);
++    const promotedTransient = originalChatUrl !== captureIdentity.chatUrl;
++    if (captureIdentity.chatUrl !== chatUrl && /\/c\/WEB(?::|%3A)/iu.test(chatUrl))
++        chatUrl = captureIdentity.chatUrl;
+     if (captureIdentity.browserEndpoint !== browserEndpoint) {
+         throw new Error('Capture metadata browser endpoint does not match the requested endpoint.');
+     }
+     if (!conversationUrlsReferToSameThread(captureIdentity.chatUrl, chatUrl)) {
+         throw new Error('Capture metadata thread does not match the requested ChatGPT conversation.');
+     }
+-    const targetLease = await ensureTargetLease(browserEndpoint, chatUrl, captureIdentity.targetId, true);
++    const targetLease = await ensureTargetLease(browserEndpoint, chatUrl, captureIdentity.targetId, !promotedTransient);
+     options.onTargetLease?.(targetLease);
+     const client = new CdpClient(targetLease.target.webSocketDebuggerUrl);
+     const captureDeadline = options.timeoutMs === undefined
+@@ -1143,6 +1220,23 @@ export async function captureThreadTargetSnapshot(browserEndpoint, chatUrl, capt
+         }
+     }
+ }
++export function completeDownloadCaptureIdentity(capture, snapshot) {
++    if (snapshot.stopVisible || snapshot.statusBusy || snapshotIndicatesBusy(snapshot) || !assistantSnapshotLooksTerminal(snapshot)) {
++        throw new Error('Exact captured response is not complete; refuse artifact identity promotion.');
++    }
++    const completed = completeThreadCaptureIdentity(capture, snapshot);
++    if (completed.artifacts.length === 0)
++        throw new Error('Completed exact response has no captured artifacts.');
++    return completed;
++}
++export async function recoverPendingDownloadCapture(browserEndpoint, chatUrl, capture, timeoutMs) {
++    const captured = await captureThreadTargetSnapshot(browserEndpoint, chatUrl, capture, { timeoutMs });
++    return completeDownloadCaptureIdentity({
++        ...capture,
++        chatUrl: captured.snapshot.href || capture.chatUrl,
++        targetId: String(captured.targetLease.target.id ?? ''),
++    }, captured.snapshot);
++}
+ export async function exportThreadSnapshot(browserEndpoint, chatUrl, outputPath, options = {}) {
+     const captured = options.captureIdentity
+         ? await captureThreadTargetSnapshot(browserEndpoint, chatUrl, options.captureIdentity, options)
+@@ -1193,6 +1287,7 @@ export async function downloadThreadAttachment(browserEndpoint, chatUrl, attachm
+     if (attachmentText.trim().length === 0 && selector.artifactIndex === undefined && normalizeAttachmentValue(selector.href).length === 0) {
+         throw new Error('Attachment selection requires --attachment-text, --artifact-index, or a concrete href.');
+     }
++    outputDir = path.resolve(outputDir);
+     await mkdir(outputDir, { recursive: true });
+     const filesBeforeDownloadAttempt = await listDownloadDirectoryFiles(outputDir);
+     if (options.captureIdentity) {
+@@ -1205,7 +1300,7 @@ export async function downloadThreadAttachment(browserEndpoint, chatUrl, attachm
+     }
+     const targetLease = await ensureTargetLease(browserEndpoint, chatUrl, options.captureIdentity?.targetId, Boolean(options.captureIdentity));
+     options.onTargetLease?.(targetLease);
+-    const client = new CdpClient(targetLease.target.webSocketDebuggerUrl);
++    const client = new CdpClient(targetLease.target.webSocketDebuggerUrl, timeoutMs);
+     let downloadSucceeded = false;
+     let captureValidated = !options.captureIdentity?.assistantResponse;
+     let expectedContentSha256 = '';
+@@ -1232,7 +1327,7 @@ export async function downloadThreadAttachment(browserEndpoint, chatUrl, attachm
+                 throw new Error('Requested artifact index is not present in the exact waited capture metadata.');
+             }
+             expectedContentSha256 = capturedArtifact.contentSha256 ?? '';
+-            const exactSnapshot = await scopeCapturedThreadSnapshot(browserEndpoint, String(targetLease.target.id ?? ''), await waitForSettledThreadSnapshot(client), options.captureIdentity);
++            const exactSnapshot = await waitForCapturedThreadIdentity(client, browserEndpoint, String(targetLease.target.id ?? ''), options.captureIdentity, Math.min(timeoutMs, SNAPSHOT_SETTLE_TIMEOUT_MS));
+             captureValidated = true;
+             const liveArtifact = exactSnapshot.attachmentButtons[Number(selector.artifactIndex)];
+             if (!liveArtifact) {
+@@ -1255,6 +1350,19 @@ export async function downloadThreadAttachment(browserEndpoint, chatUrl, attachm
+         });
+         const downloadStartPromise = client.waitForEvent((event) => event.method === 'Page.downloadWillBegin' &&
+             String(event.params?.suggestedFilename ?? '').length > 0, timeoutMs).then((event) => ({ event, kind: 'native-download' }));
++        let nativeDownloadGuid = '';
++        // Subscribe before activating the control: a small completed file can emit
++        // both events before the caller resumes from the download-start promise.
++        const downloadCompletionPromise = client.waitForEvent((event) => {
++            if (event.method === 'Page.downloadWillBegin' && !nativeDownloadGuid &&
++                String(event.params?.suggestedFilename ?? '').length > 0) {
++                nativeDownloadGuid = String(event.params?.guid ?? '');
++            }
++            return event.method === 'Page.downloadProgress' && Boolean(nativeDownloadGuid) &&
++                String(event.params?.guid ?? '') === nativeDownloadGuid &&
++                ['completed', 'canceled'].includes(String(event.params?.state ?? ''));
++        }, timeoutMs);
++        void downloadCompletionPromise.catch(() => { });
+         const estuaryResponsePromise = client.waitForEvent((event) => {
+             const response = getNetworkResponse(event);
+             return (event.method === 'Network.responseReceived' &&
+@@ -1324,9 +1432,11 @@ export async function downloadThreadAttachment(browserEndpoint, chatUrl, attachm
+                 const guid = String(downloadStart.params?.guid ?? '');
+                 const downloadedFile = path.join(path.resolve(outputDir), suggestedFilename);
+                 await removeIfPresent(`${downloadedFile}.crdownload`);
+-                await client.waitForEvent((event) => event.method === 'Page.downloadProgress' &&
+-                    String(event.params?.guid ?? '') === guid &&
+-                    String(event.params?.state ?? '') === 'completed', timeoutMs);
++                const completion = await downloadCompletionPromise;
++                if (String(completion.params?.guid ?? '') !== guid ||
++                    String(completion.params?.state ?? '') !== 'completed') {
++                    throw new Error('Native artifact download was canceled or changed identity.');
++                }
+                 try {
+                     await waitForDownloadedFile(downloadedFile, timeoutMs);
+                 }
+@@ -1367,7 +1477,13 @@ export async function downloadThreadAttachment(browserEndpoint, chatUrl, attachm
+             return await completeVerifiedDownload(downloadedFile);
+         }
+         catch (error) {
++            const verifiedFile = await recoverVerifiedDownloadFile(path.join(path.resolve(outputDir), sanitizeDownloadFilename(effectiveAttachmentText)), filesBeforeDownloadAttempt, expectedContentSha256);
++            if (verifiedFile)
++                return await completeVerifiedDownload(verifiedFile);
+             await removeEmptyDownloadFilesCreatedSince(outputDir, filesBeforeDownloadAttempt);
++            if (/Timed out waiting for matching CDP event/u.test(normalizeError(error, '').message)) {
++                throw new Error('No completed artifact download event. If this artifact opened a native Save dialog, finish it and retry using the unchanged capture metadata; do not resend the request.', { cause: error });
++            }
+             throw error;
+         }
+     }
 diff --git a/dist/chatgpt-thread-snapshot-lib.mjs b/dist/chatgpt-thread-snapshot-lib.mjs
+index 4ba6e49dbb83de266aceda796cbd41012bf471e7..9e699904948414366da5f60f970d8a70da30d13e 100644
 --- a/dist/chatgpt-thread-snapshot-lib.mjs
 +++ b/dist/chatgpt-thread-snapshot-lib.mjs
-@@ -90,6 +90,10 @@
+@@ -1,7 +1,7 @@
+ import { createHash } from 'node:crypto';
+ import { createRequire } from 'node:module';
+ const require = createRequire(import.meta.url);
+-const { buildChatGptCaptureStateExpression, normalizeComparableText, sanitizeDeepResearchResponseText, threadStatusTextIndicatesBusy, } = require('./chatgpt-dom-snapshot-shared.js');
++const { buildChatGptCaptureStateExpression, normalizeComparableText, deriveChatGptHrefLabel, sanitizeDeepResearchResponseText, threadStatusTextIndicatesBusy, } = require('./chatgpt-dom-snapshot-shared.js');
+ export { threadStatusTextIndicatesBusy };
+ const EMPTY_PATCH_MARKERS = {
+     addFile: false,
+@@ -90,6 +90,10 @@ function matchesStoredTurnId(liveValue, storedValue) {
      return String(liveValue ?? '') === String(storedValue ?? '') ||
          sanitizedCaptureTurnId(liveValue) === String(storedValue ?? '');
  }
@@ -12,7 +1282,7 @@ diff --git a/dist/chatgpt-thread-snapshot-lib.mjs b/dist/chatgpt-thread-snapshot
  function matchesCapturedAssistant(snapshot, capture) {
      return (matchesStoredTurnId(snapshot.assistantTurnId, capture.assistantTurnId) &&
          matchesStoredCaptureValue(snapshot.precedingUserMessageSignature, capture.precedingUserMessageSignature) &&
-@@ -182,7 +186,7 @@
+@@ -182,7 +186,7 @@ export function scopeThreadSnapshotToCaptureIdentity(snapshot, capture) {
      if (!assistantResponse) {
          if (!capture)
              return normalized;
@@ -21,7 +1291,7 @@ diff --git a/dist/chatgpt-thread-snapshot-lib.mjs b/dist/chatgpt-thread-snapshot
              matchesStoredCaptureValue(candidate.signature, capture.committedUserTurn.signature));
          if (committedUserMatches.length !== 1) {
              throw new Error(`Captured committed user-turn identity resolved to ${committedUserMatches.length} turns; refusing ambiguous wake.`);
-@@ -191,7 +195,7 @@
+@@ -191,7 +195,7 @@ export function scopeThreadSnapshotToCaptureIdentity(snapshot, capture) {
          if (normalized.userSnapshots.some((candidate) => candidate.turnIndex > committedUserTurn.turnIndex)) {
              throw new Error('Captured committed user turn is no longer the latest request; refusing to wait on a different turn.');
          }
@@ -30,10 +1300,71 @@ diff --git a/dist/chatgpt-thread-snapshot-lib.mjs b/dist/chatgpt-thread-snapshot
              candidate.precedingUserTurnIndex === committedUserTurn.turnIndex &&
              matchesStoredCaptureValue(candidate.precedingUserMessageSignature, capture.committedUserTurn.signature));
          if (pendingAssistantMatches.length > 1) {
+@@ -541,13 +545,7 @@ export function deriveAttachmentHrefLabel(href) {
+     if (normalizedHref.length === 0) {
+         return '';
+     }
+-    try {
+-        const pathname = new URL(normalizedHref, 'https://chatgpt.com').pathname;
+-        return decodeURIComponent(pathname.split('/').filter(Boolean).at(-1) ?? '');
+-    }
+-    catch {
+-        return decodeURIComponent(normalizedHref.split('/').filter(Boolean).at(-1) ?? '');
+-    }
++    return deriveChatGptHrefLabel(normalizedHref, 'https://chatgpt.com');
+ }
+ export function deriveAttachmentLabel(item) {
+     const text = normalizeAttachmentValue(typeof item === 'string' ? item : item.text);
+diff --git a/dist/review-gpt-lib.d.mts b/dist/review-gpt-lib.d.mts
+index 7688e02b557d16358eb6c69ac8cfc76a9c45ae16..051d7c6ae01d5d53d47220a9be9b6d2dcb8eab75 100644
+--- a/dist/review-gpt-lib.d.mts
++++ b/dist/review-gpt-lib.d.mts
+@@ -7,6 +7,7 @@ export type CliOptions = {
+     chatId?: string | undefined;
+     chatUrl?: string | undefined;
+     config?: string | undefined;
++    companionSnapshot?: string[] | undefined;
+     connector?: string | undefined;
+     deepResearch?: boolean | undefined;
+     dryRun?: boolean | undefined;
+@@ -77,6 +78,11 @@ export declare function formatSensitiveArtifactFailure(zipPath: string, findings
+     path: string;
+     reason: string;
+ }[]): string;
++/** Build only through a companion's committed canonical config and guarded packager. */
++export declare function buildCompanionSnapshots(inputs: string[], cwd: string, reservedNames?: string[]): Promise<Array<{
++    path: string;
++    instruction: string;
++}>>;
+ export declare function runReviewGpt(options: CliOptions, context: RunContext): Promise<ReviewGptRunResult>;
+ export declare function buildReplayableWakeCommand(input: {
+     browserEndpoint: string;
 diff --git a/dist/review-gpt-lib.mjs b/dist/review-gpt-lib.mjs
+index 3d47b33b436588ed00c29db8ed327e4c43d8cc5f..e4e77c0407246267e7a578c869100226639554a3 100644
 --- a/dist/review-gpt-lib.mjs
 +++ b/dist/review-gpt-lib.mjs
-@@ -1126,6 +1126,7 @@
+@@ -1,6 +1,6 @@
+ import { spawn, spawnSync } from 'node:child_process';
+ import { createHash, randomUUID } from 'node:crypto';
+-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, renameSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
++import { copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, realpathSync, renameSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
+ import { createRequire } from 'node:module';
+ import { homedir, tmpdir } from 'node:os';
+ import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
+@@ -269,10 +269,11 @@ function gitHeadCommit(cwd) {
+     const sha = trimWhitespace(result.stdout);
+     return /^[0-9a-f]{40}$/iu.test(sha) ? sha : undefined;
+ }
+-function loadCompatConfig(repoRoot, configPath) {
++function loadCompatConfig(repoRoot, configPath, env = process.env) {
+     requireFile(configPath);
+     requireFile(compatScriptPath);
+     const result = spawnSync('bash', [compatScriptPath, repoRoot, configPath], {
++        env,
+         cwd: repoRoot,
+         encoding: 'utf8',
+     });
+@@ -1126,6 +1127,7 @@ export function formatSensitiveArtifactFailure(zipPath, findings) {
  }
  function listAllZipEntries(zipPath) {
      const result = spawnSync('unzip', ['-Z1', zipPath], {
@@ -41,7 +1372,163 @@ diff --git a/dist/review-gpt-lib.mjs b/dist/review-gpt-lib.mjs
          encoding: 'utf8',
      });
      if (result.status !== 0) {
-@@ -1209,6 +1210,7 @@
+@@ -1148,7 +1150,7 @@ function assertPackagedZipHasNoSensitivePaths(zipPath) {
+     }
+     throw new Error(formatSensitiveArtifactFailure(zipPath, findings));
+ }
+-function runPackageScript(packageScript, namePrefix, outDir, includeTests, includeDocs) {
++function runPackageScript(packageScript, namePrefix, outDir, includeTests, includeDocs, context) {
+     requireFile(packageScript);
+     const args = [packageScript, '--zip', '--name', namePrefix];
+     if (outDir) {
+@@ -1161,12 +1163,13 @@ function runPackageScript(packageScript, namePrefix, outDir, includeTests, inclu
+         args.push('--no-docs');
+     }
+     const result = spawnSync('bash', args, {
++        cwd: context?.cwd,
+         encoding: 'utf8',
+         env: {
+             // Default the repo-tools packager's credential filter on. Repos that
+             // deliberately package such files can still set this to 0 themselves.
+             COBUILD_AUDIT_CONTEXT_EXCLUDE_SENSITIVE: '1',
+-            ...process.env,
++            ...(context?.env ?? process.env),
+         },
+     });
+     if (result.status !== 0) {
+@@ -1174,6 +1177,131 @@ function runPackageScript(packageScript, namePrefix, outDir, includeTests, inclu
+     }
+     return result.stdout;
+ }
++function companionGit(repo, args) {
++    const result = spawnSync('git', args, { cwd: repo, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 });
++    if (result.status !== 0)
++        throw new Error('Error: companion repository preflight failed.');
++    return result.stdout.trim();
++}
++function assertCompanionClean(snapshot) {
++    if (companionGit(snapshot.repo, ['rev-parse', '--verify', 'HEAD']) !== snapshot.head) {
++        throw new Error('Error: companion HEAD differs from the requested exact head.');
++    }
++    if (companionGit(snapshot.repo, ['ls-files', '-v', '-z']).split('\0')
++        .some((entry) => /^[a-zS]/u.test(entry))) {
++        throw new Error('Error: companion index flags must not hide tracked changes.');
++    }
++    if (companionGit(snapshot.repo, ['status', '--porcelain', '--untracked-files=all'])) {
++        throw new Error('Error: companion snapshot requires a clean tracked and untracked checkout.');
++    }
++}
++function requireCommittedCompanionFile(repo, path) {
++    const repoRelative = relative(repo, path);
++    if (!repoRelative || repoRelative.startsWith('..') || isAbsolute(repoRelative)
++        || !existsSync(path) || !lstatSync(path).isFile() || realpathSync(path) !== path) {
++        throw new Error('Error: companion config and packager must be regular committed files inside its repository.');
++    }
++    const entry = companionGit(repo, ['ls-files', '--stage', '--', repoRelative]);
++    if (!/^(100644|100755) [0-9a-f]+ 0\t/u.test(entry)
++        || companionGit(repo, ['hash-object', '--no-filters', '--', repoRelative]) !== entry.split(' ')[1]) {
++        throw new Error('Error: companion config and packager must be committed files.');
++    }
++}
++function assertCompanionRemoteHead(snapshot) {
++    const result = spawnSync('gh', ['pr', 'view', snapshot.prUrl, '--json', 'headRefOid,url,isCrossRepository'], {
++        cwd: snapshot.repo, encoding: 'utf8', timeout: 30_000,
++    });
++    if (result.status !== 0)
++        throw new Error('Error: could not verify companion PR head.');
++    const data = JSON.parse(result.stdout);
++    if (data.headRefOid !== snapshot.head || data.url !== snapshot.prUrl || data.isCrossRepository !== false) {
++        throw new Error('Error: companion PR must be same-repository and match the requested exact head.');
++    }
++}
++/** Build only through a companion's committed canonical config and guarded packager. */
++export async function buildCompanionSnapshots(inputs, cwd, reservedNames = []) {
++    const artifacts = [];
++    const repositories = new Set();
++    for (const [index, input] of inputs.entries()) {
++        let value;
++        try {
++            value = JSON.parse(input);
++        }
++        catch {
++            throw new Error('Error: --companion-snapshot requires JSON with repo, head, and prUrl.');
++        }
++        if (!value || typeof value !== 'object' || Array.isArray(value)) {
++            throw new Error('Error: invalid companion snapshot descriptor.');
++        }
++        const fields = value;
++        if (Object.keys(fields).some((key) => !['repo', 'head', 'prUrl'].includes(key))
++            || typeof fields.repo !== 'string' || !fields.repo.trim()
++            || typeof fields.head !== 'string' || !/^[0-9a-f]{40}$/u.test(fields.head)
++            || typeof fields.prUrl !== 'string' || !/^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/[1-9][0-9]*$/u.test(fields.prUrl)) {
++            throw new Error('Error: companion snapshot requires repo, a full lowercase head SHA, and a GitHub PR URL.');
++        }
++        const repo = realpathSync(await gitRepoRoot(resolve(cwd, fields.repo)));
++        if (repositories.has(repo))
++            throw new Error('Error: duplicate companion repository.');
++        repositories.add(repo);
++        const snapshot = { repo, head: fields.head, prUrl: fields.prUrl };
++        const repositorySlug = new URL(snapshot.prUrl).pathname.split('/').slice(1, 3).join('/');
++        const origin = companionGit(repo, ['remote', 'get-url', 'origin']);
++        if (![`https://github.com/${repositorySlug}`, `https://github.com/${repositorySlug}.git`,
++            `git@github.com:${repositorySlug}.git`, `git@github.com:${repositorySlug}`].includes(origin)) {
++            throw new Error('Error: companion origin does not match its PR repository.');
++        }
++        assertCompanionClean(snapshot);
++        assertCompanionRemoteHead(snapshot);
++        const configPath = join(repo, 'scripts/review-gpt.config.sh');
++        requireCommittedCompanionFile(repo, configPath);
++        // Review metadata belongs to this companion, never the primary review round.
++        const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('REVIEW_GPT_') && !key.startsWith('COBUILD_AUDIT_CONTEXT_')));
++        env.REVIEW_GPT_PR_URL = snapshot.prUrl;
++        env.REVIEW_GPT_ROUND_NUMBER = '1';
++        env.REVIEW_GPT_REVIEW_PHASE = 'final';
++        env.COBUILD_AUDIT_CONTEXT_EXCLUDE_SENSITIVE = '1';
++        const config = loadCompatConfig(repo, configPath, env);
++        if (!config.packageScript)
++            throw new Error('Error: companion config must declare its canonical guarded package_script.');
++        const packageScript = resolve(repo, config.packageScript);
++        requireCommittedCompanionFile(repo, packageScript);
++        assertCompanionClean(snapshot);
++        const outputDir = realpathSync(mkdtempSync(join(tmpdir(), 'review-gpt-companion-')));
++        const output = runPackageScript(packageScript, 'companion', outputDir, parseBooleanLike(config.includeTests, false), parseBooleanLike(config.includeDocs, true), { cwd: repo, env });
++        assertCompanionClean(snapshot);
++        assertCompanionRemoteHead(snapshot);
++        const generatedPath = realpathSync(resolveZipPath(output));
++        const generatedRelative = relative(outputDir, generatedPath);
++        if (generatedRelative.startsWith('..') || isAbsolute(generatedRelative) || !lstatSync(generatedPath).isFile()) {
++            throw new Error('Error: companion packager must write a new ZIP inside the supplied output directory.');
++        }
++        const entries = listAllZipEntries(generatedPath);
++        const sensitive = findSensitiveArtifactPaths(entries);
++        if (sensitive.length)
++            throw new Error(formatSensitiveArtifactFailure(generatedPath, sensitive));
++        const metadataName = 'review-gpt-pr-context/review-round.json';
++        const metadataEntries = entries.filter((entry) => entry === metadataName || entry.endsWith(`/${metadataName}`));
++        if (metadataEntries.length !== 1)
++            throw new Error('Error: companion ZIP must retain unique guarded review-round metadata.');
++        const metadataResult = spawnSync('unzip', ['-p', generatedPath, metadataEntries[0]], { encoding: 'utf8', maxBuffer: 1024 * 1024 });
++        if (metadataResult.status !== 0)
++            throw new Error('Error: could not read companion review-round metadata.');
++        const metadata = JSON.parse(metadataResult.stdout);
++        if (metadata.schemaVersion !== 1 || metadata.currentReviewedHead !== snapshot.head
++            || (metadata.contextAnchorHead !== undefined && metadata.contextAnchorHead !== snapshot.head)
++            || metadata.contextMode !== 'full_snapshot') {
++            throw new Error('Error: companion ZIP must contain a guarded full snapshot of the requested exact head.');
++        }
++        const name = `companion-${index + 1}.codebase.zip`;
++        if (reservedNames.includes(name))
++            throw new Error('Error: companion attachment filename collides with a primary attachment.');
++        const path = join(mkdtempSync(join(tmpdir(), 'review-gpt-attachments-')), name);
++        copyFileSync(generatedPath, path);
++        artifacts.push({ path, instruction: `- Companion ${repositorySlug}: ${name}; exact head ${snapshot.head}; PR ${snapshot.prUrl}. Its guarded metadata and source are contained in this separate, unchanged ZIP.` });
++    }
++    return artifacts;
++}
+ function resolveZipPath(packageOutput) {
+     const match = Array.from(packageOutput.matchAll(/^ZIP: (.*) \(.*\)$/gm)).at(-1);
+     const zipPath = trimWhitespace(match?.[1] ?? '');
+@@ -1209,6 +1337,7 @@ function buildRepomixIgnorePaths(repoRoot, configuredPatterns, generatedPaths) {
  function listZipManifestPaths(repoRoot, zipPath) {
      const result = spawnSync('unzip', ['-Z1', zipPath], {
          cwd: repoRoot,
@@ -49,10 +1536,59 @@ diff --git a/dist/review-gpt-lib.mjs b/dist/review-gpt-lib.mjs
          encoding: 'utf8',
      });
      if (result.status !== 0) {
+@@ -1489,6 +1618,9 @@ export async function runReviewGpt(options, context) {
+         : options.artifacts === true || options.zip === true
+             ? true
+             : resolvedConfig.attachArtifacts;
++    if (!attachArtifacts && (options.companionSnapshot?.length ?? 0) > 0) {
++        throw new Error('Error: companion snapshots require artifact attachments.');
++    }
+     const attachmentPaths = [];
+     const cleanupFilePaths = [];
+     const baseCommit = gitHeadCommit(repoRoot);
+@@ -1529,8 +1661,16 @@ export async function runReviewGpt(options, context) {
+         }
+         attachmentPaths.push(zipPath);
+     }
++    const companions = await buildCompanionSnapshots(options.companionSnapshot ?? [], context.cwd, attachmentPaths.map((path) => basename(path)));
++    for (const companion of companions) {
++        attachmentPaths.push(companion.path);
++        cleanupFilePaths.push(companion.path);
++        console.log(`Companion ZIP file: ${redactLocalPath(companion.path)}`);
++    }
+     const promptChunks = options.prompt ?? [];
+-    const artifactInstructionText = attachArtifacts ? buildArtifactInstructionText(baseCommit) : '';
++    const artifactInstructionText = attachArtifacts
++        ? [buildArtifactInstructionText(baseCommit), ...companions.map((companion) => companion.instruction)].join('\n')
++        : '';
+     const repoContextInstructionText = buildRepoContextInstructionText(resolvedConfig.repoContextUrl, baseCommit, attachArtifacts);
+     const draftPromptText = buildDraftPromptText(selectedPresets, resolvedConfig, extraPromptFiles, promptChunks, repoContextInstructionText, artifactInstructionText);
+     let resolvedBrowserChromePath = options.browserPath ?? resolvedConfig.browserChromePath;
+diff --git a/dist/thread-cli.d.mts b/dist/thread-cli.d.mts
+index 815305c1fb89580964e2309a0b394c39ee1b9c71..e9af576558107a2948507f6e906335db9d42d800 100644
+--- a/dist/thread-cli.d.mts
++++ b/dist/thread-cli.d.mts
+@@ -1,4 +1,9 @@
+ import { Cli } from 'incur';
++export declare function shouldReturnWakeToCallingSession(input: {
++    currentSessionId?: string;
++    detachedWake?: boolean;
++    sessionId?: string;
++}): boolean;
+ type DetachedWakeCliOptions = {
+     browserEndpoint: string;
+     captureMetadata?: string;
 diff --git a/dist/thread-cli.mjs b/dist/thread-cli.mjs
+index 02756c3b597e2970392f7c29ef669318e2a4037f..20d3028247e212a1f6322363f068f533bf1dc13d 100644
 --- a/dist/thread-cli.mjs
 +++ b/dist/thread-cli.mjs
-@@ -9,6 +9,12 @@
+@@ -4,11 +4,17 @@ import { spawn } from 'node:child_process';
+ import { closeSync, mkdirSync, openSync, readFileSync } from 'node:fs';
+ import { fileURLToPath } from 'node:url';
+ import { Cli, z } from 'incur';
+-import { DEFAULT_BROWSER_ENDPOINT, downloadThreadAttachment, exportThreadSnapshot, isCaptureIdentityDigest, parseThreadCaptureIdentity, } from './chatgpt-thread-lib.mjs';
++import { DEFAULT_BROWSER_ENDPOINT, downloadThreadAttachment, exportThreadSnapshot, isCaptureIdentityDigest, parseThreadCaptureIdentity, recoverPendingDownloadCapture, } from './chatgpt-thread-lib.mjs';
+ import { collectThreadDiagnostics } from './chatgpt-thread-diagnostics-lib.mjs';
  import { formatCodexHomeForDisplay, formatPathForDisplay } from './codex-session-lib.mjs';
  import { chatIdFromUrl, parseWakeDelayToMs, runWakeFlow } from './chatgpt-thread-wake-lib.mjs';
  const cliEntryPath = fileURLToPath(new URL('./bin.mjs', import.meta.url));
@@ -65,7 +1601,37 @@ diff --git a/dist/thread-cli.mjs b/dist/thread-cli.mjs
  function normalizeConversationUrl(chatUrl) {
      try {
          const parsed = new URL(chatUrl);
-@@ -420,7 +426,10 @@
+@@ -180,7 +186,7 @@ export function createThreadCli() {
+             artifactIndex: z.number().int().min(0).optional().describe('Assistant artifact index from the latest request in thread.json. Prefer this over button text when possible.'),
+             attachmentText: z.string().optional().describe('Legacy attachment button label to click and download.'),
+             browserEndpoint: z.string().default(DEFAULT_BROWSER_ENDPOINT).describe('Remote debugging endpoint for the managed browser.'),
+-            captureMetadata: z.string().optional().describe('Exact capture metadata emitted by a waited send; constrain the download to that assistant turn and artifact identity.'),
++            captureMetadata: z.string().optional().describe('Exact waited-send metadata; recover a pending completed response without rewriting the input, then constrain the artifact identity.'),
+             chatUrl: z.string().describe('Full ChatGPT conversation URL (/c/<thread-id>) containing the attachment.'),
+             outputDir: z.string().describe('Directory where the download should be written.'),
+             timeoutMs: z.number().default(30_000).describe('Attachment download timeout in milliseconds.'),
+@@ -199,13 +205,17 @@ export function createThreadCli() {
+             downloadedFile: z.string().describe('Downloaded attachment path.'),
+         }),
+         async run(c) {
+-            const chatUrl = normalizeConversationUrl(c.options.chatUrl);
+-            const captureIdentity = loadCaptureMetadata(c.options.captureMetadata);
++            let chatUrl = normalizeConversationUrl(c.options.chatUrl);
++            let captureIdentity = loadCaptureMetadata(c.options.captureMetadata);
+             if (c.options.artifactIndex === undefined && !c.options.attachmentText?.trim()) {
+                 throw new Error('thread download requires --artifact-index or --attachment-text.');
+             }
+             if (captureIdentity && !captureIdentity.assistantResponse) {
+-                throw new Error('Exact capture metadata cannot download an artifact before the assistant response identity is captured.');
++                if (c.options.artifactIndex === undefined) {
++                    throw new Error('Pending exact capture recovery requires --artifact-index.');
++                }
++                captureIdentity = await recoverPendingDownloadCapture(c.options.browserEndpoint, chatUrl, captureIdentity, c.options.timeoutMs);
++                chatUrl = captureIdentity.chatUrl;
+             }
+             if (captureIdentity?.assistantResponse) {
+                 if (c.options.artifactIndex === undefined) {
+@@ -420,7 +430,10 @@ export function createThreadCli() {
                  const { wakePid } = launchDetachedWakeProcess({
                      args,
                      cwd: repoDir,
@@ -77,11 +1643,10 @@ diff --git a/dist/thread-cli.mjs b/dist/thread-cli.mjs
                      logPath: wakeLogPath,
                  });
                  return {
-@@ -435,6 +444,16 @@
-                     wakePid,
+@@ -436,6 +449,16 @@ export function createThreadCli() {
                      exportPath: formatPathForDisplay(path.join(outputDir, 'thread.json'), repoDir),
                  };
-+            }
+             }
 +            const detachedWake = process.env[DETACHED_WAKE_ENV] === '1';
 +            delete process.env[DETACHED_WAKE_ENV];
 +            const returnToCallingSession = shouldReturnWakeToCallingSession({
@@ -91,10 +1656,11 @@ diff --git a/dist/thread-cli.mjs b/dist/thread-cli.mjs
 +            });
 +            if (returnToCallingSession) {
 +                process.stderr.write('Exact calling Codex session will receive the recovered wake result; nested child launch skipped.\n');
-             }
++            }
              const captureIdentity = loadCaptureMetadata(c.options.captureMetadata);
              const result = await runWakeFlow({
-@@ -456,7 +475,7 @@
+                 browserEndpoint: c.options.browserEndpoint,
+@@ -456,7 +479,7 @@ export function createThreadCli() {
                  repoDir,
                  resumePrompt: c.options.resumePrompt,
                  sessionId,
@@ -103,10 +1669,705 @@ diff --git a/dist/thread-cli.mjs b/dist/thread-cli.mjs
                  tabLifecycle: c.options.tabLifecycle,
              });
              return {
+diff --git a/src/bin.mts b/src/bin.mts
+index f929debc7ea6a000a23151255870008170124016..6cbf8cbf76c94d368a9dca69146f7b39f333bd7a 100644
+--- a/src/bin.mts
++++ b/src/bin.mts
+@@ -26,6 +26,7 @@ const cli = Cli.create('cobuild-review-gpt', {
+   }),
+   options: z.object({
+     config: z.string().optional().describe('Optional shell config file for repo-specific defaults and presets.'),
++    companionSnapshot: z.array(z.string()).optional().describe('Attach a guarded companion snapshot. Repeatable JSON: {"repo":"../companion","head":"<full SHA>","prUrl":"https://github.com/owner/repo/pull/123"}. Requires a clean exact-head repository with its committed canonical config and packager.'),
+     preset: z.array(z.string()).optional().describe('Preset(s) to include. Repeatable, comma-separated, or passed as bare preset tokens.'),
+     prompt: z.array(z.string()).optional().describe('Append custom prompt text inline. Repeatable.'),
+     promptFile: z.array(z.string()).optional().describe('Append prompt content from a local file. Repeatable.'),
+diff --git a/src/chatgpt-dom-snapshot-shared.d.ts b/src/chatgpt-dom-snapshot-shared.d.ts
+index 828b7f24f7d80e0f698423e1d3fa550351e38418..5754c787a887dbe17c53ee3bc762d441bfb1887c 100644
+--- a/src/chatgpt-dom-snapshot-shared.d.ts
++++ b/src/chatgpt-dom-snapshot-shared.d.ts
+@@ -24,8 +24,13 @@ export function collectChatGptTurnAttachmentTexts<T>(
+ export function chatGptTextIndicatesRateLimit(value: string): boolean;
+ export function normalizeComparableText(value: unknown): string;
+ export function normalizeResponseText(value: unknown): string;
++export function readChatGptTurnText(node: unknown): string;
+ export function sanitizeDeepResearchResponseText(value: unknown): string;
+ export function threadStatusTextIndicatesBusy(value: string): boolean;
+ 
+ export function collectChatGptCapabilityLimitText(): string;
+ export function assertChatGptCapabilitiesAvailable(state: { capabilityLimitText?: string }): void;
++
++export function readChatGptTurnIdentity(node: unknown, role: string, index: number, signature: string): string;
++
++export function deriveChatGptHrefLabel(href: string | null | undefined, baseHref: string): string;
+diff --git a/src/chatgpt-dom-snapshot-shared.js b/src/chatgpt-dom-snapshot-shared.js
+index a95281de86b711e992ad10ccafa17c8df4385103..bb338b767cb28ff9fd8508c5efd6b8cf7889e893 100644
+--- a/src/chatgpt-dom-snapshot-shared.js
++++ b/src/chatgpt-dom-snapshot-shared.js
+@@ -1,4 +1,5 @@
+ const CHATGPT_ASSISTANT_TURN_SELECTOR = [
++  '[data-chatgpt-search-message-ids][data-chatgpt-search-unit-key$=":assistant"]:has(> [data-conversation-role="assistant"])',
+   'article[data-message-author-role="assistant"]',
+   'div[data-message-author-role="assistant"]',
+   'section[data-message-author-role="assistant"]',
+@@ -11,6 +12,7 @@ const CHATGPT_ASSISTANT_TURN_SELECTOR = [
+ ].join(', ');
+ 
+ const CHATGPT_USER_TURN_SELECTOR = [
++  '[data-chatgpt-search-message-ids][data-chatgpt-search-unit-key$=":user"]:has([data-user-message-bubble="true"])',
+   'article[data-message-author-role="user"]',
+   'div[data-message-author-role="user"]',
+   'section[data-message-author-role="user"]',
+@@ -71,6 +73,37 @@ function normalizeComparableText(value) {
+     .trim();
+ }
+ 
++// Code-block chrome (language badges and copy controls) can disappear after
++// rehydration. Derive those blocks from their code node, while retaining all
++// surrounding response text and exact code content in the capture identity.
++function readChatGptTurnText(node) {
++  const raw = () => String(node?.innerText || node?.textContent || '').trim();
++  if (!node?.querySelector?.('pre code') || !node.childNodes) return raw();
++  const read = (element) => {
++    if (element.nodeType === 3) return element.textContent || '';
++    const tag = String(element.tagName || '').toUpperCase();
++    if (tag === 'BR') return '\n';
++    if (tag === 'PRE') {
++      const code = element.querySelector?.('code');
++      if (code) return '\n' + String(code.textContent || '') + '\n';
++    }
++    const text = Array.from(element.childNodes || []).map(read).join('');
++    if (tag === 'TD' || tag === 'TH') return text + '\t';
++    return /^(P|DIV|SECTION|ARTICLE|LI|TR|H[1-6]|BLOCKQUOTE)$/.test(tag)
++      ? '\n' + text + '\n'
++      : text;
++  };
++  return normalizeResponseText(read(node));
++}
++
++function readChatGptTurnIdentity(node, role, index, signature) {
++  for (const attribute of ['data-message-id', 'data-chatgpt-search-message-ids', 'data-turn-id', 'data-testid', 'id']) {
++    const value = String(node?.getAttribute?.(attribute) || '').trim();
++    if (value) return attribute + ':' + value;
++  }
++  return role + ':index:' + index + ':signature:' + signature;
++}
++
+ function canonicalizeChatGptTurnNodes(nodes) {
+   const orderedNodes = Array.from(nodes || []).filter(Boolean);
+   const groups = [];
+@@ -84,7 +117,7 @@ function canonicalizeChatGptTurnNodes(nodes) {
+     }
+   };
+   const identityRank = (node) => {
+-    const attributes = ['data-message-id', 'data-turn-id', 'data-testid', 'id'];
++    const attributes = ['data-message-id', 'data-chatgpt-search-message-ids', 'data-turn-id', 'data-testid', 'id'];
+     const attributeIndex = attributes.findIndex((attribute) =>
+       Boolean(String(node?.getAttribute?.(attribute) || '').trim()),
+     );
+@@ -122,6 +155,14 @@ function canonicalizeChatGptTurnNodes(nodes) {
+   return groups;
+ }
+ 
++function deriveChatGptHrefLabel(href, baseHref) {
++  if (!href) return '';
++  let pathname = String(href);
++  try { pathname = new URL(href, baseHref).pathname; } catch {}
++  const leaf = pathname.split('/').filter(Boolean).at(-1) || '';
++  try { return decodeURIComponent(leaf); } catch { return leaf; }
++}
++
+ function collectChatGptTurnAttachmentTexts(nodes, baseHref, selector) {
+   const attachmentTexts = [];
+   const seenAttachmentTexts = new Set();
+@@ -129,12 +170,7 @@ function collectChatGptTurnAttachmentTexts(nodes, baseHref, selector) {
+     const attachmentNodes = Array.from(node.querySelectorAll?.(selector) || []);
+     for (const element of attachmentNodes) {
+       const href = String(element.href || element.getAttribute?.('href') || '');
+-      let hrefLabel = '';
+-      if (href) {
+-        try {
+-          hrefLabel = decodeURIComponent(new URL(href, baseHref).pathname.split('/').filter(Boolean).at(-1) || '');
+-        } catch {}
+-      }
++      const hrefLabel = deriveChatGptHrefLabel(href, baseHref);
+       const attachmentText = [
+         element.getAttribute?.('aria-label'),
+         element.getAttribute?.('title'),
+@@ -305,7 +341,7 @@ function buildDeepResearchResponseInspectionSource() {
+ // Read only visible product UI, never quoted prompts or assistant content.
+ function collectChatGptCapabilityLimitText() {
+   // ChatGPT also puts this footer inside the assistant turn, beside its rendered message.
+-  const excluded = '[data-message-author-role], [data-turn="user"], [data-testid*="conversation-turn-user"], .markdown, [contenteditable="true"], textarea, pre, code, blockquote';
++  const excluded = '[data-chatgpt-search-message-ids][data-chatgpt-search-unit-key$=":user"], [data-message-author-role], [data-turn="user"], [data-testid*="conversation-turn-user"], .markdown, [contenteditable="true"], textarea, pre, code, blockquote';
+   const nodes = document.body?.querySelectorAll('div, span, p, footer, [role="alert"], [role="status"]') || [];
+   for (const node of nodes) {
+     if (node.closest?.(excluded) || node.querySelector?.(excluded)) continue;
+@@ -354,6 +390,8 @@ function buildChatGptCaptureStateExpression({
+   const assistantFailureButtonTextsLiteral = JSON.stringify(Array.from(CHATGPT_ASSISTANT_FAILURE_BUTTON_TEXTS));
+   const normalizeComparableTextSource = normalizeComparableText.toString();
+   const canonicalizeChatGptTurnNodesSource = canonicalizeChatGptTurnNodes.toString();
++  const readChatGptTurnTextSource = readChatGptTurnText.toString();
++  const normalizeResponseTextSource = normalizeResponseText.toString();
+   const threadStatusTextIndicatesBusySource = threadStatusTextIndicatesBusy.toString();
+ 
+   return `(() => {
+@@ -369,6 +407,8 @@ function buildChatGptCaptureStateExpression({
+     const desiredChatId = ${desiredChatIdLiteral};
+     const normalizeComparableText = ${normalizeComparableTextSource};
+     const canonicalizeChatGptTurnNodes = ${canonicalizeChatGptTurnNodesSource};
++    const normalizeResponseText = ${normalizeResponseTextSource};
++    const readChatGptTurnText = ${readChatGptTurnTextSource};
+     const threadStatusTextIndicatesBusy = ${threadStatusTextIndicatesBusySource};
+     const visible = (node) => {
+       if (!node || typeof node.getBoundingClientRect !== 'function') return false;
+@@ -377,22 +417,8 @@ function buildChatGptCaptureStateExpression({
+       return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden';
+     };
+     const assistantSnapshots = [];
+-    const turnIdentity = (node, role, index, signature) => {
+-      const attributes = ['data-message-id', 'data-turn-id', 'data-testid', 'id'];
+-      for (const attribute of attributes) {
+-        const value = String(node?.getAttribute?.(attribute) || '').trim();
+-        if (value) return attribute + ':' + value;
+-      }
+-      return role + ':index:' + index + ':signature:' + signature;
+-    };
+-    const deriveHrefLabel = (href) => {
+-      if (!href) return '';
+-      try {
+-        return decodeURIComponent(new URL(href, location.href).pathname.split('/').filter(Boolean).at(-1) || '');
+-      } catch {
+-        return decodeURIComponent(String(href).split('/').filter(Boolean).at(-1) || '');
+-      }
+-    };
++    const turnIdentity = ${readChatGptTurnIdentity.toString()};
++    const deriveHrefLabel = (href) => (${deriveChatGptHrefLabel.toString()})(href, location.href);
+     const hasDownloadableHref = (href) => {
+       if (!href) return false;
+       const normalizedHref = String(href).trim();
+@@ -440,7 +466,7 @@ function buildChatGptCaptureStateExpression({
+     const assistantNodesAfterLastUserSet = new Set(assistantNodesAfterLastUser);
+     const finalAssistantNode = assistantNodesAfterLastUser.at(-1) || (!lastUserNode ? assistantNodes.at(-1) || null : null);
+     for (const [assistantTurnIndex, node] of assistantNodes.entries()) {
+-      const text = String(node?.innerText || node?.textContent || '').trim();
++      const text = readChatGptTurnText(node);
+       const signature = normalizeComparableText(text).slice(0, 320);
+       if (!text || !signature) continue;
+       const precedingUserNode = userNodes
+@@ -517,7 +543,7 @@ function buildChatGptCaptureStateExpression({
+     const patchTextSource =
+       assistantNodesAfterLastUser.length > 0 || lastUserNode
+         ? assistantNodesAfterLastUser
+-            .map((node) => String(node?.innerText || node?.textContent || '').trim())
++            .map((node) => readChatGptTurnText(node))
+             .filter(Boolean)
+             .join('\\n\\n')
+         : bodyText;
+@@ -527,9 +553,7 @@ function buildChatGptCaptureStateExpression({
+         const assistantTurnGroup = assistantTurnGroupFor(rawAssistantContainer);
+         const assistantContainer = assistantTurnGroup?.node || rawAssistantContainer;
+         const assistantTurnIndex = assistantContainer ? assistantNodes.indexOf(assistantContainer) : -1;
+-        const assistantText = String(
+-          assistantContainer?.innerText || assistantContainer?.textContent || '',
+-        ).trim();
++        const assistantText = readChatGptTurnText(assistantContainer);
+         const assistantSignature = normalizeComparableText(assistantText).slice(0, 320);
+         const assistantTurnId = assistantContainer
+           ? turnIdentity(assistantContainer, 'assistant', assistantTurnIndex, assistantSignature)
+@@ -614,6 +638,8 @@ function buildChatGptCaptureStateExpression({
+ }
+ 
+ module.exports = {
++  deriveChatGptHrefLabel,
++  readChatGptTurnIdentity,
+   collectChatGptCapabilityLimitText,
+   assertChatGptCapabilitiesAvailable,
+   CHATGPT_ASSISTANT_TURN_SELECTOR,
+@@ -629,6 +655,7 @@ module.exports = {
+   chatGptTextIndicatesRateLimit,
+   normalizeComparableText,
+   normalizeResponseText,
++  readChatGptTurnText,
+   sanitizeDeepResearchResponseText,
+   threadStatusTextIndicatesBusy,
+ };
+diff --git a/src/chatgpt-thread-lib.mts b/src/chatgpt-thread-lib.mts
+index 4199be0aa70c923eb0d9b722dd45770a67822831..6e0a0f7bba184c92a1ad677d70454f1c28584e5a 100644
+--- a/src/chatgpt-thread-lib.mts
++++ b/src/chatgpt-thread-lib.mts
+@@ -5,6 +5,8 @@ import path from 'node:path';
+ 
+ import {
+   buildCaptureThreadSnapshotExpression,
++  assistantSnapshotLooksTerminal,
++  snapshotIndicatesBusy,
+   completeThreadCaptureIdentity,
+   isCaptureIdentityDigest,
+   deriveAttachmentLabel,
+@@ -52,6 +54,10 @@ const {
+   CHATGPT_USER_TURN_SELECTOR,
+   buildDeepResearchResponseInspectionSource,
+   canonicalizeChatGptTurnNodes,
++  normalizeResponseText,
++  readChatGptTurnText,
++  readChatGptTurnIdentity,
++  deriveChatGptHrefLabel,
+ } = require('./chatgpt-dom-snapshot-shared.js') as typeof import('./chatgpt-dom-snapshot-shared.js');
+ 
+ export const DEFAULT_BROWSER_ENDPOINT = 'http://127.0.0.1:9222';
+@@ -291,6 +297,22 @@ async function removeEmptyDownloadFilesCreatedSince(dirPath: string, beforeFiles
+   );
+ }
+ 
++export async function recoverVerifiedDownloadFile(
++  filePath: string,
++  beforeFiles: Map<string, number>,
++  expectedContentSha256: string,
++): Promise<string | null> {
++  if (!/^[a-f0-9]{64}$/u.test(expectedContentSha256) || beforeFiles.has(filePath)) return null;
++  try {
++    const info = await stat(filePath);
++    if (!info.isFile() || info.size <= 0) return null;
++    const digest = createHash('sha256').update(await readFile(filePath)).digest('hex');
++    return digest === expectedContentSha256 ? filePath : null;
++  } catch {
++    return null;
++  }
++}
++
+ export async function fetchJson<T>(
+   url: string,
+   options: {
+@@ -340,14 +362,24 @@ export class CdpClient {
+ 
+   private readonly ws: WebSocket;
+ 
+-  constructor(url: string) {
++  constructor(url: string, private readonly commandTimeoutMs = BROWSER_ENDPOINT_REQUEST_TIMEOUT_MS) {
++    if (!Number.isFinite(commandTimeoutMs) || commandTimeoutMs <= 0) {
++      throw new Error('CDP command timeout must be positive.');
++    }
+     this.ws = new WebSocket(url);
+     this.ready = new Promise((resolve, reject) => {
+       let opened = false;
++      const connectTimer = setTimeout(() => {
++        const error = new Error('Timed out opening CDP socket.');
++        reject(error);
++        this.failPending(error);
++        this.ws.close();
++      }, commandTimeoutMs);
+       this.ws.addEventListener(
+         'open',
+         () => {
+           opened = true;
++          clearTimeout(connectTimer);
+           resolve();
+         },
+         { once: true },
+@@ -355,6 +387,7 @@ export class CdpClient {
+       this.ws.addEventListener(
+         'error',
+         () => {
++          clearTimeout(connectTimer);
+           const error = new Error(opened ? 'CDP socket errored unexpectedly.' : 'CDP socket failed to open.');
+           if (!opened) {
+             reject(error);
+@@ -366,6 +399,7 @@ export class CdpClient {
+       this.ws.addEventListener(
+         'close',
+         () => {
++          clearTimeout(connectTimer);
+           const error = new Error(opened ? 'CDP socket closed unexpectedly.' : 'CDP socket closed before opening.');
+           if (!opened) {
+             reject(error);
+@@ -471,16 +505,24 @@ export class CdpClient {
+     const id = this.nextId;
+     this.nextId += 1;
+     return await new Promise<T>((resolve, reject) => {
++      const commandTimer = setTimeout(() => {
++        const error = new Error(`Timed out executing CDP command ${method}.`);
++        this.failPending(error);
++        this.ws.close();
++      }, this.commandTimeoutMs);
+       const removeTerminalListener = this.onTerminalError((error) => {
+         this.pending.delete(id);
++        clearTimeout(commandTimer);
+         reject(error);
+       });
+       this.pending.set(id, {
+         reject: (error) => {
++          clearTimeout(commandTimer);
+           removeTerminalListener();
+           reject(error);
+         },
+         resolve: (value) => {
++          clearTimeout(commandTimer);
+           removeTerminalListener();
+           resolve(value as T);
+         },
+@@ -489,6 +531,7 @@ export class CdpClient {
+         this.ws.send(JSON.stringify({ id, method, params }));
+       } catch (error) {
+         this.pending.delete(id);
++        clearTimeout(commandTimer);
+         removeTerminalListener();
+         reject(normalizeError(error, `Failed to send CDP command ${method}.`));
+       }
+@@ -558,7 +601,27 @@ export async function closeTarget(browserEndpoint: string, targetId: string): Pr
+ 
+ async function findMatchingTarget(browserEndpoint: string, chatUrl: string): Promise<CdpTarget | null> {
+   const targets = await fetchJson<CdpTarget[]>(`${browserEndpoint}/json/list`);
+-  return pickBestThreadTarget(targets, chatUrl);
++  const candidates = targets.filter((target) => target.type === 'page' &&
++    Boolean(target.webSocketDebuggerUrl) && scoreThreadTargetUrl(target.url, chatUrl) >= 0);
++  if (candidates.length <= 1) return pickBestThreadTarget(candidates, chatUrl);
++  // Probe only URL-based discovery. Exact captured targets retain their strict
++  // identity path and never silently substitute another existing tab.
++  const deadline = Date.now() + BROWSER_ENDPOINT_REQUEST_TIMEOUT_MS;
++  while (candidates.length > 0 && Date.now() < deadline) {
++    const candidate = pickBestThreadTarget(candidates, chatUrl)!;
++    candidates.splice(candidates.indexOf(candidate), 1);
++    const client = new CdpClient(candidate.webSocketDebuggerUrl,
++      Math.max(1, Math.min(2_000, deadline - Date.now())));
++    try {
++      const href = await client.evaluate<string>('location.href');
++      if (conversationUrlsReferToSameThread(href, chatUrl)) return candidate;
++    } catch {
++      // A stale renderer is not evidence that the responsive duplicate vanished.
++    } finally {
++      client.close();
++    }
++  }
++  throw new Error('No responsive browser target for the requested conversation.');
+ }
+ 
+ async function findTargetById(browserEndpoint: string, targetId: string): Promise<CdpTarget | null> {
+@@ -602,14 +665,7 @@ async function readThreadContentState(client: CdpClient): Promise<ThreadContentS
+     attachmentButtonCount: (() => {
+       const root = document.querySelector('main') ?? document.body;
+       if (!root) return 0;
+-      const deriveHrefLabel = (href) => {
+-        if (!href) return '';
+-        try {
+-          return decodeURIComponent(new URL(href, location.href).pathname.split('/').filter(Boolean).at(-1) || '');
+-        } catch {
+-          return decodeURIComponent(String(href).split('/').filter(Boolean).at(-1) || '');
+-        }
+-      };
++      const deriveHrefLabel = (href) => (${deriveChatGptHrefLabel.toString()})(href, location.href);
+       const isConversationHref = (href) => {
+         if (!href) return false;
+         try {
+@@ -699,6 +755,9 @@ async function findAttachmentClickTargetWithSelector(
+   const assistantTurnSelectorLiteral = JSON.stringify(CHATGPT_ASSISTANT_TURN_SELECTOR);
+   const userTurnSelectorLiteral = JSON.stringify(CHATGPT_USER_TURN_SELECTOR);
+   const canonicalizeChatGptTurnNodesSource = canonicalizeChatGptTurnNodes.toString();
++  const readChatGptTurnIdentitySource = readChatGptTurnIdentity.toString();
++  const readChatGptTurnTextSource = readChatGptTurnText.toString();
++  const normalizeResponseTextSource = normalizeResponseText.toString();
+   const artifactIndex = Number.isInteger(selector.artifactIndex) && Number(selector.artifactIndex) >= 0
+     ? Number(selector.artifactIndex)
+     : -1;
+@@ -713,14 +772,7 @@ async function findAttachmentClickTargetWithSelector(
+   const expectedHrefSpecified = Object.prototype.hasOwnProperty.call(selector, 'href');
+   return await client.evaluate(`(() => {
+     const root = document.querySelector('main') ?? document.body;
+-    const deriveHrefLabel = (href) => {
+-      if (!href) return '';
+-      try {
+-        return decodeURIComponent(new URL(href, location.href).pathname.split('/').filter(Boolean).at(-1) || '');
+-      } catch {
+-        return decodeURIComponent(String(href).split('/').filter(Boolean).at(-1) || '');
+-      }
+-    };
++    const deriveHrefLabel = (href) => (${deriveChatGptHrefLabel.toString()})(href, location.href);
+     const hasDownloadableHref = (href) => {
+       if (!href) return false;
+       const normalizedHref = String(href).trim();
+@@ -736,6 +788,8 @@ async function findAttachmentClickTargetWithSelector(
+     const assistantTurnSelector = ${assistantTurnSelectorLiteral};
+     const userTurnSelector = ${userTurnSelectorLiteral};
+     const canonicalizeChatGptTurnNodes = ${canonicalizeChatGptTurnNodesSource};
++    const normalizeResponseText = ${normalizeResponseTextSource};
++    const readChatGptTurnText = ${readChatGptTurnTextSource};
+     const assistantTurnGroups = canonicalizeChatGptTurnNodes(
+       Array.from(root.querySelectorAll(assistantTurnSelector)),
+     );
+@@ -754,13 +808,7 @@ async function findAttachmentClickTargetWithSelector(
+     const assistantNodesAfterLastUser = assistantNodes.filter((node) => isAfterLastUserNode(node));
+     const assistantNodesAfterLastUserSet = new Set(assistantNodesAfterLastUser);
+     const finalAssistantNode = assistantNodesAfterLastUser.at(-1) || (!lastUserNode ? assistantNodes.at(-1) || null : null);
+-    const turnIdentity = (node, role, index, signature) => {
+-      for (const attribute of ['data-message-id', 'data-turn-id', 'data-testid', 'id']) {
+-        const value = String(node?.getAttribute?.(attribute) || '').trim();
+-        if (value) return attribute + ':' + value;
+-      }
+-      return role + ':index:' + index + ':signature:' + signature;
+-    };
++    const turnIdentity = ${readChatGptTurnIdentitySource};
+     const sanitizedTurnIdentity = (value) => {
+       const raw = String(value || '');
+       const marker = ':signature:';
+@@ -775,7 +823,7 @@ async function findAttachmentClickTargetWithSelector(
+     };
+     const normalize = (value) => String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').replace(/\\s+/g, ' ').trim();
+     const capturedAssistantNodes = assistantNodes.filter((node, index) => {
+-      const signature = normalize(node?.innerText || node?.textContent || '').slice(0, 320);
++      const signature = normalize(readChatGptTurnText(node)).slice(0, 320);
+       const liveTurnId = turnIdentity(node, 'assistant', index, signature);
+       const idMatches = !${JSON.stringify(assistantTurnId)} || liveTurnId === ${JSON.stringify(assistantTurnId)} || sanitizedTurnIdentity(liveTurnId) === ${JSON.stringify(assistantTurnId)};
+       const indexMatches = ${assistantTurnIndex} < 0 || index === ${assistantTurnIndex};
+@@ -887,6 +935,9 @@ async function clickAttachmentWithSelector(
+   const assistantTurnSelectorLiteral = JSON.stringify(CHATGPT_ASSISTANT_TURN_SELECTOR);
+   const userTurnSelectorLiteral = JSON.stringify(CHATGPT_USER_TURN_SELECTOR);
+   const canonicalizeChatGptTurnNodesSource = canonicalizeChatGptTurnNodes.toString();
++  const readChatGptTurnTextSource = readChatGptTurnText.toString();
++  const normalizeResponseTextSource = normalizeResponseText.toString();
++  const readChatGptTurnIdentitySource = readChatGptTurnIdentity.toString();
+   const artifactIndex = Number.isInteger(selector.artifactIndex) && Number(selector.artifactIndex) >= 0
+     ? Number(selector.artifactIndex)
+     : -1;
+@@ -901,14 +952,7 @@ async function clickAttachmentWithSelector(
+   const expectedHrefSpecified = Object.prototype.hasOwnProperty.call(selector, 'href');
+   const activated = await client.evaluate<boolean>(`(() => {
+     const root = document.querySelector('main') ?? document.body;
+-    const deriveHrefLabel = (href) => {
+-      if (!href) return '';
+-      try {
+-        return decodeURIComponent(new URL(href, location.href).pathname.split('/').filter(Boolean).at(-1) || '');
+-      } catch {
+-        return decodeURIComponent(String(href).split('/').filter(Boolean).at(-1) || '');
+-      }
+-    };
++    const deriveHrefLabel = (href) => (${deriveChatGptHrefLabel.toString()})(href, location.href);
+     const hasDownloadableHref = (href) => {
+       if (!href) return false;
+       const normalizedHref = String(href).trim();
+@@ -924,6 +968,8 @@ async function clickAttachmentWithSelector(
+     const assistantTurnSelector = ${assistantTurnSelectorLiteral};
+     const userTurnSelector = ${userTurnSelectorLiteral};
+     const canonicalizeChatGptTurnNodes = ${canonicalizeChatGptTurnNodesSource};
++    const normalizeResponseText = ${normalizeResponseTextSource};
++    const readChatGptTurnText = ${readChatGptTurnTextSource};
+     const assistantTurnGroups = canonicalizeChatGptTurnNodes(
+       Array.from(root.querySelectorAll(assistantTurnSelector)),
+     );
+@@ -942,13 +988,7 @@ async function clickAttachmentWithSelector(
+     const assistantNodesAfterLastUser = assistantNodes.filter((node) => isAfterLastUserNode(node));
+     const assistantNodesAfterLastUserSet = new Set(assistantNodesAfterLastUser);
+     const finalAssistantNode = assistantNodesAfterLastUser.at(-1) || (!lastUserNode ? assistantNodes.at(-1) || null : null);
+-    const turnIdentity = (node, role, index, signature) => {
+-      for (const attribute of ['data-message-id', 'data-turn-id', 'data-testid', 'id']) {
+-        const value = String(node?.getAttribute?.(attribute) || '').trim();
+-        if (value) return attribute + ':' + value;
+-      }
+-      return role + ':index:' + index + ':signature:' + signature;
+-    };
++    const turnIdentity = ${readChatGptTurnIdentitySource};
+     const sanitizedTurnIdentity = (value) => {
+       const raw = String(value || '');
+       const marker = ':signature:';
+@@ -963,7 +1003,7 @@ async function clickAttachmentWithSelector(
+     };
+     const normalize = (value) => String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').replace(/\\s+/g, ' ').trim();
+     const capturedAssistantNodes = assistantNodes.filter((node, index) => {
+-      const signature = normalize(node?.innerText || node?.textContent || '').slice(0, 320);
++      const signature = normalize(readChatGptTurnText(node)).slice(0, 320);
+       const liveTurnId = turnIdentity(node, 'assistant', index, signature);
+       const idMatches = !${JSON.stringify(assistantTurnId)} || liveTurnId === ${JSON.stringify(assistantTurnId)} || sanitizedTurnIdentity(liveTurnId) === ${JSON.stringify(assistantTurnId)};
+       const indexMatches = ${assistantTurnIndex} < 0 || index === ${assistantTurnIndex};
+@@ -1491,12 +1531,47 @@ export function extractAssistantDownloadTargets(snapshot: Partial<ThreadSnapshot
+   }));
+ }
+ 
++export async function resolveCapturedConversation(
++  browserEndpoint: string,
++  chatUrl: string,
++  capture: ThreadCaptureIdentity,
++): Promise<ThreadCaptureIdentity> {
++  const capturedUrl = parseUrl(capture.chatUrl);
++  let capturedId = '';
++  try { capturedId = decodeURIComponent(extractChatId(capturedUrl?.pathname ?? '') ?? ''); } catch { /* rejected below */ }
++  if (!/^WEB:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu.test(capturedId)) return capture;
++  if (capture.browserEndpoint !== browserEndpoint) throw new Error('Capture metadata browser endpoint does not match the requested endpoint.');
++  const targets = await fetchJson<CdpTarget[]>(`${browserEndpoint}/json/list`);
++  const matches = targets.filter((target) => target.type === 'page' && target.id === capture.targetId && Boolean(target.webSocketDebuggerUrl));
++  if (matches.length !== 1) throw new Error('Accepted transient capture requires its original browser target; refusing replacement or resend.');
++  const liveUrl = parseUrl(matches[0]!.url ?? '');
++  const liveId = extractChatId(liveUrl?.pathname ?? '');
++  if (!liveUrl || liveUrl.origin !== capturedUrl?.origin || !liveId || !/^[A-Za-z0-9_-]+$/u.test(liveId)) {
++    throw new Error('Accepted transient conversation has not obtained a canonical URL. Retry unchanged capture metadata; do not resend.');
++  }
++  const canonicalUrl = `${liveUrl.origin}/c/${liveId}`;
++  const requestedUrl = parseUrl(chatUrl);
++  let requestedId = '';
++  try { requestedId = decodeURIComponent(extractChatId(requestedUrl?.pathname ?? '') ?? ''); } catch { /* rejected below */ }
++  const matchesAcceptedTransient = requestedUrl?.origin === capturedUrl?.origin && requestedId === capturedId;
++  if (!matchesAcceptedTransient && !conversationUrlsReferToSameThread(chatUrl, canonicalUrl)) {
++    throw new Error('Requested conversation does not match the exact accepted target.');
++  }
++  // This is a location candidate, not identity approval. The caller still waits
++  // for the recorded exact user turn before exporting or activating an artifact.
++  return { ...capture, chatUrl: canonicalUrl };
++}
++
+ export async function captureThreadTargetSnapshot(
+   browserEndpoint: string,
+   chatUrl: string,
+   captureIdentity: ThreadCaptureIdentity,
+   options: CaptureThreadTargetOptions = {},
+ ): Promise<CapturedThreadTarget> {
++  const originalChatUrl = captureIdentity.chatUrl;
++  captureIdentity = await resolveCapturedConversation(browserEndpoint, chatUrl, captureIdentity);
++  const promotedTransient = originalChatUrl !== captureIdentity.chatUrl;
++  if (captureIdentity.chatUrl !== chatUrl && /\/c\/WEB(?::|%3A)/iu.test(chatUrl)) chatUrl = captureIdentity.chatUrl;
+   if (captureIdentity.browserEndpoint !== browserEndpoint) {
+     throw new Error('Capture metadata browser endpoint does not match the requested endpoint.');
+   }
+@@ -1507,7 +1582,7 @@ export async function captureThreadTargetSnapshot(
+     browserEndpoint,
+     chatUrl,
+     captureIdentity.targetId,
+-    true,
++    !promotedTransient,
+   );
+   options.onTargetLease?.(targetLease);
+   const client = new CdpClient(targetLease.target.webSocketDebuggerUrl);
+@@ -1543,6 +1618,32 @@ export async function captureThreadTargetSnapshot(
+   }
+ }
+ 
++export function completeDownloadCaptureIdentity(
++  capture: ThreadCaptureIdentity,
++  snapshot: ThreadSnapshot,
++): ThreadCaptureIdentity {
++  if (snapshot.stopVisible || snapshot.statusBusy || snapshotIndicatesBusy(snapshot) || !assistantSnapshotLooksTerminal(snapshot)) {
++    throw new Error('Exact captured response is not complete; refuse artifact identity promotion.');
++  }
++  const completed = completeThreadCaptureIdentity(capture, snapshot);
++  if (completed.artifacts.length === 0) throw new Error('Completed exact response has no captured artifacts.');
++  return completed;
++}
++
++export async function recoverPendingDownloadCapture(
++  browserEndpoint: string,
++  chatUrl: string,
++  capture: ThreadCaptureIdentity,
++  timeoutMs: number,
++): Promise<ThreadCaptureIdentity> {
++  const captured = await captureThreadTargetSnapshot(browserEndpoint, chatUrl, capture, { timeoutMs });
++  return completeDownloadCaptureIdentity({
++    ...capture,
++    chatUrl: captured.snapshot.href || capture.chatUrl,
++    targetId: String(captured.targetLease.target.id ?? ''),
++  }, captured.snapshot);
++}
++
+ export async function exportThreadSnapshot(
+   browserEndpoint: string,
+   chatUrl: string,
+@@ -1622,6 +1723,7 @@ export async function downloadThreadAttachment(
+     throw new Error('Attachment selection requires --attachment-text, --artifact-index, or a concrete href.');
+   }
+ 
++  outputDir = path.resolve(outputDir);
+   await mkdir(outputDir, { recursive: true });
+   const filesBeforeDownloadAttempt = await listDownloadDirectoryFiles(outputDir);
+   if (options.captureIdentity) {
+@@ -1639,7 +1741,7 @@ export async function downloadThreadAttachment(
+     Boolean(options.captureIdentity),
+   );
+   options.onTargetLease?.(targetLease);
+-  const client = new CdpClient(targetLease.target.webSocketDebuggerUrl);
++  const client = new CdpClient(targetLease.target.webSocketDebuggerUrl, timeoutMs);
+   let downloadSucceeded = false;
+   let captureValidated = !options.captureIdentity?.assistantResponse;
+   let expectedContentSha256 = '';
+@@ -1668,11 +1770,12 @@ export async function downloadThreadAttachment(
+         throw new Error('Requested artifact index is not present in the exact waited capture metadata.');
+       }
+       expectedContentSha256 = capturedArtifact.contentSha256 ?? '';
+-      const exactSnapshot = await scopeCapturedThreadSnapshot(
++      const exactSnapshot = await waitForCapturedThreadIdentity(
++        client,
+         browserEndpoint,
+         String(targetLease.target.id ?? ''),
+-        await waitForSettledThreadSnapshot(client),
+         options.captureIdentity,
++        Math.min(timeoutMs, SNAPSHOT_SETTLE_TIMEOUT_MS),
+       );
+       captureValidated = true;
+       const liveArtifact = exactSnapshot.attachmentButtons[Number(selector.artifactIndex)];
+@@ -1702,6 +1805,20 @@ export async function downloadThreadAttachment(
+       timeoutMs,
+     ).then((event) => ({ event, kind: 'native-download' as const }));
+ 
++    let nativeDownloadGuid = '';
++    // Subscribe before activating the control: a small completed file can emit
++    // both events before the caller resumes from the download-start promise.
++    const downloadCompletionPromise = client.waitForEvent((event) => {
++      if (event.method === 'Page.downloadWillBegin' && !nativeDownloadGuid &&
++          String(event.params?.suggestedFilename ?? '').length > 0) {
++        nativeDownloadGuid = String(event.params?.guid ?? '');
++      }
++      return event.method === 'Page.downloadProgress' && Boolean(nativeDownloadGuid) &&
++        String(event.params?.guid ?? '') === nativeDownloadGuid &&
++        ['completed', 'canceled'].includes(String(event.params?.state ?? ''));
++    }, timeoutMs);
++    void downloadCompletionPromise.catch(() => {});
++
+     const estuaryResponsePromise = client.waitForEvent(
+       (event) => {
+         const response = getNetworkResponse(event);
+@@ -1802,13 +1919,11 @@ export async function downloadThreadAttachment(
+         const downloadedFile = path.join(path.resolve(outputDir), suggestedFilename);
+ 
+         await removeIfPresent(`${downloadedFile}.crdownload`);
+-        await client.waitForEvent(
+-          (event) =>
+-            event.method === 'Page.downloadProgress' &&
+-            String(event.params?.guid ?? '') === guid &&
+-            String(event.params?.state ?? '') === 'completed',
+-          timeoutMs,
+-        );
++        const completion = await downloadCompletionPromise;
++        if (String(completion.params?.guid ?? '') !== guid ||
++            String(completion.params?.state ?? '') !== 'completed') {
++          throw new Error('Native artifact download was canceled or changed identity.');
++        }
+         try {
+           await waitForDownloadedFile(downloadedFile, timeoutMs);
+         } catch (error) {
+@@ -1852,7 +1967,16 @@ export async function downloadThreadAttachment(
+       const downloadedFile = await persistFetchedArtifact(artifactSignal);
+       return await completeVerifiedDownload(downloadedFile);
+     } catch (error) {
++      const verifiedFile = await recoverVerifiedDownloadFile(
++        path.join(path.resolve(outputDir), sanitizeDownloadFilename(effectiveAttachmentText)),
++        filesBeforeDownloadAttempt,
++        expectedContentSha256,
++      );
++      if (verifiedFile) return await completeVerifiedDownload(verifiedFile);
+       await removeEmptyDownloadFilesCreatedSince(outputDir, filesBeforeDownloadAttempt);
++      if (/Timed out waiting for matching CDP event/u.test(normalizeError(error, '').message)) {
++        throw new Error('No completed artifact download event. If this artifact opened a native Save dialog, finish it and retry using the unchanged capture metadata; do not resend the request.', { cause: error });
++      }
+       throw error;
+     }
+   } finally {
 diff --git a/src/chatgpt-thread-snapshot-lib.mts b/src/chatgpt-thread-snapshot-lib.mts
+index 95d21fdbf55cf80860f4d5d60d7d94966e8783bc..ffc0d1b1eed21c0ee8db7966e1958c26e4ddff42 100644
 --- a/src/chatgpt-thread-snapshot-lib.mts
 +++ b/src/chatgpt-thread-snapshot-lib.mts
-@@ -216,6 +216,20 @@
+@@ -5,6 +5,7 @@ const require = createRequire(import.meta.url);
+ const {
+   buildChatGptCaptureStateExpression,
+   normalizeComparableText,
++  deriveChatGptHrefLabel,
+   sanitizeDeepResearchResponseText,
+   threadStatusTextIndicatesBusy,
+ } = require('./chatgpt-dom-snapshot-shared.js') as typeof import('./chatgpt-dom-snapshot-shared.js');
+@@ -216,6 +217,20 @@ function matchesStoredTurnId(liveValue: unknown, storedValue: unknown): boolean
      sanitizedCaptureTurnId(liveValue) === String(storedValue ?? '');
  }
  
@@ -115,7 +2376,7 @@ diff --git a/src/chatgpt-thread-snapshot-lib.mts b/src/chatgpt-thread-snapshot-l
 +  storedValue: unknown,
 +  role: 'assistant' | 'user',
 +  capturedTurnIndex: number,
-+  signature: string,
++  signature: string | undefined,
 +): boolean {
 +  return matchesStoredTurnId(liveValue, storedValue) ||
 +    matchesStoredTurnId(
@@ -127,7 +2388,7 @@ diff --git a/src/chatgpt-thread-snapshot-lib.mts b/src/chatgpt-thread-snapshot-l
  function matchesCapturedAssistant(
    snapshot: ThreadAssistantSnapshot,
    capture: NonNullable<ThreadCaptureIdentity['assistantResponse']>,
-@@ -340,7 +354,13 @@
+@@ -340,7 +355,13 @@ export function scopeThreadSnapshotToCaptureIdentity(
      if (!capture) return normalized;
      const committedUserMatches = normalized.userSnapshots.filter(
        (candidate) =>
@@ -142,7 +2403,7 @@ diff --git a/src/chatgpt-thread-snapshot-lib.mts b/src/chatgpt-thread-snapshot-l
          matchesStoredCaptureValue(candidate.signature, capture.committedUserTurn.signature),
      );
      if (committedUserMatches.length !== 1) {
-@@ -354,7 +374,13 @@
+@@ -354,7 +375,13 @@ export function scopeThreadSnapshotToCaptureIdentity(
      }
      const pendingAssistantMatches = normalized.assistantSnapshots.filter(
        (candidate) =>
@@ -157,10 +2418,96 @@ diff --git a/src/chatgpt-thread-snapshot-lib.mts b/src/chatgpt-thread-snapshot-l
          candidate.precedingUserTurnIndex === committedUserTurn.turnIndex &&
          matchesStoredCaptureValue(candidate.precedingUserMessageSignature, capture.committedUserTurn.signature),
      );
+@@ -805,12 +832,7 @@ export function deriveAttachmentHrefLabel(href: string | null | undefined): stri
+     return '';
+   }
+ 
+-  try {
+-    const pathname = new URL(normalizedHref, 'https://chatgpt.com').pathname;
+-    return decodeURIComponent(pathname.split('/').filter(Boolean).at(-1) ?? '');
+-  } catch {
+-    return decodeURIComponent(normalizedHref.split('/').filter(Boolean).at(-1) ?? '');
+-  }
++  return deriveChatGptHrefLabel(normalizedHref, 'https://chatgpt.com');
+ }
+ 
+ export function deriveAttachmentLabel(item: Pick<ThreadAttachmentButton, 'href' | 'text'> | string): string {
 diff --git a/src/prepare-chatgpt-draft.js b/src/prepare-chatgpt-draft.js
+index a6444ae284b90c9136c5d91f9a933ad58df8ca04..1ec3c5a636452f4c6a5b954df17b851c499c855d 100644
 --- a/src/prepare-chatgpt-draft.js
 +++ b/src/prepare-chatgpt-draft.js
-@@ -1222,9 +1222,8 @@
+@@ -11,6 +11,8 @@ const {
+   buildChatGptCaptureStateExpression,
+   buildDeepResearchResponseInspectionSource,
+   canonicalizeChatGptTurnNodes,
++  readChatGptTurnIdentity,
++  deriveChatGptHrefLabel,
+   collectChatGptTurnAttachmentTexts,
+   chatGptTextIndicatesRateLimit,
+   collectChatGptCapabilityLimitText,
+@@ -104,6 +106,8 @@ const ATTACHMENT_PROGRESS_SELECTORS = [
+   '[aria-live="assertive"]',
+ ];
+ const MODEL_BUTTON_SELECTORS = [
++  '[role="menu"] [role="menuitem"][aria-label="Select model"]',
++  'button[aria-label="Select ChatGPT model"][aria-haspopup="menu"]',
+   '[data-testid="composer-intelligence-picker-content"] [role="menuitem"][aria-label="Select model"]',
+   '[data-testid="model-switcher-dropdown-button"]',
+   '[data-testid="composer-footer-actions"] button[aria-haspopup="menu"]',
+@@ -266,7 +270,7 @@ function createPageCdpCommandChannel(initialSocket, { commandTimeoutMs, closeSoc
+     });
+   };
+ 
+-  const command = async (method, params = {}) => {
++  const command = async (method, params = {}, timeoutMs = commandTimeoutMs) => {
+     const commandSocket = currentSocket;
+     const id = ++nextId;
+     const payload = JSON.stringify({ id, method, params });
+@@ -277,7 +281,7 @@ function createPageCdpCommandChannel(initialSocket, { commandTimeoutMs, closeSoc
+       commandSocket.send(payload);
+       return await withTimeout(
+         response,
+-        commandTimeoutMs,
++        Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : commandTimeoutMs,
+         `CDP socket command timed out: ${method}`,
+         () => pending.delete(id),
+       );
+@@ -386,6 +390,15 @@ function extractConversationHref(value, fallbackOrigin = '') {
+   return `${origin}/c/${chatId}`;
+ }
+ 
++function extractTransientConversationHref(value, fallbackOrigin = '') {
++  const parsed = safeUrl(value) || safeUrl(fallbackOrigin + String(value || ''));
++  if (!parsed) return '';
++  let chatId;
++  try { chatId = decodeURIComponent(extractChatId(parsed.pathname)); } catch { return ''; }
++  return /^WEB:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(chatId)
++    ? `${parsed.origin}/c/${chatId}` : '';
++}
++
+ async function resolveAcceptedConversationAfterSend({
+   commitResult,
+   desiredTargetOrigin,
+@@ -401,6 +414,9 @@ async function resolveAcceptedConversationAfterSend({
+       conversationStateResult?.href || commitResult?.state?.href,
+       desiredTargetOrigin,
+     ),
++    ...(extractTransientConversationHref(conversationStateResult?.state?.href || commitResult?.state?.href, desiredTargetOrigin)
++      ? { transientConversationHref: extractTransientConversationHref(conversationStateResult?.state?.href || commitResult?.state?.href, desiredTargetOrigin) }
++      : {}),
+     conversationStateResult,
+   };
+ }
+@@ -862,7 +878,7 @@ function modelPickerControlLabelCanProveTarget(label, target) {
+   // The current split picker uses the bare composer label `Pro` for Effort,
+   // while the selected model lives under Advanced. Only a selected model row
+   // or an explicit model summary can prove the model in that ambiguous state.
+-  return normalizedLabel !== 'pro' && modelPickerLabelMatchesTarget(normalizedLabel, target);
++  return normalizedLabel.replace(/^select(?: chat gpt)? model\s+/, '') !== 'pro' && modelPickerLabelMatchesTarget(normalizedLabel, target);
+ }
+ 
+ function modelPickerControlSelectionProof(snapshot, target) {
+@@ -1222,9 +1238,8 @@ function markedResponseDurationFailure({
    responseMarker: requiredMarker,
    responseElapsedMs,
    minimumResponseMs = 5 * 60 * 1000,
@@ -171,7 +2518,7 @@ diff --git a/src/prepare-chatgpt-draft.js b/src/prepare-chatgpt-draft.js
      return '';
    }
  
-@@ -1245,7 +1244,7 @@
+@@ -1245,7 +1260,7 @@ function markedResponseDurationFailure({
    const minimumLabel = Number.isSafeInteger(requiredMinimumMs) && requiredMinimumMs > 0
      ? formatDurationMs(requiredMinimumMs)
      : 'invalid configured duration';
@@ -180,7 +2527,117 @@ diff --git a/src/prepare-chatgpt-draft.js b/src/prepare-chatgpt-draft.js
  }
  
  function formatDurationMs(durationMs) {
-@@ -5668,7 +5667,6 @@
+@@ -1363,12 +1378,7 @@ function sanitizedArtifactCaptureLabel(attachment) {
+ function artifactCaptureLabel(attachment) {
+   const text = String(attachment?.text || '').trim();
+   const href = String(attachment?.href || '').trim();
+-  let hrefLabel = '';
+-  try {
+-    hrefLabel = decodeURIComponent(new URL(href, 'https://chatgpt.com').pathname.split('/').filter(Boolean).at(-1) || '');
+-  } catch {
+-    hrefLabel = decodeURIComponent(href.split('/').filter(Boolean).at(-1) || '');
+-  }
++  const hrefLabel = deriveChatGptHrefLabel(href, 'https://chatgpt.com');
+   const patchNamePattern = /\.(patch|diff|patched)\b/i;
+   if (hrefLabel && patchNamePattern.test(hrefLabel) && !patchNamePattern.test(text)) return hrefLabel;
+   return text || hrefLabel;
+@@ -1440,7 +1450,8 @@ function buildThreadCaptureIdentity({
+   targetId,
+ }) {
+   const exactBrowserEndpoint = String(browserEndpoint || '').trim();
+-  const exactChatUrl = extractConversationHref(chatUrl);
++  const exactChatUrl = extractConversationHref(chatUrl)
++    || (!assistantSnapshot ? extractTransientConversationHref(chatUrl) : '');
+   const exactTargetId = String(targetId || '').trim();
+   if (!exactBrowserEndpoint || !exactChatUrl || !exactTargetId) {
+     throw new Error('Could not persist capture metadata without one exact browser, thread, and target identity.');
+@@ -2345,12 +2356,12 @@ async function main() {
+   };
+   const cdp = pageCdpChannel.command;
+ 
+-  const evaluate = async (expression) => {
++  const evaluate = async (expression, timeoutMs = pageCommandTimeoutMs) => {
+     const result = await cdp('Runtime.evaluate', {
+       expression,
+       returnByValue: true,
+       awaitPromise: true,
+-    });
++    }, timeoutMs);
+     return result.result?.value;
+   };
+ 
+@@ -2606,7 +2617,7 @@ async function main() {
+         y: Math.round(rect.top + rect.height / 2),
+       };
+     };
+-    const controls = Array.from(document.querySelectorAll('[role="radio"]')).filter(visible);
++    const controls = Array.from(document.querySelectorAll('[role="radio"], button[aria-pressed]')).filter(visible);
+     const chatControl = controls.find((node) => matchesLabel(node, 'chat')) || null;
+     const workControl = controls.find((node) => matchesLabel(node, 'work')) || null;
+     const workUsageVisible = Array.from(
+@@ -2614,7 +2625,7 @@ async function main() {
+     ).some(visible);
+     const workBreadcrumbVisible = Array.from(document.querySelectorAll('body *')).some((node) => {
+       if (!(node instanceof HTMLElement) || node.children.length > 0 || !visible(node)) return false;
+-      if (node.closest('[role="radio"]')) return false;
++      if ([chatControl, workControl].some((control) => control?.contains(node))) return false;
+       const rect = node.getBoundingClientRect();
+       return rect.top >= 0 && rect.top < 120 && normalize(node.textContent) === 'work';
+     });
+@@ -2662,14 +2673,16 @@ async function main() {
+         inferredConversationSince = 0;
+       }
+       if (lastProbe?.status === 'work') {
+-        if (!allowSwitch || !lastProbe.chatPoint || switched) {
++        if (!allowSwitch || !lastProbe.chatPoint) {
+           throw new Error(
+             'ReviewGPT requires regular Chat and refuses to stage or send a normal review in ChatGPT Work.',
+           );
+         }
+-        await keepPageRenderingWhileBackgrounded();
+-        await clickNativePoint(lastProbe.chatPoint);
+-        switched = true;
++        if (!switched) {
++          await keepPageRenderingWhileBackgrounded();
++          await clickNativePoint(lastProbe.chatPoint);
++          switched = true;
++        }
+       }
+       await sleep(200);
+     }
+@@ -5144,7 +5157,7 @@ async function main() {
+           message: String((error && error.message) || error || 'unknown')
+         };
+       }
+-    })()`);
++    })()`, configuredDraftTimeoutMs);
+   };
+ 
+   const appendDraftComposerPromptNatively = async (prompt) => {
+@@ -5253,6 +5266,7 @@ async function main() {
+       const stopSelectors = ${stopSelectorsLiteral};
+       const userTurnAttachmentSelector = ${userTurnAttachmentSelectorLiteral};
+       const canonicalizeChatGptTurnNodes = ${canonicalizeChatGptTurnNodesSource};
++      const deriveChatGptHrefLabel = ${deriveChatGptHrefLabel.toString()};
+       const collectChatGptTurnAttachmentTexts = ${collectChatGptTurnAttachmentTextsSource};
+       const normalize = (value) => (value || '').toLowerCase();
+       const signatureize = (value) =>
+@@ -5260,13 +5274,7 @@ async function main() {
+           .replace(/[^a-z0-9]+/g, ' ')
+           .replace(/\\s+/g, ' ')
+           .trim();
+-      const turnIdentity = (node, role, index, signature) => {
+-        for (const attribute of ['data-message-id', 'data-turn-id', 'data-testid', 'id']) {
+-          const value = String(node?.getAttribute?.(attribute) || '').trim();
+-          if (value) return attribute + ':' + value;
+-        }
+-        return role + ':index:' + index + ':signature:' + signature;
+-      };
++      const turnIdentity = ${readChatGptTurnIdentity.toString()};
+       const visible = (node) => {
+         if (!node || typeof node.getBoundingClientRect !== 'function') return false;
+         const rect = node.getBoundingClientRect();
+@@ -5668,7 +5676,6 @@ async function main() {
            responseMarker,
            responseElapsedMs: Date.now() - responseWaitStartedAt,
            minimumResponseMs: minimumMarkedResponseMs,
@@ -188,10 +2645,141 @@ diff --git a/src/prepare-chatgpt-draft.js b/src/prepare-chatgpt-draft.js
          });
          if (responseDurationFailure) {
            return {
+@@ -6469,6 +6476,13 @@ async function main() {
+       commitResult.committedUserTurn,
+       expectedAttachmentNames,
+     );
++    if (lastVerification.confirmed) {
++      return {
++        status: 'confirmed',
++        committedUserTurn: commitResult.committedUserTurn,
++        verification: lastVerification,
++      };
++    }
+     while (Date.now() < deadline) {
+       const state = await readAutoSendState();
+       const matches = (Array.isArray(state?.recentUserTurns) ? state.recentUserTurns : [])
+@@ -6511,12 +6525,13 @@ async function main() {
+ 
+   const persistAcceptedSendIdentity = (commitResult, conversationHref) => {
+     const exactConversationHref = extractConversationHref(conversationHref, desiredTargetOrigin);
+-    if (!exactConversationHref) {
++    const transientConversationHref = extractTransientConversationHref(conversationHref, desiredTargetOrigin);
++    if (!exactConversationHref && !transientConversationHref) {
+       throw new Error('Auto-send committed, but ReviewGPT could not prove one exact accepted conversation URL. Do not auto-resend.');
+     }
+     acceptedCaptureIdentity = buildThreadCaptureIdentity({
+       browserEndpoint: `http://127.0.0.1:${remotePort}`,
+-      chatUrl: exactConversationHref,
++      chatUrl: exactConversationHref || transientConversationHref,
+       committedUserTurn: commitResult.committedUserTurn,
+       ...(isDeepResearchMode ? { expectedContentSource: 'deep-research-iframe' } : {}),
+       targetId: captureTargetId,
+@@ -6525,6 +6540,9 @@ async function main() {
+       writeThreadCaptureIdentity(captureMetadataFile, acceptedCaptureIdentity);
+       console.log('ReviewGPT exact target and committed-turn identity persisted for wake recovery.');
+     }
++    if (!exactConversationHref) {
++      throw new Error('Auto-send committed at a transient conversation URL. Exact target and turn metadata was retained. Recover with thread export and the unchanged capture metadata after the URL stabilizes; do not auto-resend.');
++    }
+     return exactConversationHref;
+   };
+ 
+@@ -6608,7 +6626,7 @@ async function main() {
+     return {
+       status: stableConversationHref ? 'timeout-with-conversation' : 'timeout-no-conversation',
+       href: stableConversationHref,
+-      state: stableConversationState || lastState,
++      state: stableConversationHref ? stableConversationState : lastState,
+     };
+   };
+ 
+@@ -6654,10 +6672,6 @@ async function main() {
+             maxWaitMs: Math.min(15_000, timeoutMs),
+             waitForConversationStateAfterSend,
+           });
+-          const exactConversationHref = persistAcceptedSendIdentity(
+-            commitResult,
+-            acceptedConversation.conversationHref,
+-          );
+           const attachmentVerification = await verifyCommittedUserTurnAttachments(
+             commitResult,
+             Math.min(15_000, timeoutMs),
+@@ -6675,6 +6689,10 @@ async function main() {
+             failure.reviewGptPostSendAttachmentFailure = true;
+             throw failure;
+           }
++          const exactConversationHref = persistAcceptedSendIdentity(
++            { ...commitResult, committedUserTurn: attachmentVerification.committedUserTurn },
++            acceptedConversation.conversationHref || acceptedConversation.transientConversationHref,
++          );
+           const deepResearchKickoff = await advanceDeepResearchPlan();
+           return {
+             status: 'sent',
+@@ -6719,10 +6737,6 @@ async function main() {
+                 maxWaitMs: Math.min(15_000, timeoutMs),
+                 waitForConversationStateAfterSend,
+               });
+-              const exactConversationHref = persistAcceptedSendIdentity(
+-                commitResult,
+-                acceptedConversation.conversationHref,
+-              );
+               const attachmentVerification = await verifyCommittedUserTurnAttachments(
+                 commitResult,
+                 Math.min(15_000, timeoutMs),
+@@ -6734,6 +6748,10 @@ async function main() {
+                 failure.reviewGptPostSendAttachmentFailure = true;
+                 throw failure;
+               }
++              const exactConversationHref = persistAcceptedSendIdentity(
++                { ...commitResult, committedUserTurn: attachmentVerification.committedUserTurn },
++                acceptedConversation.conversationHref || acceptedConversation.transientConversationHref,
++              );
+               const deepResearchKickoff = await advanceDeepResearchPlan();
+               return {
+                 status: 'sent',
+@@ -7314,6 +7332,7 @@ module.exports = {
+   retryTransientUnauthenticatedSession,
+   resolveAcceptedConversationAfterSend,
+   extractConversationHref,
++  extractTransientConversationHref,
+   sanitizeDeepResearchResponseText,
+   buildPromptMatchCandidates,
+   isLikelyPromptEcho,
 diff --git a/src/review-gpt-lib.mts b/src/review-gpt-lib.mts
+index a7631b54f2d8d46604dc77d28f27ead8debbb6cf..90c9938046095de0405e7235bb0e1ff88a4ecbb2 100644
 --- a/src/review-gpt-lib.mts
 +++ b/src/review-gpt-lib.mts
-@@ -1560,6 +1560,7 @@
+@@ -1,6 +1,6 @@
+ import { spawn, spawnSync } from 'node:child_process';
+ import { createHash, randomUUID } from 'node:crypto';
+-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, renameSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
++import { copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, realpathSync, renameSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
+ import { createRequire } from 'node:module';
+ import { homedir, tmpdir } from 'node:os';
+ import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
+@@ -22,6 +22,7 @@ export type CliOptions = {
+   chatId?: string | undefined;
+   chatUrl?: string | undefined;
+   config?: string | undefined;
++  companionSnapshot?: string[] | undefined;
+   connector?: string | undefined;
+   deepResearch?: boolean | undefined;
+   dryRun?: boolean | undefined;
+@@ -518,10 +519,11 @@ function gitHeadCommit(cwd: string): string | undefined {
+   return /^[0-9a-f]{40}$/iu.test(sha) ? sha : undefined;
+ }
+ 
+-function loadCompatConfig(repoRoot: string, configPath: string): LoadedConfig {
++function loadCompatConfig(repoRoot: string, configPath: string, env: NodeJS.ProcessEnv = process.env): LoadedConfig {
+   requireFile(configPath);
+   requireFile(compatScriptPath);
+   const result = spawnSync('bash', [compatScriptPath, repoRoot, configPath], {
++    env,
+     cwd: repoRoot,
+     encoding: 'utf8',
+   });
+@@ -1560,6 +1562,7 @@ export function formatSensitiveArtifactFailure(
  
  function listAllZipEntries(zipPath: string): string[] {
    const result = spawnSync('unzip', ['-Z1', zipPath], {
@@ -199,7 +2787,159 @@ diff --git a/src/review-gpt-lib.mts b/src/review-gpt-lib.mts
      encoding: 'utf8',
    });
    if (result.status !== 0) {
-@@ -1660,6 +1661,7 @@
+@@ -1592,6 +1595,7 @@ function runPackageScript(
+   outDir: string,
+   includeTests: boolean,
+   includeDocs: boolean,
++  context?: { cwd: string; env: NodeJS.ProcessEnv },
+ ): string {
+   requireFile(packageScript);
+   const args = [packageScript, '--zip', '--name', namePrefix];
+@@ -1605,12 +1609,13 @@ function runPackageScript(
+     args.push('--no-docs');
+   }
+   const result = spawnSync('bash', args, {
++    cwd: context?.cwd,
+     encoding: 'utf8',
+     env: {
+       // Default the repo-tools packager's credential filter on. Repos that
+       // deliberately package such files can still set this to 0 themselves.
+       COBUILD_AUDIT_CONTEXT_EXCLUDE_SENSITIVE: '1',
+-      ...process.env,
++      ...(context?.env ?? process.env),
+     },
+   });
+   if (result.status !== 0) {
+@@ -1619,6 +1624,128 @@ function runPackageScript(
+   return result.stdout;
+ }
+ 
++type CompanionSnapshot = { repo: string; head: string; prUrl: string };
++
++function companionGit(repo: string, args: string[]): string {
++  const result = spawnSync('git', args, { cwd: repo, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 });
++  if (result.status !== 0) throw new Error('Error: companion repository preflight failed.');
++  return result.stdout.trim();
++}
++
++function assertCompanionClean(snapshot: CompanionSnapshot): void {
++  if (companionGit(snapshot.repo, ['rev-parse', '--verify', 'HEAD']) !== snapshot.head) {
++    throw new Error('Error: companion HEAD differs from the requested exact head.');
++  }
++  if (companionGit(snapshot.repo, ['ls-files', '-v', '-z']).split('\0')
++    .some((entry) => /^[a-zS]/u.test(entry))) {
++    throw new Error('Error: companion index flags must not hide tracked changes.');
++  }
++  if (companionGit(snapshot.repo, ['status', '--porcelain', '--untracked-files=all'])) {
++    throw new Error('Error: companion snapshot requires a clean tracked and untracked checkout.');
++  }
++}
++
++function requireCommittedCompanionFile(repo: string, path: string): void {
++  const repoRelative = relative(repo, path);
++  if (!repoRelative || repoRelative.startsWith('..') || isAbsolute(repoRelative)
++    || !existsSync(path) || !lstatSync(path).isFile() || realpathSync(path) !== path) {
++    throw new Error('Error: companion config and packager must be regular committed files inside its repository.');
++  }
++  const entry = companionGit(repo, ['ls-files', '--stage', '--', repoRelative]);
++  if (!/^(100644|100755) [0-9a-f]+ 0\t/u.test(entry)
++    || companionGit(repo, ['hash-object', '--no-filters', '--', repoRelative]) !== entry.split(' ')[1]) {
++    throw new Error('Error: companion config and packager must be committed files.');
++  }
++}
++
++function assertCompanionRemoteHead(snapshot: CompanionSnapshot): void {
++  const result = spawnSync('gh', ['pr', 'view', snapshot.prUrl, '--json', 'headRefOid,url,isCrossRepository'], {
++    cwd: snapshot.repo, encoding: 'utf8', timeout: 30_000,
++  });
++  if (result.status !== 0) throw new Error('Error: could not verify companion PR head.');
++  const data = JSON.parse(result.stdout) as { headRefOid?: string; url?: string; isCrossRepository?: boolean };
++  if (data.headRefOid !== snapshot.head || data.url !== snapshot.prUrl || data.isCrossRepository !== false) {
++    throw new Error('Error: companion PR must be same-repository and match the requested exact head.');
++  }
++}
++
++/** Build only through a companion's committed canonical config and guarded packager. */
++export async function buildCompanionSnapshots(
++  inputs: string[], cwd: string, reservedNames: string[] = [],
++): Promise<Array<{ path: string; instruction: string }>> {
++  const artifacts: Array<{ path: string; instruction: string }> = [];
++  const repositories = new Set<string>();
++  for (const [index, input] of inputs.entries()) {
++    let value: unknown;
++    try { value = JSON.parse(input); } catch { throw new Error('Error: --companion-snapshot requires JSON with repo, head, and prUrl.'); }
++    if (!value || typeof value !== 'object' || Array.isArray(value)) {
++      throw new Error('Error: invalid companion snapshot descriptor.');
++    }
++    const fields = value as Record<string, unknown>;
++    if (Object.keys(fields).some((key) => !['repo', 'head', 'prUrl'].includes(key))
++      || typeof fields.repo !== 'string' || !fields.repo.trim()
++      || typeof fields.head !== 'string' || !/^[0-9a-f]{40}$/u.test(fields.head)
++      || typeof fields.prUrl !== 'string' || !/^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/[1-9][0-9]*$/u.test(fields.prUrl)) {
++      throw new Error('Error: companion snapshot requires repo, a full lowercase head SHA, and a GitHub PR URL.');
++    }
++    const repo = realpathSync(await gitRepoRoot(resolve(cwd, fields.repo)));
++    if (repositories.has(repo)) throw new Error('Error: duplicate companion repository.');
++    repositories.add(repo);
++    const snapshot = { repo, head: fields.head, prUrl: fields.prUrl };
++    const repositorySlug = new URL(snapshot.prUrl).pathname.split('/').slice(1, 3).join('/');
++    const origin = companionGit(repo, ['remote', 'get-url', 'origin']);
++    if (![ `https://github.com/${repositorySlug}`, `https://github.com/${repositorySlug}.git`,
++      `git@github.com:${repositorySlug}.git`, `git@github.com:${repositorySlug}` ].includes(origin)) {
++      throw new Error('Error: companion origin does not match its PR repository.');
++    }
++    assertCompanionClean(snapshot);
++    assertCompanionRemoteHead(snapshot);
++    const configPath = join(repo, 'scripts/review-gpt.config.sh');
++    requireCommittedCompanionFile(repo, configPath);
++    // Review metadata belongs to this companion, never the primary review round.
++    const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('REVIEW_GPT_') && !key.startsWith('COBUILD_AUDIT_CONTEXT_')));
++    env.REVIEW_GPT_PR_URL = snapshot.prUrl;
++    env.REVIEW_GPT_ROUND_NUMBER = '1';
++    env.REVIEW_GPT_REVIEW_PHASE = 'final';
++    env.COBUILD_AUDIT_CONTEXT_EXCLUDE_SENSITIVE = '1';
++    const config = loadCompatConfig(repo, configPath, env);
++    if (!config.packageScript) throw new Error('Error: companion config must declare its canonical guarded package_script.');
++    const packageScript = resolve(repo, config.packageScript);
++    requireCommittedCompanionFile(repo, packageScript);
++    assertCompanionClean(snapshot);
++    const outputDir = realpathSync(mkdtempSync(join(tmpdir(), 'review-gpt-companion-')));
++    const output = runPackageScript(packageScript, 'companion', outputDir,
++      parseBooleanLike(config.includeTests, false), parseBooleanLike(config.includeDocs, true), { cwd: repo, env });
++    assertCompanionClean(snapshot);
++    assertCompanionRemoteHead(snapshot);
++    const generatedPath = realpathSync(resolveZipPath(output));
++    const generatedRelative = relative(outputDir, generatedPath);
++    if (generatedRelative.startsWith('..') || isAbsolute(generatedRelative) || !lstatSync(generatedPath).isFile()) {
++      throw new Error('Error: companion packager must write a new ZIP inside the supplied output directory.');
++    }
++    const entries = listAllZipEntries(generatedPath);
++    const sensitive = findSensitiveArtifactPaths(entries);
++    if (sensitive.length) throw new Error(formatSensitiveArtifactFailure(generatedPath, sensitive));
++    const metadataName = 'review-gpt-pr-context/review-round.json';
++    const metadataEntries = entries.filter((entry) => entry === metadataName || entry.endsWith(`/${metadataName}`));
++    if (metadataEntries.length !== 1) throw new Error('Error: companion ZIP must retain unique guarded review-round metadata.');
++    const metadataResult = spawnSync('unzip', ['-p', generatedPath, metadataEntries[0]!], { encoding: 'utf8', maxBuffer: 1024 * 1024 });
++    if (metadataResult.status !== 0) throw new Error('Error: could not read companion review-round metadata.');
++    const metadata = JSON.parse(metadataResult.stdout) as Record<string, unknown>;
++    if (metadata.schemaVersion !== 1 || metadata.currentReviewedHead !== snapshot.head
++      || (metadata.contextAnchorHead !== undefined && metadata.contextAnchorHead !== snapshot.head)
++      || metadata.contextMode !== 'full_snapshot') {
++      throw new Error('Error: companion ZIP must contain a guarded full snapshot of the requested exact head.');
++    }
++    const name = `companion-${index + 1}.codebase.zip`;
++    if (reservedNames.includes(name)) throw new Error('Error: companion attachment filename collides with a primary attachment.');
++    const path = join(mkdtempSync(join(tmpdir(), 'review-gpt-attachments-')), name);
++    copyFileSync(generatedPath, path);
++    artifacts.push({ path, instruction: `- Companion ${repositorySlug}: ${name}; exact head ${snapshot.head}; PR ${snapshot.prUrl}. Its guarded metadata and source are contained in this separate, unchanged ZIP.` });
++  }
++  return artifacts;
++}
++
+ function resolveZipPath(packageOutput: string): string {
+   const match = Array.from(packageOutput.matchAll(/^ZIP: (.*) \(.*\)$/gm)).at(-1);
+   const zipPath = trimWhitespace(match?.[1] ?? '');
+@@ -1660,6 +1787,7 @@ function buildRepomixIgnorePaths(repoRoot: string, configuredPatterns: string[],
  function listZipManifestPaths(repoRoot: string, zipPath: string): string[] {
    const result = spawnSync('unzip', ['-Z1', zipPath], {
      cwd: repoRoot,
@@ -207,10 +2947,47 @@ diff --git a/src/review-gpt-lib.mts b/src/review-gpt-lib.mts
      encoding: 'utf8',
    });
    if (result.status !== 0) {
+@@ -1979,6 +2107,9 @@ export async function runReviewGpt(options: CliOptions, context: RunContext): Pr
+     : options.artifacts === true || options.zip === true
+       ? true
+       : resolvedConfig.attachArtifacts;
++  if (!attachArtifacts && (options.companionSnapshot?.length ?? 0) > 0) {
++    throw new Error('Error: companion snapshots require artifact attachments.');
++  }
+   const attachmentPaths: string[] = [];
+   const cleanupFilePaths: string[] = [];
+   const baseCommit = gitHeadCommit(repoRoot);
+@@ -2026,8 +2157,16 @@ export async function runReviewGpt(options: CliOptions, context: RunContext): Pr
+     attachmentPaths.push(zipPath);
+   }
+ 
++  const companions = await buildCompanionSnapshots(options.companionSnapshot ?? [], context.cwd, attachmentPaths.map((path) => basename(path)));
++  for (const companion of companions) {
++    attachmentPaths.push(companion.path);
++    cleanupFilePaths.push(companion.path);
++    console.log(`Companion ZIP file: ${redactLocalPath(companion.path)}`);
++  }
+   const promptChunks = options.prompt ?? [];
+-  const artifactInstructionText = attachArtifacts ? buildArtifactInstructionText(baseCommit) : '';
++  const artifactInstructionText = attachArtifacts
++    ? [buildArtifactInstructionText(baseCommit), ...companions.map((companion) => companion.instruction)].join('\n')
++    : '';
+   const repoContextInstructionText = buildRepoContextInstructionText(
+     resolvedConfig.repoContextUrl,
+     baseCommit,
 diff --git a/src/thread-cli.mts b/src/thread-cli.mts
+index 0159d95b3196142b6d407e3c773aa512bdc31b7a..497e7169fd68879e913acdd83edb090e3840063c 100644
 --- a/src/thread-cli.mts
 +++ b/src/thread-cli.mts
-@@ -19,6 +19,17 @@
+@@ -12,6 +12,7 @@ import {
+   exportThreadSnapshot,
+   isCaptureIdentityDigest,
+   parseThreadCaptureIdentity,
++  recoverPendingDownloadCapture,
+   type ThreadCaptureIdentity,
+ } from './chatgpt-thread-lib.mjs';
+ import { collectThreadDiagnostics } from './chatgpt-thread-diagnostics-lib.mjs';
+@@ -19,6 +20,17 @@ import { formatCodexHomeForDisplay, formatPathForDisplay } from './codex-session
  import { chatIdFromUrl, parseWakeDelayToMs, runWakeFlow, type WakeRecursiveInfo } from './chatgpt-thread-wake-lib.mjs';
  
  const cliEntryPath = fileURLToPath(new URL('./bin.mjs', import.meta.url));
@@ -228,7 +3005,39 @@ diff --git a/src/thread-cli.mts b/src/thread-cli.mts
  
  function normalizeConversationUrl(chatUrl: string): string {
    try {
-@@ -482,7 +493,10 @@
+@@ -227,7 +239,7 @@ export function createThreadCli() {
+       artifactIndex: z.number().int().min(0).optional().describe('Assistant artifact index from the latest request in thread.json. Prefer this over button text when possible.'),
+       attachmentText: z.string().optional().describe('Legacy attachment button label to click and download.'),
+       browserEndpoint: z.string().default(DEFAULT_BROWSER_ENDPOINT).describe('Remote debugging endpoint for the managed browser.'),
+-      captureMetadata: z.string().optional().describe('Exact capture metadata emitted by a waited send; constrain the download to that assistant turn and artifact identity.'),
++      captureMetadata: z.string().optional().describe('Exact waited-send metadata; recover a pending completed response without rewriting the input, then constrain the artifact identity.'),
+       chatUrl: z.string().describe('Full ChatGPT conversation URL (/c/<thread-id>) containing the attachment.'),
+       outputDir: z.string().describe('Directory where the download should be written.'),
+       timeoutMs: z.number().default(30_000).describe('Attachment download timeout in milliseconds.'),
+@@ -246,13 +258,19 @@ export function createThreadCli() {
+       downloadedFile: z.string().describe('Downloaded attachment path.'),
+     }),
+     async run(c) {
+-      const chatUrl = normalizeConversationUrl(c.options.chatUrl);
+-      const captureIdentity = loadCaptureMetadata(c.options.captureMetadata);
++      let chatUrl = normalizeConversationUrl(c.options.chatUrl);
++      let captureIdentity = loadCaptureMetadata(c.options.captureMetadata);
+       if (c.options.artifactIndex === undefined && !c.options.attachmentText?.trim()) {
+         throw new Error('thread download requires --artifact-index or --attachment-text.');
+       }
+       if (captureIdentity && !captureIdentity.assistantResponse) {
+-        throw new Error('Exact capture metadata cannot download an artifact before the assistant response identity is captured.');
++        if (c.options.artifactIndex === undefined) {
++          throw new Error('Pending exact capture recovery requires --artifact-index.');
++        }
++        captureIdentity = await recoverPendingDownloadCapture(
++          c.options.browserEndpoint, chatUrl, captureIdentity, c.options.timeoutMs,
++        );
++        chatUrl = captureIdentity.chatUrl;
+       }
+       if (captureIdentity?.assistantResponse) {
+         if (c.options.artifactIndex === undefined) {
+@@ -482,7 +500,10 @@ export function createThreadCli() {
          const { wakePid } = launchDetachedWakeProcess({
            args,
            cwd: repoDir,
@@ -240,12 +3049,10 @@ diff --git a/src/thread-cli.mts b/src/thread-cli.mts
            logPath: wakeLogPath,
          });
          return {
-@@ -497,6 +511,19 @@
-           wakePid,
-           exportPath: formatPathForDisplay(path.join(outputDir, 'thread.json'), repoDir),
+@@ -499,6 +520,19 @@ export function createThreadCli() {
          };
-+      }
-+
+       }
+ 
 +      const detachedWake = process.env[DETACHED_WAKE_ENV] === '1';
 +      delete process.env[DETACHED_WAKE_ENV];
 +      const returnToCallingSession = shouldReturnWakeToCallingSession({
@@ -257,10 +3064,12 @@ diff --git a/src/thread-cli.mts b/src/thread-cli.mts
 +        process.stderr.write(
 +          'Exact calling Codex session will receive the recovered wake result; nested child launch skipped.\n',
 +        );
-       }
- 
++      }
++
        const captureIdentity = loadCaptureMetadata(c.options.captureMetadata);
-@@ -519,7 +546,7 @@
+       const result = await runWakeFlow({
+         browserEndpoint: c.options.browserEndpoint,
+@@ -519,7 +553,7 @@ export function createThreadCli() {
          repoDir,
          resumePrompt: c.options.resumePrompt,
          sessionId,
