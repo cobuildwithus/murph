@@ -794,3 +794,6 @@ in [`local Web fonts`](exec-plans/completed/2026-09-25-local-web-fonts.md).
 
 Vault-share deferral diagnostic work is tracked in
 [`vault-share deferral observability`](exec-plans/completed/2026-09-25-vault-share-deferral-observability.md).
+
+Viewport animation setup and CSP regression proof are tracked in
+[`2026-09-28-viewport-animation-csp.md`](exec-plans/completed/2026-09-28-viewport-animation-csp.md).
