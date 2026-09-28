@@ -3913,7 +3913,13 @@ bootstrap state. Pre-v2 full/base, working `{base, delta}`, and layered
 ref decoders remain for stored-object cleanup and historical metadata
 compatibility. Live v2 snapshots are one encrypted zstd-compressed
 tar object uploaded directly from the container to R2 through a short-lived
-presigned `PUT` URL. The Worker handles only JSON start, presign, complete,
+presigned `PUT` URL. Direct conditional and managed multipart PUTs retry HTTP
+429, 500, 502, 503, and 504 once within the original presigned deadline, using
+the existing jitter, identical encrypted bytes and object/session binding.
+Cancellation, expiry, repeated failure, and response-followed-by-412 retain
+fail-closed behavior; successful uploads still require ordinary completion
+verification before checkpoint publication.
+The Worker handles only JSON start, presign, complete,
 abort, and data-key unwrap metadata, stores a short-lived upload session without
 the URL or data key, verifies the object by `HEAD` on completion, and never
 receives the snapshot body. The v2 format is a greenfield zstd hard cut, so

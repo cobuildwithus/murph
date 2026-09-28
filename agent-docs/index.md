@@ -3,6 +3,9 @@ in [the import-speed plan](exec-plans/completed/2026-09-24-garmin-import-speed.m
 
 # Murph Agent Docs Index
 
+Bounded snapshot PUT gateway retries are specified in the
+[hosted runtime protocol](references/hosted-runtime-protocol.md).
+
 Scheduled assistant real-model CI removal is recorded in
 [the CI removal plan](exec-plans/completed/2026-09-25-scheduled-ci-repair.md).
 
