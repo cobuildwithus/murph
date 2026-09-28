@@ -205,6 +205,18 @@ export const PINNED_CODEX_OPENAI_EGRESS_INVENTORY = {
   ],
   nonProviderBinaryCandidates: [
     {
+      candidate: "/v1/analytics/codex/turn-costsestimated_usage_usd_microsthreadsspeedskipping",
+      disposition: "binary_false_positive",
+      owner: "codex-analytics",
+      reason: "The 0.158.0 Linux release joins the turn-cost route to adjacent usage field labels and goal-continuation text. backend-client/src/client/turn_usage.rs sets only /v1/analytics/codex/turn-costs on the separate analytics origin.",
+    },
+    {
+      candidate: "/v1/user-auth-credential/whoamiauth.json",
+      disposition: "binary_false_positive",
+      owner: "codex-login",
+      reason: "The 0.158.0 Linux release joins the whoami route to the adjacent auth.json filename. login/src/auth/personal_access_token.rs sets only /v1/user-auth-credential/whoami on the separate authentication origin.",
+    },
+    {
       candidate: "/v1/livea",
       disposition: "binary_false_positive",
       owner: "codex",
