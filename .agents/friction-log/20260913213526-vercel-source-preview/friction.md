@@ -22,3 +22,11 @@ From a linked task checkout, run `vercel deploy --yes --target preview --no-wait
 ## Context
 
 A small Ops confirmation change needed a reviewer-openable synthetic design preview. Upload admission failed before any build work began, requiring a second source upload.
+
+## Resolution
+
+The hosted Web README now documents the source-preview command with
+`--target=preview --archive=tgz`, the existing project-link/root-directory
+context, and the distinction between a queued build and completed preview
+evidence. The guidance is verified against Vercel's CLI archive documentation
+and source-file limit; this documentation repair does not deploy a preview.
