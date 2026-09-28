@@ -22,3 +22,10 @@ Give `scripts/check-pr-complexity-summary.mjs` a TypeScript change and a complet
 ## Context
 
 The check interrupts a verified PR for a presentation difference that does not alter the executed complexity guard.
+
+## Resolution
+
+The command check now accepts the optional `--silent` logging flag before
+`complexity:diff`. Both command spellings satisfy the same evidence fields and
+passing-result requirement. Regression coverage retains rejection of an
+unexecuted guard and rejects unrelated options such as `--help`.
