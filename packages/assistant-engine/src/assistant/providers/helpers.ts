@@ -729,18 +729,19 @@ function readAssistantTurnProfileBatchToolAggregates(
       return null
     }
 
+    const label = resolveCodexCommandFamily({ argv, source: 'batch_argv' })
     aggregates.push({
       calls: 1,
       durationKnownCalls: 1,
       durationMs,
       failedCalls: ok ? 0 : 1,
       kind: 'command',
-      label: resolveCodexCommandFamily({
-        argv,
-        source: 'batch_argv',
-      }),
+      label,
       outputBytesMax: outputBytes,
       outputBytesTotal: outputBytes,
+      ...(label === 'vault-cli knowledge' ? {
+        knowledgeCounts: readAssistantKnowledgeCounts(argv[1], !ok, command.error?.code),
+      } : {}),
     })
   }
 

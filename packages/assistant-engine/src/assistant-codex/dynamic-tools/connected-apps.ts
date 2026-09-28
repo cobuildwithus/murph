@@ -1,5 +1,8 @@
 import type { MurphDynamicToolExecutionResult } from '../dynamic-tools.js'
-import { toolTextResult as connectedAppsTextResult } from '../tool-failure-diagnostics.js'
+import {
+  toolTextResult as connectedAppsTextResult,
+  withConnectedAppsToolFailureDetails,
+} from '../tool-failure-diagnostics.js'
 import * as z from '@murphai/contracts/zod-runtime'
 import { removeConnectedContextAccount } from '../../assistant/journal-connected-context-ledger.js'
 
@@ -213,16 +216,20 @@ export async function executeConnectedAppsDynamicTool(input: {
       ambiguousWriteMessage
       && isConnectedAppsAmbiguousWriteFailure(error)
     ) {
-      return connectedAppsTextResult(false, ambiguousWriteMessage, 'handler_exception', error)
+      return withConnectedAppsToolFailureDetails(
+        connectedAppsTextResult(false, ambiguousWriteMessage, 'handler_exception', error), error,
+      )
     }
     if (isConnectedAppsOfficialAlertRequest(requestBody)) {
-      return connectedAppsTextResult(
+      return withConnectedAppsToolFailureDetails(connectedAppsTextResult(
         false,
         `${describeConnectedAppsFailure(error, 'none')} Do not retry this optional alert read; continue without alert context.`,
         'handler_exception', error,
-      )
+      ), error)
     }
-    return connectedAppsTextResult(false, describeConnectedAppsFailure(error), 'handler_exception', error)
+    return withConnectedAppsToolFailureDetails(
+      connectedAppsTextResult(false, describeConnectedAppsFailure(error), 'handler_exception', error), error,
+    )
   }
 }
 
