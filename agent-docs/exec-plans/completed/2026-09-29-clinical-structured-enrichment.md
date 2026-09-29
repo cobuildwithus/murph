@@ -1,6 +1,6 @@
 # Recover structured facts from retained clinical source records
 
-Status: active
+Status: completed
 Created: 2026-09-29
 Updated: 2026-09-29
 
@@ -70,4 +70,19 @@ Do not merge or deploy under this task without the applicable authority.
   $0.20/M input and $1.20/M output, before retries/infrastructure.
 - Product UX replay: Ready for the covered import/recovery paths. Complete chart
   coverage and automatic repair of previously completed imports remain excluded.
-- Remaining: publish scoped PR, changelog, required external review and exact-head CI.
+- PR #3810 and member-facing changelog are published on the existing stacked base.
+- Final ReviewGPT round 1 passed on ccfe5ca69b6f085e077205c2b87a7b8df9060e06:
+  zero findings received, accepted or rejected; no remediation or retrospective.
+  The managed Hercules lane requested GPT-6 Pro and captured the exact-turn
+  completed response after approximately eleven minutes. The substantive review
+  traced the full patch, source attestation, frozen replay, canonical writes,
+  correction/withdrawal and legacy attachment compatibility. Capture metadata
+  binds the accepted user turn and response; local artifacts remain untracked.
+- Parent final review confirmed the changed production owners and synthetic
+  regression proof. Runtime behavior is unchanged by the final documentation
+  closeout, so the existing review remains applicable under the docs exemption.
+- Broad CI passed on the reviewed implementation head. The final plan-closeout
+  commit still requires its own CI; the PR is the live owner of that gate.
+- Deployment concerns: new v2 jobs require upgraded exclusive runtime owners;
+  retain a v2-capable reader for rollback. No deployment or merge was performed.
+Completed: 2026-09-29
