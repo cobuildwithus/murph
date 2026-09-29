@@ -235,7 +235,7 @@ describe('automation model input schema', () => {
     },
   )
 
-  it('advertises GPT-6 Sol as the reminder default and Luna only for a fixed cue', () => {
+  it('advertises GPT-6.1 Sol as the reminder default and Luna only for a fixed cue', () => {
     const schemaDescriptions = collectKeys(
       MURPH_AUTOMATION_TOOL.inputSchema,
       'description',
@@ -265,7 +265,7 @@ describe('automation model input schema', () => {
         'use luna for self-contained cues and reminders',
       )
     }
-    expect(MURPH_AUTOMATION_TOOL.description).toContain('Luna and Sol mean GPT-6 Luna and GPT-6 Sol')
+    expect(MURPH_AUTOMATION_TOOL.description).toContain('Luna and Sol mean GPT-6 Luna and GPT-6.1 Sol')
     expect(schemaDescriptions.join(' ')).not.toMatch(/Terra|high for Luna/iu)
     expect(MURPH_AUTOMATION_TOOL.description).not.toContain('GPT-5.6')
     expect(MURPH_AUTOMATION_TOOL.description).toContain(
