@@ -2,11 +2,11 @@
 
 Coverage: 1748/1748 exercises; 5340/5340 images.
 
-Confirmed fixes: 125. Visual audit complete. Repair status: 122 accepted, 1 awaiting-perspective-choice, 2 blocked.
+Confirmed fixes: 125. Visual audit complete. Repair status: 123 accepted, 2 blocked.
 
 Review model: GPT-6 Sol. Replacements: built-in image generation only; no image-generation API keys.
 
-Images are local review artifacts. The live catalog has not changed; publishing needs Cloudflare Images access. ST208 and ST679 remain blocked by image-generation output moderation. EX347 awaits a user perspective choice because the attempted three-quarter sequences still confuse the crossing leg. An accepted status means the current replacement bytes passed independent visual review, not that they have been published.
+Images are local review artifacts. The live catalog has not changed; publishing needs Cloudflare Images access. ST208 and ST679 remain blocked by image-generation output moderation. EX347 uses a consistent top-down view approved by the user. An accepted status means the current replacement bytes passed independent visual review, not that they have been published.
 
 ## Fix list
 
@@ -73,7 +73,8 @@ Images are local review artifacts. The live catalog has not changed; publishing 
 ### EX347 — Cross-Body Mountain Climber
 
 - **High**, slides 2, 4: Both drive slides draw the near knee toward the near elbow; the cross-body opposite-elbow drive and side switch are absent. Fix: Show each knee crossing under the torso toward its opposite elbow, then reverse limbs in slide 4.
-- Replacement status: awaiting-perspective-choice.
+- Replacement status: accepted.
+- Review note: The four fixed top-down frames show plank, lower-hip leg crossing toward the opposite upper elbow, a neutral full-plank reset, and upper-hip leg crossing toward the opposite lower elbow. The revised shirt edge occludes the crossing thigh beneath the torso in slide 4 while knee, shin and two bare feet remain traceable. Subject, olive mat, camera and bare-foot style remain consistent; slide-3 cues no longer indicate the wrong leg.
 
 ### EX353 — Bottle Halo
 
@@ -761,6 +762,6 @@ Images are local review artifacts. The live catalog has not changed; publishing 
 
 ## Validation and delivery
 
-All 5,340 original file checksums and all review/repair references passed validation. All 125 records assemble without errors. The accepted-only delivery package contains 122 independently reviewed repairs; live catalog rows are unchanged.
+All 5,340 original file checksums and all review/repair references passed validation. All 125 records assemble without errors. The accepted-only delivery package contains 123 independently reviewed repairs; live catalog rows are unchanged. EX347 now has an independently accepted top-down sequence. ST208 and ST679 remain blocked by output moderation.
 
-The repository documentation drift command could not run because this isolated checkout lacks the repo-tools consumer shell helper. Changed-document links, whitespace, and privacy were checked directly instead. Application tests and typecheck do not apply because no code, runtime configuration, or catalog entries changed.
+Repository documentation drift, whitespace, and privacy checks passed. A dry-run catalog updater validated the 123 accepted sets, preserved all unselected rows byte-for-byte, and rejected missing upload receipts and stale source URLs. Cloudflare browser authorization expired without approval, so no images were uploaded and no catalog changes were applied. Application tests and typecheck are required once the catalog patch exists; they do not apply to this documentation-only progress record.
