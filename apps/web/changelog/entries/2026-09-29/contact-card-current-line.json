@@ -1,0 +1,17 @@
+{
+  "publishedOn": "2026-09-29",
+  "order": 100,
+  "item": {
+    "id": "contact-card-current-line",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Save the current Murph contact number",
+    "summary": "Shared contact cards use your active Murph texting number.",
+    "details": "Saving from the app waits until your texting line is ready. Cards are not sent when messaging is blocked or the current sending number cannot be determined.",
+    "relevanceTags": [
+      "imessage",
+      "onboarding"
+    ],
+    "sourcePullRequests": []
+  }
+}
