@@ -21,9 +21,10 @@ history. Native source pins are versioned in
 `.github/native-hosted-e2e-controller.json`, so a source rotation advances the
 same checkpoint instead of mutating hidden runtime configuration. The
 controller resolves the current production alias and dispatches that deployed
-SHA only when it exactly matches selected `main`. A pending or failed Web
-production admission fails before private dispatch and retries at the next
-slot.
+SHA after proving its protected-main ancestry and exact production deployment.
+The checked-out controller may be newer than production. Immediately before
+dispatch, the alias must still match that selected deployment; a promotion
+between selection and dispatch fails closed and retries at the next slot.
 
 The public controller is canary-only. It cannot create a Vercel candidate,
 reset a database or provider identity, or dispatch PR mode.

@@ -271,25 +271,26 @@ fi
   }
 });
 
-test("iOS workflow selects the verified deployed revision independently of main", async () => {
-  const workflow = await readFile(
-    path.join(REPO_ROOT, ".github", "workflows", "native-ios-hosted-e2e.yml"),
-    "utf8",
-  );
-  const select = extractWorkflowStepScript(workflow, "Select verified production deployment");
-  const dispatch = workflow.slice(
-    workflow.indexOf("      - name: Verify current production alias and dispatch non-destructive canary"),
-  );
-  assert.match(dispatch, /DEPLOYED_SHA: \$\{\{ steps\.production\.outputs\.web_sha \}\}/u);
-  assert.match(dispatch, /--web-sha "\$\{DEPLOYED_SHA\}"/u);
-  const dir = await mkdtemp(path.join(tmpdir(), "ios-production-selection-"));
-  try {
-    await writeFile(path.join(dir, "git"), `#!/bin/bash
+for (const platform of ["ios", "android"]) {
+  test(`${platform} workflow selects the verified deployed revision independently of main`, async () => {
+    const workflow = await readFile(
+      path.join(REPO_ROOT, ".github", "workflows", `native-${platform}-hosted-e2e.yml`),
+      "utf8",
+    );
+    const select = extractWorkflowStepScript(workflow, "Select verified production deployment");
+    const dispatch = workflow.slice(
+      workflow.indexOf("      - name: Verify current production alias and dispatch non-destructive canary"),
+    );
+    assert.match(dispatch, /DEPLOYED_SHA: \$\{\{ steps\.production\.outputs\.web_sha \}\}/u);
+    assert.match(dispatch, /--web-sha "\$\{DEPLOYED_SHA\}"/u);
+    const dir = await mkdtemp(path.join(tmpdir(), `${platform}-production-selection-`));
+    try {
+      await writeFile(path.join(dir, "git"), `#!/bin/bash
 set -euo pipefail
 [[ "$*" == "merge-base --is-ancestor ${SHA} origin/main" ]] || exit 64
 exit "$ANCESTRY_EXIT"
 `, { mode: 0o700 });
-    await writeFile(path.join(dir, "pnpm"), `#!/bin/bash
+      await writeFile(path.join(dir, "pnpm"), `#!/bin/bash
 set -euo pipefail
 case "$*" in
   "--dir apps/web exec tsx scripts/resolve-vercel-production-alias-sha.ts")
@@ -300,35 +301,36 @@ case "$*" in
   *) exit 64 ;;
 esac
 `, { mode: 0o700 });
-    const output = path.join(dir, "output");
-    const env = {
-      ...process.env,
-      PATH: `${dir}:${process.env.PATH ?? ""}`,
-      GITHUB_OUTPUT: output,
-      ALIAS_SHA: SHA,
-      ANCESTRY_EXIT: "0",
-      VERIFIED_SHA: SHA,
-      // The controller is newer than production: this must still execute.
-      DEPLOYED_SHA: IOS_SHA,
-    };
-    const run = (script, overrides = {}) => spawnSync("bash", ["-c", script], {
-      cwd: REPO_ROOT, encoding: "utf8", env: { ...env, ...overrides },
-    });
-    assert.equal(run(select).status, 0);
-    assert.equal(await readFile(output, "utf8"), `web_sha=${SHA}\n`);
-    for (const overrides of [
-      { ALIAS_SHA: "invalid" },
-      { ANCESTRY_EXIT: "1" },
-      { VERIFIED_SHA: IOS_SHA },
-    ]) {
-      await writeFile(output, "");
-      assert.notEqual(run(select, overrides).status, 0);
-      assert.equal(await readFile(output, "utf8"), "");
+      const output = path.join(dir, "output");
+      const env = {
+        ...process.env,
+        PATH: `${dir}:${process.env.PATH ?? ""}`,
+        GITHUB_OUTPUT: output,
+        ALIAS_SHA: SHA,
+        ANCESTRY_EXIT: "0",
+        VERIFIED_SHA: SHA,
+        // The controller is newer than production: this must still execute.
+        DEPLOYED_SHA: IOS_SHA,
+      };
+      const run = (script, overrides = {}) => spawnSync("bash", ["-c", script], {
+        cwd: REPO_ROOT, encoding: "utf8", env: { ...env, ...overrides },
+      });
+      assert.equal(run(select).status, 0);
+      assert.equal(await readFile(output, "utf8"), `web_sha=${SHA}\n`);
+      for (const overrides of [
+        { ALIAS_SHA: "invalid" },
+        { ANCESTRY_EXIT: "1" },
+        { VERIFIED_SHA: IOS_SHA },
+      ]) {
+        await writeFile(output, "");
+        assert.notEqual(run(select, overrides).status, 0);
+        assert.equal(await readFile(output, "utf8"), "");
+      }
+    } finally {
+      await rm(dir, { force: true, recursive: true });
     }
-  } finally {
-    await rm(dir, { force: true, recursive: true });
-  }
-});
+  });
+}
 
 test("production canary requires the exact selected revision at dispatch", () => {
   assert.equal(selectProductionCanaryWebSha(SHA, SHA), SHA);
