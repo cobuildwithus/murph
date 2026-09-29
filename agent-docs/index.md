@@ -3,6 +3,10 @@ in [the import-speed plan](exec-plans/completed/2026-09-24-garmin-import-speed.m
 
 # Murph Agent Docs Index
 
+Read-only system-mailbox selection and deferred conversation chronology reads
+are owned by `packages/assistant-runtime/README.md`; local proof is recorded in
+[`foreground mailbox latency`](exec-plans/completed/2026-09-28-warm-input-latency.md).
+
 [Batch/status failure telemetry](exec-plans/completed/2026-09-28-more-failure-telemetry.md)
 records the patch handoff; its contract remains in `docs/hosted-runtime-log-database.md`.
 

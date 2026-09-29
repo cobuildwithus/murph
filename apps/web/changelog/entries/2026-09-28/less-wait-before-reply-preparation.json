@@ -1,0 +1,13 @@
+{
+  "publishedOn": "2026-09-28",
+  "order": 100,
+  "item": {
+    "id": "less-wait-before-reply-preparation",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Less waiting before preparing a reply",
+    "summary": "Murph skips unnecessary checks and waits when there is no pending background result to handle before your message.",
+    "relevanceTags": ["reliability", "messaging"],
+    "sourcePullRequests": []
+  }
+}
