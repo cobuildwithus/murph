@@ -119,6 +119,8 @@ describe.skipIf(!runPostgresProof)(
         await prisma.hostedRuntimeOwner.create({ data: {
           userId, migrationPhase: "postgres", phase: "active", processingMode: "default",
           attemptId: runtimeAttemptId, generation: 2n, acceptedAt,
+          allocationId: `${userId}-allocation`, runnerContainerName: `${userId}-runner`,
+          workspaceVersion: 1n,
         } });
         await recordHostedIngressAssistantInputStaged({
           authenticatedUserId: userId, mailboxItemId, assistantInputId: `${userId}-input`,
@@ -136,7 +138,7 @@ describe.skipIf(!runPostgresProof)(
         await assertStalled(0, deadline);
         await assertStalled(1, new Date(+deadline + 1));
         for (const override of [
-          { phase: "idle" }, { phase: "retiring" }, { processingMode: "system_mailbox" },
+          { phase: "idle", attemptId: null }, { phase: "retiring" }, { processingMode: "system_mailbox" },
           { attemptId: "another-attempt" }, { generation: 3n }, { completedAt },
         ]) {
           await prisma.hostedRuntimeOwner.update({ where: { userId }, data: override });
@@ -160,10 +162,20 @@ describe.skipIf(!runPostgresProof)(
         }
         // A newer trace without completion must not fall back to old evidence.
         const trace = await prisma.hostedIngressLatencyTrace.findUniqueOrThrow({ where: { mailboxItemId } });
+        const newerAt = new Date("2026-08-10T15:19:00Z");
+        await prisma.hostedMailboxItem.create({ data: {
+          id: `${userId}-newer-item`, userId, lane: "conversation", laneSeq: 2n,
+          kind: "conversation.message", dedupeKey: `${userId}-newer-item`,
+          occurredAt: newerAt, createdAt: newerAt, consumedAt: newerAt,
+          payloadSchema: "murph.runtime-progress-proof.v1",
+        } });
+        await prisma.hostedMailboxLaneCounter.update({
+          where: { userId_lane: { userId, lane: "conversation" } }, data: { nextSeq: 3n },
+        });
         await prisma.hostedIngressLatencyTrace.create({ data: {
           id: `${userId}-latest-trace`, userId, source: "email", mailboxLane: "conversation",
           mailboxItemId: `${userId}-newer-item`, mailboxLaneSeq: 2n,
-          acceptedAt: new Date("2026-08-10T15:19:00Z"), runtimeAttemptId,
+          acceptedAt: newerAt, runtimeAttemptId,
           phaseBreakdownJson: {},
         } });
         await assertStalled(1);
