@@ -281,6 +281,13 @@ that performs canonical import emits bounded source/resource normalization
 evidence for fallback coverage checks. `device-syncd` does not maintain a
 second raw-payload metric parser.
 
+Junction summary continuations call the canonical importer only when the prepared
+summary map contains a resource. A completed summary phase does not manufacture
+an empty provider snapshot or receipt. Explicit fetched empty collections retain
+their existing import path; complete-source-day timeseries imports and their
+authoritative corrections are unchanged. Source checks, continuation checkpoints,
+content proof, and reconciliation cadence keep their existing owners.
+
 One worker drain reuses a single in-memory canonical import session. Core may
 reuse its event-identity index only when the event-ledger metadata fingerprint
 is unchanged and every event id, external reference, Junction profile scope,
