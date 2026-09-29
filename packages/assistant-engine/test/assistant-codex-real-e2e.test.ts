@@ -901,7 +901,7 @@ afterAll(() => {
     )
   }
 })
-const DEFAULT_REAL_CODEX_MODEL = 'gpt-6-sol'
+const DEFAULT_REAL_CODEX_MODEL = 'gpt-6.1-sol'
 const REAL_CODEX_HOSTED_CONFIG_OVERRIDES = [
   'allow_login_shell=false',
   'features.plugins=false',
@@ -8299,7 +8299,10 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
     720_000,
   )
 
-  it('runs a saved legacy Luna reminder on the current OpenAI model without rewriting it', async () => {
+  it.each([
+    ['gpt-5.6-luna', 'gpt-6-luna'],
+    ['gpt-6-sol', 'gpt-6.1-sol'],
+  ])('runs a saved %s reminder on the current OpenAI model without rewriting it', async (savedModel, expectedModel) => {
     const config = await resolveRealCodexE2eConfig()
     const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-automation-model-upgrade-e2e-'))
     const binDirectory = path.join(workingDirectory, 'bin')
@@ -8308,7 +8311,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
       await materializeRealWorkoutVaultCli({ binDirectory, commandLogPath, vaultRoot: workingDirectory })
       await initializeVault({ timezone: 'UTC', vaultRoot: workingDirectory })
       const saved = await upsertAutomation({
-        assistantTargetOverride: { model: 'gpt-5.6-luna' },
+        assistantTargetOverride: { model: savedModel },
         continuityPolicy: 'fresh',
         instructions: 'Send this self-contained reminder now: put the recycling bin outside. No lookups or other actions are needed.',
         now: new Date('2026-09-23T12:00:00.000Z'),
@@ -8338,7 +8341,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
       const target = resolveAutomationAssistantTargetOverrideForTarget(saved.record.assistantTargetOverride, createAssistantModelTarget({
         model: config.model, modelProvider: config.modelProvider ?? 'openai', provider: 'codex-cli', reasoningEffort: 'low',
       }))
-      expect(target).toMatchObject({ model: 'gpt-6-luna', reasoningEffort: 'low' })
+      expect(target).toMatchObject({ model: expectedModel, reasoningEffort: 'low' })
       if (!target?.model) throw new Error('Expected upgraded model.')
       const result = await executeRealCodexAppServerTurn({
         approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,

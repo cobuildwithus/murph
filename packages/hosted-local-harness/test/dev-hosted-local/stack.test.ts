@@ -184,6 +184,7 @@ const cleanupHostedRunnerContainerLocalState = vi.fn<
 const collectDockerDevDiagnostics = vi.fn(async () => "Docker diagnostics:\n- docker version: ok");
 const DEFAULT_CODEX_MODEL_CATALOG_TEXT = JSON.stringify({
   models: [
+    { slug: "gpt-6.1-sol" },
     { slug: "gpt-6-sol" },
     { slug: "gpt-6-luna" },
     {
@@ -3133,6 +3134,7 @@ describe("hosted local dev stack", () => {
     expect(catalogWrite).toBeDefined();
     expect(JSON.parse(String(catalogWrite?.[1]))).toMatchObject({
       models: [
+        { slug: "gpt-6.1-sol", tool_mode: "code_mode" },
         { slug: "gpt-6-sol", tool_mode: "code_mode" },
         { slug: "gpt-6-luna", tool_mode: "code_mode" },
         {
@@ -3167,7 +3169,7 @@ describe("hosted local dev stack", () => {
       stdout: "{not-json",
     },
     {
-      expectedMessage: "Hosted local dev Codex model catalog is missing gpt-6-sol.",
+      expectedMessage: "Hosted local dev Codex model catalog is missing gpt-6.1-sol.",
       stdout: JSON.stringify({ models: [] }),
     },
   ])(

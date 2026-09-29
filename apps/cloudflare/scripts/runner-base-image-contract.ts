@@ -2,7 +2,7 @@ export const hostedRunnerBaseImageRepository =
   "ghcr.io/cobuildwithus/murph-cloudflare-runner-base";
 
 export const hostedRunnerBaseImageVersionTag =
-  "node24.14.1-codex0.158.0-live1";
+  "node24.14.1-codex0.159.1-live1";
 
 export const hostedRunnerBaseImageRemoteTag =
   `${hostedRunnerBaseImageRepository}:${hostedRunnerBaseImageVersionTag}`;

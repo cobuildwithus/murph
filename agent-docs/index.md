@@ -846,3 +846,6 @@ Hosted CI PostgreSQL registry provenance is tracked in
 
 The E2E MinIO cleanup ownership repair is tracked in
 [`2026-09-28-minio-e2e-cleanup-ownership.md`](exec-plans/completed/2026-09-28-minio-e2e-cleanup-ownership.md).
+
+GPT-6.1 Sol defaults, saved reminder upgrades, and Codex 0.159.1 compatibility:
+[`Sol model upgrade`](exec-plans/completed/2026-09-29-gpt61-sol-default.md).

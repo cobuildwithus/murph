@@ -9,6 +9,7 @@ import {
   HOSTED_ASSISTANT_DEFAULT_MODEL,
   HOSTED_ASSISTANT_DEFAULT_PROVIDER,
   HOSTED_ASSISTANT_GPT_6_SOL_MODEL,
+  HOSTED_ASSISTANT_GPT_61_SOL_MODEL,
   HOSTED_ASSISTANT_GPT_6_LUNA_MODEL,
   HOSTED_ASSISTANT_VENICE_PROVIDER_MODELS,
   HOSTED_ASSISTANT_DEFAULT_REASONING_EFFORT,
@@ -412,13 +413,14 @@ function assertHostedAssistantModelSelection(input: {
     });
   }
   const selectedModel = input.model ?? input.storedModel;
-  if ((selectedModel === HOSTED_ASSISTANT_GPT_6_SOL_MODEL
+  if ((selectedModel === HOSTED_ASSISTANT_GPT_61_SOL_MODEL
+      || selectedModel === HOSTED_ASSISTANT_GPT_6_SOL_MODEL
       || selectedModel === HOSTED_ASSISTANT_GPT_6_LUNA_MODEL)
       && (input.provider ?? input.current.provider) !== HOSTED_ASSISTANT_DEFAULT_PROVIDER) {
     throw hostedOnboardingError({
       code: "ASSISTANT_MODEL_REQUIRES_OPENAI",
       httpStatus: 400,
-      message: "Choose OpenAI to use GPT-6 Sol or Luna.",
+      message: "Choose OpenAI to use GPT-6.1 Sol, GPT-6 Sol, or GPT-6 Luna.",
     });
   }
   if ((input.model ?? input.current.model) === HOSTED_ASSISTANT_ASTRA_MODEL
