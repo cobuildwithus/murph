@@ -4200,6 +4200,7 @@ describe('assistant Codex turn planning', () => {
           progressUpdatesAvailable: false,
           responseCardsAvailable: true,
           voiceMemoGenerationAvailable: plan.voiceMemoDeliveryChannel !== null,
+          voiceMemoModelId: 'eleven_v4',
         }),
         routeFingerprint: route.routeFingerprint ?? route.routeId,
       }),

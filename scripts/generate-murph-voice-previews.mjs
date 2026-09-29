@@ -9,7 +9,7 @@ import { generateElevenLabsSpeechMp3 } from "./elevenlabs-speech-generation.mjs"
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const OUTPUT_DIR = path.join(REPO_ROOT, "apps/web/public/audio/murph-voices");
-const DEFAULT_ELEVENLABS_MODEL_ID = "eleven_v3";
+const DEFAULT_ELEVENLABS_MODEL_ID = "eleven_v4";
 const PREVIEW_TEXT = "hey, it's murph. i'll send you voice memos that sound like this.";
 
 await loadLocalEnvFile(".env.local");

@@ -9285,6 +9285,68 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
     360_000,
   )
 
+  it.each(['eleven_v4', 'eleven_multilingual_v2'] as const)(
+    'uses model-aware expressive voice cues with the saved voice on %s',
+    async (modelId) => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-expressive-voice-e2e-'))
+      const generations: unknown[] = []
+      try {
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions: buildCapabilityRoutingDeveloperInstructions(),
+          dynamicTools: resolveMurphDynamicTools({
+            voiceMemoGenerationAvailable: true,
+            voiceMemoModelId: modelId,
+          }).filter((tool) => tool.name === 'generate_voice_memo'),
+          env: config.env,
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt: modelId === 'eleven_v4'
+            ? 'Send me one short, sleepy goodnight voice memo with an audible yawn. Use my saved voice. Audio only, no text and no settings changes.'
+            : 'Send me one short, calm goodnight voice memo in my saved voice. Audio only, no text, sound effects, or settings changes.',
+          reasoningEffort: 'low',
+          sandbox: 'read-only',
+          voiceMemoRuntime: {
+            elevenLabs: { apiKeyAvailable: true, modelId, voiceId: 'voice_saved_synthetic' },
+            kind: 'linq',
+            generateAndUpload: async (input) => {
+              generations.push(input.generation)
+              return { attachmentId: 'attachment_expressive_voice', filename: 'goodnight.mp3' }
+            },
+          },
+          workingDirectory,
+        })
+        const actions = readCapabilityRoutingActions(result.jsonEvents)
+        const calls = actions.filter((action) => action.kind === 'dynamic')
+        expect(calls).toEqual([
+          expect.objectContaining({ tool: 'generate_voice_memo', success: true }),
+        ])
+        const call = calls[0]
+        if (call?.kind !== 'dynamic') throw new Error('Expected one voice memo call')
+        const text = String(call.argumentsValue.text)
+        expect(call.argumentsValue.userRequestedVoice ?? null).toBeNull()
+        expect(text).toMatch(/night|sleep|rest/iu)
+        if (modelId === 'eleven_v4') expect(text).toMatch(/\[yawn(?:ing|s)?\]/iu)
+        else expect(text).not.toMatch(/\[|<[^>]+>/u)
+        expect(generations).toEqual([
+          expect.objectContaining({ kind: 'elevenlabs_speech', modelId, voiceId: 'voice_saved_synthetic', text }),
+        ])
+        expect(result.responseMedia).toHaveLength(1)
+        expect(result.finalMessage.trim()).toBe('')
+        expect(result.runtimeIssueInputs).toEqual([])
+        expect(actions.filter((action) => action.kind === 'command')).toEqual([])
+        process.stdout.write(`[expressive-voice-e2e] ${JSON.stringify({ modelId, text, reply: result.finalMessage, generations: generations.length })}\n`)
+      } finally {
+        await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+      }
+    },
+    360_000,
+  )
+
   it(
     'keeps the running-turn voice unless the user names an exact memo voice',
     async () => {

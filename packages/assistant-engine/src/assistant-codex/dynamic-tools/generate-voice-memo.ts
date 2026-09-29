@@ -45,7 +45,7 @@ export const MURPH_GENERATE_VOICE_MEMO_TOOL = {
         type: 'string',
         minLength: 1,
         maxLength: ELEVENLABS_TTS_MAX_TEXT_LENGTH,
-        description: `The exact text to speak in the voice memo. ${voiceMemoTextLengthGuidance}`,
+        description: `The exact text to speak in the voice memo. ${voiceMemoTextLengthGuidance} Use plain spoken words, without bracketed audio directions or SSML.`,
       },
       userRequestedVoice: {
         anyOf: [
@@ -58,6 +58,20 @@ export const MURPH_GENERATE_VOICE_MEMO_TOOL = {
       },
     },
     required: ['text'],
+  },
+} as const
+
+export const MURPH_EXPRESSIVE_VOICE_MEMO_TOOL = {
+  ...MURPH_GENERATE_VOICE_MEMO_TOOL,
+  inputSchema: {
+    ...MURPH_GENERATE_VOICE_MEMO_TOOL.inputSchema,
+    properties: {
+      ...MURPH_GENERATE_VOICE_MEMO_TOOL.inputSchema.properties,
+      text: {
+        ...MURPH_GENERATE_VOICE_MEMO_TOOL.inputSchema.properties.text,
+        description: `The exact text to speak in the voice memo. ${voiceMemoTextLengthGuidance} This turn uses Eleven v4. Add occasional inline audio directions such as [yawning], [sighs], [whispering], or [excited] when requested or when they naturally serve the moment. Put each cue beside the words it affects; cues count toward the character limit. Keep ordinary memos natural and restrained, without gratuitous sounds or laughing at your own jokes. Keep serious health guidance clear and literal. Use square-bracket natural-language cues, not SSML, and keep them out of accompanying text. Delivery cues never authorize changing the configured voice.`,
+      },
+    },
   },
 } as const
 

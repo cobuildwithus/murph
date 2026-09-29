@@ -1,6 +1,7 @@
 import { resolveAssistantFollowUpTurnContext } from '../follow-ups.js'
 import type { AssistantSession } from '@murphai/operator-config/assistant-cli-contracts'
 import { resolveXaiApiKey } from '@murphai/operator-config/xai-runtime'
+import { resolveElevenLabsModelId } from '@murphai/operator-config/elevenlabs-runtime'
 import { isMurphAndroidAppEnabled } from '@murphai/hosted-execution/env'
 import {
   HOSTED_GEMINI_VIDEO_ANALYSIS_API_KEY_ENV,
@@ -1274,6 +1275,7 @@ export async function resolveAssistantRouteTurnPlan(
           interactivePhoneCallAudience,
         }),
         voiceMemoGenerationAvailable: voiceMemoDeliveryChannel !== null,
+        voiceMemoModelId: resolveElevenLabsModelId(input.sharedPlan.cliAccess.env),
         askGrokAvailable:
           resolveXaiApiKey(input.sharedPlan.cliAccess.env) !== null,
       })
