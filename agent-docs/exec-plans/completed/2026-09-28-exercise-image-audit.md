@@ -1,6 +1,6 @@
 # Exercise image visual audit and repair
 
-Status: active — catalog candidate complete; final review and merge pending.
+Status: completed
 
 ## Goal and delivered scope
 Audit every exercise carousel with GPT-6 Sol reviewers, list confusing visuals, and publish the repairs that pass independent review using built-in image generation only. The audit covered all 1,748 exercises and 5,340 original images. Of 125 confirmed exercise-level findings, 123 have accepted repairs integrated into the catalog candidate. ST208 and ST679 remain unchanged because image-generation output moderation blocked their replacements.
@@ -32,10 +32,12 @@ Audit every exercise carousel with GPT-6 Sol reviewers, list confusing visuals, 
 - `pnpm complexity:diff`: passed; no authored production JS/TS to analyze.
 - Documentation drift, whitespace, privacy, source/replacement checksums, and delivery ZIP integrity passed.
 
-## Remaining completion work
+## Release gates and deferred repairs
 - Final ReviewGPT on the stable pushed head, concurrently with required CI, because two exercise-form instruction corrections are health-safety sensitive.
 - Parent final review and user-authorized merge of PR #3804 after required checks pass.
 - ST208 and ST679 remain blocked follow-up work. No moderation workarounds or alternate generation API keys were used.
 
 ## Delivery boundary
 Public image uploads are verified. Catalog changes ship through the existing package and hosted release pipelines after merge; this task does not manually deploy the Worker or Web. Original images remain available for existing readers. Local source images, exact prompts, repair packages, full before/after gallery, QA ledgers, and upload receipts are preserved in ignored task artifacts and the delivery package.
+Updated: 2026-09-29
+Completed: 2026-09-29
