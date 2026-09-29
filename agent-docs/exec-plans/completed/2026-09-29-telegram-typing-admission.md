@@ -34,7 +34,7 @@ Production provider acceptance and latency remain post-deployment checks.
 
 - [x] Implement admission acknowledgement and slow-success diagnostics.
 - [x] Run focused tests, typechecks, complexity review, and privacy review.
-- [ ] Record verification and complete the scoped commit.
+- [x] Record verification and complete the scoped commit.
 
 ## Verification
 
@@ -51,3 +51,9 @@ Production provider acceptance and latency remain post-deployment checks.
   dispatch latency remain post-deployment checks. A one-shot Telegram indicator
   expires naturally; this patch does not promise continuous coverage of a long
   platform stall or shorten the eventual reply's model execution.
+- Implementation and local review are complete in PR #3806. Exact-head CI and
+  required external review remain PR gates; merge and production deployment
+  remain separate from this implementation record.
+Status: completed
+Updated: 2026-09-29
+Completed: 2026-09-29

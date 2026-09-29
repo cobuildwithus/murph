@@ -9,6 +9,6 @@
     "summary": "Murph can show its first typing indicator sooner after accepting your direct Telegram message.",
     "details": "The first indicator no longer waits for your workspace to wake up. Reply processing and ongoing typing continue as usual.",
     "relevanceTags": ["telegram"],
-    "sourcePullRequests": []
+    "sourcePullRequests": [3806]
   }
 }
