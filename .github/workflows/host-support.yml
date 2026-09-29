@@ -684,6 +684,9 @@ jobs:
       - name: Check one-vCPU container latency
         # Two bounded native source builds, then the unchanged benchmark budget.
         timeout-minutes: 195
+        env:
+          # Hosted runners have four vCPUs; a cold Codex build at two jobs took ~55 min.
+          CODEX_CARGO_JOBS: "4"
         run: |
           node --test candidate/scripts/check-container-latency-ci.test.mjs
           node candidate/scripts/check-container-latency-ci.mjs base candidate
