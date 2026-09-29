@@ -931,9 +931,19 @@ describe("expectAdvertisedMurphDynamicTools", () => {
     expectAdvertisedMurphDynamicTools([
       buildResponsesRequest(baseToolNames, "additional-tools"),
     ]);
-    expectAdvertisedMurphDynamicTools([
-      buildResponsesRequest(baseToolNames, "code-mode"),
-    ]);
+    const codeModeRequest = buildResponsesRequest(baseToolNames, "code-mode");
+    expectAdvertisedMurphDynamicTools([codeModeRequest]);
+    expect(() => expectAdvertisedMurphDynamicTools([
+      buildResponsesRequest(baseToolNamesWithoutProgress, "code-mode"),
+    ])).toThrow();
+    expect(() => expectAdvertisedMurphDynamicTools([{
+      ...codeModeRequest,
+      body: codeModeRequest.body.replace("ALL_TOOLS", "murph__family_plan\\nALL_TOOLS"),
+    }])).toThrow();
+    expect(() => expectAdvertisedMurphDynamicTools([{
+      ...codeModeRequest,
+      body: codeModeRequest.body.replace("ALL_TOOLS", ""),
+    }])).toThrow();
     // Codex 0.147 wraps the code-mode exec tool in the default functions
     // namespace inside additional_tools.
     expectAdvertisedMurphDynamicTools([
@@ -1208,6 +1218,15 @@ function buildResponsesRequest(
         && name !== "murph.attach_response_card"
         && name !== "murph.attach_exercise_routine_card"
         && name !== "murph.attach_telegram_rich_content"
+        && name !== "murph.generate_image"
+        && name !== "murph.generate_voice_memo"
+        && name !== "murph.generate_song"
+        && name !== "murph.analyze_video"
+        && name !== "murph.submit_product_feedback"
+        && name !== "murph.family_plan"
+        && name !== "murph.create_phone_call"
+        && name !== "murph.send_physical_note"
+        && name !== "murph.resolve_physical_note"
         && !hostedGroupFamilyToolNames.includes(name)
       )
       .map((name) => name.replace(/^murph\./u, "murph__"))

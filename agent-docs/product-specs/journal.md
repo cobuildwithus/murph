@@ -121,10 +121,16 @@ constraints. It retains no email body, price, booking code, exact address,
 attachment, or other traveler's data. Complete source evidence reconciles moved
 or canceled plans and follow-ups; a failed read or window absence is not deletion.
 
-Existing follow-ups remain: check passive evidence first, at most one per event
-or trip, and calendar check-ins one hour after a timed event ends. Date-only
-all-day plans never infer an overnight check-in from a midnight boundary. Routine Journal
-writes and upcoming-context refreshes stay silent.
+Connected plans do not automatically create attendance or logistics check-ins.
+A follow-up requires an explicit member request or a concrete member-specific
+health purpose whose next decision needs the answer. Check available evidence
+first, ask the health question directly, and choose purpose-appropriate timing
+while preserving requested timing. Do not manufacture generic wellness advice.
+The same rule applies to existing automatic follow-ups: scheduled execution
+skips ineligible questions, and morning reconciliation archives proven automatic
+logistics-only checks while preserving explicit requests and uncertain cases.
+Useful plans remain saved silently; there is at most one useful follow-up per
+event or trip and no default end-plus-one-hour question.
 
 The morning pass uses `gpt-6-sol` with low reasoning effort for contextual
 reconciliation of existing reminders as well as connected plans. Cron admits it

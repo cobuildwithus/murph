@@ -14,10 +14,13 @@ const KNOWN_SHELL_WRAPPER_PREFIX_PATTERN =
   /^\s*(?:(?:\/bin|\/usr\/bin)\/)?(?:bash|zsh|dash)\s+-[a-z]*c[a-z]*\s+/u
 
 const BATCH_COMMAND_FAMILIES = new Map<string, CodexCommandFamily>([
+  ['event payload-schema', 'vault-cli event'],
+  ['event show', 'vault-cli event'],
   ['food search-labels', 'food.search-labels'],
   ['food search-labels-batch', 'food.search-labels-batch'],
   ['goal list', 'goal.list'],
   ['goal show', 'goal.show'],
+  ['knowledge show', 'vault-cli knowledge'],
   ['meal add', 'meal.add'],
   ['meal edit', 'meal.edit'],
   ['meal nutrients', 'meal.nutrients'],

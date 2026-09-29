@@ -1410,6 +1410,49 @@ separate. Propose a behavior correction only after at least two matching
 action/code observations and a deterministic reproduction at the responsible
 owner; telemetry alone does not establish the original cause.
 
+### Batch read attribution and connected-app failure status
+
+Parsed batch children for exactly `knowledge show`, `event show` and
+`event payload-schema` use the existing `vault-cli knowledge` / `vault-cli event`
+profile labels. Known knowledge children contribute the existing optional
+`knowledgeCounts` from parsed argv operation, success and structured error code;
+counters never parse stdout or data, in either compact or noncompact mode. Direct
+and batch contributions merge in either order, including direct failures. Unknown
+batch paths still use `other`; malformed envelopes retain the outer batch fallback.
+The v2 profile, safe integer sums, child/family caps, timing and byte semantics are
+unchanged. Missing-page counts describe expected rejections, not bad model behavior.
+
+The outer connected-app execution catch may add only `connectedAppsHttpStatus`
+to its existing private failure diagnostic/classification row. It is an integer
+100..599 from an own data `status`, falling back to own data `statusCode` only
+when status is nullish. The observer rejects proxies before descriptors and does
+not invoke accessors, follow prototypes/context/causes, coerce values, or retain
+codes, names, messages, arguments, payloads, identifiers or URLs. Invalid or absent
+status is omitted. Ordinary, ambiguous-write and official-alert caught failures
+retain their exact RPC text, error category and retry posture. No field is taken
+from successful/oversized results, local preflight/admission refusals, or the
+separate local disconnect-cleanup failure. This does not repair pre-existing
+RPC error projection or infer transport failure from absent status.
+
+No new event, profile label or schema is required. The unchanged issue reporter,
+sanitizer and record parser accept the optional numeric detail (six keys in a
+connected-app classification row, below the existing 24-key cap). Existing usage
+readers already accept these labels and optional knowledge counters. Old producers
+and records remain valid; this patch does not backfill historical attribution.
+Deploy compatible readers first wherever they are not already present, then the
+producer runtime. Verify exact reader release and Worker/runner bundle versions,
+including warm containers, before comparing natural emissions across a fixed,
+bounded prior/latest window. Do not induce failures or mutate production data.
+
+Group future connected-app classification failures by the bounded status, keeping
+413 separate from status-absent/unknown evidence. A 413 on an otherwise-valid
+oversized request belongs to the efficiency investigation, not a presumed prompt
+bug; unrelated Web status observations do not establish request correlation.
+Use batch knowledge counters to identify missing-page rejections. Keep completion
+rows as the existing call denominator, not extra failures, and do not add profile
+counts to overlapping native CLI counts. Unresolved connection loss remains
+unresolved. This rollout grants no automatic rollback or production mutation.
+
 ### Finite CLI failure counts (optional, same timing identity)
 
 Each non-successful invocation from a new producer contributes at most one
@@ -1480,6 +1523,7 @@ static field names are admitted:
 - `automation list`: limit, status (only these two options from `packages/cli/src/commands/automation.ts`).
 - `food search-labels`: query, limit.
 - `knowledge show`: slug (required positional argument in `packages/cli/src/commands/knowledge.ts`).
+- `measurement entry list`: metric, from, to, limit (only these top-level options from `packages/cli/src/commands/measurement.ts`; no metric array indices).
 - `event payload-schema`: kind, for (required public kind and optional literal `import-jsonl` surface in `packages/cli/src/commands/event.ts`).
 - `knowledge upsert`: body, slug, title, pageType, status, clearLibraryLinks,
   relatedSlug, librarySlug, sourcePath.
@@ -1587,12 +1631,15 @@ list with no provider calls or filesystem changes, plus byte-identical output
 and exits with timing disabled/enabled. No prompt, schema or dynamic-tool change
 is implied by these synthetic probes.
 
-The `knowledge show` and `event payload-schema` field extension uses that same
-consumer-first Web/reader, then runner/CLI-producer rollout. Run the history-backed
-reader test with
-`MURPH_CLI_READ_VALIDATION_COMPAT_BASE=85d536703736f3553105e01120f5560a25b732e4`.
-It checks old-reader omission/coalescing with unchanged envelopes, counts and
-drops, and new-reader acceptance of old writers with or without failure detail.
+The `knowledge show`, `event payload-schema` and `measurement entry list` field
+extensions use that same consumer-first Web/reader, then runner/CLI-producer
+rollout. Run the history-backed reader tests with
+`MURPH_CLI_READ_VALIDATION_COMPAT_BASE=85d536703736f3553105e01120f5560a25b732e4`
+for the first two commands and
+`MURPH_CLI_MEASUREMENT_VALIDATION_COMPAT_BASE=00001e1f796f5fa17dfba94e3a38215b0a87d656`
+for measurement entries. They check old-reader omission/coalescing with unchanged
+envelopes, counts and drops, and new-reader acceptance of old writers with or
+without failure detail.
 Verify deployed Web/reader source versions and runner bundle/source versions,
 including warm processes, before interpreting natural-traffic coverage. Mixed
 versions and a rollback to the old reader can lose only this optional detail;
@@ -1603,9 +1650,12 @@ The native timing parity fixture covers missing/malformed slug, missing/invalid
 kind and invalid `for`, both default/explicit valid schema requests, a valid
 knowledge read and an ordinary missing-page rejection. It requires identical
 output/exits with timing off/on, zero provider calls and unchanged filesystem
-contents. These synthetic cases prove the observation seam, not the cause of a
-retained singleton. Cause remains ambiguous until natural failed traffic carries
-this detail; null/absent fields are not healthy outcomes. Do not trigger production
+contents. Measurement-entry cases reuse that fixture for missing metric,
+malformed from, impossible-calendar-date to and excessive limit. These synthetic
+cases prove the observation seam, not which mistake caused a production failure.
+Absent detail cannot distinguish these alternatives; nested metric-index issues
+remain deliberately unattributed. Cause remains ambiguous until natural failed
+traffic carries this detail; null/absent fields are not healthy outcomes. Do not trigger production
 failures to validate rollout. This diagnostics-only change needs no live-model
 journey and changes no prompt, command schema, recovery, retry or provider behavior.
 
@@ -1676,9 +1726,9 @@ needed for this extension's unchanged output contract.
 
 #### Command-specific validation inspection (including singletons)
 
-For `automation list`, `knowledge show` and `event payload-schema` with
-`VALIDATION_ERROR / validation`, **any newly attributed event warrants inspection,
-including one event in one turn**; the two-turn
+For `automation list`, `knowledge show`, `event payload-schema` and
+`measurement entry list` with `VALIDATION_ERROR / validation`, **any newly
+attributed event warrants inspection, including one event in one turn**; the two-turn
 implementation-investigation threshold above does not gate this inspection.
 Attribution is not an automatic behavior or prompt change. Reproduce the exact
 attributed path synthetically and establish its cause before proposing one.
@@ -1709,7 +1759,7 @@ WITH rows AS MATERIALIZED (
   FROM rows
   CROSS JOIN LATERAL jsonb_array_elements(t -> 'commands') c
   WHERE t ->> 'schema' = 'murph.cli-timing.v1'
-    AND c ->> 'command' IN ('automation list', 'knowledge show', 'event payload-schema')
+    AND c ->> 'command' IN ('automation list', 'knowledge show', 'event payload-schema', 'measurement entry list')
     AND c ->> 'outcome' = 'error'
 ), per_turn AS (
   SELECT turn_id, c ->> 'command' AS command, f.field, f.issue_code, f.missing,
@@ -1720,6 +1770,7 @@ WITH rows AS MATERIALIZED (
              WHEN c ->> 'command' = 'automation list' AND e -> 'validation' ->> 'field' IN ('limit', 'status')
                OR c ->> 'command' = 'knowledge show' AND e -> 'validation' ->> 'field' = 'slug'
                OR c ->> 'command' = 'event payload-schema' AND e -> 'validation' ->> 'field' IN ('kind', 'for')
+               OR c ->> 'command' = 'measurement entry list' AND e -> 'validation' ->> 'field' IN ('metric', 'from', 'to', 'limit')
              THEN e -> 'validation' ->> 'field' END AS field,
            CASE WHEN e -> 'validation' ->> 'code' IN (
              'invalid_type', 'too_big', 'too_small', 'invalid_format', 'not_multiple_of',

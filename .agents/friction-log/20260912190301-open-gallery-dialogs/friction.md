@@ -22,3 +22,12 @@ Open /screenshots/account, locate a settings study outside the Family section, a
 ## Context
 
 This blocks trustworthy visual proof of account recovery states. A focused noindex route is the current workaround; screenshots still require visual inspection.
+
+## Resolution
+
+The account gallery no longer eagerly opens its recovery dialogs. The existing
+study controls remain inert, and the production dialog components retain their
+normal click-open behavior. Browser regressions explicitly exercise the
+synthetic owner and sponsored-member dialogs after hydration, including focus,
+Escape dismissal, and phone/desktop bounds, before capturing the unrelated
+settings study without an overlay.

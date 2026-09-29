@@ -601,39 +601,28 @@ describe("hosted-local MinIO sidecar", () => {
     );
   });
 
-  it("uses E2E labels for hosted-local E2E MinIO cleanup", async () => {
-    childProcessMocks.spawnResponses = [
-      { stdout: "container-a\ncontainer-b\n" },
-      {},
-    ];
-    const { cleanupHostedLocalMinioE2eContainersBestEffort } = await import("../../src/dev-hosted-local/minio.ts");
+  it("uses the exact build identity for E2E MinIO cleanup", async () => {
+    childProcessMocks.spawnResponses = [{}, { stdout: "owned-container\n" }, {}];
+    const { cleanupHostedLocalMinioBuildContainersBestEffort } = await import("../../src/dev-hosted-local/minio.ts");
 
-    await cleanupHostedLocalMinioE2eContainersBestEffort({
-      DOCKER_CONFIG: ".tmp/docker-config",
-    });
+    await cleanupHostedLocalMinioBuildContainersBestEffort({
+      MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED: "1",
+    }, "sha256-111111111111111111111111");
 
     expect(childProcessMocks.spawn).toHaveBeenNthCalledWith(
-      1,
-      "docker",
-      [
-        "ps",
-        "-aq",
-        "--filter",
-        "label=murph.hosted-local.role=r2-minio",
-        "--filter",
-        "label=murph.hosted-local.e2e=1",
-      ],
-      expect.objectContaining({
-        env: { DOCKER_CONFIG: ".tmp/docker-config" },
-        stdio: ["ignore", "pipe", "ignore"],
-      }),
+      1, "docker", ["rm", "-f", "murph-hosted-local-r2-sha256-111111111111111111111111"], expect.anything(),
     );
     expect(childProcessMocks.spawn).toHaveBeenNthCalledWith(
-      2,
-      "docker",
-      ["rm", "-f", "container-a", "container-b"],
-      expect.objectContaining({ stdio: "ignore" }),
+      2, "docker", [
+        "ps", "-aq",
+        "--filter", "label=murph.hosted-local.role=r2-minio",
+        "--filter", "label=murph.hosted-local.build-id=sha256-111111111111111111111111",
+      ], expect.anything(),
     );
+    expect(childProcessMocks.spawn).toHaveBeenNthCalledWith(
+      3, "docker", ["rm", "-f", "owned-container"], expect.anything(),
+    );
+    expect(childProcessMocks.spawn).toHaveBeenCalledTimes(3);
   });
 
   it("bounds a hung exact-child MinIO removal command", async () => {
@@ -661,42 +650,42 @@ describe("hosted-local MinIO sidecar", () => {
 
   it("bounds a hung exact-child MinIO listing command", async () => {
     vi.useFakeTimers();
-    childProcessMocks.spawnResponses = [{ hang: true }];
-    const { cleanupHostedLocalMinioE2eContainersBestEffort } = await import("../../src/dev-hosted-local/minio.ts");
+    childProcessMocks.spawnResponses = [{}, { hang: true }];
+    const { cleanupHostedLocalMinioBuildContainersBestEffort } = await import("../../src/dev-hosted-local/minio.ts");
 
     try {
-      const cleanup = cleanupHostedLocalMinioE2eContainersBestEffort({
+      const cleanup = cleanupHostedLocalMinioBuildContainersBestEffort({
         DOCKER_CONFIG: ".tmp/docker-config",
-      });
+      }, "build:test");
       await vi.runAllTimersAsync();
 
       await expect(cleanup).resolves.toBeUndefined();
-      const timedOutChild = childProcessMocks.spawnedChildren[0];
+      const timedOutChild = childProcessMocks.spawnedChildren[1];
       expect(timedOutChild?.kill).toHaveBeenCalledOnce();
       expect(timedOutChild?.kill).toHaveBeenCalledWith("SIGKILL");
-      expect(childProcessMocks.spawn).toHaveBeenCalledTimes(1);
+      expect(childProcessMocks.spawn).toHaveBeenCalledTimes(2);
       expect(() => {
         timedOutChild?.emit("exit", 0);
         timedOutChild?.emit("error", new Error("late Docker error"));
       }).not.toThrow();
-      expect(childProcessMocks.spawn).toHaveBeenCalledTimes(1);
+      expect(childProcessMocks.spawn).toHaveBeenCalledTimes(2);
     } finally {
       vi.useRealTimers();
     }
   });
 
   it("keeps an early Docker listing error best-effort", async () => {
-    childProcessMocks.spawnResponses = [{
+    childProcessMocks.spawnResponses = [{}, {
       error: new Error("docker unavailable"),
     }];
-    const { cleanupHostedLocalMinioE2eContainersBestEffort } = await import("../../src/dev-hosted-local/minio.ts");
+    const { cleanupHostedLocalMinioBuildContainersBestEffort } = await import("../../src/dev-hosted-local/minio.ts");
 
-    await expect(cleanupHostedLocalMinioE2eContainersBestEffort({
+    await expect(cleanupHostedLocalMinioBuildContainersBestEffort({
       DOCKER_CONFIG: ".tmp/docker-config",
-    })).resolves.toBeUndefined();
+    }, "build:test")).resolves.toBeUndefined();
 
-    expect(childProcessMocks.spawnedChildren[0]?.kill).not.toHaveBeenCalled();
-    expect(childProcessMocks.spawn).toHaveBeenCalledTimes(1);
+    expect(childProcessMocks.spawnedChildren[1]?.kill).not.toHaveBeenCalled();
+    expect(childProcessMocks.spawn).toHaveBeenCalledTimes(2);
   });
 
   it("restarts the same hosted-local R2 sidecar when health is lost", async () => {

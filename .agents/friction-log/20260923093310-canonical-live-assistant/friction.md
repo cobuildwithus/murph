@@ -25,3 +25,7 @@ Preflight the shipped CLI entrypoint in createCanonicalLiveFixture before starti
 ## Context
 
 Discovered while verifying runtime request reductions. This is test preparation friction, independent of the scheduling behavior under test. No provider transcript or credential is needed to reproduce it.
+
+## Resolution
+
+The canonical fixture now checks the shipped CLI entrypoint before allocating its temporary vault and reports the existing prepared-runtime build command when the entrypoint is missing. Unexpected filesystem errors retain their original cause. Focused tests exercise the actual fixture with missing, inaccessible, and available CLI preflight results without starting a model.

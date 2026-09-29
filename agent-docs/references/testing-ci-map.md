@@ -169,6 +169,12 @@ collection errors, interrupted runs, and an empty inventory fail the existing
 required `Release checks (ubuntu)` aggregator. Consent and supplement search
 retain their separate required database lanes below.
 
+Host Support and scheduled Stripe proof use the official Docker Hub `postgres:17`
+image. [GitHub-hosted public image pulls are exempt from Docker Hub's rate limit](https://docs.github.com/en/actions/reference/limits#docker-hubs-rate-limit-for-github-actions);
+the anonymous ECR Public mirror has a
+[500 GB monthly data limit](https://docs.aws.amazon.com/AmazonECR/latest/public/public-service-quotas.html).
+The registry choice preserves the existing database version and service setup.
+
 `prisma-timezone-postgres.test.ts` is discovered by the same PostgreSQL owner.
 It creates and removes its own synthetic database with a non-UTC default, then
 proves UTC instants through fresh and reused Prisma pool connections, including
@@ -956,19 +962,11 @@ Host Support prepares built runtime artifacts before its `cli` and
 `test:packages:coverage` entrypoint, which already prepares those artifacts
 before every shard.
 
-The separate `Assistant Real Model` workflow runs three bounded canonical
-journeys daily or by manual recovery on protected `main` only, using a dedicated sandbox Environment key and
-fixed `gpt-6-sol` with the production Responses websocket-enabled setting.
-`scripts/run-assistant-real-model-gate.ts` preflights all exact names and requires
-one executed passing assertion per scenario; missing configuration and skipped
-tests fail. The journeys exercise production assistant service/tool planning,
-shipped CLI writes/readback, process restart plus vault restore, recurring
-reminder lifecycle and group privacy/quiet behavior. External Linq route metadata
-and delivery acknowledgement are synthetic. Artifacts contain commit/run/model,
-configured transport and scenario status, never transcripts. This scheduled lane is not a
-managed-container, private Worker egress, or Temporal proof. Environment setup,
-limits, and local proof distinctions are owned by
-`agent-docs/operations/verification-and-runtime.md`.
+The live Codex suite has no scheduled CI lane. All live journeys, including
+canonical meal persistence across restart/restore, recurring reminder lifecycle,
+and group privacy/quiet behavior, remain available through the focused local
+`pnpm test:assistant:live` runner. Local authentication and verification
+boundaries are owned by `agent-docs/operations/verification-and-runtime.md`.
 
 ## Current CI Workflows
 

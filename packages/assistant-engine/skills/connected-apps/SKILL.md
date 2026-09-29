@@ -217,6 +217,11 @@ instructions naming a city:
    member statements override bookings. If the read is unavailable or evidence
    remains insufficient, send the ordinary cue without city/weather.
 
+A lodging title alone is not destination evidence. Require explicit geographic
+logistics in the canonical plan or its permitted source confirmation; use the
+`journal-connected-context` evidence policy when reading that source. If those
+details are missing, omit city/weather rather than geocoding the title.
+
 A planned arrival alone is not proof of presence. With only an uncontradicted
 itinerary, use the destination after its planned arrival and before its known
 return, check weather there, and make destination wording conditional. Do not

@@ -406,6 +406,8 @@ export async function removeHostedSystemMailboxPendingItem(input: {
 }
 
 export async function removeHostedSystemMailboxPendingItemIfCurrent(input: {
+  /** Completion published after this admission's accepted checkpoint. */
+  completedDeviceSyncWake?: Extract<HostedExecutionSystemWake, { kind: "device-sync.wake" }> | null;
   item: HostedSystemMailboxPendingItem;
   vaultRoot: string;
 }): Promise<boolean> {
@@ -417,10 +419,26 @@ export async function removeHostedSystemMailboxPendingItemIfCurrent(input: {
         state,
       };
     }
+    const completedWake = input.completedDeviceSyncWake;
+    const coveredIds = completedWake && current.lastAttemptAt !== null
+      ? projectHostedDeviceHintCoverage({
+          now: current.lastAttemptAt,
+          pending: state.pending.map((item) => item === current ? {
+            ...item,
+            deviceSyncContinuationOwner: true,
+            postCheckpointRecord: null,
+            status: "pending",
+            wake: completedWake,
+          } : item),
+        }).get(current.itemId)?.retirableHintIds
+      : undefined;
     return {
       result: true,
       state: {
-        pending: state.pending.filter((item) => item.itemId !== input.item.itemId),
+        pending: state.pending.filter((item) => item.itemId !== input.item.itemId
+          && !(coveredIds?.has(item.itemId)
+            && item.wake.kind === "device-sync.wake"
+            && item.wake.reason === "reconcile_due")),
       },
     };
   });

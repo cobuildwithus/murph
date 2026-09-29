@@ -4649,7 +4649,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       ...values: unknown[]
     ) => {
       const sql = query.join(" ").toLowerCase();
-      if (sql.includes("for update skip locked")) {
+      if (sql.includes("for no key update skip locked")) {
         lockOrder.push("member-row");
       } else if (sql.includes("for no key update")) {
         lockOrder.push("home-route");
@@ -4959,7 +4959,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       ...values: unknown[]
     ) => {
       const sql = query.join(" ").toLowerCase();
-      if (sql.includes("for update skip locked")) {
+      if (sql.includes("for no key update skip locked")) {
         const rows = lockedRows[memberLockAttempt];
         memberLockAttempt += 1;
         return rows ?? [];
@@ -14494,7 +14494,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       ...values: unknown[]
     ) => {
       const sql = query.join(" ").toLowerCase();
-      if (sql.includes("for update skip locked")) {
+      if (sql.includes("for no key update skip locked")) {
         lockOrder.push("member-row");
       } else if (sql.includes("for no key update")) {
         lockOrder.push("home-route");
@@ -15804,7 +15804,7 @@ function asPrismaTransactionClient<T extends PrismaFixtureBase>(
       : (query as { values?: readonly unknown[] }).values ?? [];
     const sql = strings.join(" ").toLowerCase();
     if (sql.includes("hosted_runtime_cutover")) return [{ phase: "legacy" }];
-    return sql.includes("for update skip locked")
+    return sql.includes("for no key update skip locked")
       ? [{ id: values[0] }]
       : [];
   });

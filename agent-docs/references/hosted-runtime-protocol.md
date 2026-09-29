@@ -3230,7 +3230,14 @@ recorder then publishes cadence, removes the mailbox item, and checkpoints that
 removal in the same runtime admission only for a fresh record whose full
 reconciliation was accepted in that admission, whose normalized retained-job
 set is empty, and whose non-null connection epoch still names the current
-active connection. Yielded wakes are not completion-eligible. Restored records
+active connection. That same conditional mailbox removal also retires pristine,
+already-imported scheduled hints covered by the completed cadence. It reuses
+retained-owner coverage (same connection, member, provider, and connection epoch;
+strictly older cadence and later mailbox sequence) without persisting another
+owner. Webhook and explicit-work barriers remain, and newer requests, manual
+refresh, dirty work, and future or equal cadences are preserved. A changed
+mailbox claim prevents both removals. This does not retire unimported Web rows.
+Yielded wakes are not completion-eligible. Restored records
 return to the full-reconciliation path; epoch-less legacy, replaced, missing,
 or terminal records drain without a cadence write. A cold replacement, whose snapshot
 intentionally excludes the device-sync SQLite store, reconstructs the same
@@ -3906,7 +3913,13 @@ bootstrap state. Pre-v2 full/base, working `{base, delta}`, and layered
 ref decoders remain for stored-object cleanup and historical metadata
 compatibility. Live v2 snapshots are one encrypted zstd-compressed
 tar object uploaded directly from the container to R2 through a short-lived
-presigned `PUT` URL. The Worker handles only JSON start, presign, complete,
+presigned `PUT` URL. Direct conditional and managed multipart PUTs retry HTTP
+429, 500, 502, 503, and 504 once within the original presigned deadline, using
+the existing jitter, identical encrypted bytes and object/session binding.
+Cancellation, expiry, repeated failure, and response-followed-by-412 retain
+fail-closed behavior; successful uploads still require ordinary completion
+verification before checkpoint publication.
+The Worker handles only JSON start, presign, complete,
 abort, and data-key unwrap metadata, stores a short-lived upload session without
 the URL or data key, verifies the object by `HEAD` on completion, and never
 receives the snapshot body. The v2 format is a greenfield zstd hard cut, so
