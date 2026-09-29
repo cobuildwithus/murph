@@ -831,3 +831,6 @@ Clinical storage replay serialization and concurrent repair proof are tracked in
 
 Historical parser-hold refresh preservation and composed retrieval proof are tracked
 in [parser-hold refresh](exec-plans/completed/2026-09-28-clinical-parser-holds.md).
+
+Hosted enrichment read/repair concurrency proof is recorded in
+[enrichment source locking](exec-plans/completed/2026-09-29-clinical-enrichment-read-lock.md).

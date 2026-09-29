@@ -395,6 +395,9 @@ parent eligibility and clinical text remain attested. Provider retries still
 validate original provider bytes, then reuse verified retained storage. One outer
 canonical write lock spans retained-byte selection through raw-batch publication,
 so a concurrent explicit repair cannot replace the selected preimage in that gap.
+Hosted enrichment preparation takes the same lock for its bounded source-file
+read, then releases it before rendering or provider work. It cannot mistake the
+repair's temporary quarantine interval for permanently missing evidence.
 This is
 an explicit repair API, without automatic classification or cleanup on import.
 Deploy compatible readers everywhere before repairing a hosted vault. Older
