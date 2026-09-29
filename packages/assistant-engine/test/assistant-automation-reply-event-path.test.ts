@@ -800,14 +800,14 @@ describe('assistant auto-reply event-first path', () => {
     expect(firstDelivery.delivery).toMatchObject({
       providerMessageEffects: [{
         carriesIntentMedia: true,
-        message: 'Generated image',
+        message: null,
         providerMessageId: 'linq-msg-first-generated-avatar',
       }],
     })
     expect(secondDelivery.delivery).toMatchObject({
       providerMessageEffects: [{
         carriesIntentMedia: true,
-        message: 'Generated image',
+        message: null,
         providerMessageId: 'linq-msg-second-generated-avatar',
       }],
     })
@@ -841,8 +841,8 @@ describe('assistant auto-reply event-first path', () => {
     expect(prompt).toContain(firstMedia.sha256)
     expect(prompt).not.toContain(secondMedia.ref)
     expect(prompt).not.toContain(secondMedia.sha256)
-    expect(prompt).toContain('Visible text sent with that image:')
-    expect(prompt).toContain('Generated image')
+    expect(prompt).not.toContain('Visible text sent with that image:')
+    expect(prompt).not.toContain('Generated image')
     expect(prompt).toContain('no effect authority')
     expect(replyEventPathMocks.listAssistantTranscriptEntries)
       .not.toHaveBeenCalled()

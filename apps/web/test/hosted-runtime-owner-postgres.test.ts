@@ -122,6 +122,22 @@ describe.skipIf(!enabled)("Postgres runtime ownership", () => {
     });
   });
 
+  it("routes and authorizes a provider using only the three required lock queries", async () => {
+    const userId = await member();
+    const runtime = identity((await claim(userId)).owner);
+    const tokenHash = "c".repeat(64);
+    await prepareHostedRuntimeLaunch({ prisma: first, identity: runtime,
+      runnerContainerName: "synthetic-provider-query-count", workspaceVersion: "0",
+      customInferenceEnvelope: null, platformAiUsageAllowed: true, providerEgressTokenHash: tokenHash });
+    const operations: PrismaOperationTiming[] = [];
+    const result = await runWithPrismaOperationTimings(operations, () => executeHostedRuntimeOwnerCommand({
+      prisma: first, userId, command: { operation: "authorize_provider", runnerContainerName: null,
+        providerEgressTokenHash: tokenHash, providerKind: "linq" },
+    }));
+    expect(result).toMatchObject({ cutover: "postgres", status: "authorized", owner: { attemptId: runtime.attemptId } });
+    expect(operations.map(operation => operation.key)).toEqual(["$queryRaw", "$queryRaw", "$queryRaw"]);
+  });
+
   it("drains 200 eligible snapshot/replica candidates within the configured cron hour", async () => {
     const config = JSON.parse(await readFile(new URL("../vercel.json", import.meta.url), "utf8")) as {
       crons: Array<{ path: string; schedule: string }>;
@@ -298,7 +314,7 @@ describe.skipIf(!enabled)("Postgres runtime ownership", () => {
     });
     expect((await claim(userId, second)).status).toBe("existing");
     expect(await authorizeHostedRuntimeProvider({ prisma: second, userId, runnerContainerName: null,
-      providerEgressTokenHash, providerKind: "openai" })).toBeNull();
+      providerEgressTokenHash, providerKind: "openai" })).toMatchObject({ owner: null });
     await expect(second.$transaction(tx => requireHostedRuntimeOwnerTx(tx, runtime)))
       .rejects.toMatchObject({ code: "HOSTED_RUNTIME_OWNER_STALE" });
 
@@ -708,7 +724,7 @@ describe.skipIf(!enabled)("Postgres runtime ownership", () => {
     expect(await observer.hostedRuntimeOwner.findUnique({ where: { userId } }))
       .toMatchObject({ runnerContainerName: "synthetic-deletion-slot" });
     expect(await authorizeHostedRuntimeProvider({ prisma: first, userId,
-      runnerContainerName: "synthetic-deletion-slot", providerEgressTokenHash: null, providerKind: "openai" })).toBeNull();
+      runnerContainerName: "synthetic-deletion-slot", providerEgressTokenHash: null, providerKind: "openai" })).toMatchObject({ owner: null });
     await expect(first.$transaction((tx) => requireHostedRuntimeOwnerTx(tx, owner)))
       .rejects.toMatchObject({ code: "HOSTED_RUNTIME_OWNER_STALE" });
   });
@@ -821,13 +837,23 @@ describe.skipIf(!enabled)("Postgres runtime ownership", () => {
     if (expiry === "none") expect(retained.cleanupAt.getTime()).toBe(Date.parse(ref.createdAt) + HOSTED_RUNTIME_SNAPSHOT_RECOVERY_RETENTION_MS);
     if (expiry === "soon") expect(retained.cleanupAt).toEqual(contentExpiry);
     if (expiry === "unknown") expect(retained.cleanupAt.getTime() - retained.createdAt.getTime()).toBe(65 * 60_000);
+    const unchangedOperations: PrismaOperationTiming[] = [];
+    await runWithPrismaOperationTimings(unchangedOperations, () => checkpointHostedRuntimeWorkspace({
+      prisma: first, userId, runtimeAuthority: { ...runtime, workspaceVersion: "1" },
+      expectedVersion: "1", reason: "canonical_runtime_commit", snapshotRef: ref,
+      nextWakeAt: contentExpiry, nextWakeReason: "synthetic-status-progress",
+    }));
+    expect(await observer.hostedRuntimeOrphan.findFirstOrThrow({ where: { userId, kind: "snapshot" } })).toEqual(retained);
+    expect((await observer.hostedWorkspace.findUniqueOrThrow({ where: { userId } })).version).toBe(2n);
+    expect(unchangedOperations.some(operation => operation.key === "HostedRuntimeOrphan.upsert"
+      || operation.key === "HostedRuntimeOrphan.findUnique")).toBe(false);
     // A current snapshot stays protected, but moving its cleanup retry must
     // not extend the archive's fixed recovery deadline when it is replaced.
     expect((await claimHostedRuntimeResourceCleanup({ prisma: second, now: retained.cleanupAt })).orphans.some(row => row.userId === userId)).toBe(false);
     const deferred = await observer.hostedRuntimeOrphan.findFirstOrThrow({ where: { userId, kind: "snapshot" } });
     expect(deferred.cleanupAt.getTime()).toBeGreaterThan(retained.cleanupAt.getTime());
     expect(deferred.recoveryUntil).toEqual(retained.cleanupAt);
-    await checkpointHostedRuntimeWorkspace({ prisma: first, userId, runtimeAuthority: { ...runtime, workspaceVersion: "1" }, expectedVersion: "1", reason: "canonical_runtime_commit", snapshotRef: null });
+    await checkpointHostedRuntimeWorkspace({ prisma: first, userId, runtimeAuthority: { ...runtime, workspaceVersion: "2" }, expectedVersion: "2", reason: "canonical_runtime_commit", snapshotRef: null });
     const lateAt = new Date();
     await first.$transaction(async tx => {
       await requireHostedRuntimeOwnerTx(tx, runtime);
@@ -1107,7 +1133,7 @@ describe.skipIf(!enabled)("Postgres runtime ownership", () => {
       runnerContainerName: "synthetic-provider-slot", workspaceVersion: "0",
       customInferenceEnvelope: null, platformAiUsageAllowed: true, providerEgressTokenHash: tokenHash });
     const authorize = (runnerContainerName: string | null, providerEgressTokenHash: string | null = null) =>
-      authorizeHostedRuntimeProvider({ prisma: second, userId, runnerContainerName, providerEgressTokenHash, providerKind: "openai" });
+      authorizeHostedRuntimeProvider({ prisma: second, userId, runnerContainerName, providerEgressTokenHash, providerKind: "openai" }).then(result => result.owner);
     expect(await authorize("wrong-slot")).toBeNull();
     expect(await authorize(null, "b".repeat(64))).toBeNull();
     expect(await authorize(null, tokenHash)).toMatchObject({ attemptId: runtime.attemptId, platformAiUsageAllowed: true });

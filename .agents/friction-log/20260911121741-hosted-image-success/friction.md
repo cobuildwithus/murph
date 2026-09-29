@@ -1,6 +1,7 @@
 ---
 title: 'Hosted image success fixtures retain Starter-only entitlement'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3762'
 ---
 
 ## Expected Behavior

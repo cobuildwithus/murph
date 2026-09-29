@@ -22,6 +22,7 @@ import {
 } from "./junction-provider.harness.ts";
 
 import assert from "node:assert/strict";
+import { prepareDeviceProviderSnapshotImport } from "@murphai/importers";
 import {
   JUNCTION_DEFAULT_SUMMARY_RESOURCES,
   JUNCTION_DEFAULT_TIMESERIES_RESOURCES,
@@ -1474,11 +1475,64 @@ test("Junction yieldable reconcile checkpoints one bounded normalization-safe su
       { summaryPhaseComplete: true, summaryResourceCursor: undefined },
     ],
   );
-  assert.equal(importedSnapshots.length, 4);
+  assert.equal(importedSnapshots.length, 3);
+  assert.ok(importedSnapshots.every((snapshot) =>
+    Object.keys((snapshot as { summaries: Record<string, unknown> }).summaries).length > 0
+  ));
   assert.deepEqual(
     Object.keys((importedSnapshots[1] as { summaries: Record<string, unknown> }).summaries),
     ["sleep", "sleep_cycle"],
   );
+});
+
+test("Junction empty continuation produces only a receipt without health outputs", async () => {
+  const snapshot: JunctionSnapshotInput = {
+    accountId: "synthetic-account",
+    importedAt: "2026-04-03T00:00:00.000Z",
+    windowStart: "2026-03-27T00:00:00.000Z",
+    windowEnd: "2026-04-03T00:00:00.000Z",
+    connections: [{ id: "synthetic-provider", slug: "garmin" }],
+    summaries: {},
+    timeseries: {},
+  };
+  const normalized = normalizeJunctionSnapshot(snapshot);
+  assert.deepEqual(normalized.events, []);
+  assert.equal(normalized.samples, undefined);
+  assert.deepEqual(normalized.evidenceParts, []);
+  assert.equal(normalized.authoritativeEventSets, undefined);
+  const prepared = await prepareDeviceProviderSnapshotImport({ provider: "junction", snapshot });
+  assert.deepEqual(prepared.events, []);
+  assert.equal(prepared.authoritativeEventSets, undefined);
+  assert.deepEqual(prepared.evidenceParts, []);
+  assert.ok(prepared.ingestReceipt);
+});
+
+test.each([false, true])("Junction preserves fetched empty summary imports with bounded=%s", async (bounded) => {
+  const importedSnapshots: JunctionSnapshotInput[] = [];
+  const provider = createJunctionProvider(async (input) => {
+    const pathname = new URL(readUrl(input)).pathname;
+    if (pathname.includes("/user/providers/")) return createJsonResponse({ providers: [] });
+    assert.ok(pathname.includes("/summary/activity/"));
+    return createJsonResponse({ data: [] });
+  }, { summaryResources: ["activity"], timeseriesResources: [] });
+  const context = createJunctionJobContext({
+    ...(bounded ? { shouldYield: () => false } : {}),
+    importSnapshot: async (snapshot) => {
+      importedSnapshots.push(snapshot as JunctionSnapshotInput);
+      return { imported: true };
+    },
+  });
+  const result = await executeJunctionJob(provider, context, createJob("reconcile", {
+    windowStart: "2026-03-27T00:00:00.000Z", windowEnd: "2026-04-03T00:00:00.000Z",
+  }));
+  assert.equal(importedSnapshots.length, 1);
+  assert.deepEqual(importedSnapshots[0]!.summaries, { activity: [] });
+  if (bounded) {
+    const continuation = result.scheduledJobs?.find((job) => job.payload?.summaryPhaseComplete === true);
+    assert.ok(continuation);
+    await executeJunctionJob(provider, context, createJobFromInput(continuation));
+    assert.equal(importedSnapshots.length, 1);
+  }
 });
 
 test("Junction yieldable summary continuation fails within its inner provider-attempt bound", async () => {

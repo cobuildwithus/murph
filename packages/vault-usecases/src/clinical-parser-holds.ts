@@ -9,6 +9,7 @@ import { findEventsByExternalRefs, resolveVaultPathOnDisk } from "@murphai/core"
 
 const parserReasons = new Set([
   "laboratory observation result is not importable",
+  "laboratory observation component result is not importable",
   "observation code is not importable",
   "vital quantity unit is not importable",
 ]);
@@ -31,7 +32,7 @@ export async function retainUnchangedClinicalParserHolds(input: {
   let retainedLabCount = 0;
   for (const [index, decision] of candidates.entries()) {
     const held = existing[index];
-    if (!isParserHold(held, decision)) continue;
+    if (!isMatchingDeletedObservation(held, decision)) continue;
     const evidence = matchingSourceEvidence(held, decision);
     if (!evidence) continue;
     const { rawRef, oldRawRef, resourceId } = evidence;
@@ -45,17 +46,43 @@ export async function retainUnchangedClinicalParserHolds(input: {
     const original = uniqueObservation(await oldPage, resourceId);
     const incoming = uniqueObservation(JSON.parse(current), resourceId);
     if (!original || !incoming || !isDeepStrictEqual(original, incoming)) continue;
-    replacements.set(decision, { action: "retract", externalRef: held.externalRef!, reason: held.note!, evidence: held.evidence });
+    const reason = historicalParserReason(held, decision, original);
+    if (!reason) continue;
+    replacements.set(decision, { action: "retract", externalRef: held.externalRef!, reason, evidence: held.evidence });
     if (decision.payload.kind === "test" && decision.payload.testCategory === "laboratory") retainedLabCount++;
   }
   return { decisions: input.decisions.map((decision) => replacements.get(decision) ?? decision),
     retainedCount: replacements.size, retainedLabCount };
 }
 
-function isParserHold(record: EventRecord | null | undefined, decision: Upsert): record is Extract<EventRecord, { kind: "note" }> & { externalRef: NonNullable<EventRecord["externalRef"]> & { version: string } } {
-  return record?.kind === "note" && record.noteType === "event_import_retraction_marker"
-    && record.lifecycle?.state === "deleted" && parserReasons.has(record.note ?? "")
+function isMatchingDeletedObservation(record: EventRecord | null | undefined, decision: Upsert): record is EventRecord & { externalRef: NonNullable<EventRecord["externalRef"]> & { version: string } } {
+  return record?.lifecycle?.state === "deleted"
     && typeof record.externalRef?.version === "string" && isDeepStrictEqual(record.externalRef, decision.payload.externalRef);
+}
+
+function historicalParserReason(held: EventRecord, decision: Upsert, resource: Record<string, unknown>): string | undefined {
+  if (held.kind === "note" && held.noteType === "event_import_retraction_marker") {
+    return parserReasons.has(held.note ?? "") ? held.note : undefined;
+  }
+  // Retraction of an existing event preserves its payload, not the parser reason.
+  // These source notes were unconditionally held before this importer change.
+  if (decision.payload.kind === "note" && decision.payload.noteType === "fhir_observation_source") {
+    return "unchanged historical observation parser hold";
+  }
+  if (decision.payload.kind !== "test" || decision.payload.testCategory !== "laboratory") return undefined;
+  const hasQualitativeBounds = (value: unknown): boolean => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+    const item = value as Record<string, unknown>;
+    if (item.valueQuantity !== undefined || !["valueString", "valueInteger", "valueBoolean", "valueCodeableConcept"].some((key) => item[key] !== undefined)) return false;
+    return Array.isArray(item.referenceRange) && item.referenceRange.some((range: unknown) =>
+      range !== null && typeof range === "object" && ("low" in range || "high" in range));
+  };
+  // Current mapping has already validated each result. Numeric bounds on a
+  // qualitative result are precisely the range shape the old mapper rejected.
+  if (Array.isArray(resource.component) && resource.component.some(hasQualitativeBounds)) {
+    return "laboratory observation component result is not importable";
+  }
+  return hasQualitativeBounds(resource) ? "laboratory observation result is not importable" : undefined;
 }
 
 function matchingSourceEvidence(held: EventRecord, decision: Upsert) {

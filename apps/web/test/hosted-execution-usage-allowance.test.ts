@@ -1622,7 +1622,20 @@ describe("hosted AI usage allowance pricing", () => {
         modelSource: "requested",
         pricingSource: "https://elevenlabs.io/pricing/api",
       },
-      pricingVersion: "elevenlabs-tts-pricing-2026-06-18",
+      pricingVersion: "elevenlabs-tts-pricing-2026-09-28",
+    });
+
+    expect(priceHostedAiUsageForAllowance({
+      ...voiceMemo,
+      rawUsageJson: { characterCount: 1_001 },
+      requestedModel: "eleven_v4",
+    })).toMatchObject({
+      costUsdMicros: 80_080n,
+      counted: true,
+      pricingSnapshot: {
+        characters: { count: "1001", usdMicrosPerThousandCharacters: "80000" },
+        model: "eleven_v4",
+      },
     });
 
     expect(priceHostedAiUsageForAllowance({

@@ -56,6 +56,7 @@ Current responsibilities:
 - project a saved outbox retry as `assistant_delivery`, distinct from model-capable `assistant` work, so Web can admit delivery reconciliation after managed AI usage is exhausted while the existing assistant phase remains the sole delivery owner
 - release foreground ownership after terminal reply delivery, abort in-flight provider cleanup when later conversation input is staged, and reserve exact automation reconciliation for canonical automation writes or maintenance wakes
 - keep foreground pending-input checks read-only; incomplete indexes schedule bounded maintenance while compaction and legacy backfill remain maintenance-owned
+- reject empty or unrelated system-mailbox selections from a read-only snapshot before taking the shared runtime write lock; positive selections re-read and claim current state under that lock, later arrivals stay queued for a later pass, and conversation occurrence timestamps are loaded outside the lock only after the snapshot contains an eligible foreground candidate
 - apply every Web-approved sparse `member.preferences.updated` delta with that event's own cross-lane mailbox sequence, so the canonical preference owner preserves approved event order while stale-no-oping only affected fields; bounded per-field watermarks in `bank/assistant-preference-mutations.json` make replay idempotent without reservation or receipt retention
 - admit one bounded, cursor-ordered batch of same-conversation, same-reply-anchor mailbox inputs only when their positive causal sequences are exact successors; pass the terminal accepted input id to hosted personality commands so Web derives the compound turn frontier from its member-bound mailbox row, and leave gaps, legacy input, overflow, and later arrivals pending
 - recover late foreground input from the current invocation's exact imported-ID snapshot when best-effort active-turn notifications are early or missed; at admission, compose that recovered cursor-ordered prefix with any notified exact IDs, admit every valid same-room successor up to the existing cumulative cap, and reuse the same replyability, route, and capacity checks without scanning or mutating the broad pending index
@@ -157,8 +158,18 @@ forwarded into a claimed parse attempt. If an earlier input needs retry, a compl
 sibling's local raw/derived result remains reusable on replay, but its assistant
 evidence, pending visibility, and notification stay withheld behind that input.
 This does not add a retry owner or strengthen the existing checkpoint/crash boundary.
-Existing attachment typing starts during staging, remains available for the reply
-handoff after admission, and is released for any staged input left unadmitted.
+Eligible Linq text and attachment inputs start best-effort typing immediately
+following durable staging, before pending-reply notification, mailbox progress
+publication, or assistant preparation. The existing per-chat claim and refresh
+loop pass to the admitted turn without another start request, even while initial
+provider acceptance is pending. Typing never blocks admission. Failed staging,
+self-authored input, consumed replay, disabled auto-replies, and unbound routes do
+not start preparation; failed admission cancels an unclaimed handle. Attachment
+evidence and canonical receipt/watermark checkpoints keep their existing gates.
+Runtime status checkpoints resolve independent pending-input, outbox,
+provider-cleanup, system-mailbox and cron wake reads concurrently (at most five).
+Wake selection keeps its existing precedence; every started read settles before
+failure can release or replace the workspace.
 The existing content-free import diagnostic may include `audioPairCount`,
 `audioPairPreparationMs` (whole pair preparation wall span), and
 `audioParsePreparationOverlapMs` (intersection of artifact/parse/scratch-cleanup

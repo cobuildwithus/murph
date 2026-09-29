@@ -113,6 +113,8 @@ describe("runner base image preparation", () => {
         "--load",
         "-t",
         hostedLocalRunnerBaseImageTag,
+        "--build-arg",
+        "CODEX_CARGO_JOBS",
         "--label",
         `${runnerBaseImageSourceFingerprintLabel}=${fingerprint}`,
         "--label",

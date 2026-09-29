@@ -4863,16 +4863,16 @@ async function prepareForegroundSystemMailboxSelection(
   const phaseInput = input.input;
   const assistantAskCompletionOccurredBefore = pendingAssistantInputWakeAt === null
     ? undefined
-    : input.hasFreshConversationInput
-    ? await resolveHostedOldestAssistantInputOccurredAt({
-        assistantInputIds: readHostedInitialAssistantInputIds(phaseInput),
-        signal: phaseInput.signal ?? null,
-        vaultRoot: phaseInput.restored.vaultRoot,
-      })
-    : await resolveHostedOldestPendingAssistantInputAt({
-        signal: phaseInput.signal ?? null,
-        vaultRoot: phaseInput.restored.vaultRoot,
-      });
+    : () => input.hasFreshConversationInput
+      ? resolveHostedOldestAssistantInputOccurredAt({
+          assistantInputIds: readHostedInitialAssistantInputIds(phaseInput),
+          signal: phaseInput.signal ?? null,
+          vaultRoot: phaseInput.restored.vaultRoot,
+        })
+      : resolveHostedOldestPendingAssistantInputAt({
+          signal: phaseInput.signal ?? null,
+          vaultRoot: phaseInput.restored.vaultRoot,
+        });
   const hasExclusiveSelection = input.exclusiveRouteActions !== undefined
     || input.exclusiveWakeKinds !== undefined;
   const prepareForegroundMailboxItem = (
@@ -4932,7 +4932,7 @@ async function prepareForegroundSystemMailboxSelection(
     const preCheckpointCompletionOccurredBefore =
       pendingAssistantInputWakeAt === null
         ? undefined
-        : await resolveHostedOldestPendingAssistantInputAt({
+        : () => resolveHostedOldestPendingAssistantInputAt({
             signal: phaseInput.signal ?? null,
             vaultRoot: phaseInput.restored.vaultRoot,
           });

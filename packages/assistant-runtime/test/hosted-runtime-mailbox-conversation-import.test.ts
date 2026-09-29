@@ -780,20 +780,24 @@ describe("hosted mailbox conversation import adapter", () => {
   });
 
   test.each([
-    "pending-start", "failed-start", "parser-retry", "unsettled", "abort",
-    "failed-stage", "self-authored", "consumed-replay",
-  ])("attachment typing preserves importer lifecycle for %s", async (scenario) => {
+    ...["pending-start", "failed-start", "parser-retry", "unsettled", "abort",
+      "failed-stage", "self-authored", "consumed-replay"]
+      .map(scenario => ({ scenario, text: false })),
+    ...["pending-start", "failed-start", "failed-stage", "self-authored",
+      "consumed-replay", "enqueue-failed"]
+      .map(scenario => ({ scenario, text: true })),
+  ])("input typing preserves importer lifecycle for $scenario (text: $text)", async ({ scenario, text }) => {
     const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-attachment-typing-"));
     tempRoots.push(parentRoot);
     const vaultRoot = path.join(parentRoot, "vault");
     const wake = createConversationWake({ message: {
       channel: "linq",
       linqMessage: {
-        chatId: `chat_attachment_${scenario}`,
+        chatId: `chat_attachment_${scenario}_${text}`,
         from: "synthetic_sender",
         isFromMe: scenario === "self-authored",
         messageId: `message_attachment_${scenario}`,
-        parts: [{
+        parts: text ? [{ type: "text", value: "Please help me plan tomorrow." }] : [{
           attachmentId: "synthetic_attachment", fileName: "fixture.png",
           mimeType: "image/png", size: 1, type: "media", url: "synthetic_attachment",
         }],
@@ -809,7 +813,9 @@ describe("hosted mailbox conversation import adapter", () => {
     else if (scenario === "failed-start") start.mockRejectedValue(new Error("synthetic start failure"));
     else start.mockResolvedValue(handle);
     const signal = new AbortController();
-    const enqueuePendingReply = vi.fn(async () => {});
+    const enqueuePendingReply = vi.fn(async () => {
+      if (scenario === "enqueue-failed") throw new Error("synthetic pending admission failure");
+    });
     const staged = createDeferred<void>();
     const releaseStage = createDeferred<void>();
     const importing = importHostedConversationMailboxItem({
@@ -826,8 +832,8 @@ describe("hosted mailbox conversation import adapter", () => {
         return {
           inputId: `input_attachment_${scenario}`,
           receivedAt: "2026-04-26T00:00:00.000Z",
-          attachmentDescriptorCount: 1,
-          attachmentEvidenceRequired: true,
+          attachmentDescriptorCount: text ? 0 : 1,
+          attachmentEvidenceRequired: !text,
           enqueuePendingReply,
           async recordProjection() {},
           async recordAttachmentEvidence() { return scenario !== "unsettled"; },
@@ -846,17 +852,17 @@ describe("hosted mailbox conversation import adapter", () => {
       await staged.promise;
       expect(start).not.toHaveBeenCalled();
       releaseStage.resolve(undefined);
-      if (scenario === "abort" || scenario === "failed-stage") {
+      if (["abort", "failed-stage", "enqueue-failed"].includes(scenario)) {
         await expect(importing).rejects.toThrow();
       } else {
         const outcome = await importing;
         assert.equal(outcome.status, ["parser-retry", "unsettled"].includes(scenario) ? "blocked" : "imported");
       }
-      const shouldAdmit = ["pending-start", "failed-start"].includes(scenario);
+      const shouldAdmit = ["pending-start", "failed-start", "enqueue-failed"].includes(scenario);
       expect(enqueuePendingReply).toHaveBeenCalledTimes(shouldAdmit ? 1 : 0);
       const shouldStart = !["failed-stage", "self-authored", "consumed-replay"].includes(scenario);
       expect(start).toHaveBeenCalledTimes(shouldStart ? 1 : 0);
-      if (["parser-retry", "unsettled", "abort"].includes(scenario)) {
+      if (["parser-retry", "unsettled", "abort", "enqueue-failed"].includes(scenario)) {
         await vi.waitFor(() => expect(stop).toHaveBeenCalledOnce());
       }
     } finally {

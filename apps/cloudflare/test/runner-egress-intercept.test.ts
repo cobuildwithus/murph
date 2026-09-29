@@ -1798,7 +1798,13 @@ describe("hostedRunnerIntercept", () => {
     expect(findFetchCall(fetchMock, "api.openai.com")).toBeUndefined();
   });
 
-  it("injects ElevenLabs speech credentials and records successful TTS usage", async () => {
+  it.each(["eleven_multilingual_v2", "eleven_v4"])("injects ElevenLabs %s credentials and records successful TTS usage", async (modelId) => {
+    const url = modelId === "eleven_v4"
+      ? "https://api.elevenlabs.io/v1/text-to-dialogue?output_format=mp3_44100_128"
+      : "https://api.elevenlabs.io/v1/text-to-speech/voice_123?output_format=mp3_44100_128";
+    const body = modelId === "eleven_v4"
+      ? { inputs: [{ text: "Short memo.", voice_id: "voice_123" }], model_id: modelId }
+      : { model_id: modelId, text: "Short memo." };
     vi.useFakeTimers();
     vi.setSystemTime(new Date(PROVIDER_REQUEST_STARTED_AT));
     const fetchMock = vi.fn<typeof fetch>(async (target) => {
@@ -1822,11 +1828,8 @@ describe("hostedRunnerIntercept", () => {
     const waitUntilPromises: Promise<unknown>[] = [];
 
     const response = await hostedRunnerIntercept(
-      new Request("https://api.elevenlabs.io/v1/text-to-speech/voice_123?output_format=mp3_44100_128", {
-        body: JSON.stringify({
-          model_id: "eleven_multilingual_v2",
-          text: "Short memo.",
-        }),
+      new Request(url, {
+        body: JSON.stringify(body),
         headers: {
           ...BOUND_USER_WRITE_FENCE_HEADERS,
           authorization: "Bearer user-supplied-token",
@@ -1858,18 +1861,13 @@ describe("hostedRunnerIntercept", () => {
     const forwarded = findFetchCall(fetchMock, "api.elevenlabs.io")?.[0];
     expect(forwarded).toBeInstanceOf(Request);
     const forwardedRequest = forwarded as Request;
-    expect(forwardedRequest.url).toBe(
-      "https://api.elevenlabs.io/v1/text-to-speech/voice_123?output_format=mp3_44100_128",
-    );
+    expect(forwardedRequest.url).toBe(url);
     expect(forwardedRequest.headers.get("xi-api-key")).toBe("elevenlabs-worker-secret");
     expect(forwardedRequest.headers.has("authorization")).toBe(false);
     expect(forwardedRequest.headers.has("cookie")).toBe(false);
     expect(forwardedRequest.headers.has("proxy-authorization")).toBe(false);
     expect(forwardedRequest.headers.has(HOSTED_RUNNER_BOUND_USER_ID_HEADER)).toBe(false);
-    expect(await forwardedRequest.clone().json()).toEqual({
-      model_id: "eleven_multilingual_v2",
-      text: "Short memo.",
-    });
+    expect(await forwardedRequest.clone().json()).toEqual(body);
     await Promise.all(waitUntilPromises);
     expect(fetchMock).toHaveBeenCalledTimes(2);
     const usageCall = findFetchCall(fetchMock, "web.example.test");
@@ -1887,7 +1885,7 @@ describe("hostedRunnerIntercept", () => {
       provider: "elevenlabs",
       providerName: "ElevenLabs",
       rawUsageJson: { characterCount: "Short memo.".length },
-      requestedModel: "eleven_multilingual_v2",
+      requestedModel: modelId,
       surface: "hosted-runner",
       triggerKind: "voice-memo-delivery",
       usageExtractionSourcePath: "elevenlabs.text_to_speech",
@@ -2111,6 +2109,42 @@ describe("hostedRunnerIntercept", () => {
       expect(response.status).toBe(403);
     }
 
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { model_id: "eleven_v4", inputs: [] },
+    { model_id: "eleven_v4", inputs: [{ text: "Memo.", voice_id: "voice_123" }, { text: "Extra.", voice_id: "voice_123" }] },
+    { model_id: "eleven_v4", inputs: [null] },
+    { model_id: "eleven_v4", inputs: [{ text: "Memo." }] },
+    { model_id: "eleven_v4", inputs: [{ text: "Memo.", voice_id: " " }] },
+    { model_id: "eleven_v4", inputs: [{ text: "Memo.", voice_id: "v".repeat(201) }] },
+    { model_id: "eleven_v4", inputs: [{ text: " ", voice_id: "voice_123" }] },
+    { model_id: "eleven_v4", inputs: [{ text: "x".repeat(1_001), voice_id: "voice_123" }] },
+    { model_id: "eleven_v4", inputs: [{ text: "Memo.", voice_id: "voice_123", extra: true }] },
+    { model_id: "eleven_v4", inputs: [{ text: "Memo.", voice_id: "voice_123" }], extra: true },
+    { model_id: "eleven_v4_turbo", inputs: [{ text: "Memo.", voice_id: "voice_123" }] },
+    { model_id: "eleven_multilingual_v2", inputs: [{ text: "Memo.", voice_id: "voice_123" }] },
+  ])("rejects unsupported dialogue bodies before provider dispatch %#", async (body) => {
+    const fetchMock = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", fetchMock);
+    const response = await hostedRunnerIntercept(
+      new Request("https://api.elevenlabs.io/v1/text-to-dialogue?output_format=mp3_44100_128", {
+        body: JSON.stringify(body),
+        headers: {
+          ...BOUND_USER_WRITE_FENCE_HEADERS,
+          "content-type": "application/json",
+          "xi-api-key": HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
+        },
+        method: "POST",
+      }),
+      createInterceptEnv({
+        ELEVENLABS_API_KEY: "elevenlabs-worker-secret",
+        validateRuntimeWriteFence: async () => true,
+      }),
+      { containerId: "member_123--v-version_1" },
+    );
+    expect(response.status).toBe(403);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 

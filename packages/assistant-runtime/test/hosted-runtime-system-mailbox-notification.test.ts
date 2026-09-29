@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import * as mailboxState from "../src/hosted-runtime/system-mailbox-state.ts";
 import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
@@ -1675,23 +1676,62 @@ describe("hosted system mailbox notification execution context", () => {
         wake,
       });
 
+      // A stale positive read is not execution authority.
+      const originalRead = mailboxState.readHostedSystemMailboxState;
+      const snapshot = await originalRead(workspace.vaultRoot);
+      const stalePositive = vi.spyOn(mailboxState, "readHostedSystemMailboxState")
+        .mockImplementationOnce(async (vaultRoot) => {
+          await updateHostedSystemMailboxState(vaultRoot, () => ({ pending: [] }));
+          return snapshot;
+        });
+      try {
+        await expect(prepareHostedSystemMailboxItemForCheckpoint({
+          allowedRouteActions: ["continue-assistant-ask"],
+          now: () => "2026-04-27T00:01:00.000Z",
+          runtime: createRuntime({}), runtimeEnv: {}, vaultRoot: workspace.vaultRoot,
+        })).resolves.toBeNull();
+        expect(mocks.executeHostedMailboxEvent).not.toHaveBeenCalled();
+      } finally {
+        stalePositive.mockRestore();
+      }
+      // A candidate committed after a negative snapshot survives for the next pass.
+      const staleNegative = vi.spyOn(mailboxState, "readHostedSystemMailboxState")
+        .mockImplementationOnce(async (vaultRoot) => {
+          await updateHostedSystemMailboxState(vaultRoot, () => snapshot);
+          return { pending: [] };
+        });
+      try {
+        await expect(prepareHostedSystemMailboxItemForCheckpoint({
+          allowedRouteActions: ["continue-assistant-ask"],
+          now: () => "2026-04-27T00:01:00.000Z",
+          runtime: createRuntime({}), runtimeEnv: {}, vaultRoot: workspace.vaultRoot,
+        })).resolves.toBeNull();
+        expect(await originalRead(workspace.vaultRoot)).toEqual(snapshot);
+      } finally {
+        staleNegative.mockRestore();
+      }
+
       for (const cutoff of [
         "2026-04-26T23:59:59.000Z",
         FIXED_NOW,
         "not-a-timestamp",
         null,
       ]) {
-        const blocked = await prepareHostedSystemMailboxItemForCheckpoint({
-          allowedRouteActions: ["continue-assistant-ask"],
-          allowedWakeKinds: ["assistant.ask.completed"],
-          assistantAskCompletionOccurredBefore: cutoff,
-          now: () => "2026-04-27T00:01:00.000Z",
-          runtime: createRuntime({}),
-          runtimeEnv: {},
-          vaultRoot: workspace.vaultRoot,
-        });
+        const resolveCutoff = vi.fn(async () => cutoff);
+        for (const cutoffInput of [cutoff, resolveCutoff]) {
+          const blocked = await prepareHostedSystemMailboxItemForCheckpoint({
+            allowedRouteActions: ["continue-assistant-ask"],
+            allowedWakeKinds: ["assistant.ask.completed"],
+            assistantAskCompletionOccurredBefore: cutoffInput,
+            now: () => "2026-04-27T00:01:00.000Z",
+            runtime: createRuntime({}),
+            runtimeEnv: {},
+            vaultRoot: workspace.vaultRoot,
+          });
 
-        assert.equal(blocked, null);
+          assert.equal(blocked, null);
+        }
+        expect(resolveCutoff).toHaveBeenCalledTimes(1);
       }
       assert.equal(mocks.executeHostedMailboxEvent.mock.calls.length, 0);
       assert.equal((await readHostedSystemMailboxState(workspace.vaultRoot)).pending[0]?.attemptCount, 0);
@@ -1699,7 +1739,7 @@ describe("hosted system mailbox notification execution context", () => {
       const prepared = await prepareHostedSystemMailboxItemForCheckpoint({
         allowedRouteActions: ["continue-assistant-ask"],
         allowedWakeKinds: ["assistant.ask.completed"],
-        assistantAskCompletionOccurredBefore: "2026-04-27T00:00:01.000Z",
+        assistantAskCompletionOccurredBefore: async () => "2026-04-27T00:00:01.000Z",
         now: () => "2026-04-27T00:01:00.000Z",
         runtime: createRuntime({}),
         runtimeEnv: {},

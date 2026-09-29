@@ -341,7 +341,12 @@ unchanged. A resource that omits `meta.lastUpdated` takes its batch manifest
 and replays stay idempotent. Comparable clinical holds retain the existing
 revision protection. A refresh preserves an existing parser hold for an unchanged
 Observation at the same revision only when its exact historical parser reason,
-identity, manifest-bound source bytes and resource contents match. The canonical
+identity, manifest-bound source bytes and resource contents match. Component
+results use their own historical hold reason. For a retracted prior event, core
+retains its clinical payload rather than a marker reason: the importer establishes
+the prior rejection from newly supported source-note mapping or qualitative
+numeric bounds in that same attested source. Deleted records stay unchanged.
+The canonical
 lock spans the batched ledger lookup and import; matching holds count as review
 items, not imported labs, while unrelated and later-page records continue.
 Provider withdrawals, changed evidence and other revision conflicts retain their

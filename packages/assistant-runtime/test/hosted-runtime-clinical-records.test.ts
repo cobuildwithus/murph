@@ -51,13 +51,22 @@ beforeEach(async () => { vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cl
 afterEach(async () => { vi.useRealTimers(); await rm(vaultRoot, { force: true, recursive: true }); });
 
 describe("hosted clinical records maintenance", () => {
-  it.each(["qualitative-range", "source-note"])("completes a real refresh past a historical %s hold and advances both pages", async (shape) => {
+  it.each(["qualitative-range", "source-note", "component-range", "prior-result", "prior-component", "prior-source-note"])("completes a real refresh past a historical %s hold and advances both pages", async (shape) => {
     await initializeVault({ vaultRoot, timezone: "UTC" });
     const heldResource = { resourceType: "Observation", id: "historical-hold", status: "final", subject: { reference: "Patient/patient-1" },
       meta: { lastUpdated: "2026-07-01T12:00:00.000Z" }, effectiveDateTime: "2026-07-01T11:00:00.000Z",
       code: { text: "Example assessment" }, valueString: "Source finding",
-      ...(shape === "qualitative-range" ? { category: [{ coding: [{ system: "http://terminology.hl7.org/CodeSystem/observation-category", code: "laboratory" }] }], referenceRange: [{ low: { value: 2, unit: "ng/mL" } }] } : {}),
+      ...(!shape.endsWith("source-note") ? { category: [{ coding: [{ system: "http://terminology.hl7.org/CodeSystem/observation-category", code: "laboratory" }] }], referenceRange: [{ low: { value: 2, unit: "ng/mL" } }] } : {}),
     };
+    if (shape.includes("component")) {
+      Object.assign(heldResource, { valueString: undefined, referenceRange: undefined,
+        component: [{ code: { text: "Example assay" }, valueString: "Source finding", referenceRange: [{ low: { value: 2, unit: "ng/mL" } }] }] });
+    }
+    if (shape.startsWith("prior-")) {
+      await importClinicalFhirSnapshot({ ...RUN, vaultRoot, completedRetrievalSlices: [], retrievalJobId: "prior-successful",
+        pages: [{ resourceType: "Observation", queryScopeId: "observation", sliceId: "whole",
+          content: bundle([{ ...lab(heldResource.id), meta: { lastUpdated: "2026-06-01T12:00:00.000Z" } }]) }] });
+    }
     let checks = 0;
     await expect(importClinicalFhirSnapshot({ ...RUN, vaultRoot, completedRetrievalSlices: [], retrievalJobId: "historical-batch", fetchedAt: "2026-07-02T12:00:00.000Z",
       pages: [{ resourceType: "Observation", queryScopeId: "observation", sliceId: "whole", content: bundle([heldResource]) }],
@@ -65,7 +74,7 @@ describe("hosted clinical records maintenance", () => {
     })).rejects.toThrow("fixture pauses");
     const externalRef = { system: `epic-fhir-${RUN.fhirBaseUrlHash}-${RUN.patientIdHash}`, resourceType: "observation", resourceId: heldResource.id, version: heldResource.meta.lastUpdated };
     await importEventBatch({ vaultRoot, apply: true, decisions: [{ action: "retract", externalRef,
-      reason: shape === "qualitative-range" ? "laboratory observation result is not importable" : "observation code is not importable",
+      reason: shape.endsWith("source-note") ? "observation code is not importable" : shape.includes("component") ? "laboratory observation component result is not importable" : "laboratory observation result is not importable",
       evidence: [{ rawRef: `raw/clinical/fhir/${RUN.connectionId}/historical-batch/observation/whole/Observation/page-0001.json`, sourceLabel: "Observation/historical-hold" }],
     }] });
     const held = await findEventByExternalRef({ vaultRoot, ...externalRef, includeDeleted: true });

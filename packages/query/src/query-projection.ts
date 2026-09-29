@@ -322,8 +322,8 @@ export async function summarizeWearableSleepRuntime(
   vaultRoot: string,
   filters: WearableSummaryFilters = {},
 ): Promise<ProjectedWearableSleepSummary[]> {
-  const location = await ensureFreshQueryProjection(vaultRoot);
-  const bundle = readStoredPublicWearableSummaryBundle(location, filters);
+  const rows = await readFreshWearableSummaryRows(vaultRoot, { providers: filters.providers });
+  const bundle = composePublicWearableSummaryBundleFromStoredRows(rows, filters);
   return summarizeWearableSleepFromBundle(bundle, filters);
 }
 

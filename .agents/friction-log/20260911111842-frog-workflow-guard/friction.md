@@ -1,6 +1,7 @@
 ---
 title: 'Frog workflow guard test requires unauthenticated GitHub Markdown requests'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3759'
 ---
 
 ## Expected Behavior
