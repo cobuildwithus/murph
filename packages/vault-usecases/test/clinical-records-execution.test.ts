@@ -11,6 +11,7 @@ import {
 } from "@murphai/clinical-records";
 import {
   findEventByExternalRef,
+  importEventBatch,
   initializeVault,
 } from "@murphai/core";
 import {
@@ -41,6 +42,84 @@ afterEach(async () => {
 });
 
 describe("importClinicalFhirSnapshot", () => {
+  it.each([
+    { reason: "laboratory observation result is not importable", fields: {
+      category: [{ coding: [{ system: "http://terminology.hl7.org/CodeSystem/observation-category", code: "laboratory" }] }],
+      code: { text: "Example assay" }, valueString: "Below detection", referenceRange: [{ low: { value: 2, unit: "ng/mL" } }],
+    } },
+    { reason: "laboratory observation component result is not importable", fields: {
+      category: [{ coding: [{ system: "http://terminology.hl7.org/CodeSystem/observation-category", code: "laboratory" }] }],
+      code: { text: "Example panel" }, component: [{ code: { text: "Example assay" }, valueString: "Below detection", referenceRange: [{ low: { value: 2, unit: "ng/mL" } }] }],
+    } },
+    { reason: "observation code is not importable", fields: { code: { text: "Unmapped assessment" }, valueString: "Source finding" } },
+    { reason: "vital quantity unit is not importable", fields: {
+      code: { coding: [{ system: "http://loinc.org", code: "8867-4" }] }, valueQuantity: { value: 70 },
+    } },
+  ].flatMap((fixture) => [false, true].map((priorResult) => ({ ...fixture, priorResult }))))("preserves an unchanged prior $reason hold (prior result: $priorResult) while importing fresh and later-page records", async ({ reason, fields, priorResult }) => {
+    const resource = { resourceType: "Observation", id: "prior-held", status: "final", subject: { reference: `Patient/${PATIENT_ID}` },
+      meta: { lastUpdated: "2026-07-01T12:00:00.000Z" }, effectiveDateTime: "2026-07-01T11:00:00.000Z", ...fields };
+    const initial = await createSnapshotInput({ pages: [{ resourceType: "Observation", content: fhirBundle([resource]) }], resourceTypes: ["Observation"] });
+    if (priorResult) {
+      const priorResource = reason.startsWith("laboratory")
+        ? { ...resource, component: undefined, referenceRange: undefined, valueString: "Below detection" }
+        : heartRateObservation(resource.id);
+      await importClinicalFhirSnapshot({ ...initial, retrievalJobId: "prior-successful",
+        pages: [{ ...initial.pages[0]!, content: fhirBundle([{ ...priorResource, meta: { lastUpdated: "2026-06-01T12:00:00.000Z" } }]) }] });
+    }
+    // Stop after actual immutable snapshot publication, then persist the exact
+    // base importer's review-hold decision through the canonical writer.
+    let authorityChecks = 0;
+    await expect(importClinicalFhirSnapshot({ ...initial, assertCurrent: async () => {
+      if (++authorityChecks === 2) throw new Error("fixture pauses before canonical import");
+    } })).rejects.toThrow("fixture pauses");
+    const ref = { system: `epic-fhir-${FHIR_BASE_URL_HASH}-${PATIENT_ID_HASH}`, resourceType: "observation", resourceId: resource.id, version: resource.meta.lastUpdated };
+    const rawRef = `raw/clinical/fhir/${initial.connectionId}/${initial.retrievalJobId}/observation/whole/Observation/page-0001.json`;
+    await importEventBatch({ vaultRoot: initial.vaultRoot, apply: true, decisions: [{ action: "retract", externalRef: ref, reason,
+      evidence: [{ rawRef, sourceLabel: `Observation/${resource.id}` }] }] });
+    const held = await findEventByExternalRef({ vaultRoot: initial.vaultRoot, ...ref, includeDeleted: true });
+    const nextUrl = `${FHIR_BASE_URL}/Observation?page=2`;
+    const nextHash = hashClinicalFhirPageUrl(nextUrl);
+    const refresh: ClinicalFhirSnapshotImportInput = { ...initial, fetchedAt: "2026-07-11T12:00:00.000Z", retrievalJobId: "refresh-batch-0",
+      completedRetrievalSlices: [], batch: { runId: "refresh", index: 0, continuesWith: { queryScopeId: "observation", sliceId: "whole", pageUrlHash: nextHash } },
+      pages: [{ queryScopeId: "observation", sliceId: "whole", resourceType: "Observation", content: fhirBundle([resource, heartRateObservation("fresh-result")], [{ relation: "next", url: nextUrl }]) }] };
+    const first = await importClinicalFhirSnapshot(refresh);
+    expect(first).toMatchObject({ reviewDecisionCount: 1, labResultCount: 0, canonical: { createdCount: 1, skippedExistingCount: 1 } });
+    const second: ClinicalFhirSnapshotImportInput = { ...refresh, retrievalJobId: "refresh-batch-1", completedRetrievalSlices: [],
+      batch: { runId: "refresh", index: 1, previous: { manifestPath: first.manifestPath, sha256: first.manifestSha256 } },
+      pages: [{ queryScopeId: "observation", sliceId: "whole", resourceType: "Observation", pageUrlHash: nextHash, content: fhirBundle([heartRateObservation("later-page")]) }] };
+    expect((await importClinicalFhirSnapshot(second)).canonical.createdCount).toBe(1);
+    expect((await importClinicalFhirSnapshot(refresh)).canonical).toMatchObject({ createdCount: 0, skippedExistingCount: 2 });
+    expect((await importClinicalFhirSnapshot(second)).canonical).toMatchObject({ createdCount: 0, skippedExistingCount: 1 });
+    expect(await findEventByExternalRef({ vaultRoot: initial.vaultRoot, ...ref, includeDeleted: true })).toEqual(held);
+    for (const resourceId of ["fresh-result", "later-page"]) expect(await findEventByExternalRef({ vaultRoot: initial.vaultRoot, ...ref, version: undefined, resourceId })).not.toBeNull();
+    const originalPage = await readFile(path.join(initial.vaultRoot, rawRef), "utf8");
+    await writeFile(path.join(initial.vaultRoot, rawRef), `${originalPage} `);
+    await expect(importClinicalFhirSnapshot(refresh)).rejects.toThrow("Clinical hold page integrity mismatch");
+    await writeFile(path.join(initial.vaultRoot, rawRef), originalPage);
+    const changed = { ...refresh, retrievalJobId: "changed-same-revision", batch: undefined, completedRetrievalSlices: initial.completedRetrievalSlices,
+      pages: [{ queryScopeId: "observation", sliceId: "whole", resourceType: "Observation", content: fhirBundle([{ ...resource, note: [{ text: "Different source evidence" }] }]) }] };
+    await expect(importClinicalFhirSnapshot(changed)).rejects.toBeInstanceOf(ClinicalFhirSnapshotRejectedError);
+    expect(await findEventByExternalRef({ vaultRoot: initial.vaultRoot, ...ref, includeDeleted: true })).toEqual(held);
+  });
+
+  it("does not reinterpret an authoritative withdrawal as a historical parser hold", async () => {
+    const resource = { resourceType: "Observation", id: "withdrawn", status: "final", subject: { reference: `Patient/${PATIENT_ID}` },
+      code: { text: "Unmapped assessment" }, valueString: "Source finding", effectiveDateTime: "2026-07-01T11:00:00.000Z",
+      meta: { lastUpdated: "2026-07-01T12:00:00.000Z" } };
+    const initial = await createSnapshotInput({ pages: [{ resourceType: "Observation", content: fhirBundle([resource]) }], resourceTypes: ["Observation"] });
+    let checks = 0;
+    await expect(importClinicalFhirSnapshot({ ...initial, assertCurrent: async () => {
+      if (++checks === 2) throw new Error("fixture pauses before canonical import");
+    } })).rejects.toThrow("fixture pauses");
+    const ref = { system: `epic-fhir-${FHIR_BASE_URL_HASH}-${PATIENT_ID_HASH}`, resourceType: "observation", resourceId: resource.id, version: resource.meta.lastUpdated };
+    await importEventBatch({ vaultRoot: initial.vaultRoot, apply: true, decisions: [{ action: "retract", externalRef: ref,
+      reason: "observation is entered-in-error", evidence: [{ sourceLabel: `Observation/${resource.id}`,
+        rawRef: `raw/clinical/fhir/${initial.connectionId}/${initial.retrievalJobId}/observation/whole/Observation/page-0001.json` }] }] });
+    const held = await findEventByExternalRef({ vaultRoot: initial.vaultRoot, ...ref, includeDeleted: true });
+    await expect(importClinicalFhirSnapshot(initial)).rejects.toBeInstanceOf(ClinicalFhirSnapshotRejectedError);
+    expect(await findEventByExternalRef({ vaultRoot: initial.vaultRoot, ...ref, includeDeleted: true })).toEqual(held);
+  });
+
   it("imports a long inline note without losing its body and replays without duplicates", async () => {
     const text = "Historical discharge instruction. ".repeat(600);
     const resource = {

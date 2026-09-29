@@ -1,4 +1,4 @@
-import type { Resource } from "@medplum/fhirtypes";
+import type { Observation, Resource } from "@medplum/fhirtypes";
 import { isWritableIsoDateTime } from "@murphai/contracts";
 
 // These are provider statements, not member-confirmed diagnoses or medication
@@ -30,6 +30,22 @@ const CLINICAL_DATE_FIELDS = [
 export interface FhirSourceNote {
   note: string;
   sections?: Array<{ heading: string; kind: "other"; text: string }>;
+}
+
+/** Unmapped observations remain dated source statements, never guessed metrics. */
+export function buildFhirObservationSourceNote(resource: Observation) {
+  const occurredAt = readExactDate(resource.effectiveDateTime ?? resource.effectivePeriod?.start);
+  if (!occurredAt) return null;
+  const selected = Object.fromEntries(Object.entries(resource).filter(([key]) =>
+    !["id", "meta", "subject", "encounter", "performer", "basedOn", "derivedFrom", "device"].includes(key)));
+  const note = buildFhirSourceNote("Original source observation. Values and codes are preserved without metric normalization or inferred units.\n\n"
+    + JSON.stringify(selected, (_key, value: unknown) => {
+      if (value === null || typeof value !== "object" || Array.isArray(value)) return value;
+      return Object.fromEntries(Object.keys(value).sort().map((key) => [key, Reflect.get(value, key)]));
+    }, 2));
+  if (!note) return null;
+  const label = readLabel(resource.code) ?? "Source clinical observation";
+  return { ...note, occurredAt, title: `Source observation: ${label}`.slice(0, 160), noteType: "fhir_observation_source" };
 }
 
 /** Preserve the full text within the existing note/section contract. */

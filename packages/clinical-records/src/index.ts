@@ -1071,7 +1071,10 @@ export function clinicalFhirScopeAllowsOperation(
 }
 
 /** Search warnings must not establish complete coverage or clinical absence. */
-export function clinicalFhirPageHasIncompleteSearchOutcome(content: string): boolean {
+export function clinicalFhirPageHasIncompleteSearchOutcome(
+  content: string,
+  options: { ignorePatientAccessNotices?: boolean } = {},
+): boolean {
   const value: unknown = JSON.parse(content);
   if (!value || typeof value !== "object" || !("resourceType" in value) || value.resourceType !== "Bundle"
     || !("entry" in value) || !Array.isArray(value.entry)) return false;
@@ -1082,6 +1085,20 @@ export function clinicalFhirPageHasIncompleteSearchOutcome(content: string): boo
       || resource.resourceType !== "OperationOutcome") return false;
     if (!("issue" in resource) || !Array.isArray(resource.issue) || resource.issue.length === 0) return true;
     return resource.issue.some((issue: unknown) => !issue || typeof issue !== "object"
-      || !("severity" in issue) || issue.severity !== "information");
+      || !("severity" in issue) || (issue.severity !== "information"
+        && !(options.ignorePatientAccessNotices && isExpectedEpicPatientNotice(issue))));
   });
+}
+
+/** Retrieval can finish within patient access without proving whole-chart absence. */
+function isExpectedEpicPatientNotice(issue: object): boolean {
+  if (!("severity" in issue) || issue.severity !== "warning"
+    || !("code" in issue) || issue.code !== "processing"
+    || !("details" in issue) || !issue.details || typeof issue.details !== "object"
+    || !("coding" in issue.details) || !Array.isArray(issue.details.coding)
+    || issue.details.coding.length === 0) return false;
+  return issue.details.coding.every((coding: unknown) => !!coding && typeof coding === "object"
+    && "system" in coding && typeof coding.system === "string"
+    && /^urn:oid:1\.2\.840\.114350\.1\.13\.\d+\.\d+\.7\.2\.657369$/u.test(coding.system)
+    && "code" in coding && (coding.code === "4101" || coding.code === "4119"));
 }

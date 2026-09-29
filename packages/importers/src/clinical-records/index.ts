@@ -2,7 +2,7 @@ import { assertResolvedFhirPagination, type ClinicalPreviousImportBatch } from "
 export type { ClinicalPreviousImportBatch } from "./pagination.ts";
 import { readClinicalDocumentText, validateClinicalDocumentSnapshot, type ClinicalDocumentContext, type ClinicalImportSnapshotAttachment } from "./documents.ts";
 export { readClinicalAttachmentText, type ClinicalImportSnapshotAttachment } from "./documents.ts";
-import { buildFhirHistoryNote, buildFhirSourceNote, FHIR_HISTORY_RESOURCE_TYPES } from "./history.ts";
+import { buildFhirHistoryNote, buildFhirObservationSourceNote, buildFhirSourceNote, FHIR_HISTORY_RESOURCE_TYPES } from "./history.ts";
 import { createHash } from "node:crypto";
 
 import type {
@@ -262,7 +262,7 @@ export function buildClinicalImportPlanFromSnapshot(
   }
 
   const allergySnapshotDecision = [...pageContents.values()].some(
-    clinicalFhirPageHasIncompleteSearchOutcome,
+    (content) => clinicalFhirPageHasIncompleteSearchOutcome(content),
   )
     ? null
     : buildAllergySnapshotDecision({
@@ -867,7 +867,7 @@ function mapObservation(context: FhirResourceContext<Observation>): MappedFhirRe
     }
     const unit = normalizeVitalUnit(value, vital);
     if (!unit) {
-      return reviewOnly(context, "vital quantity unit is not importable");
+      return mapVitalUnitFailure(context, value);
     }
     if (emittedVitalFacets.has(vital.facet)) {
       return reviewOnly(context, "duplicate vital facet in FHIR observation");
@@ -931,7 +931,7 @@ function mapObservation(context: FhirResourceContext<Observation>): MappedFhirRe
     }
     const unit = normalizeVitalUnit(quantity, vital);
     if (!unit) {
-      return reviewOnly(context, "vital quantity unit is not importable");
+      return mapVitalUnitFailure(context, quantity);
     }
 
     return upsertOrReview(
@@ -950,7 +950,25 @@ function mapObservation(context: FhirResourceContext<Observation>): MappedFhirRe
     );
   }
 
-  return reviewOnly(context, "observation code is not importable");
+  return mapObservationSourceNote(context, "observation code is not importable");
+}
+
+function mapVitalUnitFailure(context: FhirResourceContext<Observation>, quantity: QuantityValue): MappedFhirResource {
+  const reason = "vital quantity unit is not importable";
+  return quantity.unit !== undefined || quantity.system !== undefined
+    ? reviewOnly(context, reason)
+    : mapObservationSourceNote(context, reason);
+}
+
+function mapObservationSourceNote(context: FhirResourceContext<Observation>, reason: string): MappedFhirResource {
+  const resourceId = readResourceId(context.resource);
+  const note = buildFhirObservationSourceNote(context.resource);
+  if (!resourceId || !note) return reviewOnly(context, reason);
+  return upsertOrReview(context, {
+    ...note, kind: "note", source: "import",
+    evidence: [evidenceForResource(context, resourceId)],
+    externalRef: externalRefForResource(context, "Observation", resourceId),
+  }, reason);
 }
 
 function mapLaboratoryObservation(
@@ -1327,20 +1345,22 @@ function decideBloodTestReferenceRange(
     return { status: "unsupported" };
   }
 
+  const text = readText(range.text);
+  if (range.text !== undefined && (!text || text.length > LAB_RESULT_TEXT_MAX_LENGTH)) {
+    return { status: "unsupported" };
+  }
+  if (resultQuantity === null) {
+    return textResultReferenceRange(range, text);
+  }
   const low = readReferenceRangeBoundary(range.low, resultQuantity);
   const high = readReferenceRangeBoundary(range.high, resultQuantity);
   if (low.status === "unsupported" || high.status === "unsupported") {
     return { status: "unsupported" };
   }
-  const text = range.text === undefined ? undefined : readText(range.text);
   if (
-    (range.text !== undefined && !text)
-    || (text !== undefined && text.length > LAB_RESULT_TEXT_MAX_LENGTH)
-    || (
       low.value !== undefined
       && high.value !== undefined
       && low.value > high.value
-    )
   ) {
     return { status: "unsupported" };
   }
@@ -1367,6 +1387,27 @@ function decideBloodTestReferenceRange(
     return { referenceRange: { text }, status: "supported" };
   }
   return { status: "unsupported" };
+}
+
+/** Keep source bounds as text; a qualitative result has no numeric comparison unit. */
+function textResultReferenceRange(
+  range: NonNullable<Observation["referenceRange"]>[number],
+  text: string | undefined,
+): BloodTestReferenceRangeDecision {
+  const low = readQuantityValue(range.low);
+  const high = readQuantityValue(range.high);
+  if ((range.low !== undefined && !low) || (range.high !== undefined && !high)
+    || low?.comparator !== undefined || high?.comparator !== undefined
+    || (low && high && (low.value > high.value || low.unit !== high.unit || low.system !== high.system))) {
+    return { status: "unsupported" };
+  }
+  const parts = [text];
+  if (low) parts.push(`Low: ${low.value}${low.unit ? ` ${low.unit}` : ""}`);
+  if (high) parts.push(`High: ${high.value}${high.unit ? ` ${high.unit}` : ""}`);
+  const rangeText = parts.filter(Boolean).join("; ");
+  return rangeText && rangeText.length <= LAB_RESULT_TEXT_MAX_LENGTH
+    ? { status: "supported", referenceRange: { text: rangeText } }
+    : { status: "unsupported" };
 }
 
 function readReferenceRangeBoundary(
