@@ -65,7 +65,6 @@ export async function resolveAssistantTurnRouteForMessage(
       override: resolveAutomationAssistantTargetOverrideForTarget(
         input.assistantTargetOverride,
         sessionInput.target,
-        input.turnTrigger === 'automation-cron' || input.turnTrigger === 'automation-auto-reply',
       ),
       sessionTarget: sessionInput.target,
     }).codexRoute
@@ -85,7 +84,6 @@ function resolveAssistantTurnRouteOverride(
     resolveAutomationAssistantTargetOverrideForTarget(
       input.assistantTargetOverride,
       automationBaseTarget,
-      input.turnTrigger === 'automation-cron' || input.turnTrigger === 'automation-auto-reply',
     )
 
   return compactAssistantProviderConfigInput({

@@ -2870,3 +2870,7 @@ artifact cleanup, canonical write receipt recovery, and the omitted
 pointer drain does not prove those independent stores empty. After rollout,
 confirm normal managed-container smoke and supported v2 cold restore/checkpoint
 behavior; an unsupported-ref rejection means the pointer/writer gate failed.
+
+The GPT-6.1 Sol compatibility release deliberately retains GPT-6 Sol defaults
+and automation replacements and withholds GPT-6.1 Sol from Web selection. Deploy
+and verify this additive reader/catalog release before the activation PR.

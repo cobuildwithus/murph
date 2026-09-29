@@ -412,6 +412,14 @@ function assertHostedAssistantModelSelection(input: {
       message: "GPT-6 Astra requires an active paid Edge or Max plan.",
     });
   }
+  // Compatibility release: activate selection only after the runner fleet converges.
+  if (input.model === HOSTED_ASSISTANT_GPT_61_SOL_MODEL) {
+    throw hostedOnboardingError({
+      code: "ASSISTANT_MODEL_NOT_AVAILABLE",
+      httpStatus: 400,
+      message: "GPT-6.1 Sol is not available yet.",
+    });
+  }
   const selectedModel = input.model ?? input.storedModel;
   if ((selectedModel === HOSTED_ASSISTANT_GPT_61_SOL_MODEL
       || selectedModel === HOSTED_ASSISTANT_GPT_6_SOL_MODEL
@@ -544,7 +552,8 @@ export function resolveHostedMemberAssistantModel(
   return {
     availableModels: configurationAvailable
       ? HOSTED_ASSISTANT_PRODUCT_MODELS.filter(
-          (candidate) => (candidate !== HOSTED_ASSISTANT_SOL_MODEL || solAvailable)
+          (candidate) => candidate !== HOSTED_ASSISTANT_GPT_61_SOL_MODEL
+            && (candidate !== HOSTED_ASSISTANT_SOL_MODEL || solAvailable)
             && (candidate !== HOSTED_ASSISTANT_ASTRA_MODEL || astraAvailable),
         )
       : [],

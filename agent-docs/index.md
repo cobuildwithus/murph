@@ -859,3 +859,6 @@ in [parser-hold refresh](exec-plans/completed/2026-09-28-clinical-parser-holds.m
 
 Complete historical clinical hold-shape coverage is recorded in
 [hold histories](exec-plans/completed/2026-09-29-clinical-hold-histories.md).
+
+The authorized two-stage deployment is tracked in
+[GPT-6.1 Sol rollout](exec-plans/active/2026-09-29-gpt61-sol-rollout.md).
