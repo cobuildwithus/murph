@@ -395,8 +395,35 @@ example results and boilerplate advice. A handout topic is not evidence of a
 member diagnosis, procedure or treatment. Explicit member findings, orders and
 counseling remain eligible, including clinical scans on branded pages. Inspected
 education-only sources produce no proposed facts and do not count as incomplete
-clinical coverage. Immutable source documents retain their original bytes;
-embedded decorative assets are not extracted into separate canonical records.
+clinical coverage. Ordinary imports retain original source bytes; embedded
+decorative assets are not extracted into separate canonical records.
+
+An explicitly authorized `minimizeClinicalDocumentImages` repair may omit exact
+embedded image payload digests already reviewed as nonclinical from eligible,
+linked HTML attachments. It rejects inline FHIR copies, conflicting manifest
+bindings, unknown requested digests, lossy UTF-8, and changed extracted clinical
+text. Other images remain. The immutable manifest and FHIR parent keep original
+identity. A bounded `murph.clinical-document-storage.v1` raw sidecar attests the
+original and stored byte digests/sizes, clinical text digest and omitted image
+digests. Core checks the exact raw preimage and atomically audits/publishes the
+replacement and receipt; source readers share its lock and reject corrupt or
+orphan evidence. Repeating the repair is a no-op.
+
+Fresh extraction binds its model input to the retained bytes. Existing frozen
+proposals, cache identity and canonical source facets retain original identity;
+parent eligibility and clinical text remain attested. Provider retries still
+validate original provider bytes, then reuse verified retained storage. One outer
+canonical write lock spans retained-byte selection through raw-batch publication,
+so a concurrent explicit repair cannot replace the selected preimage in that gap.
+Hosted enrichment preparation takes the same lock for its bounded source-file
+read, then releases it before rendering or provider work. It cannot mistake the
+repair's temporary quarantine interval for permanently missing evidence.
+This is
+an explicit repair API, without automatic classification or cleanup on import.
+Deploy compatible readers everywhere before repairing a hosted vault. Older
+readers fail closed afterward; restoring original evidence is required before
+rolling back below that reader version. Preserve the original source archive
+outside the repair copy.
 
 Validated proposals are frozen in private operational state. A separate bounded
 canonical action derives source identity and raw/page provenance, checks existing
@@ -421,8 +448,9 @@ that every document or clinical fact was recovered.
 A member has at most twenty sources and one unfinished retrieval per source.
 Completed generations no longer impose a lifetime import limit. Each page batch
 has its existing bounded manifest and raw evidence; prior batches remain
-immutable and available to prove continuation. No raw evidence is pruned, so
-canonical references remain valid. Total retained history grows with completed
+immutable and available to prove continuation. Routine imports do not prune raw
+evidence. Explicit reviewed image omission preserves canonical references and
+clinical text through the storage contract above. Total retained history grows with completed
 checks; this is not a constant-storage design.
 Repeated unchanged facts use existing canonical idempotency; newer comparable
 corrections use existing revision handling. A fresh authorization increments

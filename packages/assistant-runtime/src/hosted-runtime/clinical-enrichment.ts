@@ -96,6 +96,7 @@ async function extractClinicalEnrichmentPage({ input, work, state, now }: {
   let stage: AttemptStage = "render";
   try {
     prepared = work.source.resource ? { totalPages: 1, extractedText: work.extractedText, renderedPages: [], scratchRoots: [], async cleanup() {} } : await (input.prepareDocument ?? prepareClinicalEnrichmentDocument)({
+      vaultRoot: input.vaultRoot,
       documentPath: work.documentPath,
       mediaType: work.source.mediaType,
       page: work.page,
