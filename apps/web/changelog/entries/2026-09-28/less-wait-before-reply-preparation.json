@@ -8,6 +8,6 @@
     "title": "Less waiting before preparing a reply",
     "summary": "Murph skips unnecessary checks and waits when there is no pending background result to handle before your message.",
     "relevanceTags": ["reliability", "messaging"],
-    "sourcePullRequests": []
+    "sourcePullRequests": [3766]
   }
 }
