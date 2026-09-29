@@ -132,6 +132,44 @@ describe("hosted runtime progress health", () => {
     }
   });
 
+  it("defers imported activation behind a current foreground checkpoint only until its deadline", () => {
+    const row = progressRow({
+      progressOriginAt: "2026-08-10T15:30:00Z", lane: "system", runtimeKey: "runtime_a",
+      headKind: "member.activated", workspaceCheckpointedAt: instant("2026-08-10T15:40:00Z"),
+    });
+    row.activationCheckpointEvidence = { assistant: {
+      terminalReplyCommittedAtEpochMs: +now - 4 * 60_000,
+      checkpointPublicationExpectedByEpochMs: +now + 60_000,
+    } };
+    const summarize = (candidate = row, at = now) => summarizeHostedRuntimeProgressRows({
+      activeRuntimeKeys: ["runtime_a"], rows: [candidate], now: at,
+    });
+    expect(summarize().anomalous).toBe(false);
+    expect(summarize(row, new Date(+now + 60_000)).anomalous).toBe(false);
+    expect(summarize(row, new Date(+now + 60_001))).toMatchObject({
+      anomalous: true, stalledSystemLaneCount: 1, oldestStalledAgeMs: 31 * 60_000 + 1,
+    });
+    for (const override of [
+      { headKind: "device-sync.wake" },
+      { workspaceSystemImportedSeq: null },
+      { workspaceSystemImportedSeq: 0n },
+      { workspaceSystemImportedSeq: 2n },
+      { workspaceCheckpointedAt: null },
+      { workspaceCheckpointedAt: instant("2026-08-10T15:56:00Z") },
+      { activationCheckpointEvidence: null },
+      { chronologyInvalid: true },
+      { activationCheckpointEvidence: { assistant: {
+        checkpointPublicationExpectedByEpochMs: +now + 60_000,
+      } } },
+      { activationCheckpointEvidence: { assistant: {
+        terminalReplyCommittedAtEpochMs: +now + 1,
+        checkpointPublicationExpectedByEpochMs: +now + 60_000,
+      } } },
+    ]) {
+      expect(summarize({ ...row, ...override }).anomalous).toBe(true);
+    }
+  });
+
   it("classifies every system import and wake-owner diagnostic without identifiers", () => {
     const health = summarizeHostedRuntimeProgressRows({
       activeRuntimeKeys: [
@@ -965,6 +1003,7 @@ function progressRow(input: {
   workspaceSystemImportedSeq?: bigint | null;
 }): HostedRuntimeProgressHealthRow {
   return {
+    activationCheckpointEvidence: null,
     checkpointEvidence: null,
     deliveryAcceptedAt: null,
     chronologyInvalid: input.chronologyInvalid ?? false,
