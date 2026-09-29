@@ -379,6 +379,12 @@ export const PINNED_CODEX_OPENAI_EGRESS_INVENTORY = {
       reason: "This exact Linux printable token joins unrelated serialized field labels; the pinned provider source has no such HTTP route.",
     },
     {
+      candidate: "/v1/raterowscols",
+      disposition: "binary_false_positive",
+      owner: "dependency",
+      reason: "The 0.159.1 Linux release joins rtc_avas/v1/ to serialized rate, rows, and cols labels before Exec. The pinned provider source has no such HTTP route.",
+    },
+    {
       candidate: "/v1/resp",
       disposition: "binary_false_positive",
       owner: "dependency",
