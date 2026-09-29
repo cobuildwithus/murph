@@ -33,12 +33,15 @@ import {
   applyCanonicalWriteBatch,
   importEventBatch,
   isVaultError,
+  withCanonicalWriteLock,
 } from "@murphai/core";
 import {
   resolveRuntimePaths,
   writeJsonFileAtomic,
 } from "@murphai/runtime-state/node";
 import * as z from "@murphai/contracts/zod-runtime";
+
+import { retainUnchangedClinicalParserHolds } from "./clinical-parser-holds.ts";
 
 import { extractClinicalDocumentText } from "./clinical-document-text.js";
 
@@ -481,7 +484,7 @@ export async function importClinicalFhirSnapshot(
   await yieldClinicalFhirImportControl(input.signal ?? null);
   await input.assertCurrent?.();
   input.signal?.throwIfAborted();
-  const reviewDecisionCount = plan.decisions.filter(
+  let reviewDecisionCount = plan.decisions.filter(
     (decision) => decision.action === "review",
   ).length;
   const rawContents = [
@@ -524,6 +527,7 @@ export async function importClinicalFhirSnapshot(
     input.signal?.throwIfAborted();
   }
 
+  let retainedLabCount = 0;
   const canonical = executableDecisions.length === 0
     ? {
         applied: false,
@@ -532,10 +536,16 @@ export async function importClinicalFhirSnapshot(
         skippedExistingCount: 0,
         supersededCount: 0,
       }
-    : await importClinicalEventDecisions({
-        decisions: executableDecisions,
-        signal: input.signal,
-        vaultRoot: input.vaultRoot,
+    : await withCanonicalWriteLock(input.vaultRoot, async () => {
+        const retained = await retainUnchangedClinicalParserHolds({
+          vaultRoot: input.vaultRoot, decisions: executableDecisions, manifest: prepared.manifest,
+          pages: new Map(prepared.pages.map((page) => [page.rawPath, page.content])),
+        });
+        reviewDecisionCount += retained.retainedCount;
+        retainedLabCount = retained.retainedLabCount;
+        return importClinicalEventDecisions({
+          decisions: retained.decisions, signal: input.signal, vaultRoot: input.vaultRoot,
+        });
       });
 
   return {
@@ -547,7 +557,7 @@ export async function importClinicalFhirSnapshot(
       supersededCount: canonical.supersededCount,
     },
     executableDecisionCount: executableDecisions.length,
-    labResultCount: plan.decisions.filter((decision) => decision.action === "upsert" && decision.payload.kind === "test" && decision.payload.testCategory === "laboratory").length,
+    labResultCount: plan.decisions.filter((decision) => decision.action === "upsert" && decision.payload.kind === "test" && decision.payload.testCategory === "laboratory").length - retainedLabCount,
     incompleteRevisionCount: plan.decisions.filter((decision) => decision.action === "review" && decision.disposition === "incomplete").length,
     manifestPath: prepared.manifestPath,
     manifestSha256: createHash("sha256").update(`${JSON.stringify(prepared.manifest, null, 2)}\n`, "utf8").digest("hex"),

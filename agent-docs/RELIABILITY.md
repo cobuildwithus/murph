@@ -2293,8 +2293,11 @@ to apply after cutover.
   failures and history discard reuse. A new inventory read is one attempt capped
   at eight seconds, accepts at most 64 provider rows, and its source projection
   reads the current local source set once before at most 64 serial upserts.
-  Every summary admission still reads live sources after the provider fetch,
-  independently of provider cardinality or inventory reuse. Ordinary units contain
+  Populated summary admission still reads live sources after the provider fetch,
+  independently of provider cardinality or inventory reuse. Empty summaries have
+  no canonical records or authoritative deletions, so they skip import; bounded
+  empty summary units also skip the import-only source read and advance their
+  existing continuation. Historical and timeseries coverage checks are unchanged. Ordinary units contain
   one resource and allow at most three sequential pages with one eight-second
   request attempt per page.
   Sleep and sleep-cycle remain one canonical unit so

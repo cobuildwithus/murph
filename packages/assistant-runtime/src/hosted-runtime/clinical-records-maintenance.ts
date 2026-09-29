@@ -389,7 +389,7 @@ async function runHostedClinicalRecordsSyncWakeLaneWithCancellation(input: {
         });
       }
       if (
-        clinicalFhirPageHasIncompleteSearchOutcome(response.body) &&
+        clinicalFhirPageHasIncompleteSearchOutcome(response.body, { ignorePatientAccessNotices: true }) &&
         !checkpoint.errors.some(
           (error) =>
             error.code === "provider-search-incomplete" &&

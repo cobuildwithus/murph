@@ -2723,7 +2723,14 @@ test("Junction resource job with an unresolvable resource records an observable 
 
 test("Junction import accountId is stable across local account row re-registration", async () => {
   const importedAccountIds: string[] = [];
-  const provider = createEmptyJunctionBackfillProvider();
+  const provider = createJunctionProvider(async (input) => {
+    const pathname = new URL(readUrl(input)).pathname;
+    if (pathname === "/v2/user/providers/junction-user-1") {
+      return createJsonResponse({ providers: [] });
+    }
+    assert.equal(pathname, "/v2/summary/activity/junction-user-1");
+    return createJsonResponse({ data: [{ id: "synthetic-activity", steps: 4321 }] });
+  }, { summaryResources: ["activity"], timeseriesResources: [] });
 
   const runReconcileWithAccountRowId = async (rowId: string) => {
     await executeJunctionJob(

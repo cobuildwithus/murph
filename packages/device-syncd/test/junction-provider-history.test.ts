@@ -1454,7 +1454,7 @@ test("Junction reconcile keeps summaries current while compact timeseries stays 
       return createJsonResponse({ providers: [] });
     }
     if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/activity/junction-user-1")) {
-      return createJsonResponse({ data: [] });
+      return createJsonResponse({ data: [{ id: "synthetic-activity", steps: 4321 }] });
     }
     if (url.startsWith("https://api.sandbox.us.junction.com/v2/timeseries/junction-user-1/blood_oxygen/grouped")) {
       return createJsonResponse({ groups: {} });
@@ -3343,7 +3343,7 @@ test("Junction historical reconcile jobs preserve their summary window", async (
       return createJsonResponse({ providers: [] });
     }
     if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/activity/junction-user-1")) {
-      return createJsonResponse({ data: [] });
+      return createJsonResponse({ data: [{ id: "synthetic-activity", steps: 4321 }] });
     }
     if (url.startsWith("https://api.sandbox.us.junction.com/v2/timeseries/junction-user-1/blood_oxygen/grouped")) {
       return createJsonResponse({ groups: {} });
@@ -3421,7 +3421,7 @@ test("Junction ordinary timeseries correction resumes on the next closed day aft
     }),
   );
 
-  assert.equal(importedSnapshots.length, 1);
+  assert.equal(importedSnapshots.length, 0);
   assert.equal(
     requests.filter((url) => url.includes("/v2/timeseries/junction-user-1/hrv/grouped")).length,
     0,
@@ -3438,7 +3438,7 @@ test("Junction ordinary timeseries correction resumes on the next closed day aft
     }),
   );
 
-  assert.equal(importedSnapshots.length, 1);
+  assert.equal(importedSnapshots.length, 0);
   assert.equal(
     requests.filter((url) => url.includes("/v2/timeseries/junction-user-1/hrv/grouped")).length,
     7,

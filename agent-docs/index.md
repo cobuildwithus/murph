@@ -652,6 +652,10 @@ Provider-search delivery is recorded in
 The separate registration activation and composed import proof remain active in
 [`2026-09-16-epic-import-live-verification.md`](exec-plans/active/2026-09-16-epic-import-live-verification.md).
 
+Clinical import notice handling, qualitative range preservation, and repeated-item
+reporting are tracked in
+[`2026-09-25-clinical-import-coverage.md`](exec-plans/active/2026-09-25-clinical-import-coverage.md).
+
 Medical records presentation simplification and responsive interaction proof:
 [`records simplification`](exec-plans/completed/2026-09-25-records-simplify.md).
 
@@ -849,3 +853,9 @@ The E2E MinIO cleanup ownership repair is tracked in
 
 Android production revision selection is tracked in
 [`2026-09-29-android-canary-production-revision`](exec-plans/completed/2026-09-29-android-canary-production-revision.md).
+
+Historical parser-hold refresh preservation and composed retrieval proof are tracked
+in [parser-hold refresh](exec-plans/completed/2026-09-28-clinical-parser-holds.md).
+
+Complete historical clinical hold-shape coverage is recorded in
+[hold histories](exec-plans/completed/2026-09-29-clinical-hold-histories.md).

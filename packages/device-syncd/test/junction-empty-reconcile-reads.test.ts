@@ -219,3 +219,35 @@ test.each(historyScenarios)("$kind scoped=$scoped cannot save empty progress wit
   await assert.rejects(fixture.run, /Synthetic source read unavailable/u);
   assert.equal(fixture.counts().imports, 0);
 });
+
+
+test.each([false, true])("bounded summary reconcile imports only populated responses (populated: %s)", async (populated) => {
+  const source = createConnectionSource();
+  const events: string[] = [];
+  const provider = createJunctionProvider(async (input) => {
+    const pathname = new URL(readUrl(input)).pathname;
+    if (pathname === "/v2/user/providers/junction-user-1") {
+      return createJsonResponse({ providers: [{
+        id: "provider-garmin-1", slug: "garmin", status: "connected",
+        resource_availability: { activity: true },
+      }] });
+    }
+    assert.equal(pathname, "/v2/summary/activity/junction-user-1");
+    events.push("summary");
+    return createJsonResponse({ data: populated ? [{
+      id: "synthetic-activity", connectionId: "provider-garmin-1", steps: 4321,
+    }] : [] });
+  }, { summaryResources: ["activity"], timeseriesResources: [] });
+  const context = createJunctionJobContext({
+    account: createAccount({ sources: [{ ...source, resourceCount: 1 }] }),
+    listConnectionSources: async () => { events.push("sources"); return [source]; },
+    importSnapshot: async () => { events.push("import"); return { imported: true }; },
+    shouldYield: () => false,
+  });
+  const result = await executeJunctionJob(provider, context, createJob("reconcile", {
+    windowStart: "2026-03-27T00:00:00.000Z", windowEnd: "2026-04-03T00:00:00.000Z",
+  }));
+  assert.equal(result.scheduledJobs?.[0]?.payload?.summaryPhaseComplete, true);
+  assert.deepEqual(events.slice(events.indexOf("summary")), populated
+    ? ["summary", "sources", "import"] : ["summary"]);
+});

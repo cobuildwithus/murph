@@ -309,6 +309,15 @@ Unqualified single laboratory reference ranges are retained when their numeric
 boundaries use units compatible with the result, or when they provide a bounded
 text range. Multiple, qualified, inverted, malformed, or unit-incompatible
 ranges hold the containing observation for review instead of being dropped.
+For a qualitative laboratory result, valid numeric reference bounds and their
+units are preserved as bounded reference text alongside supplied range text;
+no numeric result, result unit, or numeric comparison is inferred.
+Explicitly dated observations without a supported metric mapping are preserved
+as source notes with their original values, codes, and qualifiers. Missing-unit
+vitals can also become source notes, without fabricating a unit or normalized
+measurement. Ambiguous coding, incompatible declared units, unsafe modifiers,
+and undated observations remain held. JSON object key order does not change
+source-note identity or content on replay.
 Preemption requeues the same run without discarding or replaying completed page
 progress. Web current-run authority is checked immediately before raw evidence
 persistence and immediately before canonical mutation. Final
@@ -318,15 +327,31 @@ The hosted writer emits v3 manifests and derives outgoing pagination edges
 from raw Bundles, preserving root/reachability/cycle/family/base validation.
 
 Completed slices and prior page batches survive an unrelated later byte/page/resource bound. The
-unfinished work remains checkpointed for retry without refunding historical charges. Meaningful
-OperationOutcome warnings/errors mark coverage incomplete; empty uncertain
-searches never establish allergy absence. SMART `.s` grants authorize search.
+unfinished work remains checkpointed for retry without refunding historical charges.
+Unknown or actionable OperationOutcome warnings/errors mark retrieval incomplete.
+Recognized Epic no-results (4101) and patient-access (4119) notices do not fail
+retrieval, but still cannot establish allergy absence. Denied subtype warnings
+remain explicit coverage limits. Web distinguishes portal coverage limits from
+other partial imports and labels skipped decisions as repeated items, because
+those counts may include repeated review holds rather than saved results. SMART `.s` grants authorize search.
 SUBSETTED resources and unorderable same-identity siblings remain raw evidence
 with an explicit incomplete disposition, leaving validated canonical facts
 unchanged. A resource that omits `meta.lastUpdated` takes its batch manifest
 `fetchedAt` as the source revision, so later retrievals supersede earlier ones
 and replays stay idempotent. Comparable clinical holds retain the existing
-revision protection.
+revision protection. A refresh preserves an existing parser hold for an unchanged
+Observation at the same revision only when its exact historical parser reason,
+identity, manifest-bound source bytes and resource contents match. Component
+results use their own historical hold reason. For a retracted prior event, core
+retains its clinical payload rather than a marker reason: the importer establishes
+the prior rejection from newly supported source-note mapping or qualitative
+numeric bounds in that same attested source. Deleted records stay unchanged.
+The canonical
+lock spans the batched ledger lookup and import; matching holds count as review
+items, not imported labs, while unrelated and later-page records continue.
+Provider withdrawals, changed evidence and other revision conflicts retain their
+existing rejection behavior. Promoting a historical hold requires explicit
+canonical correction.
 Web accepts partial received-page counts below served counts, rejects
 excess counts, and records same-generation saved counts after authorization
 ends without restoring access. Permanent outcome conflicts leave the mailbox
@@ -349,6 +374,14 @@ authority. They treat document instructions as untrusted evidence and cannot
 choose canonical identities or source paths. Foreground replies can continue
 during extraction; snapshots, workspace replacement, fence loss and shutdown
 abort and join the exact owned children. Cancellation retains durable work.
+
+Extraction excludes provider branding, stock illustrations, generic education,
+example results and boilerplate advice. A handout topic is not evidence of a
+member diagnosis, procedure or treatment. Explicit member findings, orders and
+counseling remain eligible, including clinical scans on branded pages. Inspected
+education-only sources produce no proposed facts and do not count as incomplete
+clinical coverage. Immutable source documents retain their original bytes;
+embedded decorative assets are not extracted into separate canonical records.
 
 Validated proposals are frozen in private operational state. A separate bounded
 canonical action derives source identity and raw/page provenance, checks existing
