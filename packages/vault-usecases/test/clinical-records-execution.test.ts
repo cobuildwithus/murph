@@ -47,14 +47,25 @@ describe("importClinicalFhirSnapshot", () => {
       category: [{ coding: [{ system: "http://terminology.hl7.org/CodeSystem/observation-category", code: "laboratory" }] }],
       code: { text: "Example assay" }, valueString: "Below detection", referenceRange: [{ low: { value: 2, unit: "ng/mL" } }],
     } },
+    { reason: "laboratory observation component result is not importable", fields: {
+      category: [{ coding: [{ system: "http://terminology.hl7.org/CodeSystem/observation-category", code: "laboratory" }] }],
+      code: { text: "Example panel" }, component: [{ code: { text: "Example assay" }, valueString: "Below detection", referenceRange: [{ low: { value: 2, unit: "ng/mL" } }] }],
+    } },
     { reason: "observation code is not importable", fields: { code: { text: "Unmapped assessment" }, valueString: "Source finding" } },
     { reason: "vital quantity unit is not importable", fields: {
       code: { coding: [{ system: "http://loinc.org", code: "8867-4" }] }, valueQuantity: { value: 70 },
     } },
-  ])("preserves an unchanged prior $reason hold while importing fresh and later-page records", async ({ reason, fields }) => {
+  ].flatMap((fixture) => [false, true].map((priorResult) => ({ ...fixture, priorResult }))))("preserves an unchanged prior $reason hold (prior result: $priorResult) while importing fresh and later-page records", async ({ reason, fields, priorResult }) => {
     const resource = { resourceType: "Observation", id: "prior-held", status: "final", subject: { reference: `Patient/${PATIENT_ID}` },
       meta: { lastUpdated: "2026-07-01T12:00:00.000Z" }, effectiveDateTime: "2026-07-01T11:00:00.000Z", ...fields };
     const initial = await createSnapshotInput({ pages: [{ resourceType: "Observation", content: fhirBundle([resource]) }], resourceTypes: ["Observation"] });
+    if (priorResult) {
+      const priorResource = reason.startsWith("laboratory")
+        ? { ...resource, component: undefined, referenceRange: undefined, valueString: "Below detection" }
+        : heartRateObservation(resource.id);
+      await importClinicalFhirSnapshot({ ...initial, retrievalJobId: "prior-successful",
+        pages: [{ ...initial.pages[0]!, content: fhirBundle([{ ...priorResource, meta: { lastUpdated: "2026-06-01T12:00:00.000Z" } }]) }] });
+    }
     // Stop after actual immutable snapshot publication, then persist the exact
     // base importer's review-hold decision through the canonical writer.
     let authorityChecks = 0;

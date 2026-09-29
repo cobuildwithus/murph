@@ -824,4 +824,7 @@ The E2E MinIO cleanup ownership repair is tracked in
 [`2026-09-28-minio-e2e-cleanup-ownership.md`](exec-plans/completed/2026-09-28-minio-e2e-cleanup-ownership.md).
 
 Historical parser-hold refresh preservation and composed retrieval proof are tracked
-in [parser-hold refresh](exec-plans/active/2026-09-28-clinical-parser-holds.md).
+in [parser-hold refresh](exec-plans/completed/2026-09-28-clinical-parser-holds.md).
+
+Complete historical clinical hold-shape coverage is recorded in
+[hold histories](exec-plans/completed/2026-09-29-clinical-hold-histories.md).
