@@ -1,6 +1,7 @@
 ---
 title: 'Focused live-test selector errors omit matching test names'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3293'
 ---
 
 ## Expected Behavior

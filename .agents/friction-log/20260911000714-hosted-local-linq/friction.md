@@ -1,6 +1,7 @@
 ---
 title: 'Hosted local Linq Worker uses a Docker-only upstream hostname'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3291'
 ---
 
 ## Expected Behavior

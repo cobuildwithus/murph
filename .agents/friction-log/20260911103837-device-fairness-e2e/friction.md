@@ -1,6 +1,7 @@
 ---
 title: 'Device fairness E2E traps the retry needed after a zero-job yield'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3355'
 ---
 
 ## Expected Behavior

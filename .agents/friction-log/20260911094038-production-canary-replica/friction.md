@@ -1,6 +1,7 @@
 ---
 title: 'Production canary replica fixture expires against the wall clock'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3327'
 ---
 
 ## Expected Behavior

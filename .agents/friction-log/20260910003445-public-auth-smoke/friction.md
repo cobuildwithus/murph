@@ -1,6 +1,7 @@
 ---
 title: 'Public auth smoke passes despite experiment-library server rendering failure'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3456'
 ---
 
 ## Expected Behavior

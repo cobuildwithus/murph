@@ -1,6 +1,7 @@
 ---
 title: 'Canary outcome fixtures expire against the real clock'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3326'
 ---
 
 ## Expected Behavior

@@ -1,6 +1,7 @@
 ---
 title: 'Environment recovery E2E budgets one checkpoint floor for successor work'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3353'
 ---
 
 ## Expected Behavior

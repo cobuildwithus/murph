@@ -1,6 +1,7 @@
 ---
 title: 'Colored child diagnostics hide hosted-local port collisions'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3294'
 ---
 
 ## Expected Behavior

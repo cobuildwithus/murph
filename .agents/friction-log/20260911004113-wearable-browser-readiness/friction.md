@@ -1,6 +1,7 @@
 ---
 title: 'Wearable browser readiness conflates transport and connect navigation'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3292'
 ---
 
 ## Expected Behavior

@@ -1,6 +1,7 @@
 ---
 title: 'Junction nudge E2E accepts rejected provider sends as delivery'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3356'
 ---
 
 ## Expected Behavior

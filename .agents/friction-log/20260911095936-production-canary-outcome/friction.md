@@ -1,6 +1,7 @@
 ---
 title: 'Production canary outcome fixture expires after 24 hours'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3352'
 ---
 
 ## Expected Behavior

@@ -1,6 +1,7 @@
 ---
 title: 'Foreground priority proof requires an obsolete system-owner replacement'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3763'
 ---
 
 ## Expected Behavior

@@ -1,6 +1,7 @@
 ---
 title: 'Host-native provider egress retains a container-only DNS alias'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3354'
 ---
 
 ## Expected Behavior
