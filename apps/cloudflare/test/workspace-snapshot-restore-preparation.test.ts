@@ -394,11 +394,10 @@ describe("runHostedWorkspaceSnapshotRestorePreparationWithinBudget", () => {
       vi.setSystemTime(new Date("2026-06-24T00:00:00.000Z"));
       const onBudgetTimeout = vi.fn();
       const budget = createRuntimeProcessingCommandBudget({
-        commandTimeoutMs: null,
+        commandTimeoutMs: 1_002,
         startedAtMs: Date.now(),
         // Margin is 1000ms, so an effective deadline of +2ms keeps the step's
         // setTimeout small enough to fire deterministically under fake timers.
-        webControlTimeoutMs: 1002,
       });
 
       const promise = runHostedWorkspaceSnapshotRestorePreparationWithinBudget({
@@ -426,7 +425,6 @@ describe("runHostedWorkspaceSnapshotRestorePreparationWithinBudget", () => {
     const budget = createRuntimeProcessingCommandBudget({
       commandTimeoutMs: null,
       startedAtMs: Date.now(),
-      webControlTimeoutMs: 60_000,
     });
 
     await expect(runHostedWorkspaceSnapshotRestorePreparationWithinBudget({
