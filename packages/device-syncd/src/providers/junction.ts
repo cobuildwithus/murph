@@ -1928,11 +1928,7 @@ export function createJunctionDeviceSyncProvider(
     const baseTimeseriesWindowStart = job.kind === "backfill"
       ? maxIsoTimestamp(window.windowStart, subtractDays(window.windowEnd, timeseriesBackfillDays))
       : window.windowStart;
-    // A completed summary phase has no collection to import. Keep explicit
-    // empty resource arrays on the ordinary importer path.
-    if (job.kind === "backfill"
-      ? summaryHasFetchedRecords
-      : Object.keys(importSummaries).length > 0) {
+    if (summaryHasFetchedRecords) {
       await commitPreparedJunctionCanonicalImport(
         context,
         preparedSummaryImport,
@@ -4461,23 +4457,27 @@ export function createJunctionDeviceSyncProvider(
       }
     }
 
-    const preparedSummaryImport = await prepareJunctionImportSnapshot(
-      input.context,
-      summaries,
-      input.sourceProviders,
-    );
-    await commitPreparedJunctionCanonicalImport(
-      input.context,
-      preparedSummaryImport,
-      {
-        importedAt: input.summaryWindow.windowEnd,
-        windowStart: input.summaryWindow.windowStart,
-        windowEnd: input.summaryWindow.windowEnd,
-        summaries: preparedSummaryImport.snapshots,
-        timeseries: {},
-      },
-      input.context.now,
-    );
+    // Empty summaries have no canonical records or authoritative deletions.
+    // The continuation is admitted afresh; there is no import to authorize here.
+    if (hasJunctionSnapshotRecords(summaries)) {
+      const preparedSummaryImport = await prepareJunctionImportSnapshot(
+        input.context,
+        summaries,
+        input.sourceProviders,
+      );
+      await commitPreparedJunctionCanonicalImport(
+        input.context,
+        preparedSummaryImport,
+        {
+          importedAt: input.summaryWindow.windowEnd,
+          windowStart: input.summaryWindow.windowStart,
+          windowEnd: input.summaryWindow.windowEnd,
+          summaries: preparedSummaryImport.snapshots,
+          timeseries: {},
+        },
+        input.context.now,
+      );
+    }
 
     const nextResource = eligibleUnits[cursorIndex >= 0 ? cursorIndex + 1 : 1]?.[0] ?? null;
     const sourceProviderSlug = normalizeProviderSlug(

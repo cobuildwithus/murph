@@ -775,6 +775,11 @@ to apply after cutover.
   children stop without another grace period; future durable wakes can start
   cold. DO reactivation preserves the SDK task, while process replacement does
   not inherit a completed process's watermark.
+  Activity expiry rearms and yields to an active invocation before acquiring the
+  lifecycle lock, which the invocation retains until its response settles.
+  Maintenance must not hold the SDK alarm open behind that long-running work.
+  Destructive cleanup remains locked and rechecks interaction ownership after
+  external reads; scheduling a future check grants no new conversation warmth.
 - The production database-health operator alert is an independent Cloudflare
   singleton so the monitored Postgres database cannot take down its own page
   owner. A five-minute Cron Trigger records one normalized PlanetScale sample
@@ -2293,8 +2298,11 @@ to apply after cutover.
   failures and history discard reuse. A new inventory read is one attempt capped
   at eight seconds, accepts at most 64 provider rows, and its source projection
   reads the current local source set once before at most 64 serial upserts.
-  Every summary admission still reads live sources after the provider fetch,
-  independently of provider cardinality or inventory reuse. Ordinary units contain
+  Populated summary admission still reads live sources after the provider fetch,
+  independently of provider cardinality or inventory reuse. Empty summaries have
+  no canonical records or authoritative deletions, so they skip import; bounded
+  empty summary units also skip the import-only source read and advance their
+  existing continuation. Historical and timeseries coverage checks are unchanged. Ordinary units contain
   one resource and allow at most three sequential pages with one eight-second
   request attempt per page.
   Sleep and sleep-cycle remain one canonical unit so
@@ -2556,6 +2564,15 @@ to apply after cutover.
   updates cover all three channels and preserve stale-lease rejection. These
   facts never acknowledge mailbox consumption; the checkpoint retains ownership.
   A system head ages from its accepted mailbox creation time.
+  Imported `member.activated` work may defer its alert while the same active
+  default-mode runtime owns both its workspace progress generation and the
+  latest foreground trace's attempt/generation. That trace must prove a terminal
+  reply or no-reply after the activation and last workspace checkpoint, with an
+  unexpired runtime-owned checkpoint deadline. Read only the newest trace through
+  the existing member/acceptance index; never fall back to older evidence when
+  that trace is incomplete. Expiry restores the original activation age. Other
+  system kinds, unimported activation, retired owners, generation mismatches,
+  and already-published completion retain normal stall classification.
   Lane high-water reads select only sequence and update time; they never fetch
   inline or externalized mailbox ciphertext.
   Import and unrelated
