@@ -2438,7 +2438,10 @@ describe("handleRunnerOutboundRequest", () => {
       }), createRunnerOutboundEnv({ RUNNER_CONTAINER: { getByName } }), "member_123",
     );
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({ completed: matched && receipt });
+    await expect(response.json()).resolves.toEqual({
+      completed: matched && receipt,
+      ...(!matched ? { reason: generation === "8" ? "superseded" : "owner_unconfirmed" } : {}),
+    });
     expect(runtimeOwnerClient.commandHostedRuntimeOwner).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
       userId: "member_123", command: { operation: "reconcile" },
     }));

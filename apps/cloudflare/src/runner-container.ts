@@ -80,6 +80,7 @@ import type {
   WorkerActiveRuntimeUserFenceResult,
 } from "./worker-contracts.ts";
 import { recordHostedRuntimeOwnerCompletion } from "./runtime-owner-completion.ts";
+import type { HostedRuntimeCompletionReceipt } from "./runtime-completion-receipt.ts";
 import { commandHostedRuntimeOwner } from "./runtime-owner-client.ts";
 import { HOSTED_CONTAINER_RUNTIME_COMPLETION_TIMEOUT_MS } from "./container-runtime-completion.ts";
 
@@ -328,7 +329,7 @@ export interface HostedExecutionContainerStubLike extends Partial<HostedRunnerSl
   ensureProcessing?(input: RunnerContainerEnsureProcessingInput): Promise<RunnerContainerEnsureProcessingResult>;
   invoke(input: HostedExecutionContainerInvokeRequest): Promise<HostedExecutionRunnerJobResult>;
   startSupervisedInvocation?(input: HostedExecutionContainerInvokeRequest): Promise<{ accepted: true }>;
-  recordSupervisedRuntimeCompletion?(input: { userId: string; attemptId: string; generation: string; result: HostedWorkspaceInvocationResult }): Promise<{ completed: boolean }>;
+  recordSupervisedRuntimeCompletion?(input: { userId: string; attemptId: string; generation: string; result: HostedWorkspaceInvocationResult }): Promise<HostedRuntimeCompletionReceipt>;
   readSupervisedInvocation?(input: { userId: string }): Promise<RunnerInvocationReceipt | null>;
   beginRuntimeUsageSettlement?(input: { userId: string; attemptId: string; generation: string; reportId: string }): Promise<boolean>;
   finishRuntimeUsageSettlement?(input: { userId: string; attemptId: string; generation: string; reportId: string; allowed: boolean }): Promise<void>;
@@ -1058,12 +1059,12 @@ export class RunnerContainer extends Container {
     return { accepted: true };
   }
 
-  async recordSupervisedRuntimeCompletion(input: { userId: string; attemptId: string; generation: string; result: HostedWorkspaceInvocationResult }): Promise<{ completed: boolean }> {
+  async recordSupervisedRuntimeCompletion(input: { userId: string; attemptId: string; generation: string; result: HostedWorkspaceInvocationResult }): Promise<HostedRuntimeCompletionReceipt> {
     this.authorizeBoundUser(input.userId);
-    if (!this.requireInvocationReceiptStore().complete(input, input.result.immediateRecheckRequested === true)) return { completed: false };
+    if (!this.requireInvocationReceiptStore().complete(input, input.result.immediateRecheckRequested === true)) return { completed: false, reason: "native_receipt_mismatch" };
     const completed = await recordHostedRuntimeOwnerCompletion({ ...input, source: this.environment });
     if (completed) await this.onRuntimeCompletionRecorded({ userId: input.userId, attemptId: input.attemptId, leaseGeneration: input.generation });
-    return { completed };
+    return completed ? { completed: true } : { completed: false, reason: "canonical_completion_rejected" };
   }
 
   async readSupervisedInvocation(input: { userId: string }): Promise<RunnerInvocationReceipt | null> {
