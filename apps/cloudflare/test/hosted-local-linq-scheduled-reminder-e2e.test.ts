@@ -39,8 +39,6 @@ const userId = `member_local_linq_scheduled_reminder_${Date.now()}`;
 const linqWebhookSecret = "linq-local-scheduled-reminder-secret";
 const reminderText = "Time to sleep. Put the phone down and get some rest.";
 const scheduledReminderImageAlt = "Sleep reminder illustration";
-const scheduledReminderDeliveredText =
-  `${reminderText}\n\n${scheduledReminderImageAlt}`;
 const overlapReminderText = "Time to sleep. This is the overlap reminder.";
 const overlapForegroundInboundText = "Still there while the bedtime reminder is due?";
 const overlapForegroundReplyText = "Yep, I am here.";
@@ -302,7 +300,7 @@ describe("hosted local Linq scheduled reminder e2e", () => {
     });
     const reminderSendBaselineCount = countScheduledReminderSendsWithoutNudge({
       expectedPath: reminderPath,
-      expectedText: scheduledReminderDeliveredText,
+      expectedText: reminderText,
     });
     const reminderAttachmentBaselineCount = requireLinqStub().countObservedRequests({
       expectedMethod: "POST",
@@ -315,7 +313,7 @@ describe("hosted local Linq scheduled reminder e2e", () => {
     const sendRequest = await waitForScheduledReminderSendWithoutNudge({
       baselineCount: reminderSendBaselineCount,
       expectedPath: reminderPath,
-      expectedText: scheduledReminderDeliveredText,
+      expectedText: reminderText,
       timeoutMs: scheduledReminderSendWaitMs,
       userId,
     });
@@ -324,11 +322,11 @@ describe("hosted local Linq scheduled reminder e2e", () => {
     expect(requireObservedRequestTimestamp(sendRequest))
       .toBeGreaterThanOrEqual(Date.parse(scheduledReminderTimes.dueAtIso));
     expect(requireLinqStub().readObservedMessageText(sendRequest))
-      .toBe(scheduledReminderDeliveredText);
+      .toBe(reminderText);
     expect(readObservedLinqMessageParts(sendRequest)).toEqual([
       {
         type: "text",
-        value: scheduledReminderDeliveredText,
+        value: reminderText,
       },
       expect.objectContaining({
         attachment_id: expect.stringMatching(/^attachment_local_/u),
