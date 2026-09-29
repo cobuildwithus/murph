@@ -2556,6 +2556,15 @@ to apply after cutover.
   updates cover all three channels and preserve stale-lease rejection. These
   facts never acknowledge mailbox consumption; the checkpoint retains ownership.
   A system head ages from its accepted mailbox creation time.
+  Imported `member.activated` work may defer its alert while the same active
+  default-mode runtime owns both its workspace progress generation and the
+  latest foreground trace's attempt/generation. That trace must prove a terminal
+  reply or no-reply after the activation and last workspace checkpoint, with an
+  unexpired runtime-owned checkpoint deadline. Read only the newest trace through
+  the existing member/acceptance index; never fall back to older evidence when
+  that trace is incomplete. Expiry restores the original activation age. Other
+  system kinds, unimported activation, retired owners, generation mismatches,
+  and already-published completion retain normal stall classification.
   Lane high-water reads select only sequence and update time; they never fetch
   inline or externalized mailbox ciphertext.
   Import and unrelated

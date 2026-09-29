@@ -93,6 +93,97 @@ describe.skipIf(!runPostgresProof)(
       }
     }, 60_000);
 
+    it("bounds activation deferral to imported work and the current owner's latest completed foreground input", async () => {
+      const prisma = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const userId = `progress-activation-proof-${randomUUID()}`;
+      const acceptedAt = new Date("2026-08-10T15:00:00Z");
+      const foregroundAt = new Date("2026-08-10T15:12:00Z");
+      const completedAt = new Date("2026-08-10T15:14:00Z");
+      const now = new Date("2026-08-10T15:20:00Z");
+      const checkpointedAt = new Date("2026-08-10T15:10:00Z");
+      const deadline = new Date("2026-08-10T15:24:00Z");
+      const runtimeAttemptId = "activation-proof-attempt";
+      const mailboxItemId = `${userId}-conversation-item-1`;
+      const assertStalled = async (count: number, at = now) => {
+        await expect(readHostedRuntimeProgressHealth({ now: at, prisma }))
+          .resolves.toMatchObject({ stalledSystemLaneCount: count });
+      };
+      try {
+        await prisma.hostedMember.create({ data: member(userId, HostedBillingStatus.active) });
+        await seedProgressLane({ createdAt: acceptedAt, kind: "member.activated", lane: "system", tx: prisma, userId });
+        await seedProgressLane({ createdAt: foregroundAt, lane: "conversation", tx: prisma, userId });
+        await prisma.hostedWorkspace.create({ data: {
+          userId, checkpointedAt, systemMailboxProgressGeneration: 2n,
+          redactedStatusJson: { hostedMailboxSystemImportedSeq: "1" },
+        } });
+        await prisma.hostedRuntimeOwner.create({ data: {
+          userId, migrationPhase: "postgres", phase: "active", processingMode: "default",
+          attemptId: runtimeAttemptId, generation: 2n, acceptedAt,
+        } });
+        await recordHostedIngressAssistantInputStaged({
+          authenticatedUserId: userId, mailboxItemId, assistantInputId: `${userId}-input`,
+          source: "email", at: foregroundAt, runtimeAttemptId, prisma,
+        });
+        await assertStalled(1);
+        await recordHostedIngressDeliveryCommitted({
+          authenticatedUserId: userId, mailboxItemIds: [mailboxItemId], source: "email",
+          at: completedAt.toISOString(), checkpointPublicationExpectedBy: deadline.toISOString(),
+          runtimeAttemptId, runtimeLeaseGeneration: "2", prisma,
+        });
+        // Exact conversation consumption must not erase its checkpoint expectation.
+        await prisma.hostedMailboxItem.update({ where: { id: mailboxItemId }, data: { consumedAt: completedAt } });
+        await assertStalled(0);
+        await assertStalled(0, deadline);
+        await assertStalled(1, new Date(+deadline + 1));
+        for (const override of [
+          { phase: "idle" }, { phase: "retiring" }, { processingMode: "system_mailbox" },
+          { attemptId: "another-attempt" }, { generation: 3n }, { completedAt },
+        ]) {
+          await prisma.hostedRuntimeOwner.update({ where: { userId }, data: override });
+          await assertStalled(1);
+          await prisma.hostedRuntimeOwner.update({ where: { userId }, data: {
+            phase: "active", processingMode: "default", attemptId: runtimeAttemptId,
+            generation: 2n, completedAt: null,
+          } });
+        }
+        for (const override of [
+          { systemMailboxProgressGeneration: 1n },
+          { redactedStatusJson: { hostedMailboxSystemImportedSeq: "0" } },
+          { checkpointedAt: completedAt },
+        ]) {
+          await prisma.hostedWorkspace.update({ where: { userId }, data: override });
+          await assertStalled(1);
+          await prisma.hostedWorkspace.update({ where: { userId }, data: {
+            systemMailboxProgressGeneration: 2n, checkpointedAt,
+            redactedStatusJson: { hostedMailboxSystemImportedSeq: "1" },
+          } });
+        }
+        // A newer trace without completion must not fall back to old evidence.
+        const trace = await prisma.hostedIngressLatencyTrace.findUniqueOrThrow({ where: { mailboxItemId } });
+        await prisma.hostedIngressLatencyTrace.create({ data: {
+          id: `${userId}-latest-trace`, userId, source: "email", mailboxLane: "conversation",
+          mailboxItemId: `${userId}-newer-item`, mailboxLaneSeq: 2n,
+          acceptedAt: new Date("2026-08-10T15:19:00Z"), runtimeAttemptId,
+          phaseBreakdownJson: {},
+        } });
+        await assertStalled(1);
+        await prisma.hostedIngressLatencyTrace.delete({ where: { id: `${userId}-latest-trace` } });
+        await prisma.hostedIngressLatencyTrace.update({ where: { id: trace.id }, data: {
+          phaseBreakdownJson: { assistant: {
+            terminalReplyCommittedAtEpochMs: +completedAt,
+            checkpointPublicationExpectedByEpochMs: +deadline,
+            runtimeLeaseGeneration: "1",
+          } },
+        } });
+        await assertStalled(1);
+      } finally {
+        await prisma.hostedRuntimeOwner.deleteMany({ where: { userId } });
+        await prisma.hostedIngressLatencyTrace.deleteMany({ where: { userId } });
+        await prisma.hostedMember.deleteMany({ where: { id: userId } });
+        await prisma.$disconnect();
+      }
+    }, 60_000);
+
     it("filters exact runtime authority and usage pauses", async () => {
       const prisma = createPrismaClient({ databaseUrl, poolMax: 1 });
       const rollback = new Error("Rollback runtime progress PostgreSQL proof.");
