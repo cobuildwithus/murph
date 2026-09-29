@@ -339,7 +339,14 @@ with an explicit incomplete disposition, leaving validated canonical facts
 unchanged. A resource that omits `meta.lastUpdated` takes its batch manifest
 `fetchedAt` as the source revision, so later retrievals supersede earlier ones
 and replays stay idempotent. Comparable clinical holds retain the existing
-revision protection.
+revision protection. A refresh preserves an existing parser hold for an unchanged
+Observation at the same revision only when its exact historical parser reason,
+identity, manifest-bound source bytes and resource contents match. The canonical
+lock spans the batched ledger lookup and import; matching holds count as review
+items, not imported labs, while unrelated and later-page records continue.
+Provider withdrawals, changed evidence and other revision conflicts retain their
+existing rejection behavior. Promoting a historical hold requires explicit
+canonical correction.
 Web accepts partial received-page counts below served counts, rejects
 excess counts, and records same-generation saved counts after authorization
 ends without restoring access. Permanent outcome conflicts leave the mailbox

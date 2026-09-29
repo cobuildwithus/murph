@@ -378,59 +378,62 @@ function externalRefMatches(record: { externalRef?: unknown }, input: FindEventB
 export async function findEventByExternalRef(
   input: FindEventByExternalRefInput,
 ): Promise<EventRecord | null> {
+  return (await findEventsByExternalRefs({ vaultRoot: input.vaultRoot, refs: [input] }))[0] ?? null;
+}
+
+/** Resolve a bounded caller batch with two ledger scans, rather than two per identity. */
+export async function findEventsByExternalRefs(input: {
+  vaultRoot: string;
+  refs: readonly Omit<FindEventByExternalRefInput, "vaultRoot">[];
+}): Promise<Array<EventRecord | null>> {
+  if (input.refs.length === 0) return [];
+  const key = (ref: unknown): string => {
+    if (!ref || typeof ref !== "object" || Array.isArray(ref)) return "";
+    const value = ref as Record<string, unknown>;
+    return JSON.stringify([value.system, value.resourceType, value.resourceId]);
+  };
+  const requests = new Map<string, FindEventByExternalRefInput[]>();
+  for (const ref of input.refs) {
+    const request = { ...ref, vaultRoot: input.vaultRoot };
+    const bucket = requests.get(key(ref)) ?? [];
+    bucket.push(request);
+    requests.set(key(ref), bucket);
+  }
   const relativePaths = await listEventLedgerShardPaths(input.vaultRoot);
   const candidateIds = new Set<string>();
-
   for (const relativePath of relativePaths) {
-    const records = await readEventLedgerShardRecords({
-      vaultRoot: input.vaultRoot,
-      relativePath,
-    });
-
-    for (const rawRecord of records) {
-      // Unrelated supported legacy records need not satisfy today's contract.
-      if (!externalRefMatches(rawRecord, input)) continue;
-      const record = validateStoredEventRecord(rawRecord as JsonObject);
-      candidateIds.add(record.id);
-    }
-  }
-
-  if (candidateIds.size === 0) {
-    return null;
-  }
-
-  const latestByCandidateId = new Map<string, MatchedEventRecord>();
-  for (const relativePath of relativePaths) {
-    const records = await readEventLedgerShardRecords({
-      vaultRoot: input.vaultRoot,
-      relativePath,
-    });
-
-    for (const rawRecord of records) {
-      if (typeof rawRecord.id !== "string" || !candidateIds.has(rawRecord.id)) continue;
-      const record = validateStoredEventRecord(rawRecord as JsonObject);
-      const entry = { relativePath, record };
-      const latest = latestByCandidateId.get(record.id);
-      if (!latest || compareEventSpineEntries(latest, entry) < 0) {
-        latestByCandidateId.set(record.id, entry);
+    for (const rawRecord of await readEventLedgerShardRecords({ vaultRoot: input.vaultRoot, relativePath })) {
+      const candidates = requests.get(key(rawRecord.externalRef)) ?? [];
+      if (candidates.some((request) => externalRefMatches(rawRecord, request))) {
+        candidateIds.add(validateStoredEventRecord(rawRecord as JsonObject).id);
       }
     }
   }
-
-  const matchingLatestEntries = [...latestByCandidateId.values()].filter((entry) =>
-    externalRefMatches(entry.record, input)
-  );
-  const liveMatchingLatestEntries = matchingLatestEntries.filter((entry) =>
-    !isDeletedEventSpineRecord(entry.record)
-  );
-  const latest = selectLatestEventSpineEntry(
-    liveMatchingLatestEntries.length > 0 ? liveMatchingLatestEntries : matchingLatestEntries,
-  );
-  if (!latest || (!input.includeDeleted && isDeletedEventSpineRecord(latest.record))) {
-    return null;
+  if (candidateIds.size === 0) return input.refs.map(() => null);
+  const latestByCandidateId = new Map<string, MatchedEventRecord>();
+  for (const relativePath of relativePaths) {
+    for (const rawRecord of await readEventLedgerShardRecords({ vaultRoot: input.vaultRoot, relativePath })) {
+      if (typeof rawRecord.id !== "string" || !candidateIds.has(rawRecord.id)) continue;
+      const entry = { relativePath, record: validateStoredEventRecord(rawRecord as JsonObject) };
+      const latest = latestByCandidateId.get(entry.record.id);
+      if (!latest || compareEventSpineEntries(latest, entry) < 0) latestByCandidateId.set(entry.record.id, entry);
+    }
   }
-
-  return latest.record;
+  const latestByIdentity = new Map<string, MatchedEventRecord[]>();
+  for (const entry of latestByCandidateId.values()) {
+    const ref = entry.record.externalRef;
+    if (!ref) continue;
+    const bucket = latestByIdentity.get(key(ref)) ?? [];
+    bucket.push(entry);
+    latestByIdentity.set(key(ref), bucket);
+  }
+  return input.refs.map((ref) => {
+    const matching = (latestByIdentity.get(key(ref)) ?? []).filter((entry) =>
+      externalRefMatches(entry.record, { ...ref, vaultRoot: input.vaultRoot }));
+    const live = matching.filter((entry) => !isDeletedEventSpineRecord(entry.record));
+    const latest = selectLatestEventSpineEntry(live.length > 0 ? live : matching);
+    return !latest || (!ref.includeDeleted && isDeletedEventSpineRecord(latest.record)) ? null : latest.record;
+  });
 }
 
 function rawRefMatches(record: EventRecord, rawRef: string, input: FindEventsByRawRefsInput): boolean {
