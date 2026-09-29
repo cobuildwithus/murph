@@ -1,6 +1,6 @@
 # Reduce hosted runtime request amplification
 
-Status: active
+Status: completed
 Created: 2026-09-28
 Updated: 2026-09-28
 
@@ -18,7 +18,8 @@ Remove premature command expiry, unnecessary recovery waits, and empty device-im
 ## Scope
 
 - Murph runtime processing and Junction reconciliation, tests, and contract documentation.
-- No production mutations, release, new state, caching layer, dependencies, or orchestration changes.
+- Companion orchestration correction: Murph Cloud PR #172 normalizes carried activity deadlines using the existing released public timeout contract.
+- No production mutations, release, new state, caching layer, or dependencies.
 
 ## Constraints
 
@@ -39,7 +40,7 @@ Keep Postgres admission, exact native stoppedness, fresh import authority, bound
 
 ## Decisions
 
-- Source of truth is Murph. Private orchestration was inspected read-only and remains outside edit scope.
+- Source of truth for shared timeout constants and runtime behavior is Murph. Murph Cloud owns the downstream workflow option clamp; existing released exports suffice without a package bump.
 - Prefer fewer operations over caching authenticated control responses.
 - Internal scheduling and request efficiency only; no new member-facing controls or product promise.
 
@@ -54,4 +55,7 @@ Keep Postgres admission, exact native stoppedness, fresh import authority, bound
 - Parent review: no new owners, persistent state, configuration, dependencies, or protocol fields. Existing disconnect, history, native retirement, and mixed-controller fixtures remain covered.
 - Product UX: Patch, Ready at the changed internal boundaries. Covered delayed startup, foreground recovery, uncertain stop, empty device results, populated import, and historical continuation. End-to-end production latency and aggregate request reduction are not claimed before deployment.
 - Changelog: not applicable; internal runtime scheduling and redundant request removal without a new member-facing feature or contract.
-- Remaining completion gates: exact-head CI and required final ReviewGPT. No merge or deployment is authorized by this task.
+- Public final ReviewGPT passed for a559e88dc63b284e76e25c924a9c748d336f05fa with no qualifying findings. Review: https://chatgpt.com/c/6abb01f3-d8dc-83ea-acfb-0fc002447831.
+- Companion fix: https://github.com/cobuildwithus/murph-cloud/pull/172. Synthetic carried 15-second options normalize to 25 seconds and survive Continue-as-New; 497 focused workflow/replay tests and two entrypoint tests passed. No new command, state, or patch marker.
+- This plan closes implementation and local proof. Exact-head CI and companion review completion are tracked on the two PRs. Production latency and traffic reduction require a later authorized rollout and measurement. No merge or deployment is authorized by this task.
+Completed: 2026-09-28
