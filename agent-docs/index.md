@@ -768,3 +768,7 @@ Personal Patterns bounded capacity recovery: [`capacity recovery`](exec-plans/co
 Signup-wide native contact-card sharing and daily attempt suppression are owned by
 `operations/imessage-deliverability.md`; implementation and receipt-order proof
 are tracked in `exec-plans/completed/2026-09-24-signup-contact-card.md`.
+
+Explicit reviewed clinical image omission is owned by the Clinical Records Intake
+storage contract; proof is recorded in
+[`clinical image storage`](exec-plans/completed/2026-09-28-clinical-image-storage.md).

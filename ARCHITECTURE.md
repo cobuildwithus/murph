@@ -1141,7 +1141,10 @@ bound produces explicit incomplete coverage.
 `packages/clinical-records` and `packages/importers` own attachment integrity,
 parent binding and source-note mapping. `packages/vault-usecases` persists
 untouched FHIR pages and original attachment bytes through canonical raw writes,
-then applies validated clinical decisions. Text, HTML and clinical XML retain
+then applies validated clinical decisions. Explicit reviewed image omission is
+the narrow exception owned by the Clinical Records Intake storage contract: a
+canonical raw receipt preserves original identity and attests retained bytes.
+Text, HTML and clinical XML retain
 source meaning; PDFs reuse the public Poppler parser. Unreadable files remain
 raw evidence. A parent with unresolved body parts remains incomplete, allowing
 later same-revision recovery without a conflicting partial canonical note.
@@ -1195,7 +1198,8 @@ back accepted writes before advancing the page. Host-owned date provenance tags
 and evidence travel with accepted records. Missing date provenance is held for
 both fresh and previously frozen proposals. Document evidence must contain a
 matching full date and no conflicting dates; valid siblings continue to import.
-Extraction cache v3 binds bytes, media type and parent clinical-date context;
+Extraction cache v3 binds original source identity, media type and parent
+clinical-date context. Fresh extraction uses the verified retained-byte digest;
 cached source-based proposals resolve against each current attested parent.
 Derived records use the attested parent source identity, an extraction facet and
 the parent revision. The existing writer index enforces parent revision guards

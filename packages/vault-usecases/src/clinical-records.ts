@@ -41,6 +41,8 @@ import {
 import * as z from "@murphai/contracts/zod-runtime";
 
 import { extractClinicalDocumentText } from "./clinical-document-text.js";
+import { readMinimizedClinicalDocument } from "./clinical-document-storage.ts";
+export { minimizeClinicalDocumentImages, readClinicalStoredDocument } from "./clinical-document-storage.ts";
 
 import { loadRuntimeModule } from "./runtime-import.js";
 
@@ -485,7 +487,7 @@ export async function importClinicalFhirSnapshot(
     (decision) => decision.action === "review",
   ).length;
   const rawContents = [
-    ...prepareClinicalDocumentRawContents(input, prepared.manifestPath),
+    ...await prepareClinicalDocumentRawContents(input, prepared.manifestPath),
     ...prepared.pages.map((page) => ({
       allowExistingMatch: true,
       content: page.content,
@@ -764,7 +766,7 @@ function prepareClinicalFhirSnapshot(input: ClinicalFhirSnapshotImportInput): {
   };
 }
 
-function prepareClinicalDocumentRawContents(
+async function prepareClinicalDocumentRawContents(
   input: ClinicalFhirSnapshotImportInput,
   manifestPath: string,
 ) {
@@ -777,9 +779,15 @@ function prepareClinicalDocumentRawContents(
     if (!bytes || bytes.length !== attachment.byteLength || hashClinicalDocumentBytes(bytes) !== attachment.sha256) {
       throw new ClinicalFhirSnapshotRejectedError(new TypeError("Clinical document bytes do not match the manifest."));
     }
+    const rawRef = clinicalRawPathSchema.parse(`${path.posix.dirname(manifestPath)}/${attachment.relativePath}`);
+    // Replays still validate the original provider bytes above. Retention receipts
+    // permit an exact existing minimized postimage without restoring omitted data.
+    const retained = await readMinimizedClinicalDocument({ vaultRoot: input.vaultRoot,
+      source: { rawRef, sha256: attachment.sha256, byteLength: attachment.byteLength, mediaType: attachment.mediaType },
+    }) ?? bytes;
     prepared.set(attachment.relativePath, {
       allowExistingMatch: true,
-      content: bytes,
+      content: retained,
       mediaType: attachment.mediaType,
       originalFileName: path.posix.basename(attachment.relativePath),
       targetRelativePath: clinicalRawPathSchema.parse(`${path.posix.dirname(manifestPath)}/${attachment.relativePath}`),

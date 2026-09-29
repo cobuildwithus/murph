@@ -18,6 +18,7 @@ import {
   ClinicalFhirRetrievalCheckpointError,
   ClinicalFhirSnapshotRejectedError,
   importClinicalFhirSnapshot,
+  minimizeClinicalDocumentImages,
   readClinicalFhirRetrievalCheckpoint,
   readClinicalFhirRetrievalCheckpointForRun,
   type ClinicalFhirSnapshotImportInput,
@@ -88,6 +89,34 @@ describe("importClinicalFhirSnapshot", () => {
     const note = await findEventByExternalRef({ vaultRoot: input.vaultRoot, system: `epic-fhir-${FHIR_BASE_URL_HASH}-${PATIENT_ID_HASH}`, resourceType: "document-reference", resourceId: resource.id });
     expect(JSON.stringify(note)).toContain("Historical discharge summary");
     expect((await importClinicalFhirSnapshot(input)).canonical.skippedExistingCount).toBe(1);
+  });
+
+  it("replays original provider input without restoring reviewed omitted image bytes", async () => {
+    const decoration = Buffer.alloc(3000, 7);
+    const original = Buffer.from(`<html><body><p>Historical discharge summary.</p><img src="data:image/png;base64,${decoration.toString("base64")}"/></body></html>`);
+    const sha256 = createHash("sha256").update(original).digest("hex");
+    const resource = {
+      resourceType: "DocumentReference", id: "retained-note", status: "current",
+      subject: { reference: `Patient/${PATIENT_ID}` },
+      meta: { lastUpdated: "2026-07-10T12:00:00.000Z" }, date: "2020-07-10T12:00:00.000Z",
+      content: [{ attachment: { contentType: "text/html", url: "Binary/discharge" } }],
+    };
+    const content = fhirBundle([resource]);
+    const input = await createSnapshotInput({ pages: [{ content, resourceType: "DocumentReference" }], resourceTypes: ["DocumentReference"] });
+    const relativePath = `attachments/${sha256}.bin`;
+    input.documentAttachments = [{ parentPageSha256: createHash("sha256").update(content).digest("hex"), resourceType: "DocumentReference", resourceId: resource.id,
+      attachmentIndex: 0, status: "downloaded", relativePath, sha256, byteLength: original.length, mediaType: "text/html" }];
+    input.attachments = [{ relativePath, contentBase64: original.toString("base64") }];
+    const result = await importClinicalFhirSnapshot(input);
+    expect(result.canonical.createdCount).toBe(1);
+    expect(await minimizeClinicalDocumentImages({ vaultRoot: input.vaultRoot, manifestPath: result.manifestPath, manifestSha256: result.manifestSha256,
+      attachmentRelativePath: relativePath, reviewedImageSha256s: [createHash("sha256").update(decoration).digest("hex")],
+    })).toMatchObject({ changed: true });
+    const file = path.join(input.vaultRoot, path.posix.dirname(result.manifestPath), relativePath);
+    const retained = await readFile(file);
+    expect(retained.length).toBeLessThan(original.length);
+    expect((await importClinicalFhirSnapshot(input)).canonical).toMatchObject({ createdCount: 0, skippedExistingCount: 1 });
+    expect(await readFile(file)).toEqual(retained);
   });
 
   it("preserves a DiagnosticReport study image with a metadata-only source receipt", async () => {
