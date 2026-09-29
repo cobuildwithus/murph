@@ -6,6 +6,8 @@ import type {
 } from "@prisma/client";
 
 import { getPrisma } from "../prisma";
+import { sendHostedTelegramTypingBestEffort } from "./telegram-client";
+
 import {
   requireHostedLinqMessageEditedEvent,
   requireHostedLinqParticipantChangedEvent,
@@ -2229,9 +2231,15 @@ export async function handleHostedOnboardingTelegramWebhook(input: {
   }
 
   const confirmationDeadlineMs = createHostedPostCommitDeadline(undefined);
+  // The committed planner result proves fresh direct-message admission. Start
+  // activity alongside the wake, so native runner activation cannot delay it.
+  const ingressTypingAcceptedAt = plan.telegramTypingThreadId
+    ? sendHostedTelegramTypingBestEffort(plan.telegramTypingThreadId)
+    : undefined;
   try {
     await maybeHandoffHostedExecutionWebhookWake({
       webhookReceivedAt: input.webhookReceivedAt,
+      ingressTypingAcceptedAt,
       response: plan.response,
       scheduleAfterResponse: input.scheduleAfterResponse,
       signal: input.signal,

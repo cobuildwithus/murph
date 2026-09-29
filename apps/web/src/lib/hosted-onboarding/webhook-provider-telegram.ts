@@ -699,7 +699,13 @@ export async function planHostedOnboardingTelegramWebhook(input: {
       eventId, mailboxItemId: mailboxAppend.item.id, source: "telegram", userId: runtimeMemberId,
       wakeMailboxCheckpoint: { lane: mailboxAppend.item.lane, laneSeq: mailboxAppend.item.laneSeq },
     }],
+    ...buildTelegramIngressTypingPlan(summary.isDirect, mailboxAppend.duplicate, telegramMessage.threadId),
   };
+}
+
+/** Only a fresh direct conversation promises a reply before runtime routing. */
+function buildTelegramIngressTypingPlan(isDirect: boolean, duplicate: boolean, threadId: string) {
+  return isDirect && !duplicate ? { telegramTypingThreadId: threadId } : {};
 }
 
 async function revalidatePreparedDirectTelegramRouteTx(input: {

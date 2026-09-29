@@ -360,7 +360,10 @@ async function runRuntimeEnsureProcessingForUser(input: {
   try {
     postgres = await ensurePostgresRuntimeProcessing(input.context.env, command, diagnostics);
   } finally {
-    if (postgres?.kind !== "runtime_processing_accepted" || postgres.action !== "woken") {
+    if (postgres?.kind !== "runtime_processing_accepted" || postgres.action !== "woken"
+      || Date.now() - input.commandStartedAtEpochMs > 1_000) {
+      // Fast wakes stay quiet; successful slow wakes still need their native
+      // dispatch/handler timings to explain foreground latency.
       // Snapshot before detaching so telemetry cannot extend the command budget.
       const entry = buildRuntimeProcessingSummaryEntry(diagnostics, postgres, input.commandStartedAtEpochMs);
       const telemetry = Promise.resolve().then(() => recordRuntimeProcessingSummary({

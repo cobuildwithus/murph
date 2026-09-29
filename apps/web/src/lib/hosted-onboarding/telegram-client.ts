@@ -157,6 +157,32 @@ function readHostedTelegramRetryAfterSeconds(
     : undefined;
 }
 
+/** One short-lived acknowledgement; the runtime owns subsequent refreshes. */
+export async function sendHostedTelegramTypingBestEffort(threadId: string): Promise<Date | null> {
+  try {
+    const target = parseTelegramThreadTarget(threadId);
+    if (!target) return null;
+    const payload = await callHostedTelegramApi({
+      body: {
+        chat_id: target.chatId,
+        action: "typing",
+        ...(target.businessConnectionId ? { business_connection_id: target.businessConnectionId } : {}),
+        ...(target.messageThreadId ? { message_thread_id: target.messageThreadId } : {}),
+      },
+      method: "sendChatAction",
+      readJson: true,
+      signal: AbortSignal.timeout(2_000),
+    });
+    return payload && typeof payload === "object"
+      && "ok" in payload && payload.ok === true
+      && "result" in payload && payload.result === true
+      ? new Date() : null;
+  } catch {
+    // Optional provider activity cannot delay or fail durable mailbox processing.
+    return null;
+  }
+}
+
 export async function getHostedTelegramGroupTitle(input: {
   signal?: AbortSignal;
   threadId: string;

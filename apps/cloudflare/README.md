@@ -717,6 +717,12 @@ private deployment boundaries still apply.
 
 ## Private Operational Telemetry
 
+Successful warm ensure-processing requests omit the detached processing summary
+only when they complete within one second. Slower successes retain the existing
+native wake entry, dispatch, response, and handler timing fields, so platform
+dispatch delay can be distinguished from work inside the runner. Logging remains
+detached and cannot extend the command budget or change admission.
+
 OpenAI Responses upgrades return the upstream `Response` and unaccepted
 `webSocket` unchanged. Cloudflare forwards the connection; native Codex owns
 continuation, idle reuse, and reconnect/fallback. The Worker owns handshake

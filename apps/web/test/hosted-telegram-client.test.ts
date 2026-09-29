@@ -10,6 +10,7 @@ import {
   answerHostedTelegramCallbackQueryBestEffort,
   getHostedTelegramGroupTitle,
   sendHostedTelegramTextMessage,
+  sendHostedTelegramTypingBestEffort,
 } from "@/src/lib/hosted-onboarding/telegram-client";
 
 describe("hosted Telegram client", () => {
@@ -24,6 +25,30 @@ describe("hosted Telegram client", () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.unstubAllGlobals();
+  });
+
+  it("records typing only after provider acceptance and preserves the exact target", async () => {
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({ ok: true, result: true })));
+    await expect(sendHostedTelegramTypingBestEffort("42:topic:7")).resolves.toBeInstanceOf(Date);
+    const [url, request] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("https://api.telegram.org/bottelegram-token/sendChatAction");
+    expect(JSON.parse(String(request.body))).toEqual({ chat_id: "42", message_thread_id: 7, action: "typing" });
+  });
+
+  it.each([
+    [200, '{"ok":false,"result":true}'],
+    [200, '{"ok":true,"result":false}'],
+    [200, '{}'],
+    [200, 'invalid'],
+    [429, '{"ok":false}'],
+  ])("does not record rejected or invalid typing (%s, %s)", async (status, body) => {
+    fetchMock.mockResolvedValue(new Response(body, { status }));
+    await expect(sendHostedTelegramTypingBestEffort("42")).resolves.toBeNull();
+  });
+
+  it("does not surface optional typing transport failures", async () => {
+    fetchMock.mockRejectedValue(new Error("Synthetic transport failure"));
+    await expect(sendHostedTelegramTypingBestEffort("42")).resolves.toBeNull();
   });
 
   it("preserves the exact Telegram thread and replies to the inbound message", async () => {

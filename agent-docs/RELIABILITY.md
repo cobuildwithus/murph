@@ -2445,6 +2445,12 @@ to apply after cutover.
   observed typing uses the strict warm/cold threshold. Frozen emails retain both
   receipt and silence-start timestamps; older records retain their original text.
   Telegram retains exact-input typing observations and the existing thresholds.
+  Fresh access-admitted direct Telegram messages start one best-effort typing
+  request after mailbox commit, concurrently with the wake handoff. Duplicates,
+  groups, onboarding and denied inputs do not use this ingress acknowledgement.
+  Only Telegram's successful JSON acceptance records the existing ingress typing
+  timestamp. The request has a two-second budget, no retry, and cannot block or
+  fail durable wake handoff; ongoing refresh remains runtime-owned.
   Accepted-typing persistence waits for competing short trace-row writes in the
   detached callback; other retry-backed milestones keep skipping locked rows.
   Transport exceptions use the existing two retries (250 ms and 1 second), and

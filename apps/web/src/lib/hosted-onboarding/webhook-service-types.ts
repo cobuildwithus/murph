@@ -16,6 +16,8 @@ export type HostedWebhookWakeMailboxCheckpoint = {
 export type HostedWebhookPlan<TResult, TSideEffect = never> = {
   desiredSideEffects: readonly TSideEffect[];
   linqReadReceiptRouteAuthority?: HostedLinqThreadRouteEgressAuthority;
+  /** Fresh, access-admitted direct input only; consumed after transaction commit. */
+  telegramTypingThreadId?: string;
   postCommitGroupJoinConfirmationMemberIds?: readonly string[];
   postCommitPhoneCallResultRecoveryMemberIds?: readonly string[];
   postCommitSignupNotificationMemberIds?: readonly string[];
