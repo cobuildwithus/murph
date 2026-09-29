@@ -22,6 +22,8 @@ FROM rust:1.95.0-slim-bookworm@sha256:d7482085ff5b415f84dba5647ae71606650bdef00d
 
 ARG CODEX_CLI_VERSION
 ARG CODEX_UPSTREAM_REVISION
+# CI runners have four vCPUs and pass CODEX_CARGO_JOBS=4; local Docker VMs keep 2.
+ARG CODEX_CARGO_JOBS=2
 
 RUN apt-get update \
   && apt-get install -y --no-install-recommends \
@@ -49,7 +51,7 @@ RUN git apply --check /tmp/codex-public-live.patch \
   && cd codex-rs \
   && export CODEX_BWRAP_SHA256="$(sha256sum /opt/codex/codex-resources/bwrap | cut -d ' ' -f 1)" \
   && export STABLE_GIT_COMMIT="${CODEX_UPSTREAM_REVISION}.murph.$(sha256sum /tmp/codex-public-live.patch | cut -d ' ' -f 1)" \
-  && cargo build --locked --release --target x86_64-unknown-linux-gnu --bin codex --jobs 2 \
+  && cargo build --locked --release --target x86_64-unknown-linux-gnu --bin codex --jobs "${CODEX_CARGO_JOBS}" \
   && strip --strip-debug --strip-unneeded target/x86_64-unknown-linux-gnu/release/codex \
   && install -m 0755 target/x86_64-unknown-linux-gnu/release/codex /opt/codex/bin/codex \
   && printf '%s\n' "${STABLE_GIT_COMMIT}" > /opt/codex/murph-source-revision
