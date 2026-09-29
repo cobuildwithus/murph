@@ -17416,6 +17416,191 @@ describeRealCodex('real Codex memory compact receipt e2e', () => {
   }, 720_000)
 })
 
+async function seedFocusedSleepReadVault(vaultRoot: string): Promise<void> {
+  await initializeVault({ vaultRoot, timezone: 'UTC', createdAt: '2026-01-01T00:00:00Z' })
+  const { importDeviceBatch } = await import('@murphai/core')
+  const common = { timeZone: 'UTC', occurredAt: '2026-01-03T07:00:00Z', recordedAt: '2026-01-03T08:00:00Z' }
+  await importDeviceBatch({ vaultRoot, provider: 'oura', importedAt: common.recordedAt, events: [
+    { ...common, kind: 'sleep_session', title: 'Synthetic main sleep',
+      externalRef: { system: 'oura', resourceType: 'sleep', resourceId: 'synthetic-sleep-night', facet: 'window' },
+      fields: { startAt: '2026-01-02T23:00:00Z', endAt: common.occurredAt, durationMinutes: 480, sleepType: 'main_sleep' } },
+    ...[['total-sleep-minutes', 450], ['deep-minutes', 90], ['rem-minutes', 110], ['light-minutes', 250]].map(([metric, value]) => ({
+      ...common, kind: 'observation', title: 'Synthetic sleep observation',
+      externalRef: { system: 'oura', resourceType: 'sleep', resourceId: 'synthetic-sleep-night', facet: String(metric) },
+      fields: { metric, value, unit: 'minutes' },
+    })),
+  ] })
+}
+
+async function buildFocusedSleepReadInstructions(vaultRoot: string) {
+  const manifest = await readAssistantCliLlmsFullManifestFromCliEntry({
+    cliEntryPath: fileURLToPath(new URL('../../cli/dist/bin.js', import.meta.url)),
+    workingDirectory: fileURLToPath(new URL('../../../', import.meta.url)),
+  })
+  const sleep = manifest.commands.find(command => command.name === 'wearables sleep list')
+  expect(sleep?.schema?.options?.properties).toMatchObject({
+    date: expect.any(Object), provider: expect.any(Object), limit: expect.any(Object),
+  })
+  const contract = buildAssistantCliSurfaceContract(manifest)
+  if (!contract) throw new Error('The focused sleep journey requires the generated production CLI contract.')
+  expect(contract).toContain('`sleep list`')
+  const time = { ...await resolveAssistantPromptTimeContext(vaultRoot), currentLocalDate: '2026-01-03' }
+  const developerInstructions = buildWearableArrivalDeveloperInstructions(time, contract)
+  expect(developerInstructions).toContain(contract)
+  return { time, developerInstructions }
+}
+
+function readFocusedSleepCommand(command: string): string {
+  // Admit only the observed single native wrapper, never arbitrary shell prefixes.
+  expect(command).not.toMatch(/[\r\n]/u)
+  const unwrapped = command.match(/^\/bin\/zsh -c '([^']+)'$/u)?.[1] ?? command
+  expect(unwrapped).toMatch(/^[ \t]*vault-cli[ \t]+wearables[ \t]+sleep[ \t]+list(?:[ \t]|$)/u)
+  // Plain flags/values only: no quoting, expansion, chaining, redirects or escapes.
+  expect(unwrapped).not.toMatch(/[^A-Za-z0-9_= \t-]/u)
+  return unwrapped
+}
+
+function expectFocusedSleepReadOutput(output: string): void {
+  if (output.trimStart().startsWith('{')) {
+    const document = readRecord(JSON.parse(output))
+    expect(document?.ok === true ? document.data : document).toMatchObject({ count: 1, items: [{
+      date: '2026-01-03', provider: 'oura',
+      totalSleepMinutes: { value: 450, unit: 'minutes', provider: 'oura' },
+    }] })
+    return
+  }
+  // Default TOON: bind provenance and duration to the same metric, not another field.
+  expect(output).toMatch(/^\s*count: 1$/mu)
+  expect(output).toMatch(/^\s*items\[1\]:$/mu)
+  expect(output).toMatch(/^\s*- date: 2026-01-03$/mu)
+  const totalSleep = output.match(/^([ \t]+)totalSleepMinutes:\r?\n((?:\1[ \t]+[^\r\n]*(?:\r?\n|$))+)/mu)?.[2] ?? ''
+  expect(totalSleep).toMatch(/^\s*provider: oura$/mu)
+  expect(totalSleep).toMatch(/^\s*unit: minutes$/mu)
+  expect(totalSleep).toMatch(/^\s*value: 450$/mu)
+}
+
+describe('focused sleep read production contract', () => {
+  it('accepts direct and singly wrapped native sleep commands', () => {
+    for (const direct of [
+      'vault-cli wearables sleep list --help',
+      'vault-cli wearables sleep list --date 2026-01-03 --provider oura --format json',
+      'vault-cli wearables sleep list --date=2026-01-03',
+    ]) {
+      for (const command of [direct, `/bin/zsh -c '${direct}'`]) {
+        const [action] = readCapabilityRoutingActions([{ method: 'item/completed', params: { item: {
+          type: 'commandExecution', command, exitCode: 0, aggregatedOutput: '',
+        } } }])
+        if (action?.kind !== 'command') throw new Error('Expected a native command action.')
+        expect(readFocusedSleepCommand(action.command)).toBe(direct)
+      }
+    }
+  })
+
+  it('rejects unrelated commands, shell effects and extra wrapper layers', () => {
+    const help = 'vault-cli wearables sleep list --help'
+    const invalid = [
+      'vault-cli wearables sleep list-extra --help', 'vault-cli event add', 'cat synthetic-source',
+      `env ${help}`, `/bin/bash -c '${help}'`, `/bin/zsh -lc '${help}'`,
+      `/bin/zsh -c "${help}"`, `/bin/zsh -c '${help}' extra`,
+      ...[
+        '; touch synthetic-marker', ' && touch synthetic-marker', ' || touch synthetic-marker',
+        ' | cat', ' > synthetic-output', ' < synthetic-input',
+        ' $(touch synthetic-marker)', ' `touch synthetic-marker`', ' =(touch synthetic-marker)',
+        ' $SHELL', ' # comment', '\ncat synthetic-source', '\rcat synthetic-source', '\\',
+      ].map(suffix => `${help}${suffix}`),
+    ]
+    for (const command of invalid) {
+      expect(() => readFocusedSleepCommand(command), command).toThrow()
+      expect(() => readFocusedSleepCommand(`/bin/zsh -c '${command}'`), command).toThrow()
+    }
+  })
+
+  it('assembles the generated CLI contract and reads real canonical sleep in JSON and default TOON', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'murph-sleep-contract-'))
+    const vaultRoot = path.join(root, 'vault')
+    const commandLogPath = path.join(root, 'commands.log')
+    const binDirectory = path.join(root, 'bin')
+    try {
+      await seedFocusedSleepReadVault(vaultRoot)
+      await buildFocusedSleepReadInstructions(vaultRoot)
+      await materializeRealWorkoutVaultCli({ binDirectory, commandLogPath, vaultRoot })
+      const before = await snapshotRealCodexCanonicalVault(vaultRoot)
+      const args = ['wearables', 'sleep', 'list', '--date', '2026-01-03', '--provider', 'oura', '--limit', '1']
+      const json = await execFileAsync(path.join(binDirectory, 'vault-cli'), [...args, '--format', 'json'])
+      expectFocusedSleepReadOutput(json.stdout)
+      expect(JSON.parse(json.stdout)).toMatchObject({ count: 1, items: [{
+        date: '2026-01-03', totalSleepMinutes: { value: 450, unit: 'minutes', provider: 'oura' },
+        timeInBedMinutes: { value: 480 },
+      }] })
+      const toon = await execFileAsync(path.join(binDirectory, 'vault-cli'), args)
+      expectFocusedSleepReadOutput(toon.stdout)
+      expect(toon.stdout.trim()).not.toMatch(/^\{/u)
+      expect(toon.stdout).toMatch(/450/u)
+      expect(toon.stdout).toContain('totalSleepMinutes')
+      expect(await snapshotRealCodexCanonicalVault(vaultRoot)).toEqual(before)
+    } finally { await removeRealCodexTemporaryPaths([root]) }
+  }, 120_000)
+})
+
+describeRealCodex('real Codex focused sleep list e2e', () => {
+  it('answers one Oura sleep night from one real sleep read without unrelated reads or effects', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const root = await mkdtemp(path.join(tmpdir(), 'murph-focused-sleep-e2e-'))
+    const vaultRoot = path.join(root, 'vault')
+    const binDirectory = path.join(root, 'bin')
+    const commandLogPath = path.join(root, 'commands.log')
+    try {
+      await seedFocusedSleepReadVault(vaultRoot)
+      await materializeRealWorkoutVaultCli({ binDirectory, commandLogPath, vaultRoot })
+      await writeFile(commandLogPath, '')
+      const { time, developerInstructions } = await buildFocusedSleepReadInstructions(vaultRoot)
+      const prompt = await buildWearableArrivalPrompt({
+        occurredAt: '2026-01-03T12:00:00.000Z', promptTimeContext: time, vaultRoot,
+        text: 'How long did Oura say I actually slept for the night ending January 3, 2026? Read that one night of sleep history and tell me the total, not time in bed. No advice, other lookups, messages to anyone, or changes.',
+      })
+      const before = await snapshotRealCodexCanonicalVault(vaultRoot)
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome, developerInstructions, dynamicTools: [],
+        env: { ...config.env, PATH: `${binDirectory}${path.delimiter}${config.env.PATH ?? ''}` },
+        model: config.model, modelProvider: config.modelProvider, prompt,
+        reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory: vaultRoot,
+      })
+      const commands = (await readFile(commandLogPath, 'utf8')).trim().split('\n').filter(Boolean)
+      process.stdout.write(`[focused-sleep-list-e2e] ${JSON.stringify({ commands, reply: result.finalMessage })}\n`)
+      const actions = readCapabilityRoutingActions(result.jsonEvents)
+      // The generated compact contract permits targeted syntax help. It is not
+      // another data read; no root/family discovery or unrelated command is allowed.
+      const help = commands.filter(command => /(?:^|\s)--help(?:\s|$)/u.test(command))
+      const reads = commands.filter(command => !help.includes(command))
+      expect(help.length).toBeLessThanOrEqual(1)
+      expect(commands.every(command => command.startsWith('wearables sleep list '))).toBe(true)
+      expect(reads).toHaveLength(1)
+      expect(reads[0]).toMatch(/--date(?:=|\s)2026-01-03(?:\s|$)/u)
+      for (const provider of reads[0]!.matchAll(/(?:^|\s)--provider(?:=|\s+)(\S+)/gu)) {
+        expect(provider[1]?.toLowerCase()).toBe('oura')
+      }
+      expect(reads[0]).not.toMatch(/--(?:schema|from|to)\b/u)
+      expect(actions).toHaveLength(commands.length)
+      for (const action of actions) {
+        expect(action.kind).toBe('command')
+        if (action.kind !== 'command') throw new Error('No dynamic tools or delivery effects are permitted.')
+        expect(action.ok).toBe(true)
+        const command = readFocusedSleepCommand(action.command)
+        if (!/--help\b/u.test(command)) {
+          expectFocusedSleepReadOutput(action.output)
+        }
+      }
+      expect(await snapshotRealCodexCanonicalVault(vaultRoot)).toEqual(before)
+      expect(result.runtimeIssueInputs).toEqual([])
+      expect(result.finalMessage).toMatch(/450\s*(?:minutes?|mins?)|(?:7|seven)\s*(?:hours?|hrs?|h)\s*(?:,|and)?\s*(?:30|thirty)\s*(?:minutes?|mins?|m)|7(?:\.5|½)\s*(?:hours?|hrs?|h)|seven and a half hours/iu)
+      expect(result.finalMessage).not.toMatch(/(?:you (?:actually )?slept|asleep for|total sleep(?: was|:)?)\s+(?:480\s*(?:minutes?|mins?)|(?:8|eight)\s*(?:hours?|hrs?|h))\b/iu)
+      expect(result.finalMessage).not.toMatch(/\b(?:updated|saved|logged|sent|scheduled)\b|\?/iu)
+    } finally { await removeRealCodexTemporaryPaths([root, ...config.temporaryPaths]) }
+  }, 720_000)
+})
+
 describeRealCodex('real Codex wearable activity compact read e2e', () => {
   it(
     'answers same-day workout count and duration without loading bounded split detail',

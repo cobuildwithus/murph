@@ -832,6 +832,10 @@ is superseded historical evidence. `packages/query/README.md` owns the read poli
 Vault-share deferral diagnostic work is tracked in
 [`vault-share deferral observability`](exec-plans/completed/2026-09-25-vault-share-deferral-observability.md).
 
+Focused sleep-list implementation, local proof and external review are recorded in
+[`focused sleep-list read`](exec-plans/completed/2026-09-28-sleep-list-latency.md).
+[PR #3752](https://github.com/cobuildwithus/murph/pull/3752) owns pending exact-head CI and follow-up.
+
 Hosted CI PostgreSQL registry provenance is tracked in
 [`2026-09-28-postgres-ci-registry.md`](exec-plans/completed/2026-09-28-postgres-ci-registry.md).
 
