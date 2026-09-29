@@ -58,10 +58,13 @@ function deferred<T>() {
 }
 
 test.each([
-  { group: false, pendingAcceptance: false },
-  { group: false, pendingAcceptance: true },
-  { group: true, pendingAcceptance: false },
-])("real attachment import and HTTP typing survive runtime handoff (group: $group, pending: $pendingAcceptance)", async ({ group, pendingAcceptance }) => {
+  { group: false, pendingAcceptance: false, text: false },
+  { group: false, pendingAcceptance: true, text: false },
+  { group: true, pendingAcceptance: false, text: false },
+  { group: false, pendingAcceptance: false, text: true },
+  { group: false, pendingAcceptance: true, text: true },
+  { group: true, pendingAcceptance: false, text: true },
+])("real input import and HTTP typing precede admission and survive runtime handoff (group: $group, pending: $pendingAcceptance, text: $text)", async ({ group, pendingAcceptance, text }) => {
   vi.useFakeTimers({ toFake: ["Date"], now: new Date(TEST_NOW) });
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-typing-composed-"));
   const events: string[] = [];
@@ -69,11 +72,10 @@ test.each([
   let preparationAcceptedAt: string | null = null;
   const prepared = deferred<void>();
   const response = deferred<Response>();
-  const providerEntered = deferred<void>();
   const assistantEntered = deferred<void>();
   evidence.ready = prepared.promise;
   evidence.admitted = false;
-  const target = `synthetic_composed_${group ? "group" : "private"}_${pendingAcceptance ? "pending" : "accepted"}`;
+  const target = `synthetic_composed_${group ? "group" : "private"}_${pendingAcceptance ? "pending" : "accepted"}_${text ? "text" : "audio"}`;
   const route: HostedAssistantLinqDeliveryContext = {
     directRecipientPhoneNumber: null, fromPhoneNumber: null, replyToMessageId: "synthetic_audio_message",
     routeAuthority: group ? {
@@ -86,7 +88,6 @@ test.each([
   const providerFetch: typeof fetch = async (request, init) => {
     calls.push({ method: init?.method ?? "GET", pathname: new URL(String(request)).pathname });
     if (calls.length === 1) {
-      providerEntered.resolve();
       return response.promise;
     }
     return new Response(null, { status: 204 });
@@ -120,7 +121,7 @@ test.each([
           linqMessage: {
             chatId: target, messageId: "synthetic_audio_message", isFromMe: false,
             from: "synthetic_sender", threadIsDirect: !group,
-            parts: [{ type: "voice_memo", attachmentId: "synthetic_audio", fileName: "audio.m4a", mimeType: "audio/mp4", size: 4, url: "https://attachments.invalid/audio" }],
+            parts: text ? [{ type: "text", value: "Please help me plan tomorrow." }] : [{ type: "voice_memo", attachmentId: "synthetic_audio", fileName: "audio.m4a", mimeType: "audio/mp4", size: 4, url: "https://attachments.invalid/audio" }],
           },
         },
       } };
@@ -137,7 +138,14 @@ test.each([
     await mkdir(path.dirname(audioPath), { recursive: true });
     await writeFile(audioPath, "test");
     running = runHostedWorkspaceRuntimeJobInProcess(job, {
-      platform, signal: abort.signal, vaultRoot, importItem: importer,
+      platform, signal: abort.signal, vaultRoot,
+      importItem: text ? async (...args) => {
+        const result = await importer(...args);
+        // Hold post-staging import completion as a slow progress publication
+        // would. Typing must already be in flight, without admitting a turn.
+        await evidence.ready;
+        return result;
+      } : importer,
       async createCheckpointSnapshot() {
         return { snapshotRef: createSnapshotFixtureRef({ hash: "a".repeat(64), size: 512 }) };
       },
@@ -157,7 +165,7 @@ test.each([
           response.resolve(new Response(null, { status: 204 }));
         }
         const handle = await handoff;
-        assert.ok(handle, "real attachment typing must reach the foreground owner");
+        assert.ok(handle, "staged input typing must reach the foreground owner");
         assert.equal(calls.length, 1, "handoff must not issue a duplicate HTTP start");
         assert.ok(handle.acceptedAt);
         if (!pendingAcceptance) assert.equal(handle.acceptedAt, preparationAcceptedAt, "handoff preserves the original provider acceptance");
@@ -172,9 +180,9 @@ test.each([
       },
     });
     void running.catch(() => {});
-    await Promise.race([providerEntered.promise, running.then(() => { throw new Error("Runtime ended before attachment typing"); })]);
+    await vi.waitFor(() => assert.equal(calls.length, 1, "typing starts before import completion"), { timeout: 2_000 });
     assert.equal(checked, false, "unsettled evidence must not admit the model");
-    assert.equal(evidence.admitted, false);
+    if (!text) assert.equal(evidence.admitted, false);
     assert.equal(milestones.some(isAccepted), false, "HTTP entry is not provider acceptance");
     if (!pendingAcceptance) {
       response.resolve(new Response(null, { status: 204 }));

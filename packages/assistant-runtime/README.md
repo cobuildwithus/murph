@@ -157,8 +157,18 @@ forwarded into a claimed parse attempt. If an earlier input needs retry, a compl
 sibling's local raw/derived result remains reusable on replay, but its assistant
 evidence, pending visibility, and notification stay withheld behind that input.
 This does not add a retry owner or strengthen the existing checkpoint/crash boundary.
-Existing attachment typing starts during staging, remains available for the reply
-handoff after admission, and is released for any staged input left unadmitted.
+Eligible Linq text and attachment inputs start best-effort typing immediately
+following durable staging, before pending-reply notification, mailbox progress
+publication, or assistant preparation. The existing per-chat claim and refresh
+loop pass to the admitted turn without another start request, even while initial
+provider acceptance is pending. Typing never blocks admission. Failed staging,
+self-authored input, consumed replay, disabled auto-replies, and unbound routes do
+not start preparation; failed admission cancels an unclaimed handle. Attachment
+evidence and canonical receipt/watermark checkpoints keep their existing gates.
+Runtime status checkpoints resolve independent pending-input, outbox,
+provider-cleanup, system-mailbox and cron wake reads concurrently (at most five).
+Wake selection keeps its existing precedence; every started read settles before
+failure can release or replace the workspace.
 The existing content-free import diagnostic may include `audioPairCount`,
 `audioPairPreparationMs` (whole pair preparation wall span), and
 `audioParsePreparationOverlapMs` (intersection of artifact/parse/scratch-cleanup

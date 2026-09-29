@@ -8,6 +8,7 @@ import { readActiveHostedMemberAccess } from "../hosted-onboarding/member-access
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { lockHostedMemberRow } from "../hosted-onboarding/shared";
 import { readHostedHealthDataConsentState } from "../legal/consent";
+import type { HostedRuntimeBackend } from "@murphai/hosted-execution/runtime-migration";
 import { lockHostedRuntimeMemberCutoverTx } from "./runtime-cutover";
 
 export interface HostedRuntimeIdentity {
@@ -325,19 +326,20 @@ function staleRuntimeError() {
 
 export async function authorizeHostedRuntimeProvider(input: {
   prisma: PrismaClient; userId: string; runnerContainerName: string | null; providerEgressTokenHash: string | null; providerKind: string;
-}): Promise<HostedRuntimeOwner | null> {
+}): Promise<{ cutover: HostedRuntimeBackend; owner: HostedRuntimeOwner | null }> {
   return input.prisma.$transaction(async tx => {
-    if (await lockHostedRuntimeMemberCutoverTx(tx, input.userId) !== "postgres") return null;
+    const cutover = await lockHostedRuntimeMemberCutoverTx(tx, input.userId);
+    if (cutover !== "postgres") return { cutover, owner: null };
     const members = await tx.$queryRaw<Array<{ id: string }>>`
       SELECT id FROM hosted_member WHERE id = ${input.userId} FOR UPDATE
     `;
     const current = await lockHostedRuntimeOwnerRowTx(tx, input.userId);
     if (!members[0] || !current || !current.attemptId || !current.runnerContainerName || current.workspaceVersion === null
-      || (current.phase !== "starting" && current.phase !== "active")) return null;
+      || (current.phase !== "starting" && current.phase !== "active")) return { cutover, owner: null };
     if (input.runnerContainerName !== null) {
-      if (current.runnerContainerName !== input.runnerContainerName || !["exa", "mapbox", "murph_data_api", "openai", "venice", "workers_ai_transcribe"].includes(input.providerKind)) return null;
-    } else if (!input.providerEgressTokenHash || current.providerEgressTokenHash !== input.providerEgressTokenHash) return null;
-    return current;
+      if (current.runnerContainerName !== input.runnerContainerName || !["exa", "mapbox", "murph_data_api", "openai", "venice", "workers_ai_transcribe"].includes(input.providerKind)) return { cutover, owner: null };
+    } else if (!input.providerEgressTokenHash || current.providerEgressTokenHash !== input.providerEgressTokenHash) return { cutover, owner: null };
+    return { cutover, owner: current };
   }, OWNER_TRANSACTION_OPTIONS);
 }
 

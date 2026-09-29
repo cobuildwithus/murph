@@ -95,7 +95,7 @@ import {
 import {
   recordHostedAssistantMilestonesBestEffort,
 } from "./assistant-latency-trace.ts";
-import { startHostedLinqAttachmentTyping } from "./channel-activity.ts";
+import { startHostedLinqInputTyping } from "./channel-activity.ts";
 
 const CONVERSATION_PROJECTION_FAILED_REASON =
   "conversation-import.projection-failed";
@@ -527,30 +527,29 @@ async function stageHostedConversationMailboxItem(
     metrics: createEmptyHostedConversationWakeMetrics(),
     status: "imported" as const,
   };
-  const cancelAttachmentTyping = startHostedConversationAttachmentTyping({
+  const cancelInputTyping = startHostedConversationInputTyping({
     foregroundAssistantInputId,
     linqDeliveryContext,
     runtime: input.runtime,
     runtimeAttemptId: input.runtimeAttemptId,
     signal: input.signal,
-    stagedInput,
   });
-  let attachmentImportSucceeded = false;
+  let importSucceeded = false;
   return {
     status: "staged",
     cancelUnadmittedTyping() {
-      if (!attachmentImportSucceeded) cancelAttachmentTyping?.();
+      if (!importSucceeded) cancelInputTyping?.();
     },
     async complete(preparedProjection) {
-      if (!attachmentAdmissionDeferred) {
-        await enqueuePendingReply();
-        await notifyActiveTurnInputAvailable();
-      }
-      if (!inboxProjectionRequired) {
-        attachmentImportSucceeded = true;
-        return importedOutcome;
-      }
       try {
+        if (!attachmentAdmissionDeferred) {
+          await enqueuePendingReply();
+          await notifyActiveTurnInputAvailable();
+        }
+        if (!inboxProjectionRequired) {
+          importSucceeded = true;
+          return importedOutcome;
+        }
         const projectionEffect = await projectHostedConversationAssistantInputBestEffort({
           importConversationWake,
           preparedProjection,
@@ -592,31 +591,30 @@ async function stageHostedConversationMailboxItem(
           await enqueuePendingReply();
           await notifyActiveTurnInputAvailable();
         }
-        attachmentImportSucceeded = true;
+        importSucceeded = true;
         return {
           ...importedOutcome,
           conversationImportTiming: projectionEffect.timing,
           ...(projectionEffect.effect.reasonCode ? { reasonCode: projectionEffect.effect.reasonCode } : {}),
         };
       } finally {
-        if (!attachmentImportSucceeded) cancelAttachmentTyping?.();
+        if (!importSucceeded) cancelInputTyping?.();
       }
     },
   };
 }
 
-function startHostedConversationAttachmentTyping(input: {
+function startHostedConversationInputTyping(input: {
   foregroundAssistantInputId: string | null;
   linqDeliveryContext: HostedAssistantLinqDeliveryContext | null;
   runtime: HostedConversationMailboxRuntime;
   runtimeAttemptId?: string | null;
   signal?: AbortSignal | null;
-  stagedInput: HostedConversationMailboxAssistantInputStageResult;
-}): ReturnType<typeof startHostedLinqAttachmentTyping> {
-  if (!input.foregroundAssistantInputId || !input.stagedInput.attachmentEvidenceRequired) {
+}): ReturnType<typeof startHostedLinqInputTyping> {
+  if (!input.foregroundAssistantInputId) {
     return null;
   }
-  return startHostedLinqAttachmentTyping({
+  return startHostedLinqInputTyping({
     forwardedEnv: input.runtime.forwardedEnv,
     latencyTraceContext: input.runtimeAttemptId ? {
       assistantInputIds: [input.foregroundAssistantInputId],

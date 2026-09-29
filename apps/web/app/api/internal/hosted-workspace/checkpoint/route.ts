@@ -14,9 +14,10 @@ import {
 } from "@/src/lib/hosted-workspace/store";
 import { checkpointHostedRuntimeWorkspace } from "@/src/lib/hosted-workspace/runtime-publication";
 import { readHostedRuntimeCallbackAuthority } from "@/src/lib/hosted-execution/runtime-write-fence";
+import { createHostedRuntimeCallbackTiming } from "@/src/lib/hosted-execution/runtime-callback-timing";
 
 const HOSTED_WORKSPACE_CHECKPOINT_CALLBACK_BODY_LIMIT_BYTES = 256 * 1024;
-let firstInvocation = true;
+const runWithTiming = createHostedRuntimeCallbackTiming("checkpoint");
 
 type CheckpointFailureStage =
   | "request_body"
@@ -25,17 +26,12 @@ type CheckpointFailureStage =
   | "publication"
   | "response";
 
-export const POST = withJsonError(async (request: Request) => {
-  if (firstInvocation) {
-    firstInvocation = false;
-    // Compare this timestamp with invocation start and the first pool log to
-    // distinguish route initialization from signed-body verification.
-    console.info("Hosted workspace checkpoint handler first invocation.");
-  }
+export const POST = withJsonError((request: Request) => runWithTiming(request, async (timing) => {
   const userId = await requireHostedCloudflareCallbackRequest(request, {
     runtimeAuthority: "caller_transaction",
     maxBodyBytes: HOSTED_WORKSPACE_CHECKPOINT_CALLBACK_BODY_LIMIT_BYTES,
   });
+  timing.authenticated();
   let failureStage: CheckpointFailureStage = "request_body";
   try {
     const requestBody = await readOptionalJsonObject(request);
@@ -133,7 +129,7 @@ export const POST = withJsonError(async (request: Request) => {
     reportCheckpointFailure(failureStage, error);
     throw error;
   }
-});
+}));
 
 function reportCheckpointFailure(stage: CheckpointFailureStage, error: unknown): void {
   try {
