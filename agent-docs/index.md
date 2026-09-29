@@ -854,6 +854,9 @@ The E2E MinIO cleanup ownership repair is tracked in
 GPT-6.1 Sol defaults, saved reminder upgrades, and Codex 0.159.1 compatibility:
 [`Sol model upgrade`](exec-plans/completed/2026-09-29-gpt61-sol-default.md).
 
+Android production revision selection is tracked in
+[`2026-09-29-android-canary-production-revision`](exec-plans/completed/2026-09-29-android-canary-production-revision.md).
+
 Historical parser-hold refresh preservation and composed retrieval proof are tracked
 in [parser-hold refresh](exec-plans/completed/2026-09-28-clinical-parser-holds.md).
 

@@ -2133,37 +2133,20 @@ export class RunnerContainer extends Container {
   private async evaluateWarmContainerLifecycle(
     input: RunnerContainerLifecycleEvaluationInput,
   ): Promise<void> {
-    const eligible = await this.withLifecycleLock(async () => {
-      if (this.readRunnerSlotBindingOptional()?.state === "unbound") {
-        this.renewPlatformActivityTimeout("standby-unbound-ready");
-        return false;
-      }
-      // SDK 0.3.7 consumes a scheduled callback even if it throws. Persist
-      // recovery before external reads; uncertainty grants no conversation lease.
-      await this.scheduleLifecycleCheck(
-        Date.now() + (input.trigger === "invoke-completed"
-          ? HOSTED_CONTAINER_RUNTIME_COMPLETION_TIMEOUT_MS
-          : readRunnerContainerLifecycleReevaluationMs(this.environment)),
-      );
-      return !this.lifecycleInteractionChanged(input.expectedInteractionGeneration);
-    }, { blockPointerlessWake: false });
-    // Control-plane latency must not hold the native lifecycle lock ahead of
-    // an arriving message. The locked evaluator rechecks interaction ownership.
-    if (!eligible || !await this.runtimeOwnerAllowsIdleCleanup()) return;
-    await this.withLifecycleLock(
-      () => this.evaluateWarmContainerLifecycleLocked(input),
-      { blockPointerlessWake: false },
-    );
-  }
-
-  private async evaluateWarmContainerLifecycleLocked(
-    input: RunnerContainerLifecycleEvaluationInput,
-  ): Promise<void> {
-    const lifecycleObservedAtMs = Date.now();
-    const lifecycleStagePrefix = input.trigger;
-    if (this.lifecycleInteractionChanged(input.expectedInteractionGeneration)) {
+    if (this.readRunnerSlotBindingOptional()?.state === "unbound") {
+      this.renewPlatformActivityTimeout("standby-unbound-ready");
       return;
     }
+    // Rearm before external reads and before waiting for the lifecycle lock:
+    // invoke() holds that lock for the full lifetime of the child invocation.
+    // An active invocation must let the SDK finish and service its next alarm.
+    await this.scheduleLifecycleCheck(
+      Date.now() + (input.trigger === "invoke-completed"
+        ? HOSTED_CONTAINER_RUNTIME_COMPLETION_TIMEOUT_MS
+        : readRunnerContainerLifecycleReevaluationMs(this.environment)),
+    );
+    const lifecycleObservedAtMs = Date.now();
+    const lifecycleStagePrefix = input.trigger;
     const activeOperation = this.readWorkspaceInvocationOperation();
     if (activeOperation) {
       if (input.trigger === "activity-expired") {
@@ -2186,8 +2169,26 @@ export class RunnerContainer extends Container {
       return;
     }
 
+    // Control-plane latency must not hold the native lifecycle lock ahead of
+    // an arriving message. Only destructive evaluation needs the lock; it
+    // rechecks interaction ownership after this external read.
+    if (this.containerInteractionGeneration !== input.expectedInteractionGeneration
+      || !await this.runtimeOwnerAllowsIdleCleanup()) return;
+    await this.withLifecycleLock(
+      () => this.evaluateWarmContainerLifecycleLocked(input),
+      { blockPointerlessWake: false },
+    );
+  }
+
+  private async evaluateWarmContainerLifecycleLocked(
+    input: RunnerContainerLifecycleEvaluationInput,
+  ): Promise<void> {
+    const lifecycleStagePrefix = input.trigger;
+    if (this.lifecycleInteractionChanged(input.expectedInteractionGeneration)) {
+      return;
+    }
     if (input.trigger === "activity-expired") {
-      this.lastActivityExpiryAtMs = lifecycleObservedAtMs;
+      this.lastActivityExpiryAtMs = Date.now();
     }
 
     if (!await this.canStopWarmContainer({
