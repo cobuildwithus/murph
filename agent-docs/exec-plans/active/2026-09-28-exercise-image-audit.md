@@ -1,49 +1,41 @@
 # Exercise image visual audit and repair
 
-Status: active
+Status: active — catalog candidate complete; final review and merge pending.
 
-## Goal
-Visually audit all 1,748 exercise carousels (5,340 images) with GPT-6 Sol reviewers, record concrete confusing or inconsistent slides, and repair confirmed visual defects using built-in image generation only.
+## Goal and delivered scope
+Audit every exercise carousel with GPT-6 Sol reviewers, list confusing visuals, and publish the repairs that pass independent review using built-in image generation only. The audit covered all 1,748 exercises and 5,340 original images. Of 125 confirmed exercise-level findings, 123 have accepted repairs integrated into the catalog candidate. ST208 and ST679 remain unchanged because image-generation output moderation blocked their replacements.
 
-## Scope and method
-- Freeze the catalog at the task base; review each exercise against its steps, labels, and sibling slides.
-- Split the full inventory into ten non-overlapping review lanes. Record every exercise as reviewed, uncertain, or unavailable, and retain slide-specific findings.
-- Inspect flagged originals before repair; preserve subject, camera, equipment, style, and accurate movement phases.
-- Keep downloaded images, contact sheets, reviewer ledgers, generation prompts, and replacements in ignored local task artifacts.
-- Never use an image generation API key. Do not publish assets until the concrete replacements have passed visual review.
-- Validate inventory coverage and asset integrity; run catalog tests and typecheck if catalog data changes.
+## Product UX
+- Outcome: corrected poses, movement phases, and side changes are easier to follow in exercise demonstrations.
+- Reaches: existing exercise-catalog consumers, including CLI and hosted runtime exercise lookups; no new interface or permissions.
+- Proof: full original/replacement sequence review, independent file-hash QA, verified public delivery URLs, source-row and generated-catalog readback, and package runtime tests.
+- Result: Ready for the 123 integrated repairs. The two blocked exercises remain explicitly deferred.
 
-## Progress
-- Isolated task branch created; source inventory located.
-- All 1,748 exercise carousels and 5,340 source images reviewed by ten GPT-6 Sol lanes.
-- Confirmed 125 exercise-level fixes after correcting two false positives through full-resolution limb tracing.
-- Replacements are generated with the built-in image tool and receive independent review bound to exact file hashes.
-- EX347 rebuilt as a consistent four-frame top-down sequence with user approval; independent review accepted the corrected reset cue and crossing-thigh occlusion.
-- Full before/after gallery, source receipts, prompts, replacement sequences, and review ledgers are retained in ignored task artifacts.
-- Live catalog integration remains pending: the available Cloudflare login is denied Images access. ST208 and ST679 remain blocked by image-generation output moderation; no alternative API-key generation was used.
+## Implementation
+- Ten GPT-6 Sol audit lanes reviewed the complete frozen inventory; two false positives were cleared by full-resolution limb tracing.
+- All image generation used the built-in image tool, never an image-generation API key. EX347 uses the user-approved consistent top-down perspective.
+- Independent QA accepted every integrated replacement. Final integration also corrected ST024's contradictory head-turning reset arrow and re-reviewed the full sequence.
+- Cloudflare Images OAuth authorization was granted. All 225 replacement references were uploaded with distinct public URLs and verified against 219 unique reviewed PNG files. Existing assets remain available.
+- Exactly 123 exercise rows changed in three source CSVs. The other 1,625 rows remain byte-identical. Generated runtime artifacts contain 5,350 distinct public image URLs.
+- Only ST024 and ST303 change movement instructions, correcting pre-existing title/description contradictions using the primary NHS sources linked in the audit report.
+- Existing catalog test fixtures and image counts were updated; no production implementation or configuration changed.
+- Member release note: `2026-09-29/clearer-exercise-demonstrations`, source PR #3804.
 
 ## Verification
-Coverage and source checksum validation passed. All 125 finding records assemble without errors; 123 repair sets passed independent current-hash visual review. EX347 has a user-approved top-down rebuild that passed independent current-hash review, and ST208/ST679 are blocked by output moderation. Replacement file/prompt checks and the public-artifact privacy scan passed. No application code, configuration, or catalog entries changed; application tests and typecheck are not applicable to the current artifact-only change.
+- Complete audit coverage and all 5,340 source SHA-256 checksums passed against frozen catalog SHA-256 `b35ab2e78f79391da955baed4efaea7f00c957113eeb189b38c08d508ad53610`.
+- All 125 finding records assemble without errors; 123 have current-hash independent acceptance.
+- Upload receipts, ordered final catalog URLs, changed-ID scope, allowed field scope, and unchanged-row byte comparisons passed. Missing receipts and stale source rows fail closed in the local integration utility.
+- `pnpm --dir packages/exercise-library verify`: passed typecheck, six runtime tests, and generated-artifact parity.
+- `pnpm --dir apps/web changelog:generate`: passed.
+- `pnpm exec vitest run --config apps/web/vitest.config.ts --no-coverage apps/web/test/changelog-page.test.tsx`: ten tests passed.
+- `pnpm --dir apps/web typecheck`: passed.
+- `pnpm complexity:diff`: passed; no authored production JS/TS to analyze.
+- Documentation drift, whitespace, privacy, source/replacement checksums, and delivery ZIP integrity passed.
 
-## Remaining work
-- Resolve ST208/ST679 tool-moderated generation through an allowed future path; no filter workarounds or alternative generation API keys were used.
-- Publish approved images through authorized Cloudflare Images access, then regenerate and verify the catalog at its CSV source.
-- Finish the member changelog, focused catalog tests/typecheck, stable-head review, required CI, and the user-authorized merge. The final catalog includes exercise-form instruction corrections, so route its health-safety-sensitive changes through final ReviewGPT concurrently with CI.
-- Keep this plan active until unresolved generation and publication work is handled.
+## Remaining completion work
+- Final ReviewGPT on the stable pushed head, concurrently with required CI, because two exercise-form instruction corrections are health-safety sensitive.
+- Parent final review and user-authorized merge of PR #3804 after required checks pass.
+- ST208 and ST679 remain blocked follow-up work. No moderation workarounds or alternate generation API keys were used.
 
 ## Delivery boundary
-No live catalog or deployment has changed. The audit report and local replacement artifacts are an intermediate, reviewable result. No changelog entry is needed until member-visible catalog changes ship; complexity metrics do not apply because no JS/TS is authored.
-
-## Check details
-- `python3 .tmp/exercise-image-audit/validate_audit.py`: passed complete coverage, 5,340 original SHA-256 checksums, finding references, and replacement/prompt existence.
-- `python3 .tmp/exercise-image-audit/assemble_repairs.py`: all 125 records assembled with zero errors; accepted-only delivery contains 123 repair sets.
-- `bash scripts/check-agent-docs-drift.sh`: passed after installing the repository tooling with the existing package store.
-- Source catalog frozen with SHA-256 `b35ab2e78f79391da955baed4efaea7f00c957113eeb189b38c08d508ad53610`; audit validation remains bound to the original images after future catalog regeneration.
-- Cloudflare Images publishing remains blocked: the existing profile lacks Images access, and the requested scoped OAuth authorization expired without browser approval. No assets were uploaded.
-- Prepared ignored publishing and catalog-application utilities; catalog application requires current image hashes, independent QA, verified public upload receipts, and unchanged source rows.
-- No source, runtime configuration, or catalog changed, so application tests/typecheck and a member changelog are not applicable.
-
-## Integration preparation
-- Publishing preflight validates image hashes and the Cloudflare upload size limit; upload receipts must include verified public delivery URLs. No real upload receipt exists, and synthetic validation receipts have never been used to change the catalog.
-- An isolated synthetic-receipt dry-run validated 123 accepted repairs and 416 final image links across three source CSVs; all 1,625 unselected rows remained byte-identical. Missing-receipt and stale-source-URL cases failed closed. This is local integration proof only, not proof of upload or application.
-- User approved the consistent top-down EX347 rebuild and merge. Remaining authorization is Cloudflare browser consent for Images access; general merge approval does not need to be requested again.
+Public image uploads are verified. Catalog changes ship through the existing package and hosted release pipelines after merge; this task does not manually deploy the Worker or Web. Original images remain available for existing readers. Local source images, exact prompts, repair packages, full before/after gallery, QA ledgers, and upload receipts are preserved in ignored task artifacts and the delivery package.

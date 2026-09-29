@@ -6,7 +6,7 @@ Confirmed fixes: 125. Visual audit complete. Repair status: 123 accepted, 2 bloc
 
 Review model: GPT-6 Sol. Replacements: built-in image generation only; no image-generation API keys.
 
-Images are local review artifacts. The live catalog has not changed; publishing needs Cloudflare Images access. ST208 and ST679 remain blocked by image-generation output moderation. EX347 uses a consistent top-down view approved by the user. An accepted status means the current replacement bytes passed independent visual review, not that they have been published.
+All 123 accepted repair sets are wired into the source catalog in PR #3804 using verified public Cloudflare Images URLs. The 225 replacement references use 219 unique reviewed image files. ST208 and ST679 remain unchanged because image generation was blocked by output moderation. EX347 uses a consistent top-down view approved by the user. Accepted status requires independent visual review of the exact replacement file hashes.
 
 ## Fix list
 
@@ -602,7 +602,7 @@ Images are local review artifacts. The live catalog has not changed; publishing 
 
 - **Medium**, slides 2, 4: The head is visibly rotated while the hand presses the cheek, and the slides say “small turn”; this depicts turning during a movement named an isometric rotation press. Fix: Show the head held near neutral against light hand resistance with a still-neck cue, or change the exercise title and instructions if active rotation is intended.
 - Replacement status: accepted.
-- Review note: Both press frames keep the head forward-facing and neck still while opposite hands contact the cheeks. Image repair passes; existing seed instructions and alt text still describe active rotation and need alignment before integration.
+- Review note: The ordered sequence shows a neutral seated setup, gentle first-side cheek press with the head forward, release with both hands on the thighs and no rotation cue, then opposite-side cheek press with the head forward. Same subject, chair, attire, and frontal view remain coherent; labels agree with the isometric head-still instruction.
 
 ### ST056 — Open Book Stretch
 
@@ -762,6 +762,12 @@ Images are local review artifacts. The live catalog has not changed; publishing 
 
 ## Validation and delivery
 
-All 5,340 original file checksums and all review/repair references passed validation. All 125 records assemble without errors. The accepted-only delivery package contains 123 independently reviewed repairs; live catalog rows are unchanged. EX347 now has an independently accepted top-down sequence. ST208 and ST679 remain blocked by output moderation.
+All 1,748 exercises and 5,340 original images were reviewed. The source checksum and complete slide coverage checks passed. All 125 findings assemble without errors; 123 repair sets passed independent review bound to the replacement file hashes.
 
-Repository documentation drift, whitespace, and privacy checks passed. A dry-run catalog updater validated the 123 accepted sets, preserved all unselected rows byte-for-byte, and rejected missing upload receipts and stale source URLs. Cloudflare browser authorization expired without approval, so no images were uploaded and no catalog changes were applied. Application tests and typecheck are required once the catalog patch exists; they do not apply to this documentation-only progress record.
+This patch updates exactly 123 catalog rows across three source CSVs, preserves the other 1,625 rows byte-for-byte, and regenerates the runtime artifacts. The final catalog has 5,350 distinct image URLs. All 225 replacement references have verified public delivery receipts and match 219 unique reviewed PNG files; repeated setup images retain distinct delivery URLs. ST208 and ST679 remain unchanged because generation was blocked by output moderation.
+
+`pnpm --dir packages/exercise-library verify` passed the package typecheck, six runtime tests, and generated-artifact check. The changelog generation, ten changelog-page tests, Web typecheck, documentation drift, privacy, and whitespace checks passed. The complexity guard found no authored production JavaScript or TypeScript changes. Existing image fixtures were refreshed to match the repaired catalog.
+
+ST024 now consistently describes a head-still isometric press, including the reset frame, following [NHS isometric rotation guidance](https://msk-bexley.nhs.uk/conditions/neck-pain/cervical-spondylosis). ST303 now matches its knee-to-opposite-shoulder title, following [NHS stretch instructions](https://www.esht.nhs.uk/wp-content/uploads/2022/08/1004.pdf).
+
+The before/after gallery, exact prompts, reviewed PNGs, source receipts, independent QA ledgers, and upload receipts remain in the local delivery package. Catalog integration is tracked in [PR #3804](https://github.com/cobuildwithus/murph/pull/3804); deployment follows the normal release pipeline after merge.
