@@ -1,14 +1,16 @@
 import { createHash } from "node:crypto";
+import { promises as fs } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 
 import { externalRefForFhir, hashClinicalFhirBaseUrl, hashClinicalFhirPatientId, type ClinicalDocumentExtractionOutput } from "@murphai/clinical-records";
 import { initializeVault } from "@murphai/core";
 import { listCanonicalEntities, listMetricPoints } from "@murphai/query";
-import { importClinicalFhirSnapshot } from "@murphai/vault-usecases/clinical-records";
+import { importClinicalFhirSnapshot, minimizeClinicalDocumentImages } from "@murphai/vault-usecases/clinical-records";
 import { applyClinicalEnrichmentProposals, enqueueClinicalEnrichment, persistClinicalEnrichmentProposals, readClinicalEnrichmentStatus, readNextClinicalEnrichment } from "@murphai/vault-usecases/clinical-enrichment";
 import { describe, expect, it, vi } from "vitest";
 
+import { prepareClinicalEnrichmentDocument } from "../src/hosted-runtime/clinical-enrichment-document.ts";
 import { runOneHostedClinicalEnrichment, type HostedClinicalEnrichmentInput } from "../src/hosted-runtime/clinical-enrichment.ts";
 import { admitHostedClinicalEnrichmentWake, makeHostedClinicalEnrichmentWakeDue } from "../src/hosted-runtime/clinical-enrichment-wake.ts";
 import { executeHostedClinicalEnrichmentWake } from "../src/hosted-runtime/events/clinical-enrichment.ts";
@@ -40,18 +42,18 @@ function runtime(): HostedSystemMailboxRuntime {
   };
 }
 
-async function importSource(vaultRoot: string, parent: { resourceType: "DocumentReference" | "DiagnosticReport"; status: string; revision?: string; omitClinicalDate?: boolean } = { resourceType: "DocumentReference", status: "current" }) {
+async function importSource(vaultRoot: string, parent: { resourceType: "DocumentReference" | "DiagnosticReport"; status: string; revision?: string; omitClinicalDate?: boolean } = { resourceType: "DocumentReference", status: "current" }, document = { bytes: Buffer.from(SOURCE_TEXT), mediaType: "text/plain" }) {
   const now = parent.revision ?? new Date().toISOString();
   const fetchedAt = new Date(now).toISOString();
-  const bytes = Buffer.from(SOURCE_TEXT);
+  const bytes = document.bytes;
   const sha256 = digest(bytes);
   const resource = {
     resourceType: parent.resourceType, id: "synthetic-lab-document", status: parent.status,
     subject: { reference: "Patient/synthetic-patient" }, meta: { lastUpdated: now },
     ...(!parent.omitClinicalDate ? { date: OCCURRED_AT } : {}), type: { text: "Synthetic lab report" },
     ...(parent.resourceType === "DocumentReference"
-      ? { content: [{ attachment: { contentType: "text/plain", url: "Binary/synthetic-lab-document" } }] }
-      : { code: { text: "Synthetic lab report" }, ...(!parent.omitClinicalDate ? { effectiveDateTime: OCCURRED_AT } : {}), presentedForm: [{ contentType: "text/plain", url: "Binary/synthetic-lab-document" }] }),
+      ? { content: [{ attachment: { contentType: document.mediaType, url: "Binary/synthetic-lab-document" } }] }
+      : { code: { text: "Synthetic lab report" }, ...(!parent.omitClinicalDate ? { effectiveDateTime: OCCURRED_AT } : {}), presentedForm: [{ contentType: document.mediaType, url: "Binary/synthetic-lab-document" }] }),
   };
   const content = JSON.stringify({ resourceType: "Bundle", type: "searchset", entry: [{ resource }] });
   const imported = await importClinicalFhirSnapshot({
@@ -63,7 +65,7 @@ async function importSource(vaultRoot: string, parent: { resourceType: "Document
     retrievalSlices: [{ queryScopeId: "documentreference", sliceId: "whole", resourceType: parent.resourceType, coverage: "whole-family", queryFingerprint: "a".repeat(64) }],
     completedRetrievalSlices: [{ queryScopeId: "documentreference", sliceId: "whole" }],
     pages: [{ queryScopeId: "documentreference", sliceId: "whole", resourceType: parent.resourceType, content }],
-    documentAttachments: [{ parentPageSha256: digest(content), resourceType: parent.resourceType, resourceId: resource.id, attachmentIndex: 0, status: "downloaded", relativePath: `attachments/${sha256}.bin`, sha256, byteLength: bytes.length, mediaType: "text/plain" }],
+    documentAttachments: [{ parentPageSha256: digest(content), resourceType: parent.resourceType, resourceId: resource.id, attachmentIndex: 0, status: "downloaded", relativePath: `attachments/${sha256}.bin`, sha256, byteLength: bytes.length, mediaType: document.mediaType }],
     attachments: [{ relativePath: `attachments/${sha256}.bin`, contentBase64: bytes.toString("base64") }],
   });
   const job = await enqueueClinicalEnrichment({ vaultRoot, manifestPath: imported.manifestPath, manifestSha256: imported.manifestSha256 });
@@ -71,10 +73,74 @@ async function importSource(vaultRoot: string, parent: { resourceType: "Document
   const parentExternalRef = externalRefForFhir({ fhirBaseUrlHash: hashClinicalFhirBaseUrl("https://ehr.example.test/fhir"),
     patientIdHash: hashClinicalFhirPatientId("synthetic-patient"), sourceSystem: "epic-fhir",
     resourceType: parent.resourceType, resourceId: resource.id, version: now });
-  return { ...job, parentExternalRef, rawRef: path.posix.join(path.posix.dirname(imported.manifestPath), `attachments/${sha256}.bin`), sha256 };
+  return { ...job, manifestPath: imported.manifestPath, manifestSha256: imported.manifestSha256, parentExternalRef, rawRef: path.posix.join(path.posix.dirname(imported.manifestPath), `attachments/${sha256}.bin`), sha256 };
 }
 
 describe("clinical enrichment import-to-query flow", () => {
+  it.each([false, true])("waits for source publication during image repair (previous repair: %s)", async (previousRepair) => {
+    const workspace = await createHostedRuntimeWorkspace("clinical-enrichment-repair-");
+    const { vaultRoot } = workspace;
+    const firstImage = Buffer.alloc(3000, 1);
+    const secondImage = Buffer.alloc(3000, 2);
+    let release!: () => void;
+    const published = new Promise<void>((resolve) => { release = resolve; });
+    let repair: Promise<unknown> | undefined;
+    let preparation: ReturnType<typeof prepareClinicalEnrichmentDocument> | undefined;
+    let renameSpy: ReturnType<typeof vi.spyOn> | undefined;
+    try {
+      await initializeVault({ vaultRoot, timezone: "UTC", createdAt: OCCURRED_AT });
+      const html = `<p>${SOURCE_TEXT}</p><img src="data:image/png;base64,${firstImage.toString("base64")}"><img src="data:image/png;base64,${secondImage.toString("base64")}">`;
+      const job = await importSource(vaultRoot, { resourceType: "DocumentReference", status: "current" }, { bytes: Buffer.from(html), mediaType: "text/html" });
+      const repairInput = { vaultRoot, manifestPath: job.manifestPath, manifestSha256: job.manifestSha256, attachmentRelativePath: path.posix.relative(path.posix.dirname(job.manifestPath), job.rawRef) };
+      if (previousRepair) await minimizeClinicalDocumentImages({ ...repairInput, reviewedImageSha256s: [digest(firstImage)] });
+      const work = await readNextClinicalEnrichment({ vaultRoot });
+      if (work?.status !== "extract") throw new Error("Expected queued extraction work.");
+      let quarantined = false;
+      const originalRename = fs.rename.bind(fs);
+      renameSpy = vi.spyOn(fs, "rename").mockImplementation(async (from, to) => {
+        await originalRename(from, to);
+        if (String(from) === work.documentPath) {
+          quarantined = true;
+          await published;
+        }
+      });
+      repair = minimizeClinicalDocumentImages({ ...repairInput, reviewedImageSha256s: [digest(previousRepair ? secondImage : firstImage)] });
+      void repair.catch(() => {});
+      await vi.waitFor(() => expect(quarantined).toBe(true));
+      await expect(fs.stat(work.documentPath)).rejects.toMatchObject({ code: "ENOENT" });
+      let settled = false;
+      preparation = prepareClinicalEnrichmentDocument({ vaultRoot, documentPath: work.documentPath, mediaType: work.source.mediaType, page: work.page });
+      void preparation.then(() => { settled = true; }, () => { settled = true; });
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      expect(settled).toBe(false);
+      release();
+      await repair;
+      const prepared = await preparation;
+      expect(prepared.extractedText).toBe(SOURCE_TEXT);
+      await prepared.cleanup();
+      renameSpy.mockRestore();
+      expect(await readClinicalEnrichmentStatus({ vaultRoot, jobId: job.jobId })).toMatchObject({ status: "pending", counts: { held: 0 } });
+      const retainedDigest = digest(await readFile(work.documentPath));
+      const executeExtraction = vi.fn<NonNullable<HostedClinicalEnrichmentInput["executeExtraction"]>>(async (request) => {
+        expect(request.source.sha256).toBe(retainedDigest);
+        expect(request.extractedText).toBe(SOURCE_TEXT);
+        return request.family !== "labs" ? empty : { status: "complete", records: [{ dateBasis: "document", dateEvidence: "Collected 2020-03-12T12:00:00Z", payload: {
+          kind: "test", occurredAt: OCCURRED_AT, title: "Synthetic glucose", note: null, testName: "Glucose", specimenType: "serum", resultStatus: "normal",
+          results: [{ analyte: "Glucose", value: 90, unit: "mg/dL" }],
+        } }] };
+      });
+      const input: HostedClinicalEnrichmentInput = { abortSignal: new AbortController().signal, codexHome: null, env: {}, vaultRoot,
+        memberId: "synthetic-member", resolveProviderAuthority: async () => "current", onStateMutation() {}, executeExtraction };
+      expect(await runOneHostedClinicalEnrichment(input)).toBe("settled");
+      expect(await applyClinicalEnrichmentProposals({ vaultRoot, jobId: job.jobId })).toMatchObject({ counts: { created: 1, held: 0 } });
+    } finally {
+      release();
+      await Promise.allSettled([repair, preparation]);
+      renameSpy?.mockRestore();
+      await workspace.cleanup();
+    }
+  });
+
   it("applies prepared work when mailbox order differs from the extraction queue", async () => {
     const workspace = await createHostedRuntimeWorkspace("clinical-enrichment-queue-order-");
     const { vaultRoot } = workspace;

@@ -576,6 +576,8 @@ is recorded in [`2026-09-18-ios-canary-deployment-continuity.md`](exec-plans/com
 | `agent-docs/exec-plans/completed/2026-09-24-web-opening-aspiration.md` | Third Web reply and canonical identity handoff verification. | Completed implementation evidence | Medium | 2026-09-24 |
 | `agent-docs/exec-plans/completed/2026-09-28-frog-log-presence.md` | Boolean presence metadata classification and raw-payload rejection regression proof. | Historical tooling evidence | Low | 2026-09-28 |
 | `agent-docs/exec-plans/completed/2026-09-23-gpt6-defaults.md` | GPT-6 managed inference defaults and focused model-selection proof. | Completed execution plan | Medium | 2026-09-23 |
+| `agent-docs/exec-plans/completed/2026-09-29-gpt61-sol-default.md` | GPT-6.1 Sol defaults, saved reminder upgrades, and Codex 0.159.1 compatibility. | Completed execution plan | Medium | 2026-09-29 |
+| `agent-docs/exec-plans/active/2026-09-29-gpt61-sol-rollout.md` | Authorized two-stage GPT-6.1 Sol deployment. | Active execution plan | Medium | 2026-09-29 |
 | `agent-docs/exec-plans/completed/2026-09-23-vault-share-background.md` | Isolated checkpoint projection that continues across foreground replies; ownership and verification. | Hosted vault-share background execution | Medium | 2026-09-23 |
 | `agent-docs/exec-plans/completed/2026-09-28-junction-record-window.md` | Bounded recovery for oversized Junction hourly-feature days. | Device-sync recovery plan | Medium | 2026-09-28 |
 | `agent-docs/exec-plans/completed/2026-09-28-checkpoint-failure-stage-telemetry.md` | Fixed-vocabulary checkpoint rejection-stage observation and response-preservation proof. | Completed telemetry implementation evidence | Low | 2026-09-28 |
@@ -808,6 +810,10 @@ Signup-wide native contact-card sharing and daily attempt suppression are owned 
 `operations/imessage-deliverability.md`; implementation and receipt-order proof
 are tracked in `exec-plans/completed/2026-09-24-signup-contact-card.md`.
 
+Explicit reviewed clinical image omission is owned by the Clinical Records Intake
+storage contract; proof is recorded in
+[`clinical image storage`](exec-plans/completed/2026-09-28-clinical-image-storage.md).
+
 Early Linq text typing reuses the existing staging-to-turn handoff owned by
 `packages/assistant-runtime/README.md`; implementation and synthetic proof are
 tracked in [`warm typing latency`](exec-plans/completed/2026-09-25-warm-typing-latency.md).
@@ -851,8 +857,8 @@ Hosted CI PostgreSQL registry provenance is tracked in
 The E2E MinIO cleanup ownership repair is tracked in
 [`2026-09-28-minio-e2e-cleanup-ownership.md`](exec-plans/completed/2026-09-28-minio-e2e-cleanup-ownership.md).
 
-GPT-6.1 Sol defaults, saved reminder upgrades, and Codex 0.159.1 compatibility:
-[`Sol model upgrade`](exec-plans/completed/2026-09-29-gpt61-sol-default.md).
+Clinical storage replay serialization and concurrent repair proof are tracked in
+[storage replay locking](exec-plans/completed/2026-09-28-clinical-storage-replay-lock.md).
 
 Android production revision selection is tracked in
 [`2026-09-29-android-canary-production-revision`](exec-plans/completed/2026-09-29-android-canary-production-revision.md).
@@ -860,8 +866,8 @@ Android production revision selection is tracked in
 Historical parser-hold refresh preservation and composed retrieval proof are tracked
 in [parser-hold refresh](exec-plans/completed/2026-09-28-clinical-parser-holds.md).
 
+Hosted enrichment read/repair concurrency proof is recorded in
+[enrichment source locking](exec-plans/completed/2026-09-29-clinical-enrichment-read-lock.md).
+
 Complete historical clinical hold-shape coverage is recorded in
 [hold histories](exec-plans/completed/2026-09-29-clinical-hold-histories.md).
-
-The authorized two-stage deployment is tracked in
-[GPT-6.1 Sol rollout](exec-plans/active/2026-09-29-gpt61-sol-rollout.md).
