@@ -21,7 +21,7 @@ import {
 const runtimeLogLimit = 500;
 // The hosted-local recorder observes Murph's canonical product model. The
 // production Venice egress boundary owns provider-specific model translation.
-const terraProductModel = "gpt-5.6-terra";
+const veniceProductModel = "gpt-5.6-sol";
 
 type RuntimeWakeObservation = Pick<
   HostedRuntimeWorkflowState,
@@ -120,7 +120,7 @@ describe("hosted local resident-container egress e2e", () => {
     expect(providerRequestsAfterSwitch).toHaveLength(1);
     const providerRequestBody = providerRequestsAfterSwitch[0]?.body ?? "";
     expect(readProviderRequestModel(providerRequestBody))
-      .toBe(terraProductModel);
+      .toBe(veniceProductModel);
     expectCurrentResponsesLiteToolEnvelope(providerRequestBody);
     expectCurrentVeniceCacheCompatibility(providerRequestBody);
 
