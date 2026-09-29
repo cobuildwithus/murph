@@ -33,6 +33,7 @@ import {
   applyCanonicalWriteBatch,
   importEventBatch,
   isVaultError,
+  withCanonicalWriteLock,
 } from "@murphai/core";
 import {
   resolveRuntimePaths,
@@ -486,35 +487,39 @@ export async function importClinicalFhirSnapshot(
   const reviewDecisionCount = plan.decisions.filter(
     (decision) => decision.action === "review",
   ).length;
-  const rawContents = [
-    ...await prepareClinicalDocumentRawContents(input, prepared.manifestPath),
-    ...prepared.pages.map((page) => ({
-      allowExistingMatch: true,
-      content: page.content,
-      mediaType: JSON_MEDIA_TYPE,
-      originalFileName: path.posix.basename(page.relativePath),
-      targetRelativePath: page.rawPath,
-    })),
-    {
-      allowExistingMatch: true,
-      content: `${JSON.stringify(prepared.manifest, null, 2)}\n`,
-      mediaType: "application/json",
-      originalFileName: "manifest.json",
-      targetRelativePath: prepared.manifestPath,
-    },
-  ];
-
+  let rawFileCount = 0;
   try {
-    await applyCanonicalWriteBatch({
-      audit: {
-        action: "raw_copy",
-        commandName: "vault-usecases.importClinicalFhirSnapshot",
-        summary: "Persisted an immutable clinical FHIR retrieval snapshot.",
-      },
-      operationType: "clinical_fhir_snapshot",
-      rawContents,
-      summary: "Persist clinical FHIR retrieval snapshot",
-      vaultRoot: input.vaultRoot,
+    await withCanonicalWriteLock(input.vaultRoot, async () => {
+      const rawContents = [
+        ...await prepareClinicalDocumentRawContents(input, prepared.manifestPath),
+        ...prepared.pages.map((page) => ({
+          allowExistingMatch: true,
+          content: page.content,
+          mediaType: JSON_MEDIA_TYPE,
+          originalFileName: path.posix.basename(page.relativePath),
+          targetRelativePath: page.rawPath,
+        })),
+        {
+          allowExistingMatch: true,
+          content: `${JSON.stringify(prepared.manifest, null, 2)}\n`,
+          mediaType: "application/json",
+          originalFileName: "manifest.json",
+          targetRelativePath: prepared.manifestPath,
+        },
+      ];
+
+      await applyCanonicalWriteBatch({
+        audit: {
+          action: "raw_copy",
+          commandName: "vault-usecases.importClinicalFhirSnapshot",
+          summary: "Persisted an immutable clinical FHIR retrieval snapshot.",
+        },
+        operationType: "clinical_fhir_snapshot",
+        rawContents,
+        summary: "Persist clinical FHIR retrieval snapshot",
+        vaultRoot: input.vaultRoot,
+      });
+      rawFileCount = rawContents.length;
     });
   } catch (error) {
     rethrowClinicalFhirImportError(error);
@@ -553,7 +558,7 @@ export async function importClinicalFhirSnapshot(
     incompleteRevisionCount: plan.decisions.filter((decision) => decision.action === "review" && decision.disposition === "incomplete").length,
     manifestPath: prepared.manifestPath,
     manifestSha256: createHash("sha256").update(`${JSON.stringify(prepared.manifest, null, 2)}\n`, "utf8").digest("hex"),
-    rawFileCount: rawContents.length,
+    rawFileCount,
     reviewDecisionCount,
   };
 }

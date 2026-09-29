@@ -825,3 +825,6 @@ Hosted CI PostgreSQL registry provenance is tracked in
 
 The E2E MinIO cleanup ownership repair is tracked in
 [`2026-09-28-minio-e2e-cleanup-ownership.md`](exec-plans/completed/2026-09-28-minio-e2e-cleanup-ownership.md).
+
+Clinical storage replay serialization and concurrent repair proof are tracked in
+[storage replay locking](exec-plans/active/2026-09-28-clinical-storage-replay-lock.md).

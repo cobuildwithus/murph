@@ -385,7 +385,10 @@ orphan evidence. Repeating the repair is a no-op.
 Fresh extraction binds its model input to the retained bytes. Existing frozen
 proposals, cache identity and canonical source facets retain original identity;
 parent eligibility and clinical text remain attested. Provider retries still
-validate original provider bytes, then reuse verified retained storage. This is
+validate original provider bytes, then reuse verified retained storage. One outer
+canonical write lock spans retained-byte selection through raw-batch publication,
+so a concurrent explicit repair cannot replace the selected preimage in that gap.
+This is
 an explicit repair API, without automatic classification or cleanup on import.
 Deploy compatible readers everywhere before repairing a hosted vault. Older
 readers fail closed afterward; restoring original evidence is required before
