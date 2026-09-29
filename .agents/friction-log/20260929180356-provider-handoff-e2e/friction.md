@@ -1,34 +1,38 @@
 ---
-title: 'Provider handoff E2E expects retired Venice default model'
+title: 'Hosted provider E2E fixtures expect retired default models'
 severity: 'minor'
 ---
 
 ## Expected Behavior
 
-The hosted provider-switch E2E should verify that a fresh invocation receives
-Web's saved Venice configuration. A provider-only switch with no explicit model
-uses the shipped GPT-5.6 Sol default.
+Hosted E2E scenarios should verify the canonical model selected by Web. A
+provider-only switch to Venice with no explicit model uses GPT-5.6 Sol; the
+ordinary OpenAI default used by scheduled reminders is GPT-6 Sol.
 
 ## Current Behavior
 
-The scenario expects GPT-5.6 Terra even though the canonical configuration owner
-and its deterministic tests select Sol. The valid provider request therefore
-fails the exact-model assertion and blocks release integration.
+The provider-handoff and Telegram scheduled-reminder scenarios both expect
+GPT-5.6 Terra. The canonical configuration owner and its deterministic tests
+select the current Sol defaults. Valid provider requests therefore fail the
+exact-model assertions and block release integration.
 
 ## Minimal Reproducible Example
 
 Run `pnpm hosted-local e2e warm-reuse-egress` with the existing synthetic provider
-fixture. After saving the Venice provider preference without a model preference,
-compare the recorder's model with the expected model in the scenario. The
-production resolver and its focused tests select `gpt-5.6-sol`; the E2E expects
-`gpt-5.6-terra`.
+fixture. After saving Venice without a model preference, the recorder observes
+`gpt-5.6-sol`; the E2E expects `gpt-5.6-terra`.
+
+Run `pnpm hosted-local e2e telegram-scheduled-reminder` with the existing
+synthetic reminder fixture. Scheduled OpenAI requests use `gpt-6-sol`; the
+recorder predicate expects `gpt-5.6-terra` despite successful reminder delivery.
 
 ## Possible Solution
 
-Update only the expected canonical model. Retain the provider-update, wake,
-request-count, fresh-invocation, Responses Lite, and cache-compatibility checks.
+Update the expected canonical models and the reminder's stub configuration.
+Retain provider-update, wake, request-count, fresh-invocation, Responses Lite,
+cache-compatibility, due-time, and delivery checks.
 
 ## Context
 
-This test-only mismatch prevents the protected worker release from completing.
+These test-only mismatches prevent the protected worker release from completing.
 No production model selection or provider behavior needs to change.
