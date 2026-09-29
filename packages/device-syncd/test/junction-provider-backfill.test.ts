@@ -1474,7 +1474,7 @@ test("Junction yieldable reconcile checkpoints one bounded normalization-safe su
       { summaryPhaseComplete: true, summaryResourceCursor: undefined },
     ],
   );
-  assert.equal(importedSnapshots.length, 4);
+  assert.equal(importedSnapshots.length, 3);
   assert.deepEqual(
     Object.keys((importedSnapshots[1] as { summaries: Record<string, unknown> }).summaries),
     ["sleep", "sleep_cycle"],
@@ -1607,9 +1607,8 @@ test("Junction yieldable reconcile bounds maximum provider projection to fixed s
     }),
   );
 
-  // One read projects the inventory and one fixed read admits the imported
-  // summary; neither count grows with provider cardinality.
-  assert.equal(sourceReads, 2);
+  // One read projects inventory; empty summaries need no import admission.
+  assert.equal(sourceReads, 1);
   assert.equal(sourceUpserts, JUNCTION_MAX_USER_PROVIDERS);
   assert.equal(result.scheduledJobs?.[0]?.payload?.summaryPhaseComplete, true);
 });

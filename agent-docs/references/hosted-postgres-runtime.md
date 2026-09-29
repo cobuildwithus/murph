@@ -351,3 +351,14 @@ fencing admissions. A target with no persisted claim retires without one even
 when the Postgres reservation supplies its allocation claim. Bound targets
 still reject a mismatched claim or member. Failed native destruction leaves the
 slot retiring for the existing retry; delayed binds cannot resurrect it.
+
+### Processing deadline and settled recovery
+
+The processing command owns its deadline independently of the timeout for one
+Web callback. Native readiness retains its 15-second bound inside the command;
+Web owner callbacks retain their shorter per-request bound. An expired command
+preserves uncertain ownership and cannot launch a detached successor.
+
+After exact native retirement and an acknowledged canonical release, processing
+uses the existing bounded admission loop immediately. Failed or uncertain
+retirement/release still retries; elapsed time alone never proves stoppedness.

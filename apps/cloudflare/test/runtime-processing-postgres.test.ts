@@ -90,6 +90,52 @@ describe("Postgres runtime orchestration", () => {
     expect(vi.mocked(commandHostedRuntimeOwner).mock.calls.map(([input]) => input.command.operation)).not.toContain("release_completed");
   });
 
+  it("uses the command budget for native readiness while preserving the Web callback timeout", async () => {
+    vi.useFakeTimers();
+    const { source, container } = harness();
+    const starting = owner({ phase: "starting" });
+    vi.mocked(commandHostedRuntimeOwner).mockResolvedValue(response(starting, "updated"));
+    container.ensureReadyForProcessing.mockImplementation(async () => {
+      await new Promise(resolve => setTimeout(resolve, 12_000));
+      return { kind: "ready", preparesSupervisedLaunch: true };
+    });
+    const result = ensurePostgresRuntimeProcessing({ ...source, HOSTED_EXECUTION_WEB_CONTROL_TIMEOUT_MS: "10000" }, { ...request, admission: response(starting, "claimed") });
+    await vi.advanceTimersByTimeAsync(12_000);
+    expect(await result).toMatchObject({ kind: "runtime_processing_accepted", action: "started" });
+    expect(container.startSupervisedInvocation).toHaveBeenCalledOnce();
+    expect(commandHostedRuntimeOwner).toHaveBeenCalledWith(expect.objectContaining({ timeoutMs: 7_000 }));
+  });
+
+  it("bounds a Web callback independently of the longer command budget", async () => {
+    vi.useFakeTimers();
+    const { source, container } = harness();
+    vi.mocked(commandHostedRuntimeOwner).mockImplementation(() => new Promise(() => {}));
+    const result = ensurePostgresRuntimeProcessing({ ...source, HOSTED_EXECUTION_WEB_CONTROL_TIMEOUT_MS: "10000" }, request);
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(await result).toMatchObject({ kind: "retry_later" });
+    expect(commandHostedRuntimeOwner).toHaveBeenCalledWith(expect.objectContaining({ timeoutMs: 10_000 }));
+    expect(container.startSupervisedInvocation).not.toHaveBeenCalled();
+  });
+
+  it.each(["updated", "stale"] as const)("re-admits after exact retirement only when release is %s", async status => {
+    const { source, container, binding } = harness();
+    const retiring = owner({ phase: "retiring" });
+    const successor = owner({ attemptId: "attempt-b", generation: "2" });
+    container.readStandbySlotBinding.mockResolvedValue({ ...binding, state: "retired", userId: null, claimId: null });
+    vi.mocked(commandHostedRuntimeOwner).mockImplementation(async ({ command }) => {
+      if (command.operation === "release") return response(null, status);
+      if (command.operation === "claim") return response(successor);
+      return response(retiring, "updated");
+    });
+    const result = await ensurePostgresRuntimeProcessing(source, { ...request, admission: response(retiring) });
+    expect(result).toMatchObject(status === "updated"
+      ? { kind: "runtime_processing_accepted", action: "woken", runtimeAttemptId: "attempt-b" }
+      : { kind: "retry_later" });
+    expect(container.retireStandbySlot).toHaveBeenCalledOnce();
+    expect(vi.mocked(commandHostedRuntimeOwner).mock.calls.map(([input]) => input.command.operation))
+      .toEqual(status === "updated" ? ["retire", "release", "claim"] : ["retire", "release"]);
+  });
+
   it("replaces a retired retained target in the same foreground request after background completion", async () => {
     const { source, container, binding } = harness();
     const completed = owner({ processingMode: "system_mailbox", phase: "retiring", completedAt: new Date().toISOString() });
@@ -317,7 +363,7 @@ describe("Postgres runtime orchestration", () => {
     expect(await ensurePostgresRuntimeProcessing(source, request)).toMatchObject({ kind: "retry_later" });
     expect(container.ensureProcessing).not.toHaveBeenCalled();
     expect(container.retireStandbySlot).toHaveBeenCalledOnce();
-    expect(vi.mocked(commandHostedRuntimeOwner).mock.calls.map(([input]) => input.command.operation)).toEqual(["claim", "retire", "release"]);
+    expect(vi.mocked(commandHostedRuntimeOwner).mock.calls.map(([input]) => input.command.operation)).toEqual(["claim", "retire", "release", "claim"]);
   });
 
   it("does not discard authority when a wake acknowledgement is unknown", async () => {
@@ -408,7 +454,7 @@ describe("Postgres runtime orchestration", () => {
     expect(await ensurePostgresRuntimeProcessing(source, request)).toMatchObject({ kind: "retry_later" });
     expect(container.ensureProcessing).not.toHaveBeenCalled();
     expect(vi.mocked(commandHostedRuntimeOwner).mock.calls.map(([input]) => input.command.operation))
-      .toEqual(["claim", "retire", "release"]);
+      .toEqual(["claim", "retire", "release", "claim"]);
     expect(container.startSupervisedInvocation).not.toHaveBeenCalled();
   });
 
@@ -449,7 +495,7 @@ describe("Postgres runtime orchestration", () => {
     await ensurePostgresRuntimeProcessing(source, request);
     expect(container.retireStandbySlot).toHaveBeenCalledWith({ claimId: allocationId, target: { slotName: target, userId: request.userId } });
     const operations = vi.mocked(commandHostedRuntimeOwner).mock.calls.map(([input]) => input.command.operation);
-    expect(operations).toEqual(["claim", "retire", "release"]);
+    expect(operations).toEqual(["claim", "retire", "release", "claim"]);
     expect(container.startSupervisedInvocation).not.toHaveBeenCalled();
   });
 
