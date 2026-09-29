@@ -851,6 +851,9 @@ Hosted CI PostgreSQL registry provenance is tracked in
 The E2E MinIO cleanup ownership repair is tracked in
 [`2026-09-28-minio-e2e-cleanup-ownership.md`](exec-plans/completed/2026-09-28-minio-e2e-cleanup-ownership.md).
 
+Android production revision selection is tracked in
+[`2026-09-29-android-canary-production-revision`](exec-plans/completed/2026-09-29-android-canary-production-revision.md).
+
 Historical parser-hold refresh preservation and composed retrieval proof are tracked
 in [parser-hold refresh](exec-plans/completed/2026-09-28-clinical-parser-holds.md).
 
