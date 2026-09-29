@@ -1,6 +1,6 @@
 # Merge queue support for required CI
 
-Status: active
+Status: completed
 Created: 2026-09-29
 Updated: 2026-09-29
 
@@ -70,3 +70,4 @@ Updated: 2026-09-29
   release workflow guard tests, actionlint.
 - Expected outcomes: all pass. The merge-group path is proven live only after
   the ruleset enables the queue.
+Completed: 2026-09-29
