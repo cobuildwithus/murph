@@ -2,6 +2,7 @@ import { access, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { buildHostedExecutionDeviceSyncWake } from "@murphai/hosted-execution";
 import { resolveAssistantStatePaths } from "@murphai/runtime-state/node";
+import { withAssistantRuntimeWriteLock } from "@murphai/assistant-engine/assistant-state";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -44,6 +45,44 @@ afterEach(async () => {
 });
 
 describe("empty system-mailbox preparation", () => {
+  it("does not wait for an unrelated writer when the committed mailbox is empty", async () => {
+    const workspace = await createHostedRuntimeWorkspace("system-mailbox-lock-");
+    tempRoots.push(workspace.workspaceRoot);
+    let releaseWriter!: () => void;
+    let writerStarted!: () => void;
+    const started = new Promise<void>((resolve) => { writerStarted = resolve; });
+    const release = new Promise<void>((resolve) => { releaseWriter = resolve; });
+    const writer = withAssistantRuntimeWriteLock(workspace.vaultRoot, async () => {
+      writerStarted();
+      await release;
+    });
+    await started;
+    const cutoff = vi.fn(async () => { throw new Error("No completion needs a cutoff."); });
+    const preparing = prepareHostedSystemMailboxItemForCheckpoint({
+      allowedRouteActions: ["continue-assistant-ask"],
+      assistantAskCompletionOccurredBefore: cutoff,
+      runtime: createRuntime(), runtimeEnv: {}, vaultRoot: workspace.vaultRoot,
+    });
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      // A held writer cannot finish until the finally block; a negative read
+      // must settle independently. The bound only prevents a regression hang.
+      const result = await Promise.race([
+        preparing.then((value) => ({ finished: true, value })),
+        new Promise<{ finished: false }>((resolve) => {
+          timer = setTimeout(() => resolve({ finished: false }), 1_000);
+        }),
+      ]);
+      expect(result).toEqual({ finished: true, value: null });
+      expect(cutoff).not.toHaveBeenCalled();
+    } finally {
+      clearTimeout(timer);
+      releaseWriter();
+      await writer;
+      await preparing;
+    }
+  });
+
   it.each(["prepare", "import"])("retires a restored deferred webhook without executing retained work (%s)", async (entrypoint) => {
     const workspace = await createHostedRuntimeWorkspace("deferred-device-mailbox-");
     tempRoots.push(workspace.workspaceRoot);
@@ -126,13 +165,16 @@ describe("empty system-mailbox preparation", () => {
       vi.mocked(rename).mockClear();
 
       for (let pass = 0; pass < 3; pass += 1) {
+        const cutoff = vi.fn(async () => { throw new Error("Empty mailbox has no completion."); });
         await expect(prepareHostedSystemMailboxItemForCheckpoint({
           allowedRouteActions: ["apply-runtime-control-request", "continue-assistant-ask"],
           allowedWakeKinds: ["runtime.pending-effects-reconcile-requested", "assistant.ask.completed"],
+          assistantAskCompletionOccurredBefore: cutoff,
           runtime: createRuntime(),
           runtimeEnv: {},
           vaultRoot: workspace.vaultRoot,
         })).resolves.toBeNull();
+        expect(cutoff).not.toHaveBeenCalled();
       }
 
       expect(vi.mocked(writeFile).mock.calls.filter(([file]) =>
@@ -140,6 +182,9 @@ describe("empty system-mailbox preparation", () => {
       )).toHaveLength(0);
       expect(vi.mocked(rename).mock.calls.filter(([, target]) => target === statePath))
         .toHaveLength(0);
+      expect(vi.mocked(writeFile).mock.calls.filter(([file]) =>
+        String(file).includes(".runtime-write.lock"),
+      )).toHaveLength(0);
       expect(await readHostedSystemMailboxState(workspace.vaultRoot)).toEqual({ pending: [] });
       if (persisted) {
         expect(await readFile(statePath, "utf8")).toBe(before);

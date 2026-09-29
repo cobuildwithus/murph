@@ -1,6 +1,7 @@
 ---
 title: 'Release audit tests depend on retired specialist prompt files'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3760'
 ---
 
 ## Expected Behavior

@@ -39,8 +39,7 @@ const userId = `member_local_linq_scheduled_reminder_${Date.now()}`;
 const linqWebhookSecret = "linq-local-scheduled-reminder-secret";
 const reminderText = "Time to sleep. Put the phone down and get some rest.";
 const scheduledReminderImageAlt = "Sleep reminder illustration";
-const scheduledReminderDeliveredText =
-  `${reminderText}\n\n${scheduledReminderImageAlt}`;
+const scheduledReminderDeliveredText = reminderText;
 const overlapReminderText = "Time to sleep. This is the overlap reminder.";
 const overlapForegroundInboundText = "Still there while the bedtime reminder is due?";
 const overlapForegroundReplyText = "Yep, I am here.";
