@@ -20,6 +20,7 @@ import {
   deleteEvent,
   deterministicContractId,
   findEventByExternalRef,
+  findEventsByExternalRefs,
   importDeviceBatch,
   initializeVault,
   listIntegrationIngestsForEvent,
@@ -9432,6 +9433,11 @@ test("findEventByExternalRef ignores historical refs after an event moves identi
   assert.equal(historical, null);
   assert.equal(current?.id, stored.id);
   assert.equal(current?.lifecycle?.revision, 2);
+  assert.deepEqual(await findEventsByExternalRefs({ vaultRoot, refs: [
+    { ...stored.externalRef },
+    { ...stored.externalRef, resourceId: "workouts-corrected" },
+    { ...stored.externalRef, resourceId: "missing" },
+  ] }), [null, current, null]);
   assert.deepEqual(exactReplay.events, []);
   assert.deepEqual(accountDriftReplay.events, []);
   assert.deepEqual(

@@ -295,7 +295,7 @@ function ConnectionDetails({ connection, disabled, onDisconnect }: {
         {!importInProgress ? <p>{describeConnection(connection).detail}</p> : null}
         {latestRun && !importInProgress ? (
           <>
-            {skippedExistingCount > 0 ? <p>{skippedExistingCount.toLocaleString()} already in Murph.</p> : null}
+            {skippedExistingCount > 0 ? <p>{skippedExistingCount.toLocaleString()} repeated {skippedExistingCount === 1 ? "item" : "items"} skipped.</p> : null}
             {latestRun.reviewCount > 0 ? <p>{latestRun.reviewCount.toLocaleString()} {latestRun.reviewCount === 1 ? "item" : "items"} saved for reference. These are kept in your vault but aren’t shown as results.</p> : null}
           </>
         ) : null}
@@ -439,6 +439,13 @@ function describeConnection(connection: ClinicalRecordConnectionContract): {
     };
   }
 
+  if (connection.latestRun?.status === "partial" && connection.lastErrorCode === "provider-search-incomplete") {
+    return {
+      badgeVariant: "outline",
+      detail: "Your portal reported limited coverage. Any records saved are ready to use.",
+      label: "Limited portal coverage",
+    };
+  }
   return describeRun(connection.latestRun);
 }
 
@@ -460,7 +467,7 @@ function describeRun(run: ClinicalRecordConnectionContract["latestRun"]): {
     case "complete":
       return importedCount > 0
         ? { badgeVariant: "default", detail: "Your records are saved and ready for conversations with Murph.", label: "Imported" }
-        : { badgeVariant: "outline", detail: (run?.skippedExistingCount ?? 0) > 0 ? "These records were already saved." : "No new results were available to add.", label: "Nothing added" };
+        : { badgeVariant: "outline", detail: (run?.skippedExistingCount ?? 0) > 0 ? "Repeated items were skipped." : "No new results were available to add.", label: "Nothing added" };
     case "partial":
       return importedCount > 0
         ? { badgeVariant: "outline", detail: "Your saved records are ready. Some records couldn’t be imported.", label: "Import incomplete" }

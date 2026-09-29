@@ -348,6 +348,7 @@ export {
   GENERATED_IMAGE_CAPTURE_TAGS,
   findCaptureByLookup,
   findEventByExternalRef,
+  findEventsByExternalRefs,
   findEventsByRawRefs,
   readStoredCaptureLookupIndex,
   isGeneratedImageCaptureEvent,
