@@ -420,11 +420,11 @@ describe('assistant Codex turn planning', () => {
       Object.entries(plans).map(([name, plan]) => [name, digestPlan(plan)]),
     )).toMatchInlineSnapshot(`
       {
-        "direct": "d57d5c7c3d0b478546bf08c4e036a78bb82216b203e77bf660ad5f352fffe443",
+        "direct": "6af4cdde62b22fdac8e5da7d7a4b62ed6dfe7b3308d36306e5cf1665eb71031f",
         "group": "59291f8075dcdacaff23f90a0fb0260d4d1fa3a448aa3ca29c5b14ea757f681d",
         "maintenance": "ac022f98be034bc9bbcfd987fb422a0546cfa1899d4c99b97167d7d22527547e",
         "outputOnly": "a83a04afea06e5290de36b14a0fee5d18970077a8294dde129b2e2dfa99116b4",
-        "scheduledEmail": "c89363017709c0d04a03c989b0d0d65be17e3ce7790029767a18d926a8db9722",
+        "scheduledEmail": "aa532af6e9840283ea43e94204cb95d6dc03b9b13eca49d9baa4626f57cf3914",
       }
     `)
   })
@@ -4200,6 +4200,7 @@ describe('assistant Codex turn planning', () => {
           progressUpdatesAvailable: false,
           responseCardsAvailable: true,
           voiceMemoGenerationAvailable: plan.voiceMemoDeliveryChannel !== null,
+          voiceMemoModelId: 'eleven_v4',
         }),
         routeFingerprint: route.routeFingerprint ?? route.routeId,
       }),

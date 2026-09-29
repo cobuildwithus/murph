@@ -59,8 +59,9 @@ import {
   selectMetricValue,
 } from "../src/index.ts";
 import * as queryIndex from "../src/index.ts";
-import { listWearableSummaryMetricEvidenceKeys } from "../src/metrics/projection.ts";
+import { buildWearableMetricEvidenceFromBundle, listWearableSummaryMetricEvidenceKeys } from "../src/metrics/projection.ts";
 import {
+  buildWearableSummaryBundle,
   summarizeWearableDay,
   summarizeWearableSleep,
   summarizeWearableSourceHealth,
@@ -7456,6 +7457,10 @@ test("wearable summary metric ownership keys match evidence builder output", asy
   try {
     const vault = await readVaultRawTolerant(vaultRoot);
     const evidenceRows = buildWearableMetricEvidence(vault);
+    const bundle = buildWearableSummaryBundle(vault);
+    assert.ok(bundle.sourceHealth.length > 0);
+    assert.deepEqual(evidenceRows, buildWearableMetricEvidenceFromBundle(bundle));
+    assert.deepEqual(buildMetricProjection(vault).wearableMetricRows, evidenceRows);
     const ownershipKeys = listWearableSummaryMetricEvidenceKeys();
     const emittedKeys = [
       ...new Set(

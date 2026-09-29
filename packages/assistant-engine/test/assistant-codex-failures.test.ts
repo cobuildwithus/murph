@@ -437,6 +437,45 @@ describe('assistant Codex failure helpers', () => {
     })
   })
 
+  it.each([
+    [null, true],
+    [400, false],
+    [401, false],
+    [403, false],
+    [404, false],
+    [408, true],
+    [422, false],
+    [429, true],
+    [502, true],
+    [503, true],
+  ] as const)('uses HTTP status %s to classify Codex 0.158 connection failures', (httpStatusCode, retryable) => {
+    const input = {
+      errorInfo: { httpStatusCode, kind: 'httpConnectionFailed' },
+      fallback: 'connection failed; retrying',
+      providerActionCount: 0,
+      codexThreadId: 'thread-http-status',
+    }
+    const expected = {
+      code: retryable ? 'ASSISTANT_CODEX_CONNECTION_LOST' : 'ASSISTANT_CODEX_FAILED',
+      context: { retryable, recoverableConnectionLoss: retryable },
+    }
+    expect(buildCodexTurnFailedError({ ...input, status: 'failed' })).toMatchObject(expected)
+    expect(buildCodexFailure({ ...input, code: 1, signal: null, stderr: '' })).toMatchObject(expected)
+  })
+
+  it.each(['flexUnavailable', 'invalidPrompt'])('preserves terminal Codex 0.158 error %s', (kind) => {
+    expect(buildCodexTurnFailedError({
+      errorInfo: { kind, httpStatusCode: null },
+      fallback: 'capacity unavailable; retrying',
+      providerActionCount: 0,
+      codexThreadId: 'thread-terminal-error',
+      status: 'failed',
+    })).toMatchObject({
+      code: 'ASSISTANT_CODEX_FAILED',
+      context: { codexErrorInfo: kind, retryable: false },
+    })
+  })
+
   it('combines stdin write fallback details without duplicating identical messages', () => {
     expect(
       buildCodexStdinFailureFallback({

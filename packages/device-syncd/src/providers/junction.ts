@@ -1928,7 +1928,11 @@ export function createJunctionDeviceSyncProvider(
     const baseTimeseriesWindowStart = job.kind === "backfill"
       ? maxIsoTimestamp(window.windowStart, subtractDays(window.windowEnd, timeseriesBackfillDays))
       : window.windowStart;
-    if (job.kind !== "backfill" || summaryHasFetchedRecords) {
+    // A completed summary phase has no collection to import. Keep explicit
+    // empty resource arrays on the ordinary importer path.
+    if (job.kind === "backfill"
+      ? summaryHasFetchedRecords
+      : Object.keys(importSummaries).length > 0) {
       await commitPreparedJunctionCanonicalImport(
         context,
         preparedSummaryImport,

@@ -116,6 +116,10 @@ async function buildRunnerBaseImage(input: {
       "-f",
       runnerBaseDockerfile,
       ...tags.flatMap((tag) => ["-t", tag]),
+      // Without a value, Docker forwards CODEX_CARGO_JOBS from the environment
+      // only when it is set, so the Dockerfile default applies otherwise.
+      "--build-arg",
+      "CODEX_CARGO_JOBS",
       "--label",
       `${runnerBaseImageSourceFingerprintLabel}=${input.fingerprint}`,
       "--label",
