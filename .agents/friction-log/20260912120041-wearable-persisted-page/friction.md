@@ -1,6 +1,7 @@
 ---
 title: 'Wearable persisted-page proof ignores failed navigation responses'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3789'
 ---
 
 ## Expected Behavior

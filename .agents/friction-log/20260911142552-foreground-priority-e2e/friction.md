@@ -1,6 +1,7 @@
 ---
 title: 'Foreground priority E2E still requires retired runtime replacement'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3772'
 ---
 
 ## Expected Behavior

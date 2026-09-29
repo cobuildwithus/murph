@@ -1,6 +1,7 @@
 ---
 title: 'Wearable browser progress is buffered until subprocess exit'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3790'
 ---
 
 ## Expected Behavior

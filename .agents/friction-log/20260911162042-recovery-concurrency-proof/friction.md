@@ -1,6 +1,7 @@
 ---
 title: 'Recovery concurrency proof assumes one scheduling-dependent rejection status'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3780'
 ---
 
 ## Expected Behavior

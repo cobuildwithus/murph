@@ -1,6 +1,7 @@
 ---
 title: 'Foreground priority wake fixture omits new clinical enrichment kind'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3771'
 ---
 
 ## Expected Behavior

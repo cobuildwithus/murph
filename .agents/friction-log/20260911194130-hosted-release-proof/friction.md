@@ -1,6 +1,7 @@
 ---
 title: 'Hosted release proof deadline includes runner queue time'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3784'
 ---
 
 ## Expected Behavior

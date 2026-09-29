@@ -1,6 +1,7 @@
 ---
 title: 'Public main merges cancel production candidate verification'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3768'
 ---
 
 ## Expected Behavior
