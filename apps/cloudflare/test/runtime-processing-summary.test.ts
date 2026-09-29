@@ -47,6 +47,37 @@ describe("Postgres processing summaries", () => {
     expect(recordRuntimeProcessingSummary).not.toHaveBeenCalled();
   });
 
+  it.each([1_000, 1_001, 9_000])("retains native timing for a successful %i ms wake only above the slow threshold", async elapsedMs => {
+    const { context, pending } = harness();
+    const now = Date.now();
+    context.runtimeControlAuthTiming = {
+      runtimeControlAuthStartedAtEpochMs: now - elapsedMs,
+      runtimeControlAuthFinishedAtEpochMs: now - elapsedMs,
+    };
+    const clock = vi.spyOn(Date, "now").mockReturnValue(now);
+    const result: HostedRuntimeEnsureProcessingResponse = {
+      kind: "runtime_processing_accepted", action: "woken", runtimeAttemptId: "runtime-a",
+      recommendedRecheckAt: new Date(now + 300_000).toISOString(),
+    };
+    vi.mocked(ensurePostgresRuntimeProcessing).mockImplementationOnce(async (_source, _input, diagnostics) => {
+      if (!diagnostics) throw new Error("Missing request diagnostics");
+      diagnostics.wakeDetails = { wakeEnteredAtEpochMs: now - 70, wakeHandlerAcceptedAtEpochMs: now - 50 };
+      return result;
+    });
+    try {
+      const response = await handleRuntimeEnsureProcessingRoute(context, "member-a");
+      expect(await response.json()).toEqual(result);
+      expect(pending).toHaveLength(elapsedMs > 1_000 ? 1 : 0);
+      await Promise.all(pending);
+      if (elapsedMs > 1_000) expect(recordRuntimeProcessingSummary).toHaveBeenCalledWith(expect.objectContaining({
+        entry: expect.objectContaining({ redactedJson: expect.objectContaining({
+          wakeEnteredAtEpochMs: now - 70, wakeHandlerAcceptedAtEpochMs: now - 50,
+          runtimeProcessingAction: "woken",
+        }) }),
+      }));
+    } finally { clock.mockRestore(); }
+  });
+
   it.each(["started", "replaced", "already_running", "retry_later"] as const)("records %s without waiting for telemetry", async outcome => {
     const { context, pending } = harness();
     const result: HostedRuntimeEnsureProcessingResponse = outcome === "retry_later"
