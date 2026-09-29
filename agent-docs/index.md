@@ -3,6 +3,11 @@ in [the import-speed plan](exec-plans/completed/2026-09-24-garmin-import-speed.m
 
 # Murph Agent Docs Index
 
+Exercise image audit findings and local repair status are recorded in
+[the image audit](../artifacts/exercise-image-audit-2026-09-28.md);
+[the active repair plan](exec-plans/active/2026-09-28-exercise-image-audit.md)
+tracks remaining generation and catalog publication work.
+
 Native, Frog, and Garmin CI repairs are recorded in
 [the canary repair plan](exec-plans/completed/2026-09-25-scheduled-canary-repairs.md).
 
