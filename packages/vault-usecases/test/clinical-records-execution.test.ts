@@ -13,19 +13,22 @@ import {
   findEventByExternalRef,
   importEventBatch,
   initializeVault,
+  inspectCanonicalWriteLock,
 } from "@murphai/core";
 import {
   clearClinicalFhirRetrievalCheckpoint,
   ClinicalFhirRetrievalCheckpointError,
   ClinicalFhirSnapshotRejectedError,
   importClinicalFhirSnapshot,
+  minimizeClinicalDocumentImages,
   readClinicalFhirRetrievalCheckpoint,
   readClinicalFhirRetrievalCheckpointForRun,
   type ClinicalFhirSnapshotImportInput,
   writeClinicalFhirRetrievalCheckpoint,
 } from "@murphai/vault-usecases/clinical-records";
 import { listMetricPoints, rebuildQueryProjection, summarizeWearableBodyStateRuntime, summarizeWearableRecoveryRuntime } from "@murphai/query";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import * as clinicalStorage from "../src/clinical-document-storage.ts";
 
 const FHIR_BASE_URL = "https://ehr.example.test/fhir";
 const FHIR_BASE_URL_HASH = hashClinicalFhirBaseUrl(FHIR_BASE_URL);
@@ -167,6 +170,93 @@ describe("importClinicalFhirSnapshot", () => {
     const note = await findEventByExternalRef({ vaultRoot: input.vaultRoot, system: `epic-fhir-${FHIR_BASE_URL_HASH}-${PATIENT_ID_HASH}`, resourceType: "document-reference", resourceId: resource.id });
     expect(JSON.stringify(note)).toContain("Historical discharge summary");
     expect((await importClinicalFhirSnapshot(input)).canonical.skippedExistingCount).toBe(1);
+  });
+
+  it("replays original provider input without restoring reviewed omitted image bytes", async () => {
+    const decoration = Buffer.alloc(3000, 7);
+    const original = Buffer.from(`<html><body><p>Historical discharge summary.</p><img src="data:image/png;base64,${decoration.toString("base64")}"/></body></html>`);
+    const sha256 = createHash("sha256").update(original).digest("hex");
+    const resource = {
+      resourceType: "DocumentReference", id: "retained-note", status: "current",
+      subject: { reference: `Patient/${PATIENT_ID}` },
+      meta: { lastUpdated: "2026-07-10T12:00:00.000Z" }, date: "2020-07-10T12:00:00.000Z",
+      content: [{ attachment: { contentType: "text/html", url: "Binary/discharge" } }],
+    };
+    const content = fhirBundle([resource]);
+    const input = await createSnapshotInput({ pages: [{ content, resourceType: "DocumentReference" }], resourceTypes: ["DocumentReference"] });
+    const relativePath = `attachments/${sha256}.bin`;
+    input.documentAttachments = [{ parentPageSha256: createHash("sha256").update(content).digest("hex"), resourceType: "DocumentReference", resourceId: resource.id,
+      attachmentIndex: 0, status: "downloaded", relativePath, sha256, byteLength: original.length, mediaType: "text/html" }];
+    input.attachments = [{ relativePath, contentBase64: original.toString("base64") }];
+    const result = await importClinicalFhirSnapshot(input);
+    expect(result.canonical.createdCount).toBe(1);
+    expect(await minimizeClinicalDocumentImages({ vaultRoot: input.vaultRoot, manifestPath: result.manifestPath, manifestSha256: result.manifestSha256,
+      attachmentRelativePath: relativePath, reviewedImageSha256s: [createHash("sha256").update(decoration).digest("hex")],
+    })).toMatchObject({ changed: true });
+    const file = path.join(input.vaultRoot, path.posix.dirname(result.manifestPath), relativePath);
+    const retained = await readFile(file);
+    expect(retained.length).toBeLessThan(original.length);
+    expect((await importClinicalFhirSnapshot(input)).canonical).toMatchObject({ createdCount: 0, skippedExistingCount: 1 });
+    expect(await readFile(file)).toEqual(retained);
+  });
+
+  it.each([false, true])("serializes a replay with image repair after an earlier repair=%s", async (alreadyMinimized) => {
+    const decoration = Buffer.alloc(3000, 7);
+    const secondImage = Buffer.alloc(3000, 8);
+    const original = Buffer.from(`<html><body><p>Historical discharge summary.</p><img src="data:image/png;base64,${decoration.toString("base64")}"/><img src="data:image/png;base64,${secondImage.toString("base64")}"/></body></html>`);
+    const sha256 = createHash("sha256").update(original).digest("hex");
+    const resource = {
+      resourceType: "DocumentReference", id: "retained-note", status: "current",
+      subject: { reference: `Patient/${PATIENT_ID}` },
+      meta: { lastUpdated: "2026-07-10T12:00:00.000Z" }, date: "2020-07-10T12:00:00.000Z",
+      content: [{ attachment: { contentType: "text/html", url: "Binary/discharge" } }],
+    };
+    const content = fhirBundle([resource]);
+    const input = await createSnapshotInput({ pages: [{ content, resourceType: "DocumentReference" }], resourceTypes: ["DocumentReference"] });
+    const relativePath = `attachments/${sha256}.bin`;
+    input.documentAttachments = [{ parentPageSha256: createHash("sha256").update(content).digest("hex"), resourceType: "DocumentReference", resourceId: resource.id,
+      attachmentIndex: 0, status: "downloaded", relativePath, sha256, byteLength: original.length, mediaType: "text/html" }];
+    input.attachments = [{ relativePath, contentBase64: original.toString("base64") }];
+    const result = await importClinicalFhirSnapshot(input);
+    expect(result.canonical.createdCount).toBe(1);
+    const repairInput = { vaultRoot: input.vaultRoot, manifestPath: result.manifestPath, manifestSha256: result.manifestSha256,
+      attachmentRelativePath: relativePath, reviewedImageSha256s: [createHash("sha256").update(decoration).digest("hex")] };
+    if (alreadyMinimized) await minimizeClinicalDocumentImages(repairInput);
+    const selected = deferredSignal();
+    const release = deferredSignal();
+    const originalRead = clinicalStorage.readMinimizedClinicalDocument;
+    const spy = vi.spyOn(clinicalStorage, "readMinimizedClinicalDocument").mockImplementation(async (request) => {
+      const bytes = await originalRead(request);
+      selected.resolve();
+      await release.promise;
+      return bytes;
+    });
+    const replay = importClinicalFhirSnapshot(input);
+    let repair: ReturnType<typeof minimizeClinicalDocumentImages> | undefined;
+    try {
+      await selected.promise;
+      // The read has completed, but the raw batch has not begun. The lock must
+      // still be active here; a separate read-only lock would already be gone.
+      expect((await inspectCanonicalWriteLock(input.vaultRoot)).state).toBe("active");
+      let repairFinished = false;
+      repair = minimizeClinicalDocumentImages({ ...repairInput,
+        reviewedImageSha256s: [createHash("sha256").update(alreadyMinimized ? secondImage : decoration).digest("hex")],
+      }).then((value) => { repairFinished = true; return value; });
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(repairFinished).toBe(false);
+      release.resolve();
+      expect((await replay).canonical).toMatchObject({ createdCount: 0, skippedExistingCount: 1 });
+      expect(await repair).toMatchObject({ changed: true, removedImageCount: 1 });
+    } finally {
+      release.resolve();
+      await Promise.allSettled([replay, ...(repair ? [repair] : [])]);
+      spy.mockRestore();
+    }
+    const stored = await clinicalStorage.readClinicalStoredDocument({ vaultRoot: input.vaultRoot, source: {
+      rawRef: path.posix.join(path.posix.dirname(result.manifestPath), relativePath), sha256, byteLength: original.length, mediaType: "text/html",
+    } });
+    expect(stored.receipt?.removedImageSha256s).toHaveLength(alreadyMinimized ? 2 : 1);
+    expect((await importClinicalFhirSnapshot(input)).canonical).toMatchObject({ createdCount: 0, skippedExistingCount: 1 });
   });
 
   it("preserves a DiagnosticReport study image with a metadata-only source receipt", async () => {
@@ -1226,4 +1316,10 @@ function noKnownAllergyResource() {
       }],
     },
   };
+}
+
+function deferredSignal() {
+  let resolve!: () => void;
+  const promise = new Promise<void>((complete) => { resolve = complete; });
+  return { promise, resolve };
 }

@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { CLINICAL_DOCUMENT_MAX_BYTES } from "@murphai/clinical-records";
+import { withCanonicalWriteLock } from "@murphai/core";
 import { runCommand } from "@murphai/parsers";
 import { readClinicalDocumentSourceText } from "@murphai/vault-usecases/clinical-records";
 
@@ -36,6 +37,7 @@ export interface PreparedClinicalEnrichmentDocument {
 }
 
 interface DocumentPreparationInput {
+  vaultRoot: string;
   documentPath: string;
   mediaType: string;
   page: number;
@@ -64,7 +66,7 @@ export async function prepareClinicalEnrichmentDocument(
   if (!isText && mediaType !== "application/pdf" && mediaType !== "image/png" && mediaType !== "image/jpeg") {
     throw new ClinicalEnrichmentDocumentError("CLINICAL_ENRICHMENT_DOCUMENT_UNSUPPORTED");
   }
-  const bytes = await readBoundedSource(input.documentPath);
+  const bytes = await withCanonicalWriteLock(input.vaultRoot, () => readBoundedSource(input.documentPath));
   input.signal?.throwIfAborted();
   if (bytes.length > CLINICAL_DOCUMENT_MAX_BYTES) {
     throw new ClinicalEnrichmentDocumentError("CLINICAL_ENRICHMENT_DOCUMENT_LIMIT");
