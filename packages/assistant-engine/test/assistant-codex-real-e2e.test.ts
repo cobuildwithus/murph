@@ -9285,6 +9285,68 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
     360_000,
   )
 
+  it.each(['eleven_v4', 'eleven_multilingual_v2'] as const)(
+    'uses model-aware expressive voice cues with the saved voice on %s',
+    async (modelId) => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-expressive-voice-e2e-'))
+      const generations: unknown[] = []
+      try {
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions: buildCapabilityRoutingDeveloperInstructions(),
+          dynamicTools: resolveMurphDynamicTools({
+            voiceMemoGenerationAvailable: true,
+            voiceMemoModelId: modelId,
+          }).filter((tool) => tool.name === 'generate_voice_memo'),
+          env: config.env,
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt: modelId === 'eleven_v4'
+            ? 'Send me one short, sleepy goodnight voice memo with an audible yawn. Use my saved voice. Audio only, no text and no settings changes.'
+            : 'Send me one short, calm goodnight voice memo in my saved voice. Audio only, no text, sound effects, or settings changes.',
+          reasoningEffort: 'low',
+          sandbox: 'read-only',
+          voiceMemoRuntime: {
+            elevenLabs: { apiKeyAvailable: true, modelId, voiceId: 'voice_saved_synthetic' },
+            kind: 'linq',
+            generateAndUpload: async (input) => {
+              generations.push(input.generation)
+              return { attachmentId: 'attachment_expressive_voice', filename: 'goodnight.mp3' }
+            },
+          },
+          workingDirectory,
+        })
+        const actions = readCapabilityRoutingActions(result.jsonEvents)
+        const calls = actions.filter((action) => action.kind === 'dynamic')
+        expect(calls).toEqual([
+          expect.objectContaining({ tool: 'generate_voice_memo', success: true }),
+        ])
+        const call = calls[0]
+        if (call?.kind !== 'dynamic') throw new Error('Expected one voice memo call')
+        const text = String(call.argumentsValue.text)
+        expect(call.argumentsValue.userRequestedVoice ?? null).toBeNull()
+        expect(text).toMatch(/night|sleep|rest/iu)
+        if (modelId === 'eleven_v4') expect(text).toMatch(/\[yawn(?:ing|s)?\]/iu)
+        else expect(text).not.toMatch(/\[|<[^>]+>/u)
+        expect(generations).toEqual([
+          expect.objectContaining({ kind: 'elevenlabs_speech', modelId, voiceId: 'voice_saved_synthetic', text }),
+        ])
+        expect(result.responseMedia).toHaveLength(1)
+        expect(result.finalMessage.trim()).toBe('')
+        expect(result.runtimeIssueInputs).toEqual([])
+        expect(actions.filter((action) => action.kind === 'command')).toEqual([])
+        process.stdout.write(`[expressive-voice-e2e] ${JSON.stringify({ modelId, text, reply: result.finalMessage, generations: generations.length })}\n`)
+      } finally {
+        await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+      }
+    },
+    360_000,
+  )
+
   it(
     'keeps the running-turn voice unless the user names an exact memo voice',
     async () => {
@@ -15128,7 +15190,7 @@ describeRealCodex('real Codex adaptive wearable no-data outreach e2e', () => {
   )
 })
 
-describeRealCodex('real Codex Personal Patterns typed-ledger GPT-6 Sol high digest e2e', () => {
+describeRealCodex('real Codex Personal Patterns typed-ledger GPT-6 Luna xhigh digest e2e', () => {
   it.each([false, true])('sends exactly one Personal Pattern without a link (initial digest sent: %s)', async (initialDigestSent) => {
     const config = await resolveRealCodexE2eConfig()
     const automation = MURPH_MANAGED_AUTOMATIONS.find(
@@ -15137,6 +15199,7 @@ describeRealCodex('real Codex Personal Patterns typed-ledger GPT-6 Sol high dige
     if (!automation) {
       throw new Error('Expected the managed Personal Patterns automation.')
     }
+    expect(automation.assistantTargetOverride).toEqual({ model: 'gpt-6-luna', reasoningEffort: 'xhigh' })
     const workingDirectory = await mkdtemp(
       path.join(tmpdir(), 'murph-personal-pattern-baseline-e2e-'),
     )
@@ -15478,7 +15541,7 @@ describeRealCodex('real Codex Personal Patterns vocabulary normalization e2e', (
   }, 720_000)
 })
 
-describeRealCodex('real Codex Journal connected account eligibility e2e', () => {
+describeRealCodex('real Codex Journal GPT-6 Luna xhigh connected account eligibility e2e', () => {
   it.each([
     { name: 'reads a newly connected mailbox silently on its first pass', accountId: 'gmail_new', toolkit: 'gmail', optedOut: false, ledgerText: '# Journal connected context' },
     { name: 'reads an undated baseline calendar silently in the same pass', accountId: 'calendar_old', toolkit: 'googlecalendar', optedOut: false, ledgerText: '# Journal connected context\n\n- account: calendar_old\n  toolkit: googlecalendar\n  state: baseline' },
@@ -15492,6 +15555,7 @@ describeRealCodex('real Codex Journal connected account eligibility e2e', () => 
     if (!automation) {
       throw new Error('Expected the managed Journal connected-context automation.')
     }
+    expect(automation.assistantTargetOverride).toEqual({ model: 'gpt-6-luna', reasoningEffort: 'xhigh' })
     const workingDirectory = await mkdtemp(
       path.join(tmpdir(), 'murph-journal-connected-eligibility-e2e-'),
     )
