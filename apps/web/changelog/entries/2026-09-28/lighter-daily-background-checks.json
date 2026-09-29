@@ -1,0 +1,19 @@
+{
+  "publishedOn": "2026-09-28",
+  "order": 100,
+  "item": {
+    "id": "lighter-daily-background-checks",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Lighter daily background checks",
+    "summary": "Daily Journal and Personal Patterns checks now use Luna with extra-high reasoning.",
+    "details": "These two background checks use the lower-usage model while keeping their existing schedules and instructions.",
+    "relevanceTags": [
+      "journal",
+      "patterns"
+    ],
+    "sourcePullRequests": [
+      3801
+    ]
+  }
+}

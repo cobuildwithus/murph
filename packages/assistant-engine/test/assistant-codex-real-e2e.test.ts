@@ -15190,7 +15190,7 @@ describeRealCodex('real Codex adaptive wearable no-data outreach e2e', () => {
   )
 })
 
-describeRealCodex('real Codex Personal Patterns typed-ledger GPT-6 Sol high digest e2e', () => {
+describeRealCodex('real Codex Personal Patterns typed-ledger GPT-6 Luna xhigh digest e2e', () => {
   it.each([false, true])('sends exactly one Personal Pattern without a link (initial digest sent: %s)', async (initialDigestSent) => {
     const config = await resolveRealCodexE2eConfig()
     const automation = MURPH_MANAGED_AUTOMATIONS.find(
@@ -15199,6 +15199,7 @@ describeRealCodex('real Codex Personal Patterns typed-ledger GPT-6 Sol high dige
     if (!automation) {
       throw new Error('Expected the managed Personal Patterns automation.')
     }
+    expect(automation.assistantTargetOverride).toEqual({ model: 'gpt-6-luna', reasoningEffort: 'xhigh' })
     const workingDirectory = await mkdtemp(
       path.join(tmpdir(), 'murph-personal-pattern-baseline-e2e-'),
     )
@@ -15540,7 +15541,7 @@ describeRealCodex('real Codex Personal Patterns vocabulary normalization e2e', (
   }, 720_000)
 })
 
-describeRealCodex('real Codex Journal connected account eligibility e2e', () => {
+describeRealCodex('real Codex Journal GPT-6 Luna xhigh connected account eligibility e2e', () => {
   it.each([
     { name: 'reads a newly connected mailbox silently on its first pass', accountId: 'gmail_new', toolkit: 'gmail', optedOut: false, ledgerText: '# Journal connected context' },
     { name: 'reads an undated baseline calendar silently in the same pass', accountId: 'calendar_old', toolkit: 'googlecalendar', optedOut: false, ledgerText: '# Journal connected context\n\n- account: calendar_old\n  toolkit: googlecalendar\n  state: baseline' },
@@ -15554,6 +15555,7 @@ describeRealCodex('real Codex Journal connected account eligibility e2e', () => 
     if (!automation) {
       throw new Error('Expected the managed Journal connected-context automation.')
     }
+    expect(automation.assistantTargetOverride).toEqual({ model: 'gpt-6-luna', reasoningEffort: 'xhigh' })
     const workingDirectory = await mkdtemp(
       path.join(tmpdir(), 'murph-journal-connected-eligibility-e2e-'),
     )
