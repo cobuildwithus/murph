@@ -111,6 +111,7 @@ import {
 } from './dynamic-tools/connected-apps.js'
 import {
   MURPH_GENERATE_VOICE_MEMO_TOOL,
+  MURPH_EXPRESSIVE_VOICE_MEMO_TOOL,
 } from './dynamic-tools/generate-voice-memo.js'
 import {
   MURPH_CREATE_PHONE_CALL_TOOL,
@@ -1804,6 +1805,7 @@ export const MURPH_DYNAMIC_TOOLS = [
 
 export type MurphDynamicTool =
   | (typeof MURPH_DYNAMIC_TOOLS)[number]
+  | typeof MURPH_EXPRESSIVE_VOICE_MEMO_TOOL
   | typeof MURPH_GROUP_DATA_EAGER_TOOL
   | typeof MURPH_ATTACH_FOLLOW_UP_TOOL
   | typeof MURPH_MEMBER_MEMORY_TOOL
@@ -1851,6 +1853,7 @@ export interface MurphDynamicToolAvailability {
   phoneCallStatusAvailable?: boolean | null
   phoneCallStopAvailable?: boolean | null
   voiceMemoGenerationAvailable?: boolean | null
+  voiceMemoModelId?: string | null
   pendingVaultFilesAvailable?: boolean | null
   vaultFileSendAvailable?: boolean | null
   conversationAttachmentsAvailable?: boolean | null
@@ -1936,6 +1939,12 @@ export function resolveMurphDynamicTools(
   const tools: MurphDynamicTool[] = MURPH_DYNAMIC_TOOLS.filter((tool) =>
     (TOOL_AVAILABILITY.get(tool) ?? ALWAYS_AVAILABLE)(availability),
   )
+  if (availability.voiceMemoModelId === 'eleven_v4') {
+    const voiceToolIndex = tools.indexOf(MURPH_GENERATE_VOICE_MEMO_TOOL)
+    if (voiceToolIndex >= 0) {
+      tools[voiceToolIndex] = MURPH_EXPRESSIVE_VOICE_MEMO_TOOL
+    }
+  }
   if (availability.automationAvailable !== true && availability.followUpAttachmentAvailable === true) {
     tools.push(MURPH_ATTACH_FOLLOW_UP_TOOL)
   }
