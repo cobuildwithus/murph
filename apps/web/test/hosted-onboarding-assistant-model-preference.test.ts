@@ -170,6 +170,19 @@ describe("hosted member assistant model preference", () => {
     expect(mocks.updateHostedMember).not.toHaveBeenCalled();
   });
 
+  it("withholds GPT-6.1 Sol selection until the compatibility rollout completes", async () => {
+    mocks.findUniqueHostedMember.mockResolvedValue(buildMemberState({ assistantModelPreference: null }));
+    const current = await readHostedMemberAssistantModelPreference({
+      memberId: "member_pulse", prisma: createReadClient(),
+    });
+    expect(current.model).toBe("gpt-6-sol");
+    expect(current.availableModels).not.toContain("gpt-6.1-sol");
+    await expect(updateHostedMemberAssistantModelPreferenceTx({
+      memberId: "member_pulse", model: "gpt-6.1-sol", prisma: createTransactionClient(),
+    })).rejects.toMatchObject({ code: "ASSISTANT_MODEL_NOT_AVAILABLE" });
+    expect(mocks.updateHostedMember).not.toHaveBeenCalled();
+  });
+
   it.each(["gpt-6-sol", "gpt-6-luna"] as const)("saves and reads back %s on Pulse without premium access", async (model) => {
     let member = buildMemberState({
       assistantModelPreference: "gpt-6-sol",

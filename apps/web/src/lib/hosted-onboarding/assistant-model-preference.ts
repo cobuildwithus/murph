@@ -9,6 +9,7 @@ import {
   HOSTED_ASSISTANT_DEFAULT_MODEL,
   HOSTED_ASSISTANT_DEFAULT_PROVIDER,
   HOSTED_ASSISTANT_GPT_6_SOL_MODEL,
+  HOSTED_ASSISTANT_GPT_61_SOL_MODEL,
   HOSTED_ASSISTANT_GPT_6_LUNA_MODEL,
   HOSTED_ASSISTANT_VENICE_PROVIDER_MODELS,
   HOSTED_ASSISTANT_DEFAULT_REASONING_EFFORT,
@@ -411,14 +412,23 @@ function assertHostedAssistantModelSelection(input: {
       message: "GPT-6 Astra requires an active paid Edge or Max plan.",
     });
   }
+  // Compatibility release: activate selection only after the runner fleet converges.
+  if (input.model === HOSTED_ASSISTANT_GPT_61_SOL_MODEL) {
+    throw hostedOnboardingError({
+      code: "ASSISTANT_MODEL_NOT_AVAILABLE",
+      httpStatus: 400,
+      message: "GPT-6.1 Sol is not available yet.",
+    });
+  }
   const selectedModel = input.model ?? input.storedModel;
-  if ((selectedModel === HOSTED_ASSISTANT_GPT_6_SOL_MODEL
+  if ((selectedModel === HOSTED_ASSISTANT_GPT_61_SOL_MODEL
+      || selectedModel === HOSTED_ASSISTANT_GPT_6_SOL_MODEL
       || selectedModel === HOSTED_ASSISTANT_GPT_6_LUNA_MODEL)
       && (input.provider ?? input.current.provider) !== HOSTED_ASSISTANT_DEFAULT_PROVIDER) {
     throw hostedOnboardingError({
       code: "ASSISTANT_MODEL_REQUIRES_OPENAI",
       httpStatus: 400,
-      message: "Choose OpenAI to use GPT-6 Sol or Luna.",
+      message: "Choose OpenAI to use GPT-6.1 Sol, GPT-6 Sol, or GPT-6 Luna.",
     });
   }
   if ((input.model ?? input.current.model) === HOSTED_ASSISTANT_ASTRA_MODEL
@@ -542,7 +552,8 @@ export function resolveHostedMemberAssistantModel(
   return {
     availableModels: configurationAvailable
       ? HOSTED_ASSISTANT_PRODUCT_MODELS.filter(
-          (candidate) => (candidate !== HOSTED_ASSISTANT_SOL_MODEL || solAvailable)
+          (candidate) => candidate !== HOSTED_ASSISTANT_GPT_61_SOL_MODEL
+            && (candidate !== HOSTED_ASSISTANT_SOL_MODEL || solAvailable)
             && (candidate !== HOSTED_ASSISTANT_ASTRA_MODEL || astraAvailable),
         )
       : [],
