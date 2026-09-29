@@ -3,6 +3,13 @@ in [the import-speed plan](exec-plans/completed/2026-09-24-garmin-import-speed.m
 
 # Murph Agent Docs Index
 
+Read-only system-mailbox selection and deferred conversation chronology reads
+are owned by `packages/assistant-runtime/README.md`; local proof is recorded in
+[`foreground mailbox latency`](exec-plans/completed/2026-09-28-warm-input-latency.md).
+
+Native, Frog, and Garmin CI repairs are recorded in
+[the canary repair plan](exec-plans/completed/2026-09-25-scheduled-canary-repairs.md).
+
 [Batch/status failure telemetry](exec-plans/completed/2026-09-28-more-failure-telemetry.md)
 records the patch handoff; its contract remains in `docs/hosted-runtime-log-database.md`.
 
@@ -480,7 +487,7 @@ is recorded in [`2026-09-18-ios-canary-deployment-continuity.md`](exec-plans/com
 | `agent-docs/product-specs/habitat.md` | Habitat product spec. | Habitat product spec | High | 2026-08-11 |
 | `agent-docs/product-specs/murph-contact-card-picker.md` | Post-signup add-Murph-to-contacts step with member-chosen contact-card avatar, independent from `/home` first-visit personalization. | Contact-card picker spec | Medium | 2026-07-22 |
 | `agent-docs/product-specs/murph-personas.md` | Murph persona behavior. | Murph persona behavior | High | 2026-07-22 |
-| `agent-docs/product-specs/murph-tone-and-voice.md` | Murph speaking-style preference spec. | Murph speaking-style preference spec | Medium | 2026-08-10 |
+| `agent-docs/product-specs/murph-tone-and-voice.md` | Murph speaking-style preferences, Eleven v4 expressive cues, and conversational voice language memory. | Murph speaking-style preference spec | Medium | 2026-09-29 |
 | `agent-docs/product-specs/shared-message-targeting.md` | Shared opaque accepted-message reference, authority resolver, native-reply marker, reaction reuse, provider behavior, and immediate runner rollout contract. | Assistant messaging behavior | High | 2026-07-16 |
 | `agent-docs/exec-plans/completed/2026-09-21-native-chat-polls.md` | Native iMessage and Telegram polls, voter results, and tasteful proactive tool use; current behavior is owned by `ARCHITECTURE.md`. | Historical implementation evidence | Low | 2026-09-21 |
 | `agent-docs/exec-plans/completed/2026-09-22-poll-self-vote.md` | Murph’s own iMessage votes, Telegram spoken picks, and verification; current behavior is owned by `ARCHITECTURE.md`. | Poll participation implementation evidence | Medium | 2026-09-22 |
@@ -572,7 +579,9 @@ is recorded in [`2026-09-18-ios-canary-deployment-continuity.md`](exec-plans/com
 | `agent-docs/exec-plans/completed/2026-09-23-vault-share-background.md` | Isolated checkpoint projection that continues across foreground replies; ownership and verification. | Hosted vault-share background execution | Medium | 2026-09-23 |
 | `agent-docs/exec-plans/completed/2026-09-28-junction-record-window.md` | Bounded recovery for oversized Junction hourly-feature days. | Device-sync recovery plan | Medium | 2026-09-28 |
 | `agent-docs/exec-plans/completed/2026-09-28-checkpoint-failure-stage-telemetry.md` | Fixed-vocabulary checkpoint rejection-stage observation and response-preservation proof. | Completed telemetry implementation evidence | Low | 2026-09-28 |
+| `agent-docs/exec-plans/completed/2026-09-28-codex-0158-live-port.md` | Codex 0.158.0 public Live patch port, removal review, and native compatibility verification; deployment gates remain. | Historical implementation evidence | Medium | 2026-09-28 |
 | `agent-docs/exec-plans/active/` | Task-owned in-flight execution plans. | Active plan lifecycle | Medium | 2026-08-20 |
+| `agent-docs/exec-plans/completed/2026-09-25-linq-link-delay-notice.md` | Local implementation and delivery proof for one best-effort notice after a partial link send. | Historical delivery evidence | Low | 2026-09-25 |
 | `agent-docs/exec-plans/completed/2026-09-17-research-scout-failure-telemetry.md` | Three exact research error codes, parent-native verification and old-reader compatibility; rollout tracked separately. | Historical implementation evidence | Medium | 2026-09-17 |
 | `agent-docs/exec-plans/completed/2026-09-15-vercel-memory-headroom.md` | Vercel typecheck OOM recovery verification, native compiler memory comparisons, and compilation-only esbuild memory target. | Build memory investigation and local proof | Medium | 2026-09-15 |
 | `agent-docs/exec-plans/completed/2026-09-15-foreground-priority-transition-gate.md` | Foreground priority escape analysis, three-history transition matrix, required CI gate, and PR review evidence. | Historical implementation evidence | Low | 2026-09-15 |
@@ -590,7 +599,7 @@ is recorded in [`2026-09-18-ios-canary-deployment-continuity.md`](exec-plans/com
 | `agent-docs/exec-plans/tech-debt-tracker.md` | Current debt register with owner/priority/status. | Rolling debt tracker | Medium | 2026-03-12 |
 | `agent-docs/prompts/seam-audits/` | One-pass bespoke seam prompts governed by a shared review-only, evidence, correction, and zero-finding contract. | Seam-audit prompt library | Low | 2026-07-13 |
 | `apps/web/README.md` | Hosted Web setup, runtime ownership, build/deploy contracts, and bounded legacy phone-call deletion execution. | `apps/web/**` | Medium | 2026-09-10 |
-| `apps/cloudflare/README.md` | Hosted execution-plane overview, runtime contract, pinned native Codex build/update ownership, scoped `cf` operational reads, and retired member shell-hint transport. | `apps/cloudflare/**` | Medium | 2026-09-23 |
+| `apps/cloudflare/README.md` | Hosted execution-plane overview, runtime contract, pinned native Codex build/update ownership, search-first `cf` API operations, pinned open-beta setup, existing Wrangler workflow exceptions, and retired member shell-hint transport. | `apps/cloudflare/**` | Medium | 2026-09-28 |
 | `agent-docs/exec-plans/completed/2026-09-28-terminal-log-metadata.md` | Bounded hosted-local failure metadata and closed-enum diagnostic regression proof. | Historical harness evidence | Low | 2026-09-28 |
 | `apps/cloudflare/scripts/benchmark-workspace-restore.md` | Synthetic encrypted restore benchmark, measurement controls, and local/Linux limitations. | Cloudflare workspace restore | Medium | 2026-09-04 |
 | `apps/cloudflare/DEPLOY.md` | Current deployment procedure for hosted execution, consumer-first Web runtime admission, single-pool capacity, isolated artifact smoke, compatible native gradual rollout, and member shell-hint transport retirement. | Hosted deploy flow | Medium | 2026-09-10 |
@@ -795,11 +804,26 @@ Signup-wide native contact-card sharing and daily attempt suppression are owned 
 `operations/imessage-deliverability.md`; implementation and receipt-order proof
 are tracked in `exec-plans/completed/2026-09-24-signup-contact-card.md`.
 
+Early Linq text typing reuses the existing staging-to-turn handoff owned by
+`packages/assistant-runtime/README.md`; implementation and synthetic proof are
+tracked in [`warm typing latency`](exec-plans/completed/2026-09-25-warm-typing-latency.md).
+
+Actual message-processing latency reductions in checkpoint wake discovery and
+snapshot cleanup bookkeeping are tracked in
+[`message processing latency`](exec-plans/completed/2026-09-25-message-processing-latency.md).
+
+Request-local Worker entry and Web callback latency attribution is owned by
+`apps/cloudflare/README.md`; the focused implementation record is
+[`runtime latency attribution`](exec-plans/completed/2026-09-25-runtime-latency-attribution.md).
+
 Lodging destination evidence and focused assistant proof are tracked in
 [`lodging destination evidence`](exec-plans/completed/2026-09-25-lodging-location-evidence.md).
 
 Health-purpose connected-plan follow-ups and legacy suppression are tracked in
 [`health-purpose check-ins`](exec-plans/completed/2026-09-25-health-purpose-checkins.md).
+
+Further removal of duplicate provider routing reads and unchanged-snapshot cleanup
+bookkeeping is tracked in [`runtime latency work removal`](exec-plans/completed/2026-09-25-runtime-latency-work-removal.md).
 
 Web build fonts are bundled locally; source and license provenance is owned by
 `apps/web/README.md` under "Bundled Web fonts". Implementation proof is tracked
@@ -812,6 +836,10 @@ is superseded historical evidence. `packages/query/README.md` owns the read poli
 `packages/vault-usecases/README.md` owns public-path tests and benchmark commands.
 Vault-share deferral diagnostic work is tracked in
 [`vault-share deferral observability`](exec-plans/completed/2026-09-25-vault-share-deferral-observability.md).
+
+Focused sleep-list implementation, local proof and external review are recorded in
+[`focused sleep-list read`](exec-plans/completed/2026-09-28-sleep-list-latency.md).
+[PR #3752](https://github.com/cobuildwithus/murph/pull/3752) owns pending exact-head CI and follow-up.
 
 Hosted CI PostgreSQL registry provenance is tracked in
 [`2026-09-28-postgres-ci-registry.md`](exec-plans/completed/2026-09-28-postgres-ci-registry.md).

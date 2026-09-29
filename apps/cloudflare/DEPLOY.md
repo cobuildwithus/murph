@@ -6,10 +6,12 @@ This document covers the narrow Cloudflare deploy surface for hosted execution.
 - `apps/cloudflare` owns execution coordination, encrypted runtime blobs, the native runner container, and the public/internal execution routes described in [README.md](./README.md).
 - Private `cobuildwithus/murph-cloud` owns production/preview GitHub environments, the protected deployment workflow, and rollback operations. Public Murph retains the source, render helpers, and smoke contracts that workflow consumes, but no deploy workflow or production credentials.
 
-For supported Cloudflare API reads and historical logs, prefer `cf` using the
+Use `cf` by default for direct Cloudflare API operations, starting with
+`cf cli search "<action and resource type>"`; follow the
 [operational CLI guidance](./README.md#cli-access-for-operational-reads).
-Deployment continues through the reviewed, pinned Wrangler helpers below;
-changing diagnostic CLI preference does not migrate the deployment contract.
+The reviewed, pinned Wrangler deployment helpers below are an explicit exception
+until their staged Worker/Containers contract is migrated and tested. A bare
+`cf deploy` or `cf migrate` does not replace the protected deployment workflow.
 
 ## What The Deploy Flow Produces
 
@@ -2349,11 +2351,11 @@ pnpm --dir apps/cloudflare runner:docker:base
 ```
 
 That image is prepared in the local Docker cache under the stable GHCR tag
-`ghcr.io/cobuildwithus/murph-cloudflare-runner-base:node24.14.1-codex0.156.1-live1`,
+`ghcr.io/cobuildwithus/murph-cloudflare-runner-base:node24.14.1-codex0.158.0-live1`,
 which is also the final app-layer Dockerfile default. Using the pullable GHCR
 name avoids BuildKit treating the prepared base as a Docker Hub `library/*`
 image during local Wrangler container builds.
-The base Dockerfile builds the CLI from the checksum-pinned Codex 0.156.1 source
+The base Dockerfile builds the CLI from the checksum-pinned Codex 0.158.0 source
 with `patches/codex-public-live.patch`. It keeps the same release's bundled
 Code Mode host and sandbox resources. The patch adds public API-key Live
 compatibility, owned-session shutdown, and opt-in app-server input ownership.
@@ -2368,7 +2370,10 @@ that exact binary before its final-image sandbox proof.
 
 To update the patch, retain the pinned release as its base, run the affected
 upstream tests, and run `pnpm --dir apps/cloudflare verify:codex-upstream-source`
-to verify applicability. Update the source revision and archive checksum
+to verify applicability. Codex 0.158.0 supplies the policy-aware websocket transport;
+the patch retains that transport and only adds the public Live wire adapter,
+client-managed input ownership, and owned-session finalization. It does not
+restore a separate model catalog or websocket stack. Update the source revision and archive checksum
 together when upgrading Codex, keep the npm helper version aligned, and rerun
 the exact-image compatibility and sandbox lane. Remove the patch and build
 stage once a verified upstream release provides this behavior. Cold native
@@ -2378,7 +2383,7 @@ rule. The protected deployment workflow must provide that cache before this
 patch is considered operationally ready; its current fresh-runner forced
 build would otherwise recompile Codex for each deployment.
 
-Codex CLI 0.156.1 supplies native Sol, Luna and Astra entries. Its bundled
+Codex CLI 0.158.0 supplies native Sol, Luna and Astra entries. Its bundled
 Sol/Luna entries match the former pinned launch supplement, which is removed
 along with its bundle staging and fingerprint input. The native bundled catalog
 is the sole model-entry source.
@@ -2389,6 +2394,11 @@ The saved `portable-responses-v1` custom-inference verification identity remains
 stable across this CLI upgrade because it describes the verified protocol,
 not the installed binary. Changing that identity requires separate compatibility
 handling for saved connections and mixed Web/Worker versions.
+Codex 0.158 broadens `httpConnectionFailed` to include unexpected HTTP statuses.
+Murph keeps permanent HTTP rejections terminal while preserving recovery for
+transport failures, timeouts, throttling, and server failures. The new
+`flexUnavailable` classification remains terminal; this upgrade does not add a
+higher-priced service-tier fallback.
 This upgrade changes the runner base fingerprint, but no Web/Worker payload or
 workspace snapshot schema. Build the new base and final runner together through
 the existing deploy path; version-fenced containers replace the old runtime.
@@ -2399,9 +2409,6 @@ proof. After deployment, verify `codexVersion` in runner smoke and bounded
 provider-start/resume error aggregates. Production deployment and any rollback
 remain separately authorized operations.
 It contains Node, Python 3 exposed as both `python3` and `python`, pinned `@openai/codex` with its bundled Linux sandbox resources, `jq`, `ripgrep`, `ffmpeg`, and PDF tooling from Poppler plus `file` and `qpdf`, but no app bundle, worker secrets, or local speech models.
-The pinned Sol/Luna launch catalog travels inside the runner bundle, including
-bundle-only CI and hosted-local build contexts, and participates in the runner
-source fingerprint. A catalog edit therefore invalidates a prepared bundle.
 Deploy the model-capable runner and allowance reader before the Web producer
 activates new model preferences/defaults; old consumers reject the new IDs.
 Launch prices per million tokens are Sol $2 input / $10 output and Luna $0.10

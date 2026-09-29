@@ -226,6 +226,12 @@ export async function handleRuntimeEnsureProcessingRoute(
               reason: "runtime-ensure-processing-direct-completed",
               routeName: "runtime-ensure-processing",
             }, context.request, userId),
+            // Keep these request-local: merged runtime seeds may describe a
+            // competing Temporal wake instead of this direct HTTP request.
+            workerFetchStartedAtEpochMs: context.fetchStartedAtEpochMs ?? null,
+            workerFetchIsFirstRequest: context.fetchIsFirstRequest ?? null,
+            ...context.runtimeControlAuthTiming,
+            cloudflareRouteReceivedAtEpochMs,
             orchestrationAttemptId: ensureRequest.orchestrationAttemptId,
             ...(result.kind === "runtime_processing_accepted"
               ? {

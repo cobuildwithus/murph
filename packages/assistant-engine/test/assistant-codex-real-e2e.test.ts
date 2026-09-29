@@ -117,6 +117,7 @@ import {
 import { importDeviceProviderSnapshot } from '@murphai/importers'
 import { showAssistantPersonality } from '@murphai/vault-usecases/preferences'
 import { createIntegratedVaultServices } from '@murphai/vault-usecases/vault-services'
+import type { VoiceMemoToolRuntime } from '../src/assistant-codex/generate-voice-memo-tool.ts'
 import {
   logLiveWorkoutSet,
   saveWorkoutFormat,
@@ -9286,6 +9287,190 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
   )
 
   it(
+    'remembers conversational voice language and reuses it in a fresh turn without changing the voice',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-language-memory-e2e-'))
+      const binDirectory = path.join(workingDirectory, 'bin')
+      const generations: Array<{ text: string; voiceId: string }> = []
+      try {
+        await initializeVault({ vaultRoot: workingDirectory, timezone: 'Europe/Warsaw' })
+        await materializeWearableArrivalVaultCli({ binDirectory })
+        const common = {
+          approvalPolicy: 'never' as const,
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+          codexHome: config.codexHome,
+          dynamicTools: resolveMurphDynamicTools({ voiceMemoGenerationAvailable: true, voiceMemoModelId: 'eleven_v4' })
+            .filter((tool) => tool.name === 'generate_voice_memo'),
+          env: {
+            ...config.env,
+            MURPH_WEARABLE_TIMING_E2E_NODE: process.execPath,
+            MURPH_WEARABLE_TIMING_E2E_LOADER: HABITAT_VOICE_E2E_TSX_LOADER,
+            MURPH_WEARABLE_TIMING_E2E_CLI: HABITAT_VOICE_E2E_CLI_ENTRYPOINT,
+            MURPH_WEARABLE_TIMING_E2E_VAULT: workingDirectory,
+            TSX_TSCONFIG_PATH: path.resolve(path.dirname(HABITAT_VOICE_E2E_CLI_ENTRYPOINT), '../../../tsconfig.base.json'),
+            PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
+          },
+          fixtureBinDirectory: binDirectory,
+          model: config.model,
+          modelProvider: config.modelProvider,
+          reasoningEffort: 'low' as const,
+          sandbox: 'workspace-write' as const,
+          voiceMemoRuntime: {
+            elevenLabs: { apiKeyAvailable: true, modelId: 'eleven_v4', voiceId: 'voice_saved_synthetic' },
+            kind: 'linq' as const,
+            generateAndUpload: async (input: Parameters<Extract<VoiceMemoToolRuntime, { kind: 'linq' }>['generateAndUpload']>[0]) => {
+              if (input.generation.kind !== 'elevenlabs_speech') throw new Error('Expected speech generation')
+              generations.push({ text: input.generation.text, voiceId: input.generation.voiceId })
+              return { attachmentId: 'attachment_language_voice', filename: 'goodnight.mp3' }
+            },
+          },
+          workingDirectory,
+        }
+        const scenarios = [
+          { slug: 'text-learn', prompt: 'Cześć! Co porabiasz tego wieczoru?', language: /[ąćęłńóśźż]|dobr|cześć|wiecz/iu },
+          { slug: 'learn', prompt: 'Wyślij mi krótką wiadomość głosową na dobranoc. Tylko nagranie.', language: /dobranoc|śpij|snu|odpoczn/iu },
+          { slug: 'reuse', prompt: '👍 🎙️', language: /dobranoc|śpij|snu|odpoczn/iu },
+          { slug: 'one-off', prompt: 'For this memo only, say goodnight in Spanish. Keep my usual language preference. Audio only.', language: /noche|duerme|descansa|sueñ/iu },
+          { slug: 'change', prompt: 'From now on, use English for my voice memos. Send a short goodnight memo now, audio only.', language: /night|sleep|rest/iu },
+          { slug: 'quote', prompt: 'For my Italian translation exercise, say only the translation of “good night” in a voice memo. Audio only.', language: /buona\s*notte/iu },
+          { slug: 'opt-out', prompt: 'Odpowiedz teraz po polsku: wyślij krótkie nagranie na dobranoc. Nie zapisuj ani nie zmieniaj moich preferencji językowych. Tylko nagranie.', language: /dobranoc|śpij|snu|odpoczn/iu },
+        ]
+        let savedId: string | undefined
+        let savedObservedText: string | undefined
+        let previousSessionId: string | null = null
+        for (const scenario of scenarios) {
+          const before = await readMemoryDocument(workingDirectory)
+          const snapshot = await readAssistantCurrentStatePrompt({ vaultRoot: workingDirectory })
+          const result = await executeRealCodexAppServerTurn({
+            ...common,
+            developerInstructions: buildDirectConversationDeveloperInstructions(false, [
+              snapshot,
+              ...(scenario.slug === 'reuse' ? ['Recent conversation: Murph offered a short goodnight voice memo.'] : []),
+            ].filter(Boolean).join('\n\n')),
+            prompt: scenario.prompt,
+          })
+          expect(result.sessionId).not.toBe(previousSessionId)
+          previousSessionId = result.sessionId
+          const actions = readCapabilityRoutingActions(result.jsonEvents)
+          const calls = actions.filter((action) => action.kind === 'dynamic')
+          if (scenario.slug === 'text-learn') {
+            expect(calls).toEqual([])
+            expect(result.responseMedia).toEqual([])
+            expect(result.finalMessage).toMatch(scenario.language)
+            expect(result.runtimeIssueInputs).toEqual([])
+            const memory = await readMemoryDocument(workingDirectory)
+            expect(memory.records).toHaveLength(1)
+            expect(memory.records[0]!.text).toMatch(/Polish|polsk/iu)
+            expect(memory.records[0]!.text).toMatch(/voice|audio|głos/iu)
+            savedId = memory.records[0]!.id
+            savedObservedText = memory.records[0]!.text
+            process.stdout.write(`[voice-language-memory-e2e] ${JSON.stringify({ scenario: scenario.slug, reply: result.finalMessage, memoryCount: memory.records.length })}\n`)
+            continue
+          }
+          expect(calls).toEqual([expect.objectContaining({ tool: 'generate_voice_memo', success: true })])
+          const call = calls[0]
+          if (call?.kind !== 'dynamic') throw new Error('Expected voice call')
+          expect(call.argumentsValue.userRequestedVoice ?? null).toBeNull()
+          expect(generations.at(-1)).toEqual({ text: call.argumentsValue.text, voiceId: 'voice_saved_synthetic' })
+          expect(String(call.argumentsValue.text)).toMatch(scenario.language)
+          expect(result.responseMedia).toHaveLength(1)
+          expect(result.finalMessage.trim()).toBe('')
+          expect(result.runtimeIssueInputs).toEqual([])
+          const memory = await readMemoryDocument(workingDirectory)
+          process.stdout.write(`[voice-language-memory-e2e] ${JSON.stringify({ scenario: scenario.slug, spoken: call.argumentsValue.text, reply: result.finalMessage, memoryCount: memory.records.length, commandCount: actions.filter((action) => action.kind === 'command').length })}\n`)
+          expect(memory.records).toHaveLength(1)
+          const note = memory.records[0]!
+          if (scenario.slug === 'learn') {
+            expect(note.id).toBe(savedId)
+            expect(memory.records).toEqual(before.records)
+            expect(note.text).toMatch(/Polish|polsk/iu)
+            expect(note.text).toMatch(/voice|audio|głos/iu)
+            expect(note.text).not.toMatch(/nationality|citizen|native speaker|explicitly requested/iu)
+          } else {
+            expect(note.id).toBe(savedId)
+            if (scenario.slug === 'change') {
+              expect(note.text).toMatch(/English|angielsk/iu)
+              savedObservedText = note.text
+            } else {
+              expect(note.text).toBe(savedObservedText)
+              expect(memory.records).toEqual(before.records)
+              expect(actions.filter((action) => action.kind === 'command' && /memory (?:upsert|update|forget)/u.test(action.command))).toEqual([])
+            }
+          }
+        }
+        expect(generations).toHaveLength(scenarios.length - 1)
+      } finally {
+        await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+      }
+    },
+    720_000,
+  )
+
+  it.each(['eleven_v4', 'eleven_multilingual_v2'] as const)(
+    'uses model-aware expressive voice cues with the saved voice on %s',
+    async (modelId) => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-expressive-voice-e2e-'))
+      const generations: unknown[] = []
+      try {
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions: buildCapabilityRoutingDeveloperInstructions(),
+          dynamicTools: resolveMurphDynamicTools({
+            voiceMemoGenerationAvailable: true,
+            voiceMemoModelId: modelId,
+          }).filter((tool) => tool.name === 'generate_voice_memo'),
+          env: config.env,
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt: modelId === 'eleven_v4'
+            ? 'Send me one short, sleepy goodnight voice memo with an audible yawn. Use my saved voice. Audio only, no text and no settings changes.'
+            : 'Send me one short, calm goodnight voice memo in my saved voice. Audio only, no text, sound effects, or settings changes.',
+          reasoningEffort: 'low',
+          sandbox: 'read-only',
+          voiceMemoRuntime: {
+            elevenLabs: { apiKeyAvailable: true, modelId, voiceId: 'voice_saved_synthetic' },
+            kind: 'linq',
+            generateAndUpload: async (input) => {
+              generations.push(input.generation)
+              return { attachmentId: 'attachment_expressive_voice', filename: 'goodnight.mp3' }
+            },
+          },
+          workingDirectory,
+        })
+        const actions = readCapabilityRoutingActions(result.jsonEvents)
+        const calls = actions.filter((action) => action.kind === 'dynamic')
+        expect(calls).toEqual([
+          expect.objectContaining({ tool: 'generate_voice_memo', success: true }),
+        ])
+        const call = calls[0]
+        if (call?.kind !== 'dynamic') throw new Error('Expected one voice memo call')
+        const text = String(call.argumentsValue.text)
+        expect(call.argumentsValue.userRequestedVoice ?? null).toBeNull()
+        expect(text).toMatch(/night|sleep|rest/iu)
+        if (modelId === 'eleven_v4') expect(text).toMatch(/\[yawn(?:ing|s)?\]/iu)
+        else expect(text).not.toMatch(/\[|<[^>]+>/u)
+        expect(generations).toEqual([
+          expect.objectContaining({ kind: 'elevenlabs_speech', modelId, voiceId: 'voice_saved_synthetic', text }),
+        ])
+        expect(result.responseMedia).toHaveLength(1)
+        expect(result.finalMessage.trim()).toBe('')
+        expect(result.runtimeIssueInputs).toEqual([])
+        expect(actions.filter((action) => action.kind === 'command')).toEqual([])
+        process.stdout.write(`[expressive-voice-e2e] ${JSON.stringify({ modelId, text, reply: result.finalMessage, generations: generations.length })}\n`)
+      } finally {
+        await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+      }
+    },
+    360_000,
+  )
+
+  it(
     'keeps the running-turn voice unless the user names an exact memo voice',
     async () => {
       const scenarios = [
@@ -15128,7 +15313,7 @@ describeRealCodex('real Codex adaptive wearable no-data outreach e2e', () => {
   )
 })
 
-describeRealCodex('real Codex Personal Patterns typed-ledger GPT-6 Sol high digest e2e', () => {
+describeRealCodex('real Codex Personal Patterns typed-ledger GPT-6 Luna xhigh digest e2e', () => {
   it.each([false, true])('sends exactly one Personal Pattern without a link (initial digest sent: %s)', async (initialDigestSent) => {
     const config = await resolveRealCodexE2eConfig()
     const automation = MURPH_MANAGED_AUTOMATIONS.find(
@@ -15137,6 +15322,7 @@ describeRealCodex('real Codex Personal Patterns typed-ledger GPT-6 Sol high dige
     if (!automation) {
       throw new Error('Expected the managed Personal Patterns automation.')
     }
+    expect(automation.assistantTargetOverride).toEqual({ model: 'gpt-6-luna', reasoningEffort: 'xhigh' })
     const workingDirectory = await mkdtemp(
       path.join(tmpdir(), 'murph-personal-pattern-baseline-e2e-'),
     )
@@ -15478,7 +15664,7 @@ describeRealCodex('real Codex Personal Patterns vocabulary normalization e2e', (
   }, 720_000)
 })
 
-describeRealCodex('real Codex Journal connected account eligibility e2e', () => {
+describeRealCodex('real Codex Journal GPT-6 Luna xhigh connected account eligibility e2e', () => {
   it.each([
     { name: 'reads a newly connected mailbox silently on its first pass', accountId: 'gmail_new', toolkit: 'gmail', optedOut: false, ledgerText: '# Journal connected context' },
     { name: 'reads an undated baseline calendar silently in the same pass', accountId: 'calendar_old', toolkit: 'googlecalendar', optedOut: false, ledgerText: '# Journal connected context\n\n- account: calendar_old\n  toolkit: googlecalendar\n  state: baseline' },
@@ -15492,6 +15678,7 @@ describeRealCodex('real Codex Journal connected account eligibility e2e', () => 
     if (!automation) {
       throw new Error('Expected the managed Journal connected-context automation.')
     }
+    expect(automation.assistantTargetOverride).toEqual({ model: 'gpt-6-luna', reasoningEffort: 'xhigh' })
     const workingDirectory = await mkdtemp(
       path.join(tmpdir(), 'murph-journal-connected-eligibility-e2e-'),
     )
@@ -17413,6 +17600,191 @@ describeRealCodex('real Codex memory compact receipt e2e', () => {
     } finally {
       await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
     }
+  }, 720_000)
+})
+
+async function seedFocusedSleepReadVault(vaultRoot: string): Promise<void> {
+  await initializeVault({ vaultRoot, timezone: 'UTC', createdAt: '2026-01-01T00:00:00Z' })
+  const { importDeviceBatch } = await import('@murphai/core')
+  const common = { timeZone: 'UTC', occurredAt: '2026-01-03T07:00:00Z', recordedAt: '2026-01-03T08:00:00Z' }
+  await importDeviceBatch({ vaultRoot, provider: 'oura', importedAt: common.recordedAt, events: [
+    { ...common, kind: 'sleep_session', title: 'Synthetic main sleep',
+      externalRef: { system: 'oura', resourceType: 'sleep', resourceId: 'synthetic-sleep-night', facet: 'window' },
+      fields: { startAt: '2026-01-02T23:00:00Z', endAt: common.occurredAt, durationMinutes: 480, sleepType: 'main_sleep' } },
+    ...[['total-sleep-minutes', 450], ['deep-minutes', 90], ['rem-minutes', 110], ['light-minutes', 250]].map(([metric, value]) => ({
+      ...common, kind: 'observation', title: 'Synthetic sleep observation',
+      externalRef: { system: 'oura', resourceType: 'sleep', resourceId: 'synthetic-sleep-night', facet: String(metric) },
+      fields: { metric, value, unit: 'minutes' },
+    })),
+  ] })
+}
+
+async function buildFocusedSleepReadInstructions(vaultRoot: string) {
+  const manifest = await readAssistantCliLlmsFullManifestFromCliEntry({
+    cliEntryPath: fileURLToPath(new URL('../../cli/dist/bin.js', import.meta.url)),
+    workingDirectory: fileURLToPath(new URL('../../../', import.meta.url)),
+  })
+  const sleep = manifest.commands.find(command => command.name === 'wearables sleep list')
+  expect(sleep?.schema?.options?.properties).toMatchObject({
+    date: expect.any(Object), provider: expect.any(Object), limit: expect.any(Object),
+  })
+  const contract = buildAssistantCliSurfaceContract(manifest)
+  if (!contract) throw new Error('The focused sleep journey requires the generated production CLI contract.')
+  expect(contract).toContain('`sleep list`')
+  const time = { ...await resolveAssistantPromptTimeContext(vaultRoot), currentLocalDate: '2026-01-03' }
+  const developerInstructions = buildWearableArrivalDeveloperInstructions(time, contract)
+  expect(developerInstructions).toContain(contract)
+  return { time, developerInstructions }
+}
+
+function readFocusedSleepCommand(command: string): string {
+  // Admit only the observed single native wrapper, never arbitrary shell prefixes.
+  expect(command).not.toMatch(/[\r\n]/u)
+  const unwrapped = command.match(/^\/bin\/zsh -c '([^']+)'$/u)?.[1] ?? command
+  expect(unwrapped).toMatch(/^[ \t]*vault-cli[ \t]+wearables[ \t]+sleep[ \t]+list(?:[ \t]|$)/u)
+  // Plain flags/values only: no quoting, expansion, chaining, redirects or escapes.
+  expect(unwrapped).not.toMatch(/[^A-Za-z0-9_= \t-]/u)
+  return unwrapped
+}
+
+function expectFocusedSleepReadOutput(output: string): void {
+  if (output.trimStart().startsWith('{')) {
+    const document = readRecord(JSON.parse(output))
+    expect(document?.ok === true ? document.data : document).toMatchObject({ count: 1, items: [{
+      date: '2026-01-03', provider: 'oura',
+      totalSleepMinutes: { value: 450, unit: 'minutes', provider: 'oura' },
+    }] })
+    return
+  }
+  // Default TOON: bind provenance and duration to the same metric, not another field.
+  expect(output).toMatch(/^\s*count: 1$/mu)
+  expect(output).toMatch(/^\s*items\[1\]:$/mu)
+  expect(output).toMatch(/^\s*- date: 2026-01-03$/mu)
+  const totalSleep = output.match(/^([ \t]+)totalSleepMinutes:\r?\n((?:\1[ \t]+[^\r\n]*(?:\r?\n|$))+)/mu)?.[2] ?? ''
+  expect(totalSleep).toMatch(/^\s*provider: oura$/mu)
+  expect(totalSleep).toMatch(/^\s*unit: minutes$/mu)
+  expect(totalSleep).toMatch(/^\s*value: 450$/mu)
+}
+
+describe('focused sleep read production contract', () => {
+  it('accepts direct and singly wrapped native sleep commands', () => {
+    for (const direct of [
+      'vault-cli wearables sleep list --help',
+      'vault-cli wearables sleep list --date 2026-01-03 --provider oura --format json',
+      'vault-cli wearables sleep list --date=2026-01-03',
+    ]) {
+      for (const command of [direct, `/bin/zsh -c '${direct}'`]) {
+        const [action] = readCapabilityRoutingActions([{ method: 'item/completed', params: { item: {
+          type: 'commandExecution', command, exitCode: 0, aggregatedOutput: '',
+        } } }])
+        if (action?.kind !== 'command') throw new Error('Expected a native command action.')
+        expect(readFocusedSleepCommand(action.command)).toBe(direct)
+      }
+    }
+  })
+
+  it('rejects unrelated commands, shell effects and extra wrapper layers', () => {
+    const help = 'vault-cli wearables sleep list --help'
+    const invalid = [
+      'vault-cli wearables sleep list-extra --help', 'vault-cli event add', 'cat synthetic-source',
+      `env ${help}`, `/bin/bash -c '${help}'`, `/bin/zsh -lc '${help}'`,
+      `/bin/zsh -c "${help}"`, `/bin/zsh -c '${help}' extra`,
+      ...[
+        '; touch synthetic-marker', ' && touch synthetic-marker', ' || touch synthetic-marker',
+        ' | cat', ' > synthetic-output', ' < synthetic-input',
+        ' $(touch synthetic-marker)', ' `touch synthetic-marker`', ' =(touch synthetic-marker)',
+        ' $SHELL', ' # comment', '\ncat synthetic-source', '\rcat synthetic-source', '\\',
+      ].map(suffix => `${help}${suffix}`),
+    ]
+    for (const command of invalid) {
+      expect(() => readFocusedSleepCommand(command), command).toThrow()
+      expect(() => readFocusedSleepCommand(`/bin/zsh -c '${command}'`), command).toThrow()
+    }
+  })
+
+  it('assembles the generated CLI contract and reads real canonical sleep in JSON and default TOON', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'murph-sleep-contract-'))
+    const vaultRoot = path.join(root, 'vault')
+    const commandLogPath = path.join(root, 'commands.log')
+    const binDirectory = path.join(root, 'bin')
+    try {
+      await seedFocusedSleepReadVault(vaultRoot)
+      await buildFocusedSleepReadInstructions(vaultRoot)
+      await materializeRealWorkoutVaultCli({ binDirectory, commandLogPath, vaultRoot })
+      const before = await snapshotRealCodexCanonicalVault(vaultRoot)
+      const args = ['wearables', 'sleep', 'list', '--date', '2026-01-03', '--provider', 'oura', '--limit', '1']
+      const json = await execFileAsync(path.join(binDirectory, 'vault-cli'), [...args, '--format', 'json'])
+      expectFocusedSleepReadOutput(json.stdout)
+      expect(JSON.parse(json.stdout)).toMatchObject({ count: 1, items: [{
+        date: '2026-01-03', totalSleepMinutes: { value: 450, unit: 'minutes', provider: 'oura' },
+        timeInBedMinutes: { value: 480 },
+      }] })
+      const toon = await execFileAsync(path.join(binDirectory, 'vault-cli'), args)
+      expectFocusedSleepReadOutput(toon.stdout)
+      expect(toon.stdout.trim()).not.toMatch(/^\{/u)
+      expect(toon.stdout).toMatch(/450/u)
+      expect(toon.stdout).toContain('totalSleepMinutes')
+      expect(await snapshotRealCodexCanonicalVault(vaultRoot)).toEqual(before)
+    } finally { await removeRealCodexTemporaryPaths([root]) }
+  }, 120_000)
+})
+
+describeRealCodex('real Codex focused sleep list e2e', () => {
+  it('answers one Oura sleep night from one real sleep read without unrelated reads or effects', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const root = await mkdtemp(path.join(tmpdir(), 'murph-focused-sleep-e2e-'))
+    const vaultRoot = path.join(root, 'vault')
+    const binDirectory = path.join(root, 'bin')
+    const commandLogPath = path.join(root, 'commands.log')
+    try {
+      await seedFocusedSleepReadVault(vaultRoot)
+      await materializeRealWorkoutVaultCli({ binDirectory, commandLogPath, vaultRoot })
+      await writeFile(commandLogPath, '')
+      const { time, developerInstructions } = await buildFocusedSleepReadInstructions(vaultRoot)
+      const prompt = await buildWearableArrivalPrompt({
+        occurredAt: '2026-01-03T12:00:00.000Z', promptTimeContext: time, vaultRoot,
+        text: 'How long did Oura say I actually slept for the night ending January 3, 2026? Read that one night of sleep history and tell me the total, not time in bed. No advice, other lookups, messages to anyone, or changes.',
+      })
+      const before = await snapshotRealCodexCanonicalVault(vaultRoot)
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome, developerInstructions, dynamicTools: [],
+        env: { ...config.env, PATH: `${binDirectory}${path.delimiter}${config.env.PATH ?? ''}` },
+        model: config.model, modelProvider: config.modelProvider, prompt,
+        reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory: vaultRoot,
+      })
+      const commands = (await readFile(commandLogPath, 'utf8')).trim().split('\n').filter(Boolean)
+      process.stdout.write(`[focused-sleep-list-e2e] ${JSON.stringify({ commands, reply: result.finalMessage })}\n`)
+      const actions = readCapabilityRoutingActions(result.jsonEvents)
+      // The generated compact contract permits targeted syntax help. It is not
+      // another data read; no root/family discovery or unrelated command is allowed.
+      const help = commands.filter(command => /(?:^|\s)--help(?:\s|$)/u.test(command))
+      const reads = commands.filter(command => !help.includes(command))
+      expect(help.length).toBeLessThanOrEqual(1)
+      expect(commands.every(command => command.startsWith('wearables sleep list '))).toBe(true)
+      expect(reads).toHaveLength(1)
+      expect(reads[0]).toMatch(/--date(?:=|\s)2026-01-03(?:\s|$)/u)
+      for (const provider of reads[0]!.matchAll(/(?:^|\s)--provider(?:=|\s+)(\S+)/gu)) {
+        expect(provider[1]?.toLowerCase()).toBe('oura')
+      }
+      expect(reads[0]).not.toMatch(/--(?:schema|from|to)\b/u)
+      expect(actions).toHaveLength(commands.length)
+      for (const action of actions) {
+        expect(action.kind).toBe('command')
+        if (action.kind !== 'command') throw new Error('No dynamic tools or delivery effects are permitted.')
+        expect(action.ok).toBe(true)
+        const command = readFocusedSleepCommand(action.command)
+        if (!/--help\b/u.test(command)) {
+          expectFocusedSleepReadOutput(action.output)
+        }
+      }
+      expect(await snapshotRealCodexCanonicalVault(vaultRoot)).toEqual(before)
+      expect(result.runtimeIssueInputs).toEqual([])
+      expect(result.finalMessage).toMatch(/450\s*(?:minutes?|mins?)|(?:7|seven)\s*(?:hours?|hrs?|h)\s*(?:,|and)?\s*(?:30|thirty)\s*(?:minutes?|mins?|m)|7(?:\.5|½)\s*(?:hours?|hrs?|h)|seven and a half hours/iu)
+      expect(result.finalMessage).not.toMatch(/(?:you (?:actually )?slept|asleep for|total sleep(?: was|:)?)\s+(?:480\s*(?:minutes?|mins?)|(?:8|eight)\s*(?:hours?|hrs?|h))\b/iu)
+      expect(result.finalMessage).not.toMatch(/\b(?:updated|saved|logged|sent|scheduled)\b|\?/iu)
+    } finally { await removeRealCodexTemporaryPaths([root, ...config.temporaryPaths]) }
   }, 720_000)
 })
 
@@ -27011,6 +27383,88 @@ describeRealCodex('real Codex voice reminder destination e2e', () => {
       expect(reply).toMatch(/stretch/iu)
       expect(reply).not.toMatch(/this (?:Telegram )?(?:conversation|chat)|keep.*call.*open|call you|deliveryChannel|routeBinding|scheduler|projection/iu)
       expect(result.runtimeIssueInputs).toEqual([])
+    } finally {
+      await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+    }
+  }, 360_000)
+})
+
+describeRealCodex('real Codex link recovery progress e2e', () => {
+  it.each([false, true])('link recovery acknowledges a failed lookup without inventing delivery: failure=%s', async (failFirstLookup) => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-link-recovery-e2e-'))
+    const requests: AssistantHostedDeviceToolRequest[] = []
+    const progressUpdates: string[] = []
+    const effects: string[] = []
+    const connectUrl = 'https://connect.example.test/oura/recovery'
+    try {
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never',
+        baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions: buildAssistantSystemPrompt({
+          assistantCliContract: null, assistantContextSnapshotPrompt: null,
+          assistantHostedDeviceConnectAvailable: true,
+          assistantHostedDeviceConnectProviders: [{ label: 'Oura', provider: 'oura' }],
+          assistantKnowledgeToolsAvailable: false, assistantProgressUpdatesAvailable: true,
+          channel: 'linq', cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+          conversationScope: 'direct', currentLocalDate: '2026-10-14',
+          currentInstant: '2026-10-14T16:00:00.000Z', currentTimeZone: 'America/New_York',
+          hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic',
+          onboardingGuidance: false, ordinaryInboundTurn: true,
+        }),
+        dynamicTools: [MURPH_DEVICE_TOOL, MURPH_SEND_PROGRESS_UPDATE_TOOL],
+        env: config.env,
+        hostedToolContext: {
+          ...createRealCodexSupportHostedToolContext('direct'),
+          deviceTool: { async request(request) {
+            requests.push(request)
+            effects.push(request.action)
+            if (request.action === 'list_accounts') {
+              if (failFirstLookup && requests.length === 1) {
+                throw new Error('Synthetic read-only lookup timed out.')
+              }
+              return { action: 'list_accounts', accounts: [], provider: request.provider ?? null, sourceProvider: null }
+            }
+            if (request.action !== 'connect' || request.provider !== 'oura') {
+              throw new Error('Unexpected device mutation.')
+            }
+            return { action: 'connect', link: {
+              authorizationUrl: connectUrl, connectUrl, expiresAt: '2026-10-14T17:00:00.000Z',
+              provider: 'oura', providerLabel: 'Oura',
+            } }
+          } },
+        },
+        model: config.model, modelProvider: config.modelProvider,
+        progressDelivery: { async send(text) {
+          progressUpdates.push(text)
+          effects.push('progress')
+          return { kind: 'sent', source: 'model' }
+        } },
+        prompt: 'Check whether my Oura is connected. If it is not, give me the link to connect it.',
+        reasoningEffort: 'low', sandbox: 'read-only', workingDirectory,
+      })
+      const reply = result.finalMessage.trim()
+      process.stdout.write('[link-recovery-live] ' + JSON.stringify({
+        failFirstLookup, effects, progressUpdates, reply,
+      }) + '\n')
+      expect(effects).toEqual(failFirstLookup
+        ? ['list_accounts', 'progress', 'list_accounts', 'connect']
+        : ['list_accounts', 'connect'])
+      expect(requests.filter((request) => request.action === 'connect'))
+        .toEqual([{ action: 'connect', provider: 'oura' }])
+      expect(progressUpdates).toHaveLength(failFirstLookup ? 1 : 0)
+      if (failFirstLookup) {
+        expect(progressUpdates[0]).toMatch(/check|lookup|connect|Oura/iu)
+        expect(progressUpdates[0]).toMatch(/again|retry|trouble|snag|delay|slow|couldn.t|didn.t/iu)
+      }
+      expect(reply).toContain(connectUrl)
+      expect([...progressUpdates, reply].join('\n')).not.toMatch(
+        /Linq|outage|in a few|in \d+ minutes|send (?:it|the link) later|already sent|successfully connected/iu,
+      )
+      expect(readCapabilityRoutingActions(result.jsonEvents)
+        .filter((action) => action.kind === 'command')).toEqual([])
     } finally {
       await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
     }

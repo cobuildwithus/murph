@@ -236,6 +236,7 @@ export const HOSTED_AI_USAGE_ALLOWANCE_ELEVENLABS_TTS_PRICED_MODELS = [
   "eleven_turbo_v2",
   "eleven_turbo_v2_5",
   "eleven_v3",
+  "eleven_v4",
 ] as const;
 
 export type HostedAiUsageAllowanceElevenLabsTtsPricedModel =

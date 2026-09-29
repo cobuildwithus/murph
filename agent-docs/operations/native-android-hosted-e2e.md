@@ -3,7 +3,7 @@
 ## Ownership
 
 `.github/workflows/native-android-hosted-e2e.yml` is the trusted default-branch
-production canary controller. It runs at minute 47 every six hours, after the
+production canary controller. It runs at minute 47 every twelve hours, after the
 iOS controller's minute-17 slot. It admits no pull-request or deployment-status
 event and publishes no required commit status. Authenticated manual recovery is
 limited to `refs/heads/main` at the exact current `main` SHA; an arbitrary or

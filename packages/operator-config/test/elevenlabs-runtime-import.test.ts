@@ -10,7 +10,7 @@ vi.mock('@elevenlabs/elevenlabs-js', async (importOriginal) => {
 test('loads the audio SDK only for a validated audio request', async () => {
   const runtime = await import('../src/elevenlabs-runtime.ts')
   expect(sdkLoaded).not.toHaveBeenCalled()
-  expect(runtime.resolveElevenLabsModelId({})).toBe('eleven_multilingual_v2')
+  expect(runtime.resolveElevenLabsModelId({})).toBe('eleven_v4')
   expect(runtime.ELEVENLABS_TTS_MAX_TEXT_LENGTH).toBe(1000)
 
   await expect(runtime.generateElevenLabsSpeech({

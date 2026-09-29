@@ -425,8 +425,8 @@ export const MURPH_MANAGED_AUTOMATIONS = [
     ownerScope: 'member',
     hostedRuntimeOnly: true,
     assistantTargetOverride: {
-      model: 'gpt-6-sol',
-      reasoningEffort: 'low',
+      model: 'gpt-6-luna',
+      reasoningEffort: 'xhigh',
     },
     tags: ['murph-managed:journal-connected-context'],
     instructions: [
@@ -453,8 +453,8 @@ export const MURPH_MANAGED_AUTOMATIONS = [
     continuityPolicy: 'fresh',
     ownerScope: 'member',
     assistantTargetOverride: {
-      model: 'gpt-6-sol',
-      reasoningEffort: 'high',
+      model: 'gpt-6-luna',
+      reasoningEffort: 'xhigh',
     },
     tags: [
       'murph-managed:personal-patterns-update',

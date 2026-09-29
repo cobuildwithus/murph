@@ -4,9 +4,13 @@ import { requireHostedCloudflareCallbackJsonRequest } from "@/src/lib/hosted-exe
 import { executeHostedRuntimeOwnerCommand } from "@/src/lib/hosted-execution/runtime-owner-control";
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
 import { getPrisma } from "@/src/lib/prisma";
+import { createHostedRuntimeCallbackTiming } from "@/src/lib/hosted-execution/runtime-callback-timing";
 
-export const POST = withJsonError(async (request: Request) => {
+const runWithTiming = createHostedRuntimeCallbackTiming("owner");
+
+export const POST = withJsonError((request: Request) => runWithTiming(request, async (timing) => {
   const { payload, userId } = await requireHostedCloudflareCallbackJsonRequest(request, { maxBodyBytes: 64 * 1024 });
+  timing.authenticated();
   const command = parseHostedRuntimeOwnerCommand(payload);
   const result = await executeHostedRuntimeOwnerCommand({ prisma: getPrisma(), userId, command });
   if (command.operation === "complete" && result.status === "updated") {
@@ -21,4 +25,4 @@ export const POST = withJsonError(async (request: Request) => {
     });
   }
   return jsonOk(result);
-});
+}));

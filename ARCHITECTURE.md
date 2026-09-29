@@ -1556,7 +1556,7 @@ Web exposes the native field only when its existing assistant-configuration
 resolution confirms that the current managed runtime is authorized for the
 full product-model catalog; missing authority and custom inference fail closed.
 The production image defaults to a catalog containing GPT-6 Sol and Luna plus
-GPT-5.6 Luna and Sol. CLI 0.156.1 supplies every entry from its native catalog;
+GPT-5.6 Luna and Sol. CLI 0.158.0 supplies every entry from its native catalog;
 there is no separate launch-catalog supplement. All GPT-6 entries retain
 the native 272K context limit. The image fails validation for missing entries. Web separately derives Astra authority from the canonical available models
 and managed OpenAI provider; only an explicitly authorized workspace selects the

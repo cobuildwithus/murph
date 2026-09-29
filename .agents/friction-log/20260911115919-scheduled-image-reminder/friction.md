@@ -1,6 +1,7 @@
 ---
 title: 'Scheduled image reminder proof seeds Starter access'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3761'
 ---
 
 ## Expected Behavior

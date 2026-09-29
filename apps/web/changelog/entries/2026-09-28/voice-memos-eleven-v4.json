@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-28",
+  "order": 200,
+  "item": {
+    "id": "voice-memos-eleven-v4",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Updated voice memo generation",
+    "summary": "New voice memos use Eleven v4 while keeping your selected voice.",
+    "details": "Your saved voice choice stays in place. Previously queued memos keep their original generation settings.",
+    "relevanceTags": ["voice"],
+    "sourcePullRequests": []
+  }
+}
