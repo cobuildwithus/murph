@@ -266,7 +266,7 @@ pnpm test:assistant:live -- --test "<unique test-name pattern>"
 ```
 
 The helper requires a name pattern so it cannot accidentally fan out across
-the paid suite. It defaults to `gpt-6-sol` through the authenticated local
+the paid suite. It defaults to `gpt-6.1-sol` through the authenticated local
 ChatGPT/Codex subscription without copying auth material; `--auth provider`
 keeps the existing isolated provider-key route. Read every printed synthetic
 reply and record a `Ready` or `Hold` UX verdict covering correctness, action

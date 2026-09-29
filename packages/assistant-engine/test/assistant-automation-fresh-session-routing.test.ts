@@ -42,6 +42,22 @@ beforeEach(() => {
 })
 
 describe('fresh automation model routing', () => {
+  it('upgrades an inherited OpenAI Sol target without an existing session', async () => {
+    assistantStore.resolveAssistantSession.mockRejectedValueOnce({
+      code: 'ASSISTANT_SESSION_NOT_FOUND',
+    })
+    const route = await resolveAssistantTurnRouteForMessage(
+      createAutomationInput({}),
+      null,
+      requireTarget('gpt-6-sol', 'high', 'openai'),
+    )
+    expect(route.providerOptions).toMatchObject({
+      model: 'gpt-6.1-sol',
+      modelProvider: 'openai',
+      reasoningEffort: 'high',
+    })
+  })
+
   it.each(['gpt-6-sol', 'gpt-6-luna'])(
     'keeps a fresh Venice route executable with a saved %s preference',
     async (model) => {

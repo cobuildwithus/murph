@@ -5,6 +5,7 @@ import {
   HOSTED_ASSISTANT_DEFAULT_PROVIDER,
   HOSTED_ASSISTANT_DEFAULT_MODEL,
   HOSTED_ASSISTANT_GPT_6_SOL_MODEL,
+  HOSTED_ASSISTANT_GPT_61_SOL_MODEL,
   HOSTED_ASSISTANT_GPT_6_LUNA_MODEL,
   HOSTED_ASSISTANT_LUNA_MODEL,
   HOSTED_ASSISTANT_OPENAI_PROVIDER,
@@ -91,7 +92,7 @@ const MODEL_OPTIONS = [
   {
     artwork: "sol",
     description: "Deep health intelligence",
-    model: HOSTED_ASSISTANT_GPT_6_SOL_MODEL,
+    model: HOSTED_ASSISTANT_GPT_61_SOL_MODEL,
     name: "Sol",
     usage: "Balanced usage",
   },
@@ -757,7 +758,7 @@ function HostedAssistantModelSettingsForm(
           >
             {MODEL_OPTIONS.map((option) => {
               const selected = draftModel === option.model;
-              const requiresOpenAi = (option.model === HOSTED_ASSISTANT_GPT_6_SOL_MODEL
+              const requiresOpenAi = (option.model === HOSTED_ASSISTANT_GPT_61_SOL_MODEL
                 || option.model === HOSTED_ASSISTANT_GPT_6_LUNA_MODEL)
                 && draftRouting !== HOSTED_ASSISTANT_OPENAI_PROVIDER;
               const unavailable = requiresOpenAi ||
@@ -937,7 +938,7 @@ function readProductModelName(model: HostedAssistantProductModel): string {
   if (model === HOSTED_ASSISTANT_LUNA_MODEL || model === HOSTED_ASSISTANT_GPT_6_LUNA_MODEL) {
     return "Luna";
   }
-  return model === HOSTED_ASSISTANT_SOL_MODEL || model === HOSTED_ASSISTANT_GPT_6_SOL_MODEL ? "Sol" : "Murph";
+  return model === HOSTED_ASSISTANT_SOL_MODEL || model === HOSTED_ASSISTANT_GPT_6_SOL_MODEL || model === HOSTED_ASSISTANT_GPT_61_SOL_MODEL ? "Sol" : "Murph";
 }
 
 function readProviderName(provider: HostedAssistantProvider): string {
