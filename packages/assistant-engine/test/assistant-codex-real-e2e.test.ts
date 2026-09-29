@@ -117,6 +117,7 @@ import {
 import { importDeviceProviderSnapshot } from '@murphai/importers'
 import { showAssistantPersonality } from '@murphai/vault-usecases/preferences'
 import { createIntegratedVaultServices } from '@murphai/vault-usecases/vault-services'
+import type { VoiceMemoToolRuntime } from '../src/assistant-codex/generate-voice-memo-tool.ts'
 import {
   logLiveWorkoutSet,
   saveWorkoutFormat,
@@ -9283,6 +9284,128 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
       }
     },
     360_000,
+  )
+
+  it(
+    'remembers conversational voice language and reuses it in a fresh turn without changing the voice',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-language-memory-e2e-'))
+      const binDirectory = path.join(workingDirectory, 'bin')
+      const generations: Array<{ text: string; voiceId: string }> = []
+      try {
+        await initializeVault({ vaultRoot: workingDirectory, timezone: 'Europe/Warsaw' })
+        await materializeWearableArrivalVaultCli({ binDirectory })
+        const common = {
+          approvalPolicy: 'never' as const,
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+          codexHome: config.codexHome,
+          dynamicTools: resolveMurphDynamicTools({ voiceMemoGenerationAvailable: true, voiceMemoModelId: 'eleven_v4' })
+            .filter((tool) => tool.name === 'generate_voice_memo'),
+          env: {
+            ...config.env,
+            MURPH_WEARABLE_TIMING_E2E_NODE: process.execPath,
+            MURPH_WEARABLE_TIMING_E2E_LOADER: HABITAT_VOICE_E2E_TSX_LOADER,
+            MURPH_WEARABLE_TIMING_E2E_CLI: HABITAT_VOICE_E2E_CLI_ENTRYPOINT,
+            MURPH_WEARABLE_TIMING_E2E_VAULT: workingDirectory,
+            TSX_TSCONFIG_PATH: path.resolve(path.dirname(HABITAT_VOICE_E2E_CLI_ENTRYPOINT), '../../../tsconfig.base.json'),
+            PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
+          },
+          fixtureBinDirectory: binDirectory,
+          model: config.model,
+          modelProvider: config.modelProvider,
+          reasoningEffort: 'low' as const,
+          sandbox: 'workspace-write' as const,
+          voiceMemoRuntime: {
+            elevenLabs: { apiKeyAvailable: true, modelId: 'eleven_v4', voiceId: 'voice_saved_synthetic' },
+            kind: 'linq' as const,
+            generateAndUpload: async (input: Parameters<Extract<VoiceMemoToolRuntime, { kind: 'linq' }>['generateAndUpload']>[0]) => {
+              if (input.generation.kind !== 'elevenlabs_speech') throw new Error('Expected speech generation')
+              generations.push({ text: input.generation.text, voiceId: input.generation.voiceId })
+              return { attachmentId: 'attachment_language_voice', filename: 'goodnight.mp3' }
+            },
+          },
+          workingDirectory,
+        }
+        const scenarios = [
+          { slug: 'text-learn', prompt: 'Cześć! Co porabiasz tego wieczoru?', language: /[ąćęłńóśźż]|dobr|cześć|wiecz/iu },
+          { slug: 'learn', prompt: 'Wyślij mi krótką wiadomość głosową na dobranoc. Tylko nagranie.', language: /dobranoc|śpij|snu|odpoczn/iu },
+          { slug: 'reuse', prompt: '👍 🎙️', language: /dobranoc|śpij|snu|odpoczn/iu },
+          { slug: 'one-off', prompt: 'For this memo only, say goodnight in Spanish. Keep my usual language preference. Audio only.', language: /noche|duerme|descansa|sueñ/iu },
+          { slug: 'change', prompt: 'From now on, use English for my voice memos. Send a short goodnight memo now, audio only.', language: /night|sleep|rest/iu },
+          { slug: 'quote', prompt: 'For my Italian translation exercise, say only the translation of “good night” in a voice memo. Audio only.', language: /buona\s*notte/iu },
+          { slug: 'opt-out', prompt: 'Odpowiedz teraz po polsku: wyślij krótkie nagranie na dobranoc. Nie zapisuj ani nie zmieniaj moich preferencji językowych. Tylko nagranie.', language: /dobranoc|śpij|snu|odpoczn/iu },
+        ]
+        let savedId: string | undefined
+        let savedObservedText: string | undefined
+        let previousSessionId: string | null = null
+        for (const scenario of scenarios) {
+          const before = await readMemoryDocument(workingDirectory)
+          const snapshot = await readAssistantCurrentStatePrompt({ vaultRoot: workingDirectory })
+          const result = await executeRealCodexAppServerTurn({
+            ...common,
+            developerInstructions: buildDirectConversationDeveloperInstructions(false, [
+              snapshot,
+              ...(scenario.slug === 'reuse' ? ['Recent conversation: Murph offered a short goodnight voice memo.'] : []),
+            ].filter(Boolean).join('\n\n')),
+            prompt: scenario.prompt,
+          })
+          expect(result.sessionId).not.toBe(previousSessionId)
+          previousSessionId = result.sessionId
+          const actions = readCapabilityRoutingActions(result.jsonEvents)
+          const calls = actions.filter((action) => action.kind === 'dynamic')
+          if (scenario.slug === 'text-learn') {
+            expect(calls).toEqual([])
+            expect(result.responseMedia).toEqual([])
+            expect(result.finalMessage).toMatch(scenario.language)
+            expect(result.runtimeIssueInputs).toEqual([])
+            const memory = await readMemoryDocument(workingDirectory)
+            expect(memory.records).toHaveLength(1)
+            expect(memory.records[0]!.text).toMatch(/Polish|polsk/iu)
+            expect(memory.records[0]!.text).toMatch(/voice|audio|głos/iu)
+            savedId = memory.records[0]!.id
+            savedObservedText = memory.records[0]!.text
+            process.stdout.write(`[voice-language-memory-e2e] ${JSON.stringify({ scenario: scenario.slug, reply: result.finalMessage, memoryCount: memory.records.length })}\n`)
+            continue
+          }
+          expect(calls).toEqual([expect.objectContaining({ tool: 'generate_voice_memo', success: true })])
+          const call = calls[0]
+          if (call?.kind !== 'dynamic') throw new Error('Expected voice call')
+          expect(call.argumentsValue.userRequestedVoice ?? null).toBeNull()
+          expect(generations.at(-1)).toEqual({ text: call.argumentsValue.text, voiceId: 'voice_saved_synthetic' })
+          expect(String(call.argumentsValue.text)).toMatch(scenario.language)
+          expect(result.responseMedia).toHaveLength(1)
+          expect(result.finalMessage.trim()).toBe('')
+          expect(result.runtimeIssueInputs).toEqual([])
+          const memory = await readMemoryDocument(workingDirectory)
+          process.stdout.write(`[voice-language-memory-e2e] ${JSON.stringify({ scenario: scenario.slug, spoken: call.argumentsValue.text, reply: result.finalMessage, memoryCount: memory.records.length, commandCount: actions.filter((action) => action.kind === 'command').length })}\n`)
+          expect(memory.records).toHaveLength(1)
+          const note = memory.records[0]!
+          if (scenario.slug === 'learn') {
+            expect(note.id).toBe(savedId)
+            expect(memory.records).toEqual(before.records)
+            expect(note.text).toMatch(/Polish|polsk/iu)
+            expect(note.text).toMatch(/voice|audio|głos/iu)
+            expect(note.text).not.toMatch(/nationality|citizen|native speaker|explicitly requested/iu)
+          } else {
+            expect(note.id).toBe(savedId)
+            if (scenario.slug === 'change') {
+              expect(note.text).toMatch(/English|angielsk/iu)
+              savedObservedText = note.text
+            } else {
+              expect(note.text).toBe(savedObservedText)
+              expect(memory.records).toEqual(before.records)
+              expect(actions.filter((action) => action.kind === 'command' && /memory (?:upsert|update|forget)/u.test(action.command))).toEqual([])
+            }
+          }
+        }
+        expect(generations).toHaveLength(scenarios.length - 1)
+      } finally {
+        await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+      }
+    },
+    720_000,
   )
 
   it.each(['eleven_v4', 'eleven_multilingual_v2'] as const)(

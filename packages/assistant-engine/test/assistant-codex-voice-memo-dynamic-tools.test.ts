@@ -45,6 +45,8 @@ describe('murph.generate_voice_memo dynamic tool execution', () => {
       expect(schema.includes('[yawning]')).toBe(modelId === 'eleven_v4')
       expect(schema.includes('without bracketed audio directions')).toBe(modelId !== 'eleven_v4')
       expect(tool.description).toContain('The voice configured for the running turn is authoritative')
+      expect(schema).toContain("Write the spoken text in the user's requested language")
+      expect(schema).toContain('Language choice never authorizes a voice change or personal memory access outside a private conversation')
       expect(tool.inputSchema).toMatchObject({
         properties: { text: { maxLength: ELEVENLABS_TTS_MAX_TEXT_LENGTH } },
       })
