@@ -30,7 +30,9 @@ const EXPENSIVE_WORKFLOWS = new Map([
 ]);
 const READY_ONLY_TYPES = ["opened", "reopened", "ready_for_review"];
 const MARKDOWN_SCOPE_JOB = "markdown-docs-scope";
-const FULL_VERIFICATION_CONDITION = "if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.markdown-docs-scope.outputs.markdown_only != 'true') }}";
+const MERGE_QUEUE_RECEIPT_JOB = "merge-queue-receipt";
+const FULL_VERIFICATION_CONDITION = "if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.markdown-docs-scope.outputs.markdown_only != 'true') && needs.merge-queue-receipt.outputs.verified != 'true' }}";
+const MERGE_QUEUE_RECEIPT_CONDITION = "if: ${{ !cancelled() && needs.merge-queue-receipt.outputs.verified != 'true' }}";
 const NONCANCELABLE_FULL_VERIFICATION_CONDITION = "if: ${{ always() && (github.event_name != 'pull_request' || needs.markdown-docs-scope.outputs.markdown_only != 'true') }}";
 const FULL_STEP_CONDITION = "if: ${{ github.event_name != 'pull_request' || needs.markdown-docs-scope.outputs.markdown_only != 'true' }}";
 const CANCELABLE_MARKDOWN_WORKFLOWS = [
@@ -173,6 +175,7 @@ function inspectHostSupportReleaseGraph(source) {
   const plan = jobBlock(source, "release-verification-plan-linux");
   assert.deepEqual(jobNeeds(plan, "release-verification-plan-linux"), [
     "markdown-docs-scope",
+    "merge-queue-receipt",
   ]);
   assert.match(
     plan,
@@ -198,6 +201,7 @@ function inspectHostSupportReleaseGraph(source) {
   const packageCoverage = jobBlock(source, "release-package-coverage-linux");
   assert.deepEqual(jobNeeds(packageCoverage, "release-package-coverage-linux"), [
     "markdown-docs-scope",
+    "merge-queue-receipt",
     "release-verification-plan-linux",
   ]);
   assert.match(packageCoverage, /^      fail-fast: false$/mu);
@@ -261,6 +265,7 @@ function inspectHostSupportReleaseGraph(source) {
 
   assert.deepEqual(jobNeeds(webBuild, "release-web-build-linux"), [
     "markdown-docs-scope",
+    "merge-queue-receipt",
   ]);
   assert.match(webBuild, /^      MURPH_HOSTED_WEB_VERIFY_LANE: build$/mu);
   assert.doesNotMatch(webBuild, /MURPH_HOSTED_WEB_WEBPACK_CACHE/u);
@@ -271,6 +276,7 @@ function inspectHostSupportReleaseGraph(source) {
 
   assert.deepEqual(jobNeeds(webTests, "release-web-tests-linux"), [
     "markdown-docs-scope",
+    "merge-queue-receipt",
     "release-verification-plan-linux",
   ]);
   assert.match(webTests, /^      fail-fast: false$/mu);
@@ -298,6 +304,7 @@ function inspectHostSupportReleaseGraph(source) {
 
   assert.deepEqual(jobNeeds(webPostgres, "release-web-postgres-linux"), [
     "markdown-docs-scope",
+    "merge-queue-receipt",
   ]);
   assert.match(webPostgres, /^      fail-fast: false$/mu);
   assert.match(webPostgres, /^      max-parallel: 4$/mu);
@@ -326,6 +333,7 @@ function inspectHostSupportReleaseGraph(source) {
 
   assert.deepEqual(jobNeeds(cloudflare, "release-cloudflare-verification-linux"), [
     "markdown-docs-scope",
+    "merge-queue-receipt",
   ]);
   assert.match(cloudflare, /^      MURPH_CLOUDFLARE_VERIFY_SKIP_TYPECHECK: "1"$/mu);
   assert.match(cloudflare, /^      MURPH_VERIFY_STEP_PARALLEL: "1"$/mu);
@@ -352,6 +360,7 @@ function inspectHostSupportReleaseGraph(source) {
   const releaseChecks = jobBlock(source, "release-checks-linux");
   assert.deepEqual(jobNeeds(releaseChecks, "release-checks-linux"), [
     "markdown-docs-scope",
+    "merge-queue-receipt",
     "release-verification-plan-linux",
     "markdown-docs-proof",
     "release-build-typecheck-linux",
@@ -410,11 +419,70 @@ test("cancelable Markdown workflows release superseded jobs", async () => {
   const host = await workflow("host-support.yml");
   assert.throws(
     () => inspectCancellationAwareJobs(
-      host.replace("if: ${{ !cancelled() }}", "if: ${{ always() }}"),
+      host.replace(MERGE_QUEUE_RECEIPT_CONDITION, "if: ${{ always() }}"),
       "host-support.yml",
     ),
     /must not survive cancellation/u,
   );
+});
+
+function inspectMergeQueueReceipt(source) {
+  const receipt = jobBlock(source, MERGE_QUEUE_RECEIPT_JOB);
+  assert.match(receipt, /^    if: \$\{\{ github\.event_name == 'push' \}\}$/mu, "only main pushes may skip on a merge queue receipt");
+  assert.match(receipt, /^    permissions:\n      actions: read$/mu, "the receipt lookup needs only Actions read authority");
+  assert.match(receipt, /^      verified: \$\{\{ steps\.lookup\.outputs\.verified \}\}$/mu);
+  assert.match(
+    receipt,
+    /actions\/workflows\/host-support\.yml\/runs\?event=merge_group&status=success&head_sha=\$\{HEAD_SHA\}/u,
+    "the receipt must match a successful merge_group run of this workflow on the pushed SHA",
+  );
+  assert.match(receipt, /HEAD_SHA: \$\{\{ github\.sha \}\}/u);
+  assert.match(receipt, /--jq '\.total_count'\)" \|\| count=0$/mu, "lookup failures must fall back to the full suite");
+  assert.match(receipt, /if \[\[ "\$count" =~ \^\[0-9\]\+\$ && "\$count" -gt 0 \]\]; then\n            verified=true/u);
+  assert.doesNotMatch(receipt, /actions\/checkout|pnpm |setup-node|check-runs/u, "the receipt must not execute candidate code or trust check runs");
+
+  for (const jobName of [
+    "cli-host-matrix",
+    "release-verification-plan-linux",
+    "release-build-typecheck-linux",
+    "release-package-coverage-linux",
+    "release-web-build-linux",
+    "release-web-tests-linux",
+    "release-web-postgres-linux",
+    "release-cloudflare-verification-linux",
+    "production-runner-bundle-budget-linux",
+    "release-fixture-coverage-linux",
+    "release-checks-linux",
+  ]) {
+    assert.ok(jobNeeds(jobBlock(source, jobName), jobName).includes(MERGE_QUEUE_RECEIPT_JOB), `${jobName} must wait for the receipt`);
+    assert.match(
+      jobBlock(source, jobName),
+      /^    if: \$\{\{ !cancelled\(\) && .*needs\.merge-queue-receipt\.outputs\.verified != 'true' \}\}$/mu,
+      `${jobName} must run unless the main push has an affirmative merge queue receipt`,
+    );
+  }
+}
+
+test("required owners verify merge queue candidates and main pushes reuse only an exact merge_group proof", async () => {
+  for (const name of ["host-support.yml", "hosted-stripe-billing.yml"]) {
+    assert.match(eventBlock(await workflow(name), "merge_group"), /^    types: \[checks_requested\]\n/mu, `${name} must report required checks for merge queue candidates`);
+  }
+
+  const host = await workflow("host-support.yml");
+  inspectMergeQueueReceipt(host);
+  for (const mutation of [
+    host.replace("event=merge_group&status=success", "event=push&status=success"),
+    host.replace("head_sha=${HEAD_SHA}", "branch=main"),
+    host.replace(" || count=0", ""),
+    host.replace("    if: ${{ github.event_name == 'push' }}\n    permissions:\n      actions: read", "    if: ${{ github.event_name != 'pull_request' }}\n    permissions:\n      actions: read"),
+    host.replace("      - merge-queue-receipt\n    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.markdown-docs-scope.outputs.markdown_only != 'true') && needs.merge-queue-receipt.outputs.verified != 'true' }}", "    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.markdown-docs-scope.outputs.markdown_only != 'true') && needs.merge-queue-receipt.outputs.verified != 'true' }}"),
+  ]) {
+    assert.notEqual(mutation, host);
+    assert.throws(() => inspectMergeQueueReceipt(mutation));
+  }
+
+  const billingRequired = jobBlock(await workflow("hosted-stripe-billing.yml"), "billing-required");
+  assert.match(billingRequired, /^            push\|merge_group\)\n              if \[\[ "\$HERMETIC_RESULT" != "success" \|\| "\$LIVE_RESULT" != "skipped" \]\]; then$/mu);
 });
 
 test("runtime-heavy jobs skip only an affirmative trusted Markdown result", async () => {
@@ -433,7 +501,7 @@ test("runtime-heavy jobs skip only an affirmative trusted Markdown result", asyn
   }
 
   const cliHostMatrix = jobBlock(host, "cli-host-matrix");
-  assert.match(cliHostMatrix, /^    if: \$\{\{ !cancelled\(\) \}\}$/mu);
+  assert.match(cliHostMatrix, new RegExp(`^    ${escapeRegExp(MERGE_QUEUE_RECEIPT_CONDITION)}$`, "mu"));
   assert.match(
     cliHostMatrix,
     /CLI host matrix \(\$\{\{ matrix\.os \}\}\) satisfied by exact-inventory Markdown documentation proof/u,

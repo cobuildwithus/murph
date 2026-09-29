@@ -6,6 +6,8 @@ on:
   push:
     branches:
       - main
+  merge_group:
+    types: [checks_requested]
 
 # PR updates supersede their previous proof. Main commits keep independent
 # proof so later merges cannot cancel a production candidate.
@@ -83,10 +85,41 @@ jobs:
           echo "markdown_only=$markdown_only" >> "$GITHUB_OUTPUT"
           echo "Host-support scope classified with trusted base policy: markdown_only=$markdown_only"
 
+  # The merge queue fast-forwards main to the exact commit its merge_group run
+  # verified. Skip re-running the heavy suite for that push; any other main
+  # push (direct admin push, lookup failure) keeps the full suite.
+  merge-queue-receipt:
+    name: Find merge queue proof for main push
+    if: ${{ github.event_name == 'push' }}
+    permissions:
+      actions: read
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      verified: ${{ steps.lookup.outputs.verified }}
+    steps:
+      - name: Look up successful merge_group run for this commit
+        id: lookup
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -uo pipefail
+          verified=false
+          count="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/host-support.yml/runs?event=merge_group&status=success&head_sha=${HEAD_SHA}&per_page=1" --jq '.total_count')" || count=0
+          if [[ "$count" =~ ^[0-9]+$ && "$count" -gt 0 ]]; then
+            verified=true
+          fi
+          echo "verified=$verified" >> "$GITHUB_OUTPUT"
+          echo "Main push merge queue proof for ${HEAD_SHA}: verified=$verified"
+
   cli-host-matrix:
     name: CLI host matrix (${{ matrix.os }})
-    needs: markdown-docs-scope
-    if: ${{ !cancelled() }}
+    needs:
+      - markdown-docs-scope
+      - merge-queue-receipt
+    if: ${{ !cancelled() && needs.merge-queue-receipt.outputs.verified != 'true' }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -197,8 +230,10 @@ jobs:
 
   release-verification-plan-linux:
     name: Release verification plan (ubuntu)
-    needs: markdown-docs-scope
-    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.markdown-docs-scope.outputs.markdown_only != 'true') }}
+    needs:
+      - markdown-docs-scope
+      - merge-queue-receipt
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.markdown-docs-scope.outputs.markdown_only != 'true') && needs.merge-queue-receipt.outputs.verified != 'true' }}
     runs-on: ubuntu-24.04
     outputs:
       package_matrix: ${{ steps.verification_plan.outputs.package_matrix }}
@@ -227,8 +262,10 @@ jobs:
 
   release-build-typecheck-linux:
     name: Release build/typecheck (ubuntu)
-    needs: markdown-docs-scope
-    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.markdown-docs-scope.outputs.markdown_only != 'true') }}
+    needs:
+      - markdown-docs-scope
+      - merge-queue-receipt
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.markdown-docs-scope.outputs.markdown_only != 'true') && needs.merge-queue-receipt.outputs.verified != 'true' }}
     runs-on: ubuntu-24.04
     steps:
       - name: Reject draft pull request proof
@@ -325,8 +362,9 @@ jobs:
     name: Release package coverage (${{ matrix.shard }})
     needs:
       - markdown-docs-scope
+      - merge-queue-receipt
       - release-verification-plan-linux
-    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.markdown-docs-scope.outputs.markdown_only != 'true') }}
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.markdown-docs-scope.outputs.markdown_only != 'true') && needs.merge-queue-receipt.outputs.verified != 'true' }}
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
@@ -394,8 +432,10 @@ jobs:
 
   release-web-build-linux:
     name: Release Web build verification (ubuntu)
-    needs: markdown-docs-scope
-    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.markdown-docs-scope.outputs.markdown_only != 'true') }}
+    needs:
+      - markdown-docs-scope
+      - merge-queue-receipt
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.markdown-docs-scope.outputs.markdown_only != 'true') && needs.merge-queue-receipt.outputs.verified != 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
@@ -433,8 +473,9 @@ jobs:
     name: Release Web tests (${{ matrix.shard }})
     needs:
       - markdown-docs-scope
+      - merge-queue-receipt
       - release-verification-plan-linux
-    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.markdown-docs-scope.outputs.markdown_only != 'true') }}
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.markdown-docs-scope.outputs.markdown_only != 'true') && needs.merge-queue-receipt.outputs.verified != 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     strategy:
@@ -492,8 +533,10 @@ jobs:
 
   release-web-postgres-linux:
     name: Release Web PostgreSQL (${{ matrix.shard }}/4)
-    needs: markdown-docs-scope
-    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.markdown-docs-scope.outputs.markdown_only != 'true') }}
+    needs:
+      - markdown-docs-scope
+      - merge-queue-receipt
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.markdown-docs-scope.outputs.markdown_only != 'true') && needs.merge-queue-receipt.outputs.verified != 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     strategy:
@@ -555,8 +598,10 @@ jobs:
 
   release-cloudflare-verification-linux:
     name: Release Cloudflare verification (ubuntu)
-    needs: markdown-docs-scope
-    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.markdown-docs-scope.outputs.markdown_only != 'true') }}
+    needs:
+      - markdown-docs-scope
+      - merge-queue-receipt
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.markdown-docs-scope.outputs.markdown_only != 'true') && needs.merge-queue-receipt.outputs.verified != 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
@@ -597,8 +642,10 @@ jobs:
 
   production-runner-bundle-budget-linux:
     name: Production runner bundle budget (ubuntu)
-    needs: markdown-docs-scope
-    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.markdown-docs-scope.outputs.markdown_only != 'true') }}
+    needs:
+      - markdown-docs-scope
+      - merge-queue-receipt
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.markdown-docs-scope.outputs.markdown_only != 'true') && needs.merge-queue-receipt.outputs.verified != 'true' }}
     runs-on: ubuntu-24.04
     env:
       MURPH_RUNNER_BUNDLE_BUILD_CONCURRENCY: "4"
@@ -690,8 +737,10 @@ jobs:
 
   release-fixture-coverage-linux:
     name: Release fixture coverage (ubuntu)
-    needs: markdown-docs-scope
-    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.markdown-docs-scope.outputs.markdown_only != 'true') }}
+    needs:
+      - markdown-docs-scope
+      - merge-queue-receipt
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.markdown-docs-scope.outputs.markdown_only != 'true') && needs.merge-queue-receipt.outputs.verified != 'true' }}
     runs-on: ubuntu-24.04
     steps:
       - name: Reject draft pull request proof
@@ -726,6 +775,7 @@ jobs:
     runs-on: ubuntu-24.04
     needs:
       - markdown-docs-scope
+      - merge-queue-receipt
       - release-verification-plan-linux
       - markdown-docs-proof
       - release-build-typecheck-linux
@@ -736,7 +786,7 @@ jobs:
       - release-cloudflare-verification-linux
       - release-fixture-coverage-linux
       - production-runner-bundle-budget-linux
-    if: ${{ !cancelled() }}
+    if: ${{ !cancelled() && needs.merge-queue-receipt.outputs.verified != 'true' }}
     steps:
       - name: Reject draft pull request proof
         if: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft }}

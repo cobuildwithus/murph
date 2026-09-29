@@ -85,14 +85,14 @@ export function inspectRunnerBundleBudgetWorkflow(source) {
     requireText(
       budgetJob,
       "missing-budget-needs",
-      "needs: markdown-docs-scope",
-      "The bundle budget must retain its documentation-scope dependency.",
+      "needs:\n      - markdown-docs-scope\n      - merge-queue-receipt\n",
+      "The bundle budget must retain its documentation-scope and merge queue receipt dependencies.",
     );
     requireText(
       budgetJob,
       "missing-budget-if",
-      "if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.markdown-docs-scope.outputs.markdown_only != 'true') }}",
-      "The bundle budget must retain the Markdown-only fast-path contract.",
+      "if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.markdown-docs-scope.outputs.markdown_only != 'true') && needs.merge-queue-receipt.outputs.verified != 'true' }}",
+      "The bundle budget must retain the Markdown-only and merge queue receipt fast-path contract.",
     );
     requireText(
       budgetJob,

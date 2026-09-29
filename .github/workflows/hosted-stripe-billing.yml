@@ -8,6 +8,8 @@ on:
   push:
     branches:
       - main
+  merge_group:
+    types: [checks_requested]
 
 permissions:
   contents: read
@@ -280,12 +282,12 @@ jobs:
               fi
               echo "Hosted Stripe billing boundary satisfied by full scheduled proof."
               ;;
-            push)
+            push|merge_group)
               if [[ "$HERMETIC_RESULT" != "success" || "$LIVE_RESULT" != "skipped" ]]; then
-                echo "Main pushes require hermetic proof; live Stripe proof runs on its daily schedule." >&2
+                echo "Main pushes and merge queue candidates require hermetic proof; live Stripe proof runs on its daily schedule." >&2
                 exit 1
               fi
-              echo "Hosted Stripe billing boundary satisfied by hermetic main-push proof."
+              echo "Hosted Stripe billing boundary satisfied by hermetic $EVENT_NAME proof."
               ;;
             pull_request)
               if [[ "$SCOPE_RESULT" == "success" && "$MARKDOWN_ONLY" == "true" ]]; then
