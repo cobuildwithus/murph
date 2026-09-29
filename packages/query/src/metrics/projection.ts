@@ -4,7 +4,6 @@ import { resolveMetricInputKey } from "@murphai/health-metrics";
 import type { VaultReadModel } from "../read-model.ts";
 import { summarizeDailySamples, type DailySampleSummary } from "../summaries.ts";
 import {
-  buildWearableSummaryBundle,
   buildWearableSummaryBundleFromDataset,
   summarizeWearableActivityFromBundle,
   summarizeWearableBodyStateFromBundle,
@@ -76,7 +75,9 @@ export function buildMetricProjection(
 }
 
 export function buildWearableMetricEvidence(vault: VaultReadModel): MetricRowEvidence[] {
-  return buildWearableMetricProjectionEvidenceFromBundle(buildWearableSummaryBundle(vault)).rows;
+  return buildWearableMetricProjectionEvidenceFromBundle(
+    buildWearableSummaryBundleFromDataset(collectWearableDataset(vault, {}), { includeSourceHealth: false }),
+  ).rows;
 }
 
 export function buildWearableMetricEvidenceFromBundle(bundle: WearableSummaryBundle): MetricRowEvidence[] {
@@ -89,7 +90,7 @@ function resolveWearableMetricProjectionEvidence(
 ): WearableMetricProjectionEvidence {
   const dataset = options.wearableDataset ?? collectWearableDataset(vault, {});
   return buildWearableMetricProjectionEvidenceFromBundle(
-    buildWearableSummaryBundleFromDataset(dataset),
+    buildWearableSummaryBundleFromDataset(dataset, { includeSourceHealth: false }),
     dataset.metricSuppressionEvidence,
   );
 }

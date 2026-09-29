@@ -94,3 +94,28 @@ docker run --rm --platform linux/amd64 --network none \
 Use the same scoped typecheck and sequential comparison controls above. This
 benchmark measures reading and validating automation history; it does not measure
 scheduler execution, provider inference, or message delivery.
+
+## Wearable metric CPU
+
+`wearable-cpu.ts` isolates exact-candidate deduplication and composes the ordinary
+metric projection over synthetic canonical read models. It covers 8,000 unique
+candidates, repeated groups, a concentrated duplicate burst, 90 days of repeated
+observations, and 365 days of unique history. Each case warms once and records
+five wall/CPU samples; every sample must equal its complete initial result. Metric
+evidence must also equal the ordinary source-health-enabled bundle. Compare hashes
+across revisions, and run both revision orders to expose warmup/host noise.
+
+```sh
+node scripts/run-typescript.mjs package --project packages/query/bench/tsconfig.json --pretty false
+apps/cloudflare/node_modules/.bin/esbuild packages/query/bench/wearable-cpu.ts \
+  --bundle --platform=node --format=esm --target=node24 \
+  --tsconfig=tsconfig.base.json --outfile=.tmp/wearable-cpu.mjs \
+  --banner:js='import { createRequire } from "node:module"; const require = createRequire(import.meta.url);'
+node scripts/run-with-host-verification-slot.mjs 'wearable CPU benchmark' -- \
+  node --expose-gc .tmp/wearable-cpu.mjs
+```
+
+Use the same fixture and command on each revision. Output contains synthetic
+hashes and timings only. Deduplication stress cases establish scaling behavior;
+these in-memory measurements do not establish production duplicate frequency,
+container wakeups, canonical I/O cost, end-to-end CPU, or billing savings.
