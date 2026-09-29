@@ -1196,7 +1196,8 @@ with shell and dynamic tools disabled and the existing 120-second deadline.
 The provider receives selected clinical text, excluding identifier fields,
 patient routing references and revision metadata. Literal evidence and date
 provenance are required before canonical apply; unsupported dates stay held
-without a correction call. Whole-page hashes attest storage while resource
+without a correction call. Clinical assertion code/system pairs must exactly
+match a source coding. Whole-page hashes attest storage while resource
 hashes isolate caching and derived fact identity across records on the same page.
 
 Structured jobs use `murph.clinical-enrichment.v2`; attachment-only jobs retain

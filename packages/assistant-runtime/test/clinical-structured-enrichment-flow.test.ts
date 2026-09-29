@@ -90,9 +90,9 @@ it("never selects already structured results, unsafe statuses or undated observa
   expect(f.executeExtraction).not.toHaveBeenCalled();
 });
 
-it("holds fabricated evidence and preserves its source note", async () => {
+it.each(["Invented source evidence", "Resting pulse: 73 bpm"])("holds nonliteral evidence (%s) and preserves its source note", async (excerpt) => {
   const f = await fixture();
-  f.executeExtraction.mockResolvedValue({ ...output, records: output.records.map((record) => ({ ...record, excerpt: "Invented source evidence" })) });
+  f.executeExtraction.mockResolvedValue({ ...output, records: output.records.map((record) => ({ ...record, excerpt })) });
   await runOneHostedClinicalEnrichment(f.runtime);
   const applied = await applyClinicalEnrichmentProposals(f);
   expect(applied).toMatchObject({ canonical: null, counts: { held: 1 } });
@@ -106,6 +106,30 @@ it("does not reuse extraction for a different record on the same page", async ()
   const next = await readNextClinicalEnrichment(f);
   expect(next).toMatchObject({ status: "extract", source: { resource: { resourceId: "second" } } });
   expect(next?.status === "extract" && next.extractedText).toContain("74 bpm");
+});
+
+it.each([
+  { code: "assessment", codeSystem: "urn:oid:1.2.3.4", accepted: true },
+  { code: "assessment", codeSystem: "urn:oid:1.2.3", accepted: false },
+  { code: "assessment", codeSystem: "urn:oid:1.2.3.5", accepted: false },
+  { code: "invented", codeSystem: "urn:oid:1.2.3.4", accepted: false },
+  { code: "assessment", codeSystem: undefined, accepted: false },
+])("attests a clinical assertion coding as an exact pair: $code / $codeSystem", async ({ code, codeSystem, accepted }) => {
+  const text = "Clinical assessment completed.";
+  const f = await fixture([{ ...source(), valueString: text, code: { coding: [
+    { code: "assessment", system: "urn:oid:1.2.3.4", display: "Clinical assessment" },
+    { code: "encounter", system: "urn:oid:1.2.3.5", display: "Encounter" },
+  ] } }]);
+  f.executeExtraction.mockResolvedValue({ status: "complete", records: [{ dateBasis: "source", excerpt: text,
+    payload: { kind: "clinical_assertion", occurredAt: date, assertedOn: date.slice(0, 10),
+      title: "Clinical assessment", note: undefined, assertion: "not_applicable", domain: "exam", code, codeSystem,
+      assertionText: text },
+  }] });
+  await runOneHostedClinicalEnrichment(f.runtime);
+  const applied = await applyClinicalEnrichmentProposals(f);
+  expect(applied.counts).toMatchObject({ created: accepted ? 1 : 0, held: accepted ? 0 : 1 });
+  expect(applied.readback.verifiedCount).toBe(accepted ? 1 : 0);
+  expect(await listCanonicalEntities(f.vaultRoot, { family: "event", kinds: ["note"], limit: 10 })).toHaveLength(1);
 });
 
 it("holds a changed raw page before any model call", async () => {

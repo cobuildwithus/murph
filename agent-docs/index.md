@@ -654,6 +654,8 @@ The separate registration activation and composed import proof remain active in
 
 Structured clinical source recovery is tracked in
 [`2026-09-29-clinical-structured-enrichment.md`](exec-plans/completed/2026-09-29-clinical-structured-enrichment.md).
+Literal evidence selection and focused model proof are tracked in
+[`clinical evidence quotes`](exec-plans/completed/2026-09-29-clinical-evidence-quotes.md).
 
 Clinical import notice handling, qualitative range preservation, and repeated-item
 reporting are tracked in

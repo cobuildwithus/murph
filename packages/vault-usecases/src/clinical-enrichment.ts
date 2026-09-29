@@ -366,11 +366,34 @@ function clinicalProposalDate(
   return null;
 }
 
-function hasLiteralClinicalEvidence(record: ClinicalDocumentExtractionOutput["records"][number], source: NonNullable<Job["source"]>, text: string | undefined): boolean {
-  if (!source.resource) return true;
-  if (record.payload.kind === "note") return false;
-  if (!text || !record.excerpt || !text.includes(record.excerpt)) return false;
-  return record.dateBasis !== "document" || Boolean(record.dateEvidence && text.includes(record.dateEvidence));
+function clinicalSourceCodings(source: NonNullable<Job["source"]>, text: string | undefined): Set<string> | null {
+  if (!source.resource) return null;
+  const codings = new Set<string>();
+  const pending: unknown[] = text ? [JSON.parse(text)] : [];
+  while (pending.length) {
+    const value = pending.pop();
+    if (!value || typeof value !== "object") continue;
+    if ("code" in value && typeof value.code === "string") {
+      const system = "system" in value ? value.system : undefined;
+      codings.add(JSON.stringify([value.code, system]));
+    }
+    for (const child of Object.values(value)) pending.push(child);
+  }
+  return codings;
+}
+
+function clinicalEvidenceHoldReason(record: ClinicalDocumentExtractionOutput["records"][number], codings: Set<string> | null, text: string | undefined): string | null {
+  if (codings === null) return null;
+  if (record.payload.kind === "note" || !text || !record.excerpt || !text.includes(record.excerpt)
+    || (record.dateBasis === "document" && (!record.dateEvidence || !text.includes(record.dateEvidence)))) {
+    return "Clinical resource proposal lacks literal source evidence.";
+  }
+  const payload = record.payload;
+  if (payload.kind === "clinical_assertion" && (payload.code || payload.codeSystem)
+    && !codings.has(JSON.stringify([payload.code, payload.codeSystem]))) {
+    return "Clinical resource proposal code and system do not match source coding.";
+  }
+  return null;
 }
 
 async function planClinicalEnrichmentPage(
@@ -388,6 +411,7 @@ async function planClinicalEnrichmentPage(
   let held = 0;
   const identities = new Set<string>();
   const verifiedIds: string[] = [];
+  const sourceCodings = clinicalSourceCodings(source, sourceText);
   const hold = (reason: string) => {
     held++;
     if (!job.holdReasons.includes(reason)) job.holdReasons = [...job.holdReasons, reason].slice(-20);
@@ -396,8 +420,9 @@ async function planClinicalEnrichmentPage(
     const output = clinicalDocumentExtractionOutputSchemaForFamily(family).parse(prepared.outputs[family]);
     if (output.status === "blocked") hold(`${family}: ${output.reason}`.slice(0, 500));
     for (const record of output.records) {
-      if (!hasLiteralClinicalEvidence(record, source, sourceText)) {
-        hold("Clinical resource proposal lacks literal source evidence."); continue;
+      const evidenceHold = clinicalEvidenceHoldReason(record, sourceCodings, sourceText);
+      if (evidenceHold) {
+        hold(evidenceHold); continue;
       }
       const proposed = record.payload;
       const payload = clinicalProposalDate(record, parent, metadata.timezone);
