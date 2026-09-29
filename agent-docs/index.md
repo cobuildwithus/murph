@@ -808,6 +808,10 @@ Signup-wide native contact-card sharing and daily attempt suppression are owned 
 `operations/imessage-deliverability.md`; implementation and receipt-order proof
 are tracked in `exec-plans/completed/2026-09-24-signup-contact-card.md`.
 
+Explicit reviewed clinical image omission is owned by the Clinical Records Intake
+storage contract; proof is recorded in
+[`clinical image storage`](exec-plans/completed/2026-09-28-clinical-image-storage.md).
+
 Early Linq text typing reuses the existing staging-to-turn handoff owned by
 `packages/assistant-runtime/README.md`; implementation and synthetic proof are
 tracked in [`warm typing latency`](exec-plans/completed/2026-09-25-warm-typing-latency.md).
@@ -851,8 +855,14 @@ Hosted CI PostgreSQL registry provenance is tracked in
 The E2E MinIO cleanup ownership repair is tracked in
 [`2026-09-28-minio-e2e-cleanup-ownership.md`](exec-plans/completed/2026-09-28-minio-e2e-cleanup-ownership.md).
 
+Clinical storage replay serialization and concurrent repair proof are tracked in
+[storage replay locking](exec-plans/completed/2026-09-28-clinical-storage-replay-lock.md).
+
 Historical parser-hold refresh preservation and composed retrieval proof are tracked
 in [parser-hold refresh](exec-plans/completed/2026-09-28-clinical-parser-holds.md).
+
+Hosted enrichment read/repair concurrency proof is recorded in
+[enrichment source locking](exec-plans/completed/2026-09-29-clinical-enrichment-read-lock.md).
 
 Complete historical clinical hold-shape coverage is recorded in
 [hold histories](exec-plans/completed/2026-09-29-clinical-hold-histories.md).
