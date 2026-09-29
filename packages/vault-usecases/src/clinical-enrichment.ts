@@ -18,6 +18,7 @@ import { importEventBatch, isVaultError, resolveVaultPathOnDisk, withCanonicalRe
 import { listCanonicalEntities, readVaultMetadataSource, type CanonicalEntity } from "@murphai/query";
 import { resolveRuntimePaths, writeJsonFileAtomic } from "@murphai/runtime-state/node";
 
+import { readClinicalStoredDocument } from "./clinical-document-storage.ts";
 import { clinicalEnrichmentLabHoldReason } from "./clinical-enrichment-labs.ts";
 import { readClinicalEnrichmentParentEligibility } from "./clinical-enrichment-parent.ts";
 
@@ -77,18 +78,13 @@ async function readManifest(vaultRoot: string, ref: z.infer<typeof manifestRefSc
   if (hash(bytes) !== ref.sha256) throw new Error("Clinical enrichment manifest digest mismatch.");
   return clinicalRawManifestSchema.parse(JSON.parse(bytes.toString("utf8")));
 }
-async function verifySource(vaultRoot: string, source: z.infer<typeof sourceSchema>) {
-  const resolved = await resolveVaultPathOnDisk(vaultRoot, source.rawRef);
-  if ((await stat(resolved.absolutePath)).size !== source.byteLength) throw new Error("Clinical enrichment document size mismatch.");
-  if (hash(await readFile(resolved.absolutePath)) !== source.sha256) throw new Error("Clinical enrichment document digest mismatch.");
-  return resolved.absolutePath;
-}
 async function attestSource(vaultRoot: string, job: Job) {
   const manifest = await readManifest(vaultRoot, job.root);
   const attachment = "documentAttachments" in manifest ? manifest.documentAttachments?.[job.attachmentIndex] : undefined;
   if (!job.source || attachment?.status !== "downloaded" || attachment.sha256 !== job.source.sha256 || attachment.byteLength !== job.source.byteLength || attachment.mediaType !== job.source.mediaType || path.posix.join(path.posix.dirname(job.root.manifestPath), attachment.relativePath) !== job.source.rawRef) throw new Error("Clinical enrichment source is no longer attested by its manifest.");
   const parent = await readClinicalEnrichmentParentEligibility({ vaultRoot, manifestPath: job.root.manifestPath, manifest, attachment });
-  return { documentPath: await verifySource(vaultRoot, job.source), parent };
+  const stored = await readClinicalStoredDocument({ vaultRoot, source: job.source });
+  return { documentPath: stored.absolutePath, storedSha256: stored.sha256, parent };
 }
 
 /** Portable clinical operations only; raw evidence and canonical records keep their existing owners. */
@@ -186,17 +182,18 @@ async function prepareCurrentClinicalDocument(
   }
   await saveJob(vaultRoot, job);
   const metadata = vaultMetadataSchema.parse(await readVaultMetadataSource(vaultRoot));
-  return { status: "extract", jobId: job.jobId, source: { rawRef: job.source.rawRef, sha256: job.source.sha256, mediaType: job.source.mediaType, clinicalOccurredAt: attested.parent.clinicalOccurredAt }, documentPath: attested.documentPath, page: job.page, timeZone: metadata.timezone };
+  return { status: "extract", jobId: job.jobId, source: { rawRef: job.source.rawRef, sha256: attested.storedSha256, mediaType: job.source.mediaType, clinicalOccurredAt: attested.parent.clinicalOccurredAt }, documentPath: attested.documentPath, page: job.page, timeZone: metadata.timezone };
 }
 
 export async function persistClinicalEnrichmentProposals(input: { vaultRoot: string; jobId: string; sourceSha256: string; page: number; totalPages: number; outputs: Record<(typeof families)[number], ClinicalDocumentExtractionOutput> }): Promise<void> {
   await locked(input.vaultRoot, async () => {
     const job = await readJob(input.vaultRoot, input.jobId);
-    if (job.source?.sha256 !== input.sourceSha256 || job.page !== input.page) throw new Error("Clinical enrichment proposal cursor is stale.");
+    if (!job.source || job.page !== input.page) throw new Error("Clinical enrichment proposal cursor is stale.");
     if (job.status === "prepared") return; // First durable proposal wins; never resample accepted content.
     if (job.status !== "pending") throw new Error("Clinical enrichment job is terminal.");
     const attested = await attestSource(input.vaultRoot, job);
     if (!attested.parent.eligible) throw new Error("Clinical document parent is not eligible for proposals.");
+    if (input.sourceSha256 !== attested.storedSha256) throw new Error("Clinical enrichment proposal source changed.");
     const outputs = outputsSchema.parse(Object.fromEntries(families.map((family) => [family, clinicalDocumentExtractionOutputSchemaForFamily(family).parse(input.outputs[family])])));
     if (input.page > input.totalPages || families.some((family) => outputs[family].records.some((record) => record.page !== undefined && record.page !== input.page))) throw new Error("Clinical enrichment proposals reference an unprocessed page.");
     if (job.totalPages !== undefined && job.totalPages !== input.totalPages) throw new Error("Clinical enrichment document page count changed.");
@@ -207,7 +204,7 @@ export async function persistClinicalEnrichmentProposals(input: { vaultRoot: str
     job.prepared = { page: input.page, totalPages: input.totalPages, outputs };
     job.status = "prepared";
     await saveJob(input.vaultRoot, job);
-    const cachePath = extractionCachePath(input.vaultRoot, input.sourceSha256, job.source.mediaType, input.page, attested.parent.clinicalOccurredAt);
+    const cachePath = extractionCachePath(input.vaultRoot, job.source.sha256, job.source.mediaType, input.page, attested.parent.clinicalOccurredAt);
     await mkdir(path.dirname(cachePath), { recursive: true, mode: 0o700 });
     await writeJsonFileAtomic(cachePath, job.prepared, { mode: 0o600 });
   });

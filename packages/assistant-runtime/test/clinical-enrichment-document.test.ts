@@ -40,7 +40,7 @@ it("renders exactly the requested PDF page with bounded process and output setti
     }
     return { stdout: "Page 3 clinical text\n", stderr: "" };
   });
-  const prepared = await prepareClinicalEnrichmentDocument({ documentPath, mediaType: "application/pdf", page: 3 });
+  const prepared = await prepareClinicalEnrichmentDocument({ vaultRoot: path.dirname(documentPath), documentPath, mediaType: "application/pdf", page: 3 });
   roots.push(...prepared.scratchRoots);
   expect(prepared).toMatchObject({ totalPages: 7, extractedText: "Page 3 clinical text", renderedPages: [{ page: 3 }] });
   expect(commands.run).toHaveBeenCalledWith("pdftoppm", [
@@ -65,7 +65,8 @@ it("keeps rendered scans usable when text extraction fails", async () => {
     }
     throw new Error("no text layer");
   });
-  const prepared = await prepareClinicalEnrichmentDocument({ documentPath: await source(), mediaType: "application/pdf", page: 1 });
+  const documentPath = await source();
+  const prepared = await prepareClinicalEnrichmentDocument({ vaultRoot: path.dirname(documentPath), documentPath, mediaType: "application/pdf", page: 1 });
   roots.push(...prepared.scratchRoots);
   expect(prepared.extractedText).toBeUndefined();
   expect(prepared.renderedPages).toHaveLength(1);
@@ -78,7 +79,7 @@ it("removes owned scratch and redacts parser diagnostics on failures or cancella
     throw new Error("synthetic private document title in parser stderr");
   });
   const documentPath = await source();
-  await expect(prepareClinicalEnrichmentDocument({ documentPath, mediaType: "application/pdf", page: 1 })).rejects.toMatchObject({
+  await expect(prepareClinicalEnrichmentDocument({ vaultRoot: path.dirname(documentPath), documentPath, mediaType: "application/pdf", page: 1 })).rejects.toMatchObject({
     code: "CLINICAL_ENRICHMENT_DOCUMENT_RENDER_FAILED", message: "Clinical document preparation could not complete.",
   });
   await expect(stat(scratchRoot)).rejects.toMatchObject({ code: "ENOENT" });
@@ -88,48 +89,55 @@ it("removes owned scratch and redacts parser diagnostics on failures or cancella
     controller.abort(new Error("synthetic preemption"));
     throw new Error("aborted");
   });
-  await expect(prepareClinicalEnrichmentDocument({ documentPath, mediaType: "application/pdf", page: 1, signal: controller.signal })).rejects.toThrow("synthetic preemption");
+  await expect(prepareClinicalEnrichmentDocument({ vaultRoot: path.dirname(documentPath), documentPath, mediaType: "application/pdf", page: 1, signal: controller.signal })).rejects.toThrow("synthetic preemption");
   await expect(stat(scratchRoot)).rejects.toMatchObject({ code: "ENOENT" });
 });
 
 it("rejects invalid page numbers, oversized sources and oversized rendered dimensions", async () => {
   const documentPath = await source();
   for (const page of [0, 1.5, 100_001]) {
-    await expect(prepareClinicalEnrichmentDocument({ documentPath, mediaType: "application/pdf", page })).rejects.toMatchObject({ code: "CLINICAL_ENRICHMENT_DOCUMENT_PAGE_INVALID" });
+    await expect(prepareClinicalEnrichmentDocument({ vaultRoot: path.dirname(documentPath), documentPath, mediaType: "application/pdf", page })).rejects.toMatchObject({ code: "CLINICAL_ENRICHMENT_DOCUMENT_PAGE_INVALID" });
   }
   commands.run.mockImplementation(async (command: string, args: string[]) => {
     if (command === "pdfinfo") return { stdout: "Pages: 2\n", stderr: "" };
     await writeFile(`${args.at(-1)}.png`, png(2001, 100));
     return { stdout: "", stderr: "" };
   });
-  await expect(prepareClinicalEnrichmentDocument({ documentPath, mediaType: "application/pdf", page: 3 })).rejects.toMatchObject({ code: "CLINICAL_ENRICHMENT_DOCUMENT_PAGE_INVALID" });
-  await expect(prepareClinicalEnrichmentDocument({ documentPath, mediaType: "application/pdf", page: 1 })).rejects.toMatchObject({ code: "CLINICAL_ENRICHMENT_DOCUMENT_LIMIT" });
+  await expect(prepareClinicalEnrichmentDocument({ vaultRoot: path.dirname(documentPath), documentPath, mediaType: "application/pdf", page: 3 })).rejects.toMatchObject({ code: "CLINICAL_ENRICHMENT_DOCUMENT_PAGE_INVALID" });
+  await expect(prepareClinicalEnrichmentDocument({ vaultRoot: path.dirname(documentPath), documentPath, mediaType: "application/pdf", page: 1 })).rejects.toMatchObject({ code: "CLINICAL_ENRICHMENT_DOCUMENT_LIMIT" });
   await truncate(documentPath, 20 * 1024 * 1024 + 1);
   commands.run.mockClear();
-  await expect(prepareClinicalEnrichmentDocument({ documentPath, mediaType: "application/pdf", page: 1 })).rejects.toMatchObject({ code: "CLINICAL_ENRICHMENT_DOCUMENT_LIMIT" });
+  await expect(prepareClinicalEnrichmentDocument({ vaultRoot: path.dirname(documentPath), documentPath, mediaType: "application/pdf", page: 1 })).rejects.toMatchObject({ code: "CLINICAL_ENRICHMENT_DOCUMENT_LIMIT" });
   expect(commands.run).not.toHaveBeenCalled();
 });
 
 it("reuses clinical markup and charset decoding without running document programs", async () => {
   const documentPath = await source(Buffer.from('<html><script>untrusted code</script><p>Caf\u00e9: 142</p></html>', "latin1"));
-  const prepared = await prepareClinicalEnrichmentDocument({ documentPath, mediaType: 'text/html; charset="windows-1252"', page: 1 });
+  const prepared = await prepareClinicalEnrichmentDocument({ vaultRoot: path.dirname(documentPath), documentPath, mediaType: 'text/html; charset="windows-1252"', page: 1 });
   expect(prepared).toMatchObject({ totalPages: 1, extractedText: "Caf\u00e9: 142", renderedPages: [], scratchRoots: [] });
   expect(commands.run).not.toHaveBeenCalled();
   await prepared.cleanup();
-  await expect(prepareClinicalEnrichmentDocument({ documentPath, mediaType: "application/octet-stream", page: 1 })).rejects.toMatchObject({ code: "CLINICAL_ENRICHMENT_DOCUMENT_UNSUPPORTED" });
+  await expect(prepareClinicalEnrichmentDocument({ vaultRoot: path.dirname(documentPath), documentPath, mediaType: "application/octet-stream", page: 1 })).rejects.toMatchObject({ code: "CLINICAL_ENRICHMENT_DOCUMENT_UNSUPPORTED" });
 });
 
 it("preserves bounded PNG/JPEG evidence as one-page private sources", async () => {
   const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xc0, 0, 8, 8, 0, 100, 0, 200, 0, 0xff, 0xd9]);
   for (const [mediaType, bytes] of [["image/png", png()], ["image/jpeg", jpeg]] as const) {
     const documentPath = await source(bytes);
-    const prepared = await prepareClinicalEnrichmentDocument({ documentPath, mediaType, page: 1 });
+    const prepared = await prepareClinicalEnrichmentDocument({ vaultRoot: path.dirname(documentPath), documentPath, mediaType, page: 1 });
     roots.push(...prepared.scratchRoots);
     expect(prepared.totalPages).toBe(1);
     expect(await readFile(prepared.renderedPages[0]!.path)).toEqual(bytes);
-    await expect(prepareClinicalEnrichmentDocument({ documentPath, mediaType, page: 2 })).rejects.toMatchObject({ code: "CLINICAL_ENRICHMENT_DOCUMENT_PAGE_INVALID" });
+    await expect(prepareClinicalEnrichmentDocument({ vaultRoot: path.dirname(documentPath), documentPath, mediaType, page: 2 })).rejects.toMatchObject({ code: "CLINICAL_ENRICHMENT_DOCUMENT_PAGE_INVALID" });
   }
   const tooWide = await source(png(9000, 1));
-  await expect(prepareClinicalEnrichmentDocument({ documentPath: tooWide, mediaType: "image/png", page: 1 })).rejects.toMatchObject({ code: "CLINICAL_ENRICHMENT_DOCUMENT_LIMIT" });
+  await expect(prepareClinicalEnrichmentDocument({ vaultRoot: path.dirname(tooWide), documentPath: tooWide, mediaType: "image/png", page: 1 })).rejects.toMatchObject({ code: "CLINICAL_ENRICHMENT_DOCUMENT_LIMIT" });
   expect(commands.run).not.toHaveBeenCalled();
+});
+
+it("keeps genuinely missing evidence invalid after obtaining the canonical lock", async () => {
+  const documentPath = await source("source evidence");
+  await rm(documentPath);
+  await expect(prepareClinicalEnrichmentDocument({ vaultRoot: path.dirname(documentPath), documentPath, mediaType: "text/plain", page: 1 }))
+    .rejects.toMatchObject({ code: "CLINICAL_ENRICHMENT_DOCUMENT_INVALID" });
 });
