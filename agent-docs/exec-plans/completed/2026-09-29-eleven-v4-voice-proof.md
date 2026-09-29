@@ -23,4 +23,7 @@ The contracts roster owns voice choices; deployment configuration owns New York.
 - Focused catalog/turn-planning tests: 118 passed. Assistant-engine typecheck, docs drift, diff privacy, and complexity checks passed.
 - Real Codex (gpt-6-sol, local subscription): v4 emitted one yawning memo; the legacy override emitted one plain-speech memo. Both preserved the configured voice, attached once, and returned no duplicate text. UX: Ready. Initial homes failed before any provider action; an authorized alternate completed both journeys.
 - The real SDK generated a separate valid v4 MP3 containing requested sleepy/yawning directions. Acoustic similarity and exact New York deployment mapping are not established by this smoke test.
-- Next: push the complete candidate, run substantive ReviewGPT round 2 concurrently with CI, resolve New York mapping, and merge after gates pass.
+- Implementation and local verification complete. ReviewGPT round 2, exact-head CI, and the authorized merge proceed through the completion workflow. Exact New York deployment mapping remains an explicit activation evidence gap.
+Status: completed
+Updated: 2026-09-29
+Completed: 2026-09-29
