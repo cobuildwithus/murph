@@ -44,3 +44,7 @@ one existing time budget and yields to foreground work. The archive-aware reader
 and writer ship together; once audit archives exist, restoring into an older
 plain-only reader is unsupported. Query SQLite stays included in restore, and
 audit-only physical changes remain outside its source freshness manifest.
+
+`findEventsByExternalRefs` resolves a caller-bounded batch with two ledger scans,
+reusing single-reference latest-record, moved-identity and deletion semantics.
+Callers that couple this read to mutation hold the canonical write lock across both.
