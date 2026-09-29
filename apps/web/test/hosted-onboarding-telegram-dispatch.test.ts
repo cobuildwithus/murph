@@ -60,8 +60,6 @@ type TelegramExactRootUnwrapper = (input: TelegramRootReference & {
 
 const mocks = vi.hoisted(() => {
   const state = {
-    sendHostedTelegramTypingBestEffort: vi.fn<() => Promise<Date | null>>(async () => null),
-    recordHostedIngressTemporalSignalAccepted: vi.fn(async () => undefined),
     acceptHostedFamilyInviteFromTelegramTx: vi.fn(),
     activeRootKeyIdsByDomain: new Map<string, string[]>(),
     drainHostedExecutionOutboxBestEffort: vi.fn(),
@@ -390,16 +388,6 @@ vi.mock("@/src/lib/hosted-crypto/domain-root-store", async () => {
   };
 });
 
-vi.mock("@/src/lib/hosted-onboarding/telegram-client", async (importOriginal) => ({
-  ...await importOriginal<typeof import("@/src/lib/hosted-onboarding/telegram-client")>(),
-  sendHostedTelegramTypingBestEffort: mocks.sendHostedTelegramTypingBestEffort,
-}));
-
-vi.mock("@/src/lib/hosted-runtime-latency/store", async (importOriginal) => ({
-  ...await importOriginal<typeof import("@/src/lib/hosted-runtime-latency/store")>(),
-  recordHostedIngressTemporalSignalAccepted: mocks.recordHostedIngressTemporalSignalAccepted,
-}));
-
 import { handleHostedOnboardingTelegramWebhook as handleHostedOnboardingTelegramWebhookImpl } from "@/src/lib/hosted-onboarding/webhook-service";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { parseHostedTelegramWebhookUpdate } from "@/src/lib/hosted-onboarding/telegram";
@@ -616,16 +604,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
   });
 
-  it.each([false, true])("dispatches linked active-member input after commit without waiting for typing (pending=%s)", async pendingTyping => {
-    let releaseTyping: (() => void) | undefined;
-    const typingAcceptedAt = new Date("2030-01-01T00:00:00.500Z");
-    mocks.sendHostedTelegramTypingBestEffort.mockImplementationOnce(async () => {
-      expect(mocks.transactionDepth).toBe(0);
-      expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledOnce();
-      expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
-      if (pendingTyping) await new Promise<void>(resolve => { releaseTyping = resolve; });
-      return typingAcceptedAt;
-    });
+  it("reuses an existing transaction when dispatching linked active-member Telegram messages", async () => {
     mocks.runtimeEnv.telegramWebhookSecret = "telegram-secret";
     const hostedWebhookReceiptCreate = vi.fn().mockResolvedValue({});
     const hostedWebhookReceiptUpdateMany = vi.fn().mockResolvedValue({ count: 1 });
@@ -704,11 +683,6 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
       rawBody,
       secretToken: "telegram-secret",
     });
-    releaseTyping?.();
-    await vi.waitFor(() => expect(mocks.recordHostedIngressTemporalSignalAccepted).toHaveBeenCalledWith(
-      expect.objectContaining({ source: "telegram", ingressTypingAcceptedAt: typingAcceptedAt,
-        mailboxItemId: "mailbox_telegram:update:321" }),
-    ));
 
     expect(response).toMatchObject({
       ok: true,
@@ -741,7 +715,6 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
       mailboxItemId: "mailbox_telegram:update:321",
     });
     expect(response).not.toHaveProperty("wakeUserId");
-    expect(mocks.sendHostedTelegramTypingBestEffort).toHaveBeenCalledWith("123");
     expect(hostedWebhookReceiptCreate).not.toHaveBeenCalled();
     expect(hostedWebhookReceiptUpdateMany).not.toHaveBeenCalled();
     expect(hostedMemberRoutingUpsert).toHaveBeenCalledTimes(1);
@@ -907,7 +880,6 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
       ...(await defaultAppend(input)),
       duplicate: true,
     }));
-    const typingCountBeforeDuplicate = mocks.sendHostedTelegramTypingBestEffort.mock.calls.length;
     await expect(handleHostedOnboardingTelegramWebhook({
       prisma,
       rawBody: buildRestoredRouteWebhook(800_100),
@@ -918,7 +890,6 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
     });
 
     expect(hostedMemberRoutingUpsert).toHaveBeenCalledTimes(102);
-    expect(mocks.sendHostedTelegramTypingBestEffort).toHaveBeenCalledTimes(typingCountBeforeDuplicate);
     expect(
       mocks.rearmHostedPhoneCallResultNotificationRecovery,
     ).toHaveBeenCalledTimes(2);
@@ -1864,8 +1835,6 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
       ok: true,
       reason: "wake-appended-active-group",
     });
-
-    expect(mocks.sendHostedTelegramTypingBestEffort).not.toHaveBeenCalled();
 
     expect(mocks.ensureHostedThreadContainerRouteTx).toHaveBeenCalledWith({
       accountLookupKey: "telegram:bot",
@@ -4357,8 +4326,6 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
       ok: true,
       reason: "inactive-member",
     });
-
-    expect(mocks.sendHostedTelegramTypingBestEffort).not.toHaveBeenCalled();
 
     const upsertCall = hostedMemberRoutingUpsert.mock.calls[0]?.[0] as {
       update: {

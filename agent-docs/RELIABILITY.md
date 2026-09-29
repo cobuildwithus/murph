@@ -775,6 +775,11 @@ to apply after cutover.
   children stop without another grace period; future durable wakes can start
   cold. DO reactivation preserves the SDK task, while process replacement does
   not inherit a completed process's watermark.
+  Activity expiry rearms and yields to an active invocation before acquiring the
+  lifecycle lock, which the invocation retains until its response settles.
+  Maintenance must not hold the SDK alarm open behind that long-running work.
+  Destructive cleanup remains locked and rechecks interaction ownership after
+  external reads; scheduling a future check grants no new conversation warmth.
 - The production database-health operator alert is an independent Cloudflare
   singleton so the monitored Postgres database cannot take down its own page
   owner. A five-minute Cron Trigger records one normalized PlanetScale sample
@@ -2445,12 +2450,6 @@ to apply after cutover.
   observed typing uses the strict warm/cold threshold. Frozen emails retain both
   receipt and silence-start timestamps; older records retain their original text.
   Telegram retains exact-input typing observations and the existing thresholds.
-  Fresh access-admitted direct Telegram messages start one best-effort typing
-  request after mailbox commit, concurrently with the wake handoff. Duplicates,
-  groups, onboarding and denied inputs do not use this ingress acknowledgement.
-  Only Telegram's successful JSON acceptance records the existing ingress typing
-  timestamp. The request has a two-second budget, no retry, and cannot block or
-  fail durable wake handoff; ongoing refresh remains runtime-owned.
   Accepted-typing persistence waits for competing short trace-row writes in the
   detached callback; other retry-backed milestones keep skipping locked rows.
   Transport exceptions use the existing two retries (250 ms and 1 second), and

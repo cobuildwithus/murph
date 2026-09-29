@@ -610,6 +610,12 @@ facts. Postgres owns runtime admission and resource cleanup; there is no per-use
 coordination Durable Object or alarm.
 RunnerContainer reuses the Containers SDK's own scheduling/alarm owner solely
 for safe idle-container cleanup, not mailbox or checkpoint scheduling.
+Activity expiry rearms that schedule and yields to a registered invocation before
+taking the lifecycle lock. The invocation holds that lock until its response
+settles; waiting behind it would strand the current SDK alarm instead of letting
+the next alarm run. Destructive cleanup still takes the lock and rechecks the
+interaction generation after external ownership reads. This removes an
+application-owned alarm stall, not the platform's ability to reset a controller.
 
 Optional execution vars and secrets:
 
