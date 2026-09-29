@@ -1011,7 +1011,7 @@ export async function recordHostedSystemMailboxItemAfterCheckpoint(input: {
       vaultShareProjectionResult: input.vaultShareProjectionResult,
       vaultRoot: input.vaultRoot,
     });
-    const completionRetentionAt = await finalizeHostedDeviceSyncMailboxAfterCheckpoint({
+    const completion = await finalizeHostedDeviceSyncMailboxAfterCheckpoint({
       acceptedInCurrentAdmission:
         input.deviceSyncCompletionAcceptedInCurrentAdmission === true,
       item: input.item,
@@ -1022,7 +1022,7 @@ export async function recordHostedSystemMailboxItemAfterCheckpoint(input: {
     const { dirtyRemainderDiscovered, retainUntil } = resolveHostedDeviceSyncDirtyRemainderRetention({
       item: input.item,
       nextDirtyWakeAt: recordResult.nextWakeAt,
-      retainUntil: completionRetentionAt,
+      retainUntil: completion.retainUntil,
       stillDirty: recordResult.stillDirty,
     });
     const immediateDirtyContinuationCanProgress = retainUntil !== null
@@ -1039,6 +1039,7 @@ export async function recordHostedSystemMailboxItemAfterCheckpoint(input: {
       });
     } else {
       await removeHostedSystemMailboxPendingItemIfCurrent({
+        completedDeviceSyncWake: completion.completedWake,
         item: input.item,
         vaultRoot: input.vaultRoot,
       });
@@ -1227,11 +1228,14 @@ async function finalizeHostedDeviceSyncMailboxAfterCheckpoint(input: {
   runtime: HostedSystemMailboxRuntime;
   signal?: AbortSignal | null;
   stillDirty: boolean;
-}): Promise<string | null> {
+}): Promise<{
+  retainUntil: string | null;
+  completedWake?: Extract<HostedExecutionSystemWake, { kind: "device-sync.wake" }>;
+}> {
   const retainUntil = resolveHostedDeviceSyncMailboxRetentionAt(input.item);
   const checkpointedWake = resolveHostedDeviceSyncCheckpointedWake(input.item);
   if (!input.acceptedInCurrentAdmission || !checkpointedWake || input.stillDirty) {
-    return retainUntil;
+    return { retainUntil };
   }
 
   const deviceSyncPort = input.runtime.platform.deviceSyncPort;
@@ -1246,7 +1250,9 @@ async function finalizeHostedDeviceSyncMailboxAfterCheckpoint(input: {
     wake: checkpointedWake,
   });
   // Cadence publication never completes the future jobs carried by this owner.
-  return isHostedDeviceSyncCompletionFenceWake(checkpointedWake) ? null : retainUntil;
+  return isHostedDeviceSyncCompletionFenceWake(checkpointedWake)
+    ? { retainUntil: null, completedWake: checkpointedWake }
+    : { retainUntil };
 }
 
 function hostedDeviceSyncRetainedWakeHasCapacity(

@@ -22,3 +22,10 @@ Run the Web Viewport Overflow workflow against a Ready PR. In the comparison rou
 ## Context
 
 This required investigation and a rerun while completing an unrelated device-import patch. No viewport, analytics, content security policy, or layout source changed in that patch.
+
+## Resolution
+
+Viewport animation setup now appends the unchanged stylesheet through the page
+DOM and checks its own stylesheet result. Synthetic Chromium regressions prove
+that a blocked script cannot reject permitted styles, while blocked styles
+still fail setup. The permitted-style regression fails with the prior helper.

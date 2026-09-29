@@ -86,7 +86,9 @@ const WORKSPACE_SNAPSHOT_R2_PUT_RETRYABLE_ERROR_CODES = new Set([
 const WORKSPACE_SNAPSHOT_R2_PUT_RETRYABLE_STATUSES = new Set([
   429,
   500,
+  502,
   503,
+  504,
 ]);
 type HostedWorkspaceSnapshotFailurePhase =
   | "session_complete_payload_validation"

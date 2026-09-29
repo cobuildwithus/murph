@@ -424,7 +424,7 @@ describe('assistant Codex turn planning', () => {
         "group": "59291f8075dcdacaff23f90a0fb0260d4d1fa3a448aa3ca29c5b14ea757f681d",
         "maintenance": "ac022f98be034bc9bbcfd987fb422a0546cfa1899d4c99b97167d7d22527547e",
         "outputOnly": "a83a04afea06e5290de36b14a0fee5d18970077a8294dde129b2e2dfa99116b4",
-        "scheduledEmail": "4f1ed96d883f3340b876d44e0e0fcbb624be029d792cbd0cc8f59a746655058f",
+        "scheduledEmail": "c89363017709c0d04a03c989b0d0d65be17e3ce7790029767a18d926a8db9722",
       }
     `)
   })

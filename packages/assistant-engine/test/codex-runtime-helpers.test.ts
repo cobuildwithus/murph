@@ -1112,9 +1112,13 @@ describe('Codex assistant registry helpers', () => {
   })
 
   it.each([false, true])('preserves finite batch attribution alongside direct knowledge counters (batch first: %s)', (batchFirst) => {
+    const directError = JSON.stringify({ code: 'knowledge_page_conflict', message: 'synthetic conflict', retryable: false })
     const items = [{
       type: 'commandExecution', command: 'vault-cli knowledge list', exitCode: 0,
       aggregatedOutput: '[]',
+    }, {
+      type: 'commandExecution', command: 'vault-cli knowledge upsert private-slug', exitCode: 1,
+      durationMs: 2, aggregatedOutput: directError,
     }, {
       type: 'commandExecution', command: 'vault-cli batch --compact', exitCode: 1,
       aggregatedOutput: JSON.stringify({
@@ -1132,16 +1136,15 @@ describe('Codex assistant registry helpers', () => {
         method: 'item/completed', params: { item },
       })),
     })
-    expect(profile?.tools).toEqual([expect.objectContaining({
-      calls: 1, failedCalls: 1, label: 'other',
-    }), expect.objectContaining({
-      calls: 1, failedCalls: 0, label: 'vault-cli knowledge',
+    expect(profile?.tools).toEqual([{
+      calls: 3, failedCalls: 2, kind: 'command', label: 'vault-cli knowledge',
+      durationKnownCalls: 2, durationMs: 3,
+      outputBytesMax: Buffer.byteLength(directError, 'utf8'), outputBytesTotal: Buffer.byteLength(directError, 'utf8') + 2,
       knowledgeCounts: {
-        showCalls: 0, listCalls: 1, searchCalls: 0, writeCalls: 0, otherCalls: 0,
-        notFoundFailures: 0, invalidFailures: 0, conflictFailures: 0, otherFailures: 0,
+        showCalls: 1, listCalls: 1, searchCalls: 0, writeCalls: 1, otherCalls: 0,
+        notFoundFailures: 1, invalidFailures: 0, conflictFailures: 1, otherFailures: 0,
       },
-    })])
-    expect((profile?.tools as Record<string, unknown>[])[0]).not.toHaveProperty('knowledgeCounts')
+    }])
     expect(parseAssistantUsageRecord({
       attemptCount: 1, credentialSource: 'platform', inputTokens: 1, outputTokens: 1,
       occurredAt: '2026-06-10T12:00:00.000Z', provider: 'codex-cli', schema: ASSISTANT_USAGE_SCHEMA,
@@ -1149,6 +1152,104 @@ describe('Codex assistant registry helpers', () => {
       usageId: 'turn_mixed_knowledge.attempt-1', turnProfileJson: profile,
     }).turnProfileJson).toEqual(profile)
     expect(JSON.stringify(profile)).not.toMatch(/private-slug|private page detail/u)
+  })
+
+  it.each([false, true])('retains exact batch knowledge/event metrics and old-reader parity (compact: %s)', (compact) => {
+    const cases = [
+      ['knowledge', 'show', true, undefined],
+      ['knowledge', 'show', true, 'knowledge_page_not_found'],
+      ['knowledge', 'show', false, 'knowledge_page_not_found'],
+      ['knowledge', 'show', false, 'knowledge_page_invalid'],
+      ['knowledge', 'show', false, 'knowledge_page_conflict'],
+      ['knowledge', 'show', false, 'knowledge_duplicate_slug'],
+      ['knowledge', 'show', false, 'SYNTHETIC_PRIVATE_ERROR'],
+      ['knowledge', 'show', false, undefined],
+      ['event', 'show', true, undefined],
+      ['event', 'show', false, 'not_found'],
+      ['event', 'payload-schema', true, undefined],
+      ['event', 'payload-schema', false, 'invalid_payload'],
+      ['knowledge', 'list', false, 'knowledge_page_not_found'],
+      ['knowledge', 'SYNTHETIC_PRIVATE_OPERATION', true, undefined],
+      ['event', 'SYNTHETIC_PRIVATE_OPERATION', false, 'not_found'],
+    ] as const
+    // Deliberately not a structured error: counters come only from parsed
+    // child error.code, never arbitrary stdout/data or the outer exit status.
+    const stdout = 'SYNTHETIC_PRIVATE_CONTENT_é🙂_knowledge_page_not_found'
+    const bytes = Buffer.byteLength(stdout, 'utf8')
+    const commands = cases.map(([head, operation, ok, code], index) => ({
+      index, argv: [head, operation, 'SYNTHETIC_PRIVATE_SLUG'], durationMs: index + 1,
+      ok, outputBytes: bytes, outputChars: stdout.length, stdout: compact ? '' : stdout,
+      data: { content: 'SYNTHETIC_PRIVATE_RESULT' },
+      ...(code === undefined ? {} : { error: { code, message: 'SYNTHETIC_PRIVATE_MESSAGE' } }),
+    }))
+    const aggregatedOutput = JSON.stringify({
+      schema: VAULT_CLI_BATCH_RESULT_SCHEMA, vault: '/synthetic/vault',
+      count: commands.length, failed: 10, commands,
+    })
+    const profile = buildAssistantCodexTurnProfileJson({
+      turnId: 'synthetic-batch-turn',
+      rawEvents: [{ method: 'item/completed', params: { item: {
+        type: 'commandExecution', command: compact ? 'vault-cli batch --compact' : 'vault-cli batch',
+        durationMs: 999, exitCode: 0, aggregatedOutput,
+      } } }],
+    })
+    expect(profile?.tools).toEqual([
+      { calls: 4, failedCalls: 2, kind: 'command', label: 'vault-cli event',
+        durationKnownCalls: 4, durationMs: 42, outputBytesMax: bytes, outputBytesTotal: bytes * 4 },
+      { calls: 3, failedCalls: 2, kind: 'command', label: 'other',
+        durationKnownCalls: 3, durationMs: 42, outputBytesMax: bytes, outputBytesTotal: bytes * 3 },
+      { calls: 8, failedCalls: 6, kind: 'command', label: 'vault-cli knowledge',
+        durationKnownCalls: 8, durationMs: 36, outputBytesMax: bytes, outputBytesTotal: bytes * 8,
+        knowledgeCounts: {
+          showCalls: 8, listCalls: 0, searchCalls: 0, writeCalls: 0, otherCalls: 0,
+          notFoundFailures: 1, invalidFailures: 1, conflictFailures: 2, otherFailures: 2,
+        } },
+    ])
+    expect(profile?.schema).toBe('murph.assistant-turn-profile.v2')
+    expect(profile?.toolsTruncated).toBe(false)
+    const usage = {
+      attemptCount: 1, credentialSource: 'platform', inputTokens: 1, outputTokens: 1,
+      occurredAt: '2026-06-10T12:00:00.000Z', provider: 'codex-cli', schema: ASSISTANT_USAGE_SCHEMA,
+      sessionId: 'synthetic-session', turnId: 'synthetic-batch-turn', usageId: 'synthetic-batch-turn.attempt-1',
+    }
+    expect(parseAssistantUsageRecord({ ...usage, turnProfileJson: profile }).turnProfileJson).toEqual(profile)
+    const legacy = { ...profile, tools: (profile?.tools as Record<string, unknown>[]).map((tool) => {
+      const { knowledgeCounts: _counts, ...withoutCounts } = tool
+      return withoutCounts
+    }) }
+    expect(parseAssistantUsageRecord({ ...usage, turnProfileJson: legacy }).turnProfileJson).toEqual(legacy)
+    expect(JSON.stringify(profile)).not.toMatch(/SYNTHETIC_PRIVATE|knowledge_page_not_found|\/synthetic\/vault/u)
+  })
+
+  it.each(['count', 'index', 'bytes', 'unknown-field', 'error-shape', 'json'])('keeps malformed known batches on the outer fallback (%s)', (malformation) => {
+    const envelope = {
+      schema: VAULT_CLI_BATCH_RESULT_SCHEMA, vault: '/synthetic/vault', count: 1, failed: 1,
+      commands: [{
+        index: 0, argv: ['knowledge', 'show', 'SYNTHETIC_PRIVATE_SLUG'],
+        durationMs: 3, ok: false, outputBytes: 2, outputChars: 1, stdout: 'é',
+        error: { code: 'knowledge_page_not_found', message: 'SYNTHETIC_PRIVATE_MESSAGE' },
+      }],
+    }
+    if (malformation === 'count') envelope.count = 2
+    if (malformation === 'index') envelope.commands[0]!.index = 1
+    if (malformation === 'bytes') envelope.commands[0]!.outputBytes = 1
+    if (malformation === 'unknown-field') Object.assign(envelope, { unknown: 'SYNTHETIC_PRIVATE' })
+    if (malformation === 'error-shape') envelope.commands[0]!.error.message = ''
+    const aggregatedOutput = malformation === 'json' ? 'SYNTHETIC_PRIVATE_NON_JSON' : JSON.stringify(envelope)
+    const profile = buildAssistantCodexTurnProfileJson({
+      turnId: 'synthetic-batch-turn', rawEvents: [{ method: 'item/completed', params: { item: {
+        type: 'commandExecution', command: 'vault-cli batch --compact', durationMs: 7,
+        exitCode: 1, aggregatedOutput,
+      } } }],
+    })
+    expect(profile?.tools).toEqual([{
+      calls: 1, failedCalls: 1, kind: 'command', label: 'vault-cli batch',
+      durationKnownCalls: 1, durationMs: 7,
+      outputBytesMax: Buffer.byteLength(aggregatedOutput, 'utf8'),
+      outputBytesTotal: Buffer.byteLength(aggregatedOutput, 'utf8'),
+    }])
+    expect(profile?.toolsTruncated).toBe(true)
+    expect(JSON.stringify(profile)).not.toContain('SYNTHETIC_PRIVATE')
   })
 
   it('separates tool kinds and distinguishes unknown duration from measured zero', () => {
@@ -1774,10 +1875,13 @@ describe('Codex assistant registry helpers', () => {
     expect(JSON.stringify(profile)).not.toContain('/private/member/vault')
   })
 
-  it('accepts the producer batch maximum and rejects an oversized envelope', () => {
+  it.each([
+    { argv: ['goal', 'list'], label: 'goal.list' },
+    { argv: ['knowledge', 'show'], label: 'vault-cli knowledge' },
+  ])('accepts the producer batch maximum and rejects an oversized envelope ($label)', ({ argv, label }) => {
     const buildProfile = (commandCount: number) => {
       const commands = Array.from({ length: commandCount }, (_, index) => ({
-        argv: ['goal', 'list'],
+        argv,
         durationMs: 1,
         index,
         ok: true,
@@ -1816,10 +1920,16 @@ describe('Codex assistant registry helpers', () => {
       expect.objectContaining({
         calls: 50,
         kind: 'command',
-        label: 'goal.list',
+        label,
       }),
     ])
     expect(atLimit?.toolsTruncated).toBe(false)
+    if (label === 'vault-cli knowledge') {
+      expect(atLimit?.tools).toEqual([expect.objectContaining({ knowledgeCounts: {
+        showCalls: 50, listCalls: 0, searchCalls: 0, writeCalls: 0, otherCalls: 0,
+        notFoundFailures: 0, invalidFailures: 0, conflictFailures: 0, otherFailures: 0,
+      } })])
+    }
 
     const oversized = buildProfile(51)
     expect(oversized?.tools).toEqual([

@@ -1,8 +1,8 @@
 # Correct clinical import coverage and reference-only reporting
 
-Status: active
+Status: completed
 Created: 2026-09-25
-Updated: 2026-09-25
+Updated: 2026-09-28
 
 ## Outcome and invariants
 
@@ -92,3 +92,17 @@ imports can use the existing corrected care-plan query; no automatic live replay
   member finding. Reviewed result: Ready. A mistakenly broad test invocation was
   stopped after an unrelated canonical CLI test failure; the focused suite above
   was rerun directly and passed.
+
+## Completion evidence
+
+- Reconciled the newer records page without changing its layout; the limited-coverage
+  and repeated-item explanations retain their intended meaning. Product UX: Ready.
+- Revalidated importer (129), clinical contracts (52), runtime (37), extraction (22),
+  and records UI (27) tests. All four affected package typechecks and Web typecheck pass.
+- Private local recovery completed bounded document work and canonical/source
+  readback. Its portable archive excludes only rebuildable query-index files.
+  No private records or review receipts are included in this PR.
+- Source-image storage minimization remains a separate, unshipped repair task;
+  this change preserves original raw bytes and prevents educational assets from
+  becoming clinical facts. It does not activate raw replacement.
+Completed: 2026-09-28

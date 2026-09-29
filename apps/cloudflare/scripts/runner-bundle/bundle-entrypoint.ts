@@ -326,7 +326,12 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // This 3,102B growth is authored code in the already-imported runtime-state
 // timing owner; no new modules, dependencies, or subsystems enter the boot graph.
 // Rebaseline only the static closure; retain its fixed 96,000B tolerance.
-const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 64_257;
+// PR3753 exact CI measured a 75,840B base entry and a 76,589B candidate.
+// The intentional 749B growth is closed completion-receipt diagnostics on
+// the existing callback path, with no added I/O or recovery behavior.
+// Rebaseline only the entry; retain the fixed tolerances, static-closure and
+// chunk-count budgets, and exact-base total-growth guard.
+const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 76_589;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 2_047_343;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CHUNK_COUNT_BUDGET = 24;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES = 12_000;
