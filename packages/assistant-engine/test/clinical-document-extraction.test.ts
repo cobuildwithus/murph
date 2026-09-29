@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 
 import { afterEach, expect, it, vi } from 'vitest'
+import { clinicalFhirResourceText, clinicalFhirResourceExtractionText } from '@murphai/clinical-records'
 import { MURPH_MEMBER_READ_PERMISSION_PROFILE } from '@murphai/hosted-execution/assistant-permissions'
 
 const extractionMocks = vi.hoisted(() => ({
@@ -342,4 +343,32 @@ it('does not spend a correction turn on supported source dates or omitted undate
   extractionMocks.executeTurn.mockResolvedValueOnce({ finalMessage: JSON.stringify(output) })
   await expect(executeClinicalDocumentExtraction(input)).resolves.toEqual(output)
   expect(extractionMocks.executeTurn).toHaveBeenCalledTimes(1)
+})
+
+it('binds one structured assignment to its exact resource and combined schema', async () => {
+  const input = await fixture()
+  const resource = { resourceType: 'Observation', id: 'selected', valueString: 'Pulse 73 bpm.' }
+  const text = clinicalFhirResourceText(resource)
+  const bytes = JSON.stringify({ resourceType: 'Bundle', entry: [{ resource }, { resource: { resourceType: 'Observation', id: 'neighbor', valueString: 'DO NOT EXTRACT THIS' } }] })
+  await writeFile(input.documentPath, bytes)
+  input.family = 'all'
+  input.source = { ...input.source, mediaType: 'application/fhir+json', sha256: createHash('sha256').update(bytes).digest('hex'),
+    resource: { resourceType: 'Observation', resourceId: 'selected', sha256: createHash('sha256').update(text).digest('hex') } }
+  input.extractedText = clinicalFhirResourceExtractionText(resource)
+  extractionMocks.executeTurn.mockResolvedValue({ finalMessage: JSON.stringify({ status: 'complete', records: [], reason: null }) })
+  await executeClinicalDocumentExtraction(input)
+  expect(extractionMocks.executeTurn).toHaveBeenCalledOnce()
+  const turn = extractionMocks.executeTurn.mock.calls[0]![0]
+  expect(turn.threadConfig['features.shell_tool']).toBe(false)
+  expect(turn.dynamicTools).toEqual([])
+  expect(turn.baseInstructions).toContain('Do not use tools for this assignment')
+  expect(turn.baseInstructions).toContain('Family all means extract labs, measurements and history together')
+  expect(JSON.stringify(turn)).not.toContain('DO NOT EXTRACT THIS')
+  extractionMocks.executeTurn.mockClear()
+  extractionMocks.executeTurn.mockResolvedValue({ finalMessage: JSON.stringify({ status: 'complete', records: [{ ...labRecord, dateBasis: 'unknown' }] }) })
+  expect((await executeClinicalDocumentExtraction(input)).status).toBe('blocked')
+  expect(extractionMocks.executeTurn).toHaveBeenCalledOnce()
+  extractionMocks.executeTurn.mockClear()
+  await expect(executeClinicalDocumentExtraction({ ...input, extractedText: 'Wrong resource' })).rejects.toThrow('assignment integrity')
+  expect(extractionMocks.executeTurn).not.toHaveBeenCalled()
 })

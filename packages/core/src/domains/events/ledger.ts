@@ -102,7 +102,8 @@ export interface FindEventByExternalRefInput {
   resourceType: string;
   resourceId: string;
   version?: string;
-  facet?: string;
+  /** null selects the facet-free parent; undefined keeps the existing wildcard lookup. */
+  facet?: string | null;
   includeDeleted?: boolean;
 }
 
@@ -372,7 +373,7 @@ function externalRefMatches(record: { externalRef?: unknown }, input: FindEventB
     externalRef.resourceType === input.resourceType &&
     externalRef.resourceId === input.resourceId &&
     (input.version === undefined || externalRef.version === input.version) &&
-    (input.facet === undefined || externalRef.facet === input.facet);
+    (input.facet === undefined || (input.facet === null ? externalRef.facet === undefined : externalRef.facet === input.facet));
 }
 
 export async function findEventByExternalRef(

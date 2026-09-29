@@ -8,7 +8,7 @@ export const CLINICAL_DOCUMENT_MEASUREMENT_METRICS = [
   "heart-rate", "resting-heart-rate", "systolic-blood-pressure", "diastolic-blood-pressure",
   "respiratory-rate", "spo2", "temperature", "body-height", "body-weight", "bmi", "head-circumference",
 ] as const;
-export const clinicalDocumentExtractionFamilySchema = z.enum(["labs", "measurements", "history"]);
+export const clinicalDocumentExtractionFamilySchema = z.enum(["labs", "measurements", "history", "all"]);
 export type ClinicalDocumentExtractionFamily = z.infer<typeof clinicalDocumentExtractionFamilySchema>;
 
 // Extractors propose clinical content only. The canonical owner supplies source
@@ -98,6 +98,7 @@ export const clinicalDocumentExtractionOutputSchema = extractionOutputSchema(cli
 export type ClinicalDocumentExtractionOutput = z.infer<typeof clinicalDocumentExtractionOutputSchema>;
 
 const outputSchemasByFamily = {
+  all: extractionOutputSchema(z.discriminatedUnion("kind", [labPayloadSchema, measurementPayloadSchema, assertionPayloadSchema])),
   labs: extractionOutputSchema(labPayloadSchema),
   measurements: extractionOutputSchema(measurementPayloadSchema),
   history: extractionOutputSchema(z.discriminatedUnion("kind", [notePayloadSchema, assertionPayloadSchema])),
@@ -191,4 +192,41 @@ function normalizeOptionalNulls(value: unknown, schema: Record<string, unknown>)
     if (property && !required.has(key) && item === null) return [];
     return [[key, property ? normalizeOptionalNulls(item, property) : item]];
   }));
+}
+
+/** Exact selection keeps adjacent records in a FHIR page out of the assignment. */
+export function indexClinicalFhirResources(content: string): Map<string, Record<string, unknown> | null> {
+  const object = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === "object" && !Array.isArray(value);
+  const page: unknown = JSON.parse(content);
+  const entries = Array.isArray(page) ? page : object(page) && page.resourceType === "Bundle" && Array.isArray(page.entry)
+    ? page.entry.map((entry: unknown) => object(entry) ? entry.resource : undefined) : [page];
+  if (entries.length > 1_000) throw new Error("Clinical resource page exceeds the record bound.");
+  const index = new Map<string, Record<string, unknown> | null>();
+  for (const entry of entries) {
+    if (!object(entry) || typeof entry.resourceType !== "string" || typeof entry.id !== "string") continue;
+    const key = `${entry.resourceType}/${entry.id}`;
+    index.set(key, index.has(key) ? null : entry);
+  }
+  return index;
+}
+
+export function selectClinicalFhirResource(content: string, resourceType: string, resourceId: string): Record<string, unknown> {
+  const resource = indexClinicalFhirResources(content).get(`${resourceType}/${resourceId}`);
+  if (!resource) throw new Error("Clinical resource selection is not unique.");
+  return resource;
+}
+
+export function clinicalFhirResourceText(resource: Record<string, unknown>): string {
+  return JSON.stringify(resource, (_key, value: unknown) => value && typeof value === "object" && !Array.isArray(value)
+    ? Object.fromEntries(Object.keys(value).sort().map((key) => [key, Reflect.get(value, key)])) : value, 2);
+}
+
+/** Clinical content only: patient routing identity and revision clocks stay with the host. */
+export function clinicalFhirResourceExtractionText(resource: Record<string, unknown>): string {
+  const { id: _id, meta: _meta, ...content } = resource;
+  return JSON.stringify(JSON.parse(clinicalFhirResourceText(content)), (key, value: unknown) => {
+    if (key === "identifier") return undefined;
+    if (key === "reference" && typeof value === "string" && /(?:^|\/)Patient\//u.test(value)) return "Patient/redacted";
+    return value;
+  }, 2);
 }
