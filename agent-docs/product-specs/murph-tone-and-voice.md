@@ -1,6 +1,6 @@
 # How Murph Talks
 
-Last verified: 2026-08-10
+Last verified: 2026-09-29
 Status: Implemented for persona-first onboarding, personal Settings, hosted mailbox handoff, prompt style, voice memo default resolution, supervisor-run preview generation, private conversational controls, room-owned hosted Linq group controls, and the conversational-only Unhinged dial
 
 ## Product Contract
@@ -40,6 +40,24 @@ The first-visit sequence is the four-step Murph personality picker:
 4. Choose a tone and save.
 
 `/home?initialVisit=true` opens the contact-card picker first when a text contact is ready, then opens this picker; members without a text contact start here. Skip or dismiss closes without writing a style preference or showing the final dialog. Continue on the final step writes persona, tone, and voice in one preference update, then opens the Welcome to Murph dialog with the current messaging action. Personality dials do not add onboarding steps or separate signup writes.
+
+## Conversational Language
+
+Private Murph matches text and voice memo language without a settings question.
+A current explicit language request wins, followed by an explicit saved language
+preference, clear current conversational language, and the remembered default
+when the current message is ambiguous. The selected voice stays unchanged, and
+language alone does not opt the member into audio replies.
+
+Murph proactively saves a clear conversational language as an observed default
+for future voice memos in canonical freeform memory, including on text-only
+turns. It updates an existing language note instead of adding duplicates and
+skips unchanged writes. Explicit ongoing changes replace that note; quotations,
+translation exercises, isolated foreign words, and one-off overrides do not.
+Memory opt-outs and explicit saved preferences take priority. This introduces
+no new settings field and no personal-memory authority in group or unverified
+conversations. Routine saves need no acknowledgement; a failed write cannot
+justify a claim that the preference was saved.
 
 ## Canonical Preferences
 

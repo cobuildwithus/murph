@@ -29,7 +29,7 @@ const voiceRosterDescription = assistantVoiceOptions
   .map((option) => `${option.label}=${option.id}`)
   .join(', ')
 const voiceMemoTextLengthGuidance =
-  `Voice memo text is limited to at most ${ELEVENLABS_TTS_MAX_TEXT_LENGTH.toLocaleString('en-US')} characters. Compress it before calling the tool.`
+  `Voice memo text is limited to at most ${ELEVENLABS_TTS_MAX_TEXT_LENGTH.toLocaleString('en-US')} characters. Compress it before calling the tool. Write the spoken text in the user's requested language, otherwise their explicit saved language preference, clear conversational language, or remembered default when ambiguous. Language choice never authorizes a voice change or personal memory access outside a private conversation.`
 
 export const MURPH_GENERATE_VOICE_MEMO_TOOL = {
   namespace: 'murph',
