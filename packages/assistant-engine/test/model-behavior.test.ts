@@ -2257,7 +2257,11 @@ describe('assistant system prompt cache stability', () => {
     // Shared lasting-correction routing adds 1,022 characters. Complete private
     // and group request measurements plus live task/preference/one-off proof
     // cover this resident rule; retain the existing base margin.
-    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(77_722)
+    // Direct tool-recovery progress guidance adds 659 characters. Complete
+    // native-provider captures measure +660 serialized bytes for direct turns
+    // and no group growth; live Sol success/failure journeys verify behavior.
+    // Preserve the existing 2-character margin.
+    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(78_381)
   })
 
   it('passes the injected CLI contract through byte-for-byte at the stable-route tail', () => {

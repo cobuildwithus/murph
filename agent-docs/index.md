@@ -7,6 +7,9 @@ Read-only system-mailbox selection and deferred conversation chronology reads
 are owned by `packages/assistant-runtime/README.md`; local proof is recorded in
 [`foreground mailbox latency`](exec-plans/completed/2026-09-28-warm-input-latency.md).
 
+Native, Frog, and Garmin CI repairs are recorded in
+[the canary repair plan](exec-plans/completed/2026-09-25-scheduled-canary-repairs.md).
+
 [Batch/status failure telemetry](exec-plans/completed/2026-09-28-more-failure-telemetry.md)
 records the patch handoff; its contract remains in `docs/hosted-runtime-log-database.md`.
 
@@ -577,6 +580,7 @@ is recorded in [`2026-09-18-ios-canary-deployment-continuity.md`](exec-plans/com
 | `agent-docs/exec-plans/completed/2026-09-28-junction-record-window.md` | Bounded recovery for oversized Junction hourly-feature days. | Device-sync recovery plan | Medium | 2026-09-28 |
 | `agent-docs/exec-plans/completed/2026-09-28-checkpoint-failure-stage-telemetry.md` | Fixed-vocabulary checkpoint rejection-stage observation and response-preservation proof. | Completed telemetry implementation evidence | Low | 2026-09-28 |
 | `agent-docs/exec-plans/active/` | Task-owned in-flight execution plans. | Active plan lifecycle | Medium | 2026-08-20 |
+| `agent-docs/exec-plans/completed/2026-09-25-linq-link-delay-notice.md` | Local implementation and delivery proof for one best-effort notice after a partial link send. | Historical delivery evidence | Low | 2026-09-25 |
 | `agent-docs/exec-plans/completed/2026-09-17-research-scout-failure-telemetry.md` | Three exact research error codes, parent-native verification and old-reader compatibility; rollout tracked separately. | Historical implementation evidence | Medium | 2026-09-17 |
 | `agent-docs/exec-plans/completed/2026-09-15-vercel-memory-headroom.md` | Vercel typecheck OOM recovery verification, native compiler memory comparisons, and compilation-only esbuild memory target. | Build memory investigation and local proof | Medium | 2026-09-15 |
 | `agent-docs/exec-plans/completed/2026-09-15-foreground-priority-transition-gate.md` | Foreground priority escape analysis, three-history transition matrix, required CI gate, and PR review evidence. | Historical implementation evidence | Low | 2026-09-15 |
@@ -594,7 +598,7 @@ is recorded in [`2026-09-18-ios-canary-deployment-continuity.md`](exec-plans/com
 | `agent-docs/exec-plans/tech-debt-tracker.md` | Current debt register with owner/priority/status. | Rolling debt tracker | Medium | 2026-03-12 |
 | `agent-docs/prompts/seam-audits/` | One-pass bespoke seam prompts governed by a shared review-only, evidence, correction, and zero-finding contract. | Seam-audit prompt library | Low | 2026-07-13 |
 | `apps/web/README.md` | Hosted Web setup, runtime ownership, build/deploy contracts, and bounded legacy phone-call deletion execution. | `apps/web/**` | Medium | 2026-09-10 |
-| `apps/cloudflare/README.md` | Hosted execution-plane overview, runtime contract, pinned native Codex build/update ownership, scoped `cf` operational reads, and retired member shell-hint transport. | `apps/cloudflare/**` | Medium | 2026-09-23 |
+| `apps/cloudflare/README.md` | Hosted execution-plane overview, runtime contract, pinned native Codex build/update ownership, search-first `cf` API operations, pinned open-beta setup, existing Wrangler workflow exceptions, and retired member shell-hint transport. | `apps/cloudflare/**` | Medium | 2026-09-28 |
 | `agent-docs/exec-plans/completed/2026-09-28-terminal-log-metadata.md` | Bounded hosted-local failure metadata and closed-enum diagnostic regression proof. | Historical harness evidence | Low | 2026-09-28 |
 | `apps/cloudflare/scripts/benchmark-workspace-restore.md` | Synthetic encrypted restore benchmark, measurement controls, and local/Linux limitations. | Cloudflare workspace restore | Medium | 2026-09-04 |
 | `apps/cloudflare/DEPLOY.md` | Current deployment procedure for hosted execution, consumer-first Web runtime admission, single-pool capacity, isolated artifact smoke, compatible native gradual rollout, and member shell-hint transport retirement. | Hosted deploy flow | Medium | 2026-09-10 |
