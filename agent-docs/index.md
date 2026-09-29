@@ -3,6 +3,11 @@ in [the import-speed plan](exec-plans/completed/2026-09-24-garmin-import-speed.m
 
 # Murph Agent Docs Index
 
+Exercise image audit findings and published repair evidence are recorded in
+[the image audit](../artifacts/exercise-image-audit-2026-09-28.md);
+[the completed repair plan](exec-plans/completed/2026-09-28-exercise-image-audit.md)
+records the 123 integrated repairs and two generation-blocked follow-ups.
+
 Read-only system-mailbox selection and deferred conversation chronology reads
 are owned by `packages/assistant-runtime/README.md`; local proof is recorded in
 [`foreground mailbox latency`](exec-plans/completed/2026-09-28-warm-input-latency.md).
