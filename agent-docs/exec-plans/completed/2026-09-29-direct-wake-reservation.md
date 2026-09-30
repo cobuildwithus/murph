@@ -1,6 +1,6 @@
 # Prevent failed direct wakes from reserving runtimes
 
-Status: active
+Status: completed
 Created: 2026-09-29
 Updated: 2026-09-29
 
@@ -39,4 +39,6 @@ Proof: failed transport leaves no starting reservation; the next durable claim s
 - Parent review: no new authority, state, retries or cleanup. Remove unused admission test mocks and their fixture. Product UX Ready at the changed boundary; end-to-end delivery behavior is unchanged.
 - Hot path: move the existing claim transaction from Web-before-dispatch to the existing signed Worker-to-Web callback (one extra serial network round trip per direct attempt, at most two direct attempts). Callback remains bounded by the configured callback timeout and command budget; Temporal's path is unchanged. Failed dispatch performs no ownership transaction. Database fanout and provider input are unchanged.
 - Mixed versions: deployed Worker and current Worker both accept omitted admission; their processing implementation is identical at this boundary. Existing supplied-admission readers remain for older Web instances during convergence.
-- Pending: PR, ReviewGPT, required CI and authorized production deployment.
+- PR #3832 candidate review complete. Final ReviewGPT PASS at `78223573a9a747fb9f0a7000f423b7264e65d30f`, with no qualifying findings. Parent final review confirms the production diff remains the deletion tested above.
+- Implementation and proof complete. This closure changes only the execution record; required final-head CI, merge and automatic Web production admission remain external completion gates tracked in the PR.
+Completed: 2026-09-29
