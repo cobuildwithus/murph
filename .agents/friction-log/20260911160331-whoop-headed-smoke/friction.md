@@ -1,6 +1,7 @@
 ---
 title: 'WHOOP headed smoke expects obsolete content-free diagnostic'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3779'
 ---
 
 ## Expected Behavior

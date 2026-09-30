@@ -1,6 +1,7 @@
 ---
 title: 'Scheduled Telegram proof retained a retired automation tool payload'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3788'
 ---
 
 The registered scheduled Telegram journey should execute in integration CI and use the current model-facing automation tool contract. Its setup acknowledgement must be followed by a saved future wake and actual direct/group scheduled sends.

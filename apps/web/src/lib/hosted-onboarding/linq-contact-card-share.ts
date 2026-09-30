@@ -19,6 +19,7 @@ import {
   resolveMurphHostedLinqContactCardBackupPhoneNumber,
 } from "./linq-contact-card";
 import { normalizePhoneNumber } from "./phone";
+import { resolveHostedLinqEgressPolicyForRuntime } from "./linq-egress-engagement";
 
 type HostedLinqContactCardSharePersistenceClient =
   {
@@ -312,6 +313,7 @@ export type MurphHostedLinqContactCardVcfShareOutcome =
   | {
       status: "skipped";
       reason:
+        | "egress_blocked"
         | "line_unresolved"
         | "missing_chat_id"
         | "photo_unavailable"
@@ -329,6 +331,7 @@ export type MurphHostedLinqNativeContactCardShareOutcome =
   | {
       status: "skipped";
       reason:
+        | "egress_blocked"
         | "line_card_has_image"
         | "line_card_unverified"
         | "missing_chat_id";
@@ -362,7 +365,7 @@ export async function shareMurphHostedLinqNativeContactCardToChat(input: {
   chatId: string;
   memberId: string;
   now?: Date;
-  prisma: HostedLinqContactCardSharePersistenceClient;
+  prisma: PrismaClient;
   signal?: AbortSignal;
 }): Promise<MurphHostedLinqNativeContactCardShareOutcome> {
   const now = input.now ?? new Date();
@@ -410,6 +413,15 @@ export async function shareMurphHostedLinqNativeContactCardToChat(input: {
     }
     if (lineCard.imageUrl !== null) {
       return { status: "skipped", reason: "line_card_has_image" };
+    }
+    const { policy } = await resolveHostedLinqEgressPolicyForRuntime({
+      fromPhoneNumber: linePhoneNumber,
+      prisma: input.prisma,
+      target: input.chatId,
+      targetKind: "thread",
+    });
+    if (policy.kind === "block") {
+      return { status: "skipped", reason: "egress_blocked" };
     }
   } catch {
     return { status: "skipped", reason: "line_card_unverified" };
@@ -498,9 +510,7 @@ export async function shareMurphHostedLinqContactCardVcfToChat(
     : input.signal;
   const preSendSignalOption = preSendSignal ? { signal: preSendSignal } : {};
 
-  // A personalized card is saved over the member's working Murph contact, so
-  // an obsolete or ambiguous line is worse than no card. Require exactly one
-  // active self handle, matching the native line-card path.
+  // Every saved card must use the current line, matching native card sharing.
   let linePhoneNumber: string | null = null;
   let rosterPresent = false;
   try {
@@ -509,18 +519,12 @@ export async function shareMurphHostedLinqContactCardVcfToChat(
       ...preSendSignalOption,
     });
     rosterPresent = handles.length > 0;
-    if (personalized) {
-      const activeSelfHandles = handles.filter((handle) =>
-        handle.isMe && handle.status?.trim().toLowerCase() === "active",
-      );
-      linePhoneNumber = activeSelfHandles.length === 1
-        ? normalizePhoneNumber(activeSelfHandles[0]?.handle ?? null)
-        : null;
-    } else {
-      linePhoneNumber = normalizePhoneNumber(
-        handles.find((handle) => handle.isMe)?.handle ?? null,
-      );
-    }
+    const activeSelfHandles = handles.filter((handle) =>
+      handle.isMe && handle.status?.trim().toLowerCase() === "active",
+    );
+    linePhoneNumber = activeSelfHandles.length === 1
+      ? normalizePhoneNumber(activeSelfHandles[0]?.handle ?? null)
+      : null;
   } catch {
     return { status: "skipped", reason: "provider_unavailable" };
   }
@@ -529,6 +533,16 @@ export async function shareMurphHostedLinqContactCardVcfToChat(
   }
   if (!linePhoneNumber) {
     return { status: "skipped", reason: "line_unresolved" };
+  }
+
+  const { policy } = await resolveHostedLinqEgressPolicyForRuntime({
+    fromPhoneNumber: linePhoneNumber,
+    prisma: input.prisma,
+    target: input.chatId,
+    targetKind: "thread",
+  });
+  if (policy.kind === "block") {
+    return { status: "skipped", reason: "egress_blocked" };
   }
 
   let reservation: Extract<

@@ -1,4 +1,3 @@
-import { runtimeAdmission } from "./support/hosted-runtime-admission-fixture";
 import { Prisma } from "@prisma/client";
 import {
   beforeEach,
@@ -9,7 +8,6 @@ import {
 } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  executeHostedRuntimeOwnerCommand: vi.fn(),
   ensureRuntimeProcessing: vi.fn(),
   linkHostedIngressLatencyTracesToAcceptedLinqDelivery: vi.fn(async () => ({ matchedCount: 1, recorded: true })),
   readHostedExecutionControlClientIfConfigured: vi.fn(),
@@ -23,9 +21,6 @@ const mocks = vi.hoisted(() => ({
   signalHostedMailboxAppendRuntime: vi.fn(),
 }));
 
-vi.mock("@/src/lib/hosted-execution/runtime-owner-control", () => ({
-  executeHostedRuntimeOwnerCommand: mocks.executeHostedRuntimeOwnerCommand,
-}));
 vi.mock("@/src/lib/hosted-execution/control", () => ({
   readHostedExecutionControlClientIfConfigured:
     mocks.readHostedExecutionControlClientIfConfigured,
@@ -98,7 +93,6 @@ function buildWakeHandoff(
 describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.executeHostedRuntimeOwnerCommand.mockImplementation(async ({ userId }) => runtimeAdmission(userId));
     mocks.recordHostedIngressDirectEnsureTiming.mockResolvedValue({
       matchedCount: 1,
       recorded: true,
@@ -238,7 +232,6 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
     expect(wakeOrder).toEqual(["temporal", "direct"]);
     expect(mocks.ensureRuntimeProcessing).toHaveBeenCalledTimes(1);
     expect(mocks.ensureRuntimeProcessing).toHaveBeenCalledWith({
-      admission: runtimeAdmission("member_123"),
       commandTimeoutMs: 25_000,
       onTiming: expect.any(Function),
       orchestrationAttemptId: expect.stringMatching(/^web-ingress-[0-9a-f-]{36}$/u),

@@ -1,6 +1,7 @@
 ---
 title: 'Live wearable E2E starts the full stack without preparing production Web'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3793'
 ---
 
 ## Expected Behavior

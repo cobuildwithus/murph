@@ -1,6 +1,7 @@
 ---
 title: 'Latency PostgreSQL overlap proof ignores reported lock contention'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3769'
 ---
 
 ## Expected Behavior
