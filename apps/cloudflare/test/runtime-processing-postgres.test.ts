@@ -11,6 +11,7 @@ import type { RunnerWriteFenceToken } from "../src/runtime-invocation-token.ts";
 import type { HostedStandbySlotBinding } from "../src/standby-runner-contract.ts";
 import type { RunnerInvocationReceipt } from "../src/runner-invocation-receipt.ts";
 import type { RuntimeInvocationPreparation } from "../src/runtime-invocation-preparation.ts";
+import type { WorkerActiveRuntimeUserFenceResult } from "../src/worker-contracts.ts";
 
 vi.mock("../src/runtime-owner-client.ts", () => ({ commandHostedRuntimeOwner: vi.fn() }));
 vi.mock("../src/runtime-owner-completion.ts", () => ({ recordHostedRuntimeOwnerCompletion: vi.fn(async () => true) }));
@@ -43,7 +44,7 @@ function harness() {
   const container = {
     destroyInstance: vi.fn(async () => {}), invoke: vi.fn(), smokeHealth: vi.fn(),
     readSupervisedInvocation: vi.fn(async (): Promise<RunnerInvocationReceipt | null> => null),
-    readActiveRuntimeUserFence: vi.fn(async () => ({ active: false as const, reason: "no_active_runtime" as const })),
+    readActiveRuntimeUserFence: vi.fn(async (): Promise<WorkerActiveRuntimeUserFenceResult> => ({ active: false, reason: "no_active_runtime" })),
     ensureProcessing: vi.fn(async (): Promise<import("../src/runner-container.ts").RunnerContainerEnsureProcessingResult> => ({ kind: "accepted", action: "woken" })),
     ensureReadyForProcessing: vi.fn(async (): Promise<import("../src/runner-container.ts").RunnerContainerEnsureReadyForProcessingResult> => ({ kind: "ready", preparesSupervisedLaunch: true })),
     startSupervisedInvocation: vi.fn(async (_input: HostedExecutionContainerInvokeRequest) => ({ accepted: true as const })),
@@ -366,6 +367,49 @@ describe("Postgres runtime orchestration", () => {
     expect(vi.mocked(commandHostedRuntimeOwner).mock.calls.map(([input]) => input.command.operation)).toEqual(["claim", "retire", "release", "claim"]);
   });
 
+  it.each(["default", "system_mailbox"] as const)("recovers an inactive %s owner before admitting retention", async processingMode => {
+    const { source, container, binding } = harness();
+    const failed = owner({ processingMode, lastErrorCode: "runtime_error" });
+    const successor = owner({ attemptId: "attempt-b", generation: "2", processingMode: "inbox_media_retention", phase: "starting" });
+    container.readSupervisedInvocation.mockResolvedValue({ attemptId: "attempt-a", generation: "1", state: "registered", immediateRecheckRequested: false });
+    container.readStandbySlotBinding.mockResolvedValue({ ...binding, state: "retired", claimId: null, userId: null });
+    vi.mocked(commandHostedRuntimeOwner).mockImplementation(async ({ command }) =>
+      command.operation === "claim" ? response(successor, "claimed") : response(successor, "updated"));
+
+    expect(await ensurePostgresRuntimeProcessing(source, { ...request, processingMode: "inbox_media_retention", admission: response(failed) }))
+      .toMatchObject({ kind: "runtime_processing_accepted", action: "started", runtimeAttemptId: "attempt-b" });
+    expect(container.readActiveRuntimeUserFence).toHaveBeenCalledOnce();
+    expect(container.ensureProcessing).not.toHaveBeenCalled();
+    expect(container.retireStandbySlot).toHaveBeenCalledOnce();
+    expect(container.startSupervisedInvocation).toHaveBeenCalledOnce();
+    expect(vi.mocked(commandHostedRuntimeOwner).mock.calls.map(([input]) => input.command.operation))
+      .toEqual(["retire", "release", "claim", "accepted"]);
+    expect(commandHostedRuntimeOwner).toHaveBeenCalledWith(expect.objectContaining({
+      command: { operation: "retire", attemptId: "attempt-a", generation: "1", completed: false },
+    }));
+  });
+
+  it.each(["active", "mismatch", "unavailable", "starting"] as const)("preserves the owner during conflicting retention admission (%s)", async scenario => {
+    const { source, container } = harness();
+    const current = owner({ processingMode: "system_mailbox", ...(scenario === "starting" ? { phase: "starting" } : {}) });
+    if (scenario === "active" || scenario === "mismatch") {
+      container.readActiveRuntimeUserFence.mockResolvedValue({ active: true, userId: request.userId,
+        attemptId: scenario === "active" ? "attempt-a" : "attempt-b", leaseGeneration: "1" });
+    } else if (scenario === "unavailable") {
+      container.readActiveRuntimeUserFence.mockRejectedValue(new Error("synthetic liveness unavailable"));
+    }
+    const diagnostics: RuntimeProcessingDiagnostics = { stage: "admission", details: {} };
+
+    expect(await ensurePostgresRuntimeProcessing(source, { ...request, processingMode: "inbox_media_retention", admission: response(current) }, diagnostics))
+      .toMatchObject({ kind: "retry_later" });
+    expect(container.readActiveRuntimeUserFence).toHaveBeenCalledOnce();
+    expect(diagnostics.details.runtimeProcessingRetryReason).toBe(scenario === "starting" ? "starting_fence_preserved" : "processing_mode_conflict");
+    expect(commandHostedRuntimeOwner).not.toHaveBeenCalled();
+    expect(container.ensureProcessing).not.toHaveBeenCalled();
+    expect(container.retireStandbySlot).not.toHaveBeenCalled();
+    expect(container.startSupervisedInvocation).not.toHaveBeenCalled();
+  });
+
   it("does not discard authority when a wake acknowledgement is unknown", async () => {
     const { source, container } = harness();
     container.ensureProcessing.mockRejectedValue(new Error("synthetic lost acknowledgment"));
@@ -460,6 +504,8 @@ describe("Postgres runtime orchestration", () => {
 
   it("does not wake foreground work in response to a retention request", async () => {
     const { source, container } = harness();
+    container.readActiveRuntimeUserFence.mockResolvedValue({ active: true, userId: request.userId,
+      attemptId: "attempt-a", leaseGeneration: "1" });
     vi.mocked(commandHostedRuntimeOwner).mockResolvedValue(response(owner()));
     expect(await ensurePostgresRuntimeProcessing(source, { ...request, processingMode: "inbox_media_retention" }))
       .toMatchObject({ kind: "retry_later" });

@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-30",
+  "order": 100,
+  "item": {
+    "id": "background-sync-recovery",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "More reliable background sync recovery",
+    "summary": "Background syncing can recover from an interrupted run without waiting for your next conversation.",
+    "details": "Routine maintenance can clear an inactive run that was blocking recovery, while active conversations and syncs remain protected.",
+    "relevanceTags": ["wearables", "reliability"],
+    "sourcePullRequests": []
+  }
+}
