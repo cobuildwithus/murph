@@ -4121,8 +4121,33 @@ describe("runHostedDeviceSyncPass", () => {
     expect(close).toHaveBeenCalledTimes(1);
   });
 
+  const timeoutDetails = {
+    providerRequestTimeoutMs: 12_000,
+    providerRequestElapsedMs: 12_004,
+    providerRequestAttempt: 1,
+    providerRequestStage: "response_body",
+    providerResponseHeadersPresent: true,
+  };
+  // Known optional metadata pushes the final record past the shared 64-key cap.
+  const crowdedRequestDetails = {
+    providerRequestAuthKind: "provider_config_api_key_header",
+    providerRequestAuthPlacement: "headers",
+    providerRequestBodyFieldNames: "none",
+    providerRequestBodyKind: "none",
+    providerRequestCandidateAliasSource: "id",
+    providerRequestContentType: "none",
+    providerRequestEndpointKind: "junction_user_providers",
+    providerRequestMethod: "GET",
+    providerRequestQueryParameterNames: "none",
+    providerResponseErrorCode: "temporarily_unavailable",
+    providerResponseShapeKind: "json_object",
+    providerOAuthErrorCode: "invalid_grant",
+    providerOAuthGrantType: "refresh_token",
+  };
+
   it.each<{
     code: string;
+    crowded?: boolean;
     expectedReason?: string;
     exhausted?: boolean;
     label: string;
@@ -4131,6 +4156,40 @@ describe("runHostedDeviceSyncPass", () => {
     expectedExtra?: Record<string, unknown>;
   }>([
     { label: "ordinary failure", code: "SYNC_JOB_FAILED" },
+    {
+      label: "timeout evidence survives crowded metadata",
+      code: "JUNCTION_API_REQUEST_TIMEOUT",
+      crowded: true,
+      extraDetails: { ...crowdedRequestDetails, ...timeoutDetails },
+      expectedExtra: { ...crowdedRequestDetails, ...timeoutDetails },
+    },
+    {
+      label: "unbounded timeout evidence is rejected",
+      code: "JUNCTION_API_REQUEST_TIMEOUT",
+      crowded: true,
+      extraDetails: { ...crowdedRequestDetails,
+        providerRequestTimeoutMs: 300_001, providerRequestElapsedMs: Infinity,
+        providerRequestAttempt: 101, providerRequestStage: "synthetic-private-stage",
+        providerResponseHeadersPresent: "true" },
+      expectedExtra: crowdedRequestDetails,
+    },
+    {
+      label: "malformed timeout evidence is rejected",
+      code: "JUNCTION_API_REQUEST_TIMEOUT",
+      crowded: true,
+      extraDetails: { ...crowdedRequestDetails,
+        providerRequestTimeoutMs: "12000", providerRequestElapsedMs: NaN,
+        providerRequestAttempt: 1.5, providerRequestStage: ["response_body"],
+        providerResponseHeadersPresent: 1 },
+      expectedExtra: crowdedRequestDetails,
+    },
+    {
+      label: "timeout evidence on another failure is rejected",
+      code: "SYNC_JOB_FAILED",
+      crowded: true,
+      extraDetails: { ...crowdedRequestDetails, ...timeoutDetails },
+      expectedExtra: crowdedRequestDetails,
+    },
     {
       label: "oxygen classification", code: "JUNCTION_CALENDAR_REFRESH_INCOMPLETE_NORMALIZATION",
       extraDetails: { normalizationValueKind: "number", normalizationValueRange: "zero", normalizationUnitKind: "percent", validationRetryDelayMs: 1_800_000 },
@@ -4161,9 +4220,10 @@ describe("runHostedDeviceSyncPass", () => {
       { label: "object reason", reason: { reason: "sample_count_mismatch" } },
     ].map((entry) => ({ ...entry, code: "JUNCTION_ECG_RECORDING_BINDING_INCOMPLETE" })),
     { label: "reason on another failure", code: "SYNC_JOB_FAILED", reason: "sample_count_mismatch" },
-  ])("emits exactly one sanitized job-failed event: $label", async ({ code, expectedReason, exhausted = false, reason, extraDetails = {}, expectedExtra = {} }) => {
+  ])("emits exactly one sanitized job-failed event: $label", async ({ code, crowded = false, expectedReason, exhausted = false, reason, extraDetails = {}, expectedExtra = {} }) => {
     const ecgFailure = code === "JUNCTION_ECG_RECORDING_BINDING_INCOMPLETE";
-    const provider = ecgFailure || code === "JUNCTION_CALENDAR_REFRESH_INCOMPLETE_NORMALIZATION" ? "junction" : "whoop";
+    const provider = ecgFailure || code === "JUNCTION_CALENDAR_REFRESH_INCOMPLETE_NORMALIZATION"
+      || code === "JUNCTION_API_REQUEST_TIMEOUT" ? "junction" : "whoop";
     const sensitiveEcgDetails = {
       junctionEcgActualRecordingCount: 987_001,
       junctionEcgActualSampleCount: 987_002,
@@ -4393,6 +4453,18 @@ describe("runHostedDeviceSyncPass", () => {
     // Exercise the shared bounded sanitizer with the fully populated diagnostic.
     expect(Object.keys(entry.redactedJson).length).toBeGreaterThan(32);
     const sharedDetails = sanitizeHostedExecutionStructuredLogDetails(entry.redactedJson);
+    if (crowded) {
+      expect(Object.keys(entry.redactedJson).length).toBeGreaterThan(64);
+      expect(Object.keys(sharedDetails ?? {}).length).toBeLessThanOrEqual(64);
+    }
+    for (const field of Object.keys(timeoutDetails)) {
+      if (field in expectedExtra) {
+        expect(entry.redactedJson).toHaveProperty(field, expectedExtra[field]);
+      } else {
+        expect(entry.redactedJson).not.toHaveProperty(field);
+      }
+      expect(sharedDetails?.[field]).toEqual(expectedExtra[field]);
+    }
     expect(sharedDetails?.junctionEcgBindingReason).toBe(expectedReason);
     for (const [field, value] of Object.entries(expectedExtra)) {
       expect(sharedDetails?.[field]).toEqual(value);
@@ -4403,6 +4475,7 @@ describe("runHostedDeviceSyncPass", () => {
     }
     const serialized = JSON.stringify(logRequests);
     expect(serialized).not.toContain("synthetic-private-ecg");
+    expect(serialized).not.toContain("synthetic-private-stage");
     expect(serialized).not.toContain("local_account_sensitive");
     expect(serialized).not.toContain("hosted_connection_sensitive");
     expect(serialized).not.toContain("file://");

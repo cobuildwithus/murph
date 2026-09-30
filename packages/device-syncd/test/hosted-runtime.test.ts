@@ -3937,3 +3937,30 @@ describe("sanitizeHostedRuntimeDiagnosticText", () => {
     ).toBe("user <redacted-id> denied; retry as <redacted-token>");
   });
 });
+
+describe("Junction timeout failure diagnostic boundary", () => {
+  const valid = { providerRequestTimeoutMs: 12_000, providerRequestElapsedMs: 12_003,
+    providerRequestAttempt: 1, providerRequestStage: "awaiting_headers", providerResponseHeadersPresent: false };
+  it.each([
+    { label: "valid", code: "JUNCTION_API_REQUEST_TIMEOUT", details: valid, expected: valid },
+    { label: "other code", code: "WHOOP_TOKEN_REQUEST_FAILED", details: valid, expected: {} },
+    { label: "unbounded", code: "JUNCTION_API_REQUEST_TIMEOUT", details: {
+      providerRequestTimeoutMs: 300_001, providerRequestElapsedMs: Infinity, providerRequestAttempt: 101,
+      providerRequestStage: "https://example.test/private", providerResponseHeadersPresent: "false",
+    }, expected: {} },
+    { label: "wrong types", code: "JUNCTION_API_REQUEST_TIMEOUT", details: {
+      providerRequestTimeoutMs: "12000", providerRequestElapsedMs: NaN, providerRequestAttempt: 1.5,
+      providerRequestStage: ["response_body"], providerResponseHeadersPresent: 1,
+    }, expected: {} },
+    { label: "negative or zero", code: "JUNCTION_API_REQUEST_TIMEOUT", details: {
+      providerRequestTimeoutMs: 0, providerRequestElapsedMs: -1, providerRequestAttempt: 0,
+      providerRequestStage: " post_body ", providerResponseHeadersPresent: null,
+    }, expected: {} },
+  ])("$label", ({ code, details, expected }) => {
+    const parsed = parseHostedExecutionDeviceSyncRuntimeApplyRequest({
+      userId: "synthetic-user", updates: [{ connectionId: "synthetic-connection",
+        failureDiagnostic: { accountStatus: null, code, details, retryable: true } }],
+    });
+    expect(parsed.updates[0]?.failureDiagnostic?.details).toEqual(expected);
+  });
+});

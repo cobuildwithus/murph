@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-30",
+  "order": 100,
+  "item": {
+    "id": "connected-device-slow-responses",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "More time for connected-device updates",
+    "summary": "Connected-device updates now give slow responses more time to arrive before timing out.",
+    "details": "Some requests have a longer wait limit. Updates can still be delayed or fail, and your conversations keep priority.",
+    "relevanceTags": ["connected-devices"],
+    "sourcePullRequests": [3936]
+  }
+}
