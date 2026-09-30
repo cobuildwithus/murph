@@ -24,3 +24,10 @@ Give the maximum-cardinality case an explicit larger timeout, or reduce its fixt
 ## Context
 
 Blocks a clean `test:diff` exit for importer-only changes; the failure is unrelated to the change under test and costs a re-run plus manual isolation to prove it.
+
+## Resolution
+
+The exhaustive maximum-cardinality case now has its own bounded two-minute test
+budget. It still checks all 396 scheduling positions with the full source set,
+including dedupe membership, unique root admission, alias handling and stable
+ordering. Other test deadlines and production scheduling behavior are unchanged.
