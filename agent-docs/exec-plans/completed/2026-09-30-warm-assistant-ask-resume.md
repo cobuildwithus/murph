@@ -1,6 +1,6 @@
 # Resume accepted Assistant Ask work in continued warm runtimes
 
-Status: active
+Status: completed
 Created: 2026-09-30
 Updated: 2026-09-30
 
@@ -63,3 +63,9 @@ Resume accepted detached Assistant Ask work when an ordinary invocation continue
 - Product UX: Ready for the deterministic continuation boundary. The real runtime owner, mailbox bridge/state, and controller preserve import, checkpoint, preparation, and retirement ordering. Existing lifecycle tests retain abort, shutdown, provider handoff, exact request ownership, and current-sender authority.
 - Model prompts, input composition, tool schema, recipients, consent, deadlines, and reply text are unchanged. A live model turn cannot exercise the checkpoint/controller scheduling defect; focused composed lifecycle proof is the relevant boundary.
 - The only production correction is resuming the existing paused controller within the already guarded continuation block. No new awaited foreground work, retry policy, persistence, or owner is introduced.
+
+## Implementation result
+
+- One guarded resume call restores detached Ask continuation. Composed base-failure/candidate-pass proof, 108 lifecycle tests, 10 archive tests, both typechecks, and parent review passed.
+- PR #3928 carries the functional candidate. Final ReviewGPT and exact-head required CI remain the completion gates after the stable push. Human merge and canonical production release remain separate; this sweep does not authorize either for this functional fix.
+Completed: 2026-09-30
