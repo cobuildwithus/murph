@@ -30,6 +30,8 @@ export class ClinicalEnrichmentDocumentError extends Error {
 
 export interface PreparedClinicalEnrichmentDocument {
   totalPages: number;
+  coverageWarning?: string;
+  textWindow?: { index: number; total: number };
   extractedText?: string;
   renderedPages: { page: number; path: string }[];
   scratchRoots: string[];
@@ -50,7 +52,7 @@ type PreparedDocumentPage = Pick<PreparedClinicalEnrichmentDocument,
 type ImageMediaType = "image/png" | "image/jpeg";
 
 function isTextMediaType(mediaType: string): boolean {
-  return ["text/plain", "text/html", "application/xhtml+xml", "application/xml", "text/xml"].includes(mediaType)
+  return ["text/plain", "text/html", "application/xhtml+xml", "application/xml", "text/xml", "application/rtf", "text/rtf", "application/x-rtf"].includes(mediaType)
     || mediaType.endsWith("+xml");
 }
 
@@ -91,14 +93,25 @@ export async function prepareClinicalEnrichmentDocument(
 }
 
 async function prepareTextDocument(input: DocumentPreparationInput, bytes: Buffer): Promise<PreparedClinicalEnrichmentDocument> {
-  assertRequestedPage(input.page, 1);
   const extractedText = await readClinicalDocumentSourceText({ bytes, mediaType: input.mediaType });
   input.signal?.throwIfAborted();
   if (!extractedText) throw new ClinicalEnrichmentDocumentError("CLINICAL_ENRICHMENT_DOCUMENT_INVALID");
   if (Buffer.byteLength(extractedText, "utf8") > MAX_TEXT_BYTES) {
     throw new ClinicalEnrichmentDocumentError("CLINICAL_ENRICHMENT_DOCUMENT_LIMIT");
   }
-  return { totalPages: 1, extractedText, renderedPages: [], scratchRoots: [], async cleanup() {} };
+  // Bound each model assignment rather than dropping the tail of a long chart.
+  // Overlap retains statements crossing a window; canonical fact keys dedupe it.
+  const characters = Array.from(extractedText);
+  const windowSize = 12_000;
+  const stride = 11_000;
+  const totalPages = Math.max(1, Math.ceil((characters.length - windowSize) / stride) + 1);
+  assertRequestedPage(input.page, totalPages);
+  const start = (input.page - 1) * stride;
+  const hasEmbeddedMedia = /\\(?:pict|object)\b/u.test(bytes.toString("latin1")) || /<(?:img|svg|object)\b/iu.test(bytes.toString("utf8"));
+  return { totalPages, extractedText: characters.slice(start, start + windowSize).join(""),
+    ...(totalPages > 1 ? { textWindow: { index: input.page, total: totalPages } } : {}),
+    ...(hasEmbeddedMedia && input.page === totalPages ? { coverageWarning: "Embedded document media has not been visually reviewed." } : {}),
+    renderedPages: [], scratchRoots: [], async cleanup() {} };
 }
 
 async function prepareImageDocument(

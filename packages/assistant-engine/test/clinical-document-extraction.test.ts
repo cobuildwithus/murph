@@ -110,7 +110,9 @@ it('runs one confined member extraction leaf with no effects, delegation or sour
   expect(turn.baseInstructions).toContain('Every proposed record must include dateBasis')
   expect(turn.baseInstructions).toContain('literal supporting date text in dateEvidence')
   expect(turn.baseInstructions).toContain('Never use the current date, retrieval time, filename, or source revision as a clinical date')
-  expect(turn.baseInstructions).toContain('omit the undated fact and return blocked')
+  expect(turn.baseInstructions).toContain('preserve an unsupported clinical date as null with dateBasis unknown')
+  expect(turn.baseInstructions).toContain('Never use source dateBasis for clinicalFact notes')
+  expect(turn.baseInstructions).not.toContain('omit the undated fact and return blocked')
   expect(turn.baseInstructions).toContain('Keep supported records when another record is blocked')
   expect(turn.baseInstructions).toContain('Inspect every supplied rendered page')
   expect(turn.baseInstructions).toContain('unsupported qualifier is clinically material')
@@ -377,4 +379,19 @@ it('binds one structured assignment to its exact resource and combined schema', 
   extractionMocks.executeTurn.mockClear()
   await expect(executeClinicalDocumentExtraction({ ...input, extractedText: 'Wrong resource' })).rejects.toThrow('assignment integrity')
   expect(extractionMocks.executeTurn).not.toHaveBeenCalled()
+})
+
+it('corrects only a typed fact date and keeps long-text correction shell-free', async () => {
+  const input = await fixture()
+  const payload = { kind: 'note', occurredAt: '2026-09-01T12:00:00.000Z', title: 'Source finding', note: 'Source finding',
+    clinicalFact: { category: 'report-finding', label: 'Source finding', subject: 'member', clinicalDate: '2020-01-01', statement: 'Source finding' } }
+  extractionMocks.executeTurn
+    .mockResolvedValueOnce({ finalMessage: JSON.stringify({ status: 'complete', records: [{ payload, dateBasis: 'document', dateEvidence: '2026-09-01' }] }) })
+    .mockResolvedValueOnce({ finalMessage: JSON.stringify({ corrections: [{ recordIndex: 0, dateBasis: 'unknown', occurredAt: null, dateEvidence: null }] }) })
+  const output = await executeClinicalDocumentExtraction({ ...input, family: 'history', textWindow: { index: 1, total: 2 } })
+  expect(output.records[0]).toMatchObject({ dateBasis: 'unknown', payload: { ...payload, clinicalFact: { ...payload.clinicalFact, clinicalDate: null } } })
+  expect(extractionMocks.executeTurn).toHaveBeenCalledTimes(2)
+  for (const [turn] of extractionMocks.executeTurn.mock.calls) {
+    expect(turn.threadConfig['features.shell_tool']).toBe(false)
+  }
 })

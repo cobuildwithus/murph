@@ -83,11 +83,11 @@ it.each(["entered-in-error", "corrected"])("retires extracted facts when the par
   expect((await applyClinicalEnrichmentProposals(f)).canonical).toBeNull();
 });
 
-it("never selects already structured results, unsafe statuses or undated observations", async () => {
+it("keeps unsafe statuses held while admitting undated source observations", async () => {
   const f = await fixture([deterministic, { ...source("preliminary"), status: "preliminary" }, { ...source("undated"), effectiveDateTime: undefined }]);
-  expect(f.result.structuredEnrichmentSources).toEqual([]);
+  expect(f.result.structuredEnrichmentSources).toMatchObject([{ resourceId: "undated" }]);
   await runOneHostedClinicalEnrichment(f.runtime);
-  expect(f.executeExtraction).not.toHaveBeenCalled();
+  expect(f.executeExtraction).toHaveBeenCalledOnce();
 });
 
 it.each(["Invented source evidence", "Resting pulse: 73 bpm"])("holds nonliteral evidence (%s) and preserves its source note", async (excerpt) => {
@@ -161,4 +161,110 @@ it("clears a failed record's retry state when attestation holds it and continues
   f.executeExtraction.mockRejectedValueOnce(new Error("Synthetic second-record failure"));
   expect(await runOneHostedClinicalEnrichment(f.runtime)).toBe("idle");
   expect(await readClinicalEnrichmentStatus(f)).toMatchObject({ status: "pending", counts: { held: 1 } });
+});
+
+
+it.each([null, "2020-03-12T12:00:00.000Z"])("persists structured source answers with clinicalDate %s and replays without duplication", async (clinicalDate) => {
+  const answer = "Occasional outdoor exercise";
+  const f = await fixture([{ ...source(), effectiveDateTime: clinicalDate ?? undefined, valueString: answer }]);
+  const clinicalFact = { category: "social-history" as const, label: "Exercise context", subject: "member" as const,
+    clinicalDate, statement: answer, value: answer, status: "final" };
+  f.executeExtraction.mockResolvedValue({ status: "complete", records: [{
+    dateBasis: clinicalDate ? "document" : "unknown", ...(clinicalDate ? { dateEvidence: clinicalDate } : {}), excerpt: answer,
+    payload: { kind: "note", title: "Source answer", occurredAt: "1999-01-01", note: answer, clinicalFact },
+  }] });
+  await runOneHostedClinicalEnrichment(f.runtime);
+  const statePath = path.join(f.vaultRoot, ".runtime/operations/clinical-records/enrichment", `${f.jobId}.json`);
+  const frozen = await readFile(statePath, "utf8");
+  const applied = await applyClinicalEnrichmentProposals(f);
+  expect(applied).toMatchObject({ counts: { created: 1, held: 0 }, readback: { verifiedCount: 1 } });
+  await writeFile(statePath, frozen);
+  expect((await applyClinicalEnrichmentProposals(f)).counts.existing).toBe(1);
+  const facts = (await listCanonicalEntities(f.vaultRoot, { family: "event", kinds: ["note"], limit: 20 }))
+    .filter((row) => row.attributes.clinicalFact);
+  expect(facts).toHaveLength(1);
+  expect(facts[0]!.attributes.clinicalFact).toEqual(clinicalFact);
+  expect(facts[0]!.occurredAt).toBe(clinicalDate ?? f.input.fetchedAt);
+  expect(facts[0]!.attributes.noteType).toBe("clinical_fact");
+  expect(facts[0]!.attributes.tags).toContain("clinical-fact-social-history");
+  expect(facts[0]!.attributes.evidence).toEqual([expect.not.objectContaining({ page: expect.anything() })]);
+});
+
+it("reimports an unchanged undated source across days and continues the enrichment queue", async () => {
+  const answer = "Occasional outdoor exercise";
+  const undated = { ...source(), effectiveDateTime: undefined, valueString: answer };
+  const f = await fixture([undated]);
+  const clinicalFact = { category: "social-history" as const, label: "Exercise context", subject: "member" as const,
+    clinicalDate: null, statement: answer, value: answer };
+  f.executeExtraction.mockResolvedValue({ status: "complete", records: [{ dateBasis: "unknown", excerpt: answer,
+    payload: { kind: "note", title: "Source answer", occurredAt: revision, note: answer, clinicalFact },
+  }] });
+  await runOneHostedClinicalEnrichment(f.runtime);
+  expect((await applyClinicalEnrichmentProposals(f)).counts.created).toBe(1);
+  await readNextClinicalEnrichment(f);
+
+  const repeated = await importClinicalFhirSnapshot({ ...f.input, retrievalJobId: "cross-day-reimport", fetchedAt: "2026-07-03T12:00:00.000Z" });
+  const repeatedJob = await enqueueClinicalEnrichment({ vaultRoot: f.vaultRoot, manifestPath: repeated.manifestPath,
+    manifestSha256: repeated.manifestSha256, structuredSources: repeated.structuredEnrichmentSources });
+  await runOneHostedClinicalEnrichment(f.runtime);
+  expect(f.executeExtraction).toHaveBeenCalledOnce();
+  expect(await applyClinicalEnrichmentProposals({ vaultRoot: f.vaultRoot, ...repeatedJob }))
+    .toMatchObject({ counts: { created: 0, existing: 1, held: 0 }, readback: { verifiedCount: 1 } });
+  const facts = (await listCanonicalEntities(f.vaultRoot, { family: "event", kinds: ["note"], limit: 20 }))
+    .filter((row) => row.attributes.clinicalFact);
+  expect(facts).toHaveLength(1);
+  expect(facts[0]!.occurredAt).toBe(revision);
+  expect(facts[0]!.attributes.clinicalFact).toEqual(clinicalFact);
+  await readNextClinicalEnrichment({ vaultRoot: f.vaultRoot });
+  expect(await readClinicalEnrichmentStatus({ vaultRoot: f.vaultRoot, ...repeatedJob })).toMatchObject({ status: "complete" });
+
+  const later = await importClinicalFhirSnapshot({ ...f.input, retrievalJobId: "later-source", fetchedAt: "2026-07-04T12:00:00.000Z",
+    pages: [{ ...f.input.pages[0]!, content: JSON.stringify({ resourceType: "Bundle", type: "searchset", entry: [{ resource: source("later") }] }) }] });
+  const laterJob = await enqueueClinicalEnrichment({ vaultRoot: f.vaultRoot, manifestPath: later.manifestPath,
+    manifestSha256: later.manifestSha256, structuredSources: later.structuredEnrichmentSources });
+  f.executeExtraction.mockResolvedValue(output);
+  expect(await runOneHostedClinicalEnrichment(f.runtime)).toBe("settled");
+  expect(f.executeExtraction).toHaveBeenCalledTimes(2);
+  expect((await applyClinicalEnrichmentProposals({ vaultRoot: f.vaultRoot, ...laterJob })).counts.created).toBe(1);
+  await readNextClinicalEnrichment({ vaultRoot: f.vaultRoot });
+  expect(await readNextClinicalEnrichment({ vaultRoot: f.vaultRoot })).toBeNull();
+});
+
+it.each(["corrected", "entered-in-error"])("retires typed historical facts when their source is %s", async (status) => {
+  const f = await fixture();
+  f.executeExtraction.mockResolvedValue({ status: "complete", records: [{ dateBasis: "unknown", excerpt: "Resting heart rate 73 bpm.",
+    payload: { kind: "note", title: "Source fact", occurredAt: date, note: "Historical statement", clinicalFact: {
+      category: "observation", label: "Historical pulse statement", subject: "member", clinicalDate: null,
+      statement: "Resting heart rate 73 bpm.", value: 73, unit: "bpm",
+    } },
+  }] });
+  await runOneHostedClinicalEnrichment(f.runtime);
+  const statePath = path.join(f.vaultRoot, ".runtime/operations/clinical-records/enrichment", `${f.jobId}.json`);
+  const frozen = await readFile(statePath, "utf8");
+  expect((await applyClinicalEnrichmentProposals(f)).counts.created).toBe(1);
+  await importClinicalFhirSnapshot({ ...f.input, retrievalJobId: "typed-correction", fetchedAt: "2026-07-02T12:00:00.000Z",
+    pages: [{ ...f.input.pages[0]!, content: JSON.stringify({ resourceType: "Bundle", type: "searchset", entry: [{ resource: {
+      ...source(), status, meta: { lastUpdated: "2026-07-02T12:00:00.000Z" }, valueString: "Corrected source statement.",
+    } }] }) }] });
+  const rows = await listCanonicalEntities(f.vaultRoot, { family: "event", kinds: ["note"], limit: 20 });
+  expect(rows.filter((row) => row.attributes.clinicalFact)).toHaveLength(0);
+  await writeFile(statePath, frozen);
+  expect((await applyClinicalEnrichmentProposals(f)).canonical).toBeNull();
+});
+
+it.each([
+  { dateBasis: "source" as const, clinicalDate: null, excerpt: "Resting heart rate 73 bpm.", codings: undefined },
+  { dateBasis: "unknown" as const, clinicalDate: null, excerpt: "Invented answer", codings: undefined },
+  { dateBasis: "unknown" as const, clinicalDate: null, excerpt: "Resting heart rate 73 bpm.", codings: [{ code: "invented", system: "urn:synthetic" }] },
+  { dateBasis: "document" as const, clinicalDate: "2020-03-12", excerpt: "Resting heart rate 73 bpm.", codings: undefined },
+])("holds unsupported typed facts ($dateBasis, $excerpt)", async ({ dateBasis, clinicalDate, excerpt, codings }) => {
+  const f = await fixture();
+  f.executeExtraction.mockResolvedValue({ status: "complete", records: [{ dateBasis, excerpt,
+    payload: { kind: "note", title: "Source fact", occurredAt: date, note: "Source statement", clinicalFact: {
+      category: "observation", label: "Source answer", subject: "member", clinicalDate,
+      statement: "Source statement", codings,
+    } },
+  }] });
+  await runOneHostedClinicalEnrichment(f.runtime);
+  expect(await applyClinicalEnrichmentProposals(f)).toMatchObject({ canonical: null, counts: { held: 1 } });
 });

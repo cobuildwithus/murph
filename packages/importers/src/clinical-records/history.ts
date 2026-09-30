@@ -33,12 +33,15 @@ export interface FhirSourceNote {
 }
 
 /** Unmapped observations remain dated source statements, never guessed metrics. */
-export function buildFhirObservationSourceNote(resource: Observation) {
-  const occurredAt = readExactDate(resource.effectiveDateTime ?? resource.effectivePeriod?.start);
+export function buildFhirObservationSourceNote(resource: Observation, sourceRevision?: string) {
+  const clinicalDate = readExactDate(resource.effectiveDateTime ?? resource.effectivePeriod?.start);
+  if ((resource.effectiveDateTime !== undefined || resource.effectivePeriod?.start !== undefined) && !clinicalDate) return null;
+  const occurredAt = clinicalDate ?? readExactDate(sourceRevision);
   if (!occurredAt) return null;
   const selected = Object.fromEntries(Object.entries(resource).filter(([key]) =>
     !["id", "meta", "subject", "encounter", "performer", "basedOn", "derivedFrom", "device"].includes(key)));
   const note = buildFhirSourceNote("Original source observation. Values and codes are preserved without metric normalization or inferred units.\n\n"
+    + (clinicalDate ? "" : `Source record timestamp: ${occurredAt}. Clinical event date is not available.\n\n`)
     + JSON.stringify(selected, (_key, value: unknown) => {
       if (value === null || typeof value !== "object" || Array.isArray(value)) return value;
       return Object.fromEntries(Object.keys(value).sort().map((key) => [key, Reflect.get(value, key)]));

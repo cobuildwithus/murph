@@ -963,7 +963,7 @@ function mapVitalUnitFailure(context: FhirResourceContext<Observation>, quantity
 
 function mapObservationSourceNote(context: FhirResourceContext<Observation>, reason: string): MappedFhirResource {
   const resourceId = readResourceId(context.resource);
-  const note = buildFhirObservationSourceNote(context.resource);
+  const note = buildFhirObservationSourceNote(context.resource, readResourceRevision(context));
   if (!resourceId || !note) return reviewOnly(context, reason);
   return upsertOrReview(context, {
     ...note, kind: "note", source: "import",

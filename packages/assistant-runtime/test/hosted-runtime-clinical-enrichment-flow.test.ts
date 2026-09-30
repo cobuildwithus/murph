@@ -73,7 +73,7 @@ async function importSource(vaultRoot: string, parent: { resourceType: "Document
   const parentExternalRef = externalRefForFhir({ fhirBaseUrlHash: hashClinicalFhirBaseUrl("https://ehr.example.test/fhir"),
     patientIdHash: hashClinicalFhirPatientId("synthetic-patient"), sourceSystem: "epic-fhir",
     resourceType: parent.resourceType, resourceId: resource.id, version: now });
-  return { ...job, manifestPath: imported.manifestPath, manifestSha256: imported.manifestSha256, parentExternalRef, rawRef: path.posix.join(path.posix.dirname(imported.manifestPath), `attachments/${sha256}.bin`), sha256 };
+  return { ...job, fetchedAt, manifestPath: imported.manifestPath, manifestSha256: imported.manifestSha256, parentExternalRef, rawRef: path.posix.join(path.posix.dirname(imported.manifestPath), `attachments/${sha256}.bin`), sha256 };
 }
 
 describe("clinical enrichment import-to-query flow", () => {
@@ -132,7 +132,10 @@ describe("clinical enrichment import-to-query flow", () => {
       const input: HostedClinicalEnrichmentInput = { abortSignal: new AbortController().signal, codexHome: null, env: {}, vaultRoot,
         memberId: "synthetic-member", resolveProviderAuthority: async () => "current", onStateMutation() {}, executeExtraction };
       expect(await runOneHostedClinicalEnrichment(input)).toBe("settled");
-      expect(await applyClinicalEnrichmentProposals({ vaultRoot, jobId: job.jobId })).toMatchObject({ counts: { created: 1, held: 0 } });
+      // Retained image tags still leave visual coverage unresolved; supported text survives.
+      expect(await applyClinicalEnrichmentProposals({ vaultRoot, jobId: job.jobId })).toMatchObject({ counts: { created: 1, held: 1 } });
+      expect((await readClinicalEnrichmentStatus({ vaultRoot, jobId: job.jobId })).holdReasons)
+        .toContain("history: Embedded document media has not been visually reviewed.");
     } finally {
       release();
       await Promise.allSettled([repair, preparation]);
@@ -218,8 +221,9 @@ describe("clinical enrichment import-to-query flow", () => {
       expect(tests).toHaveLength(1);
       expect(tests[0]?.attributes).toMatchObject({
         externalRef: { ...job.parentExternalRef, version: parent.revision, facet: expect.stringMatching(/^document-extraction-/u) },
-        rawRefs: [job.rawRef], evidence: [{ rawRef: job.rawRef, page: 1 }],
+        rawRefs: [job.rawRef], evidence: [{ rawRef: job.rawRef }],
       });
+      expect(tests[0]?.attributes.evidence).toEqual([expect.not.objectContaining({ page: expect.anything() })]);
       expect((await listMetricPoints(vaultRoot, { limit: 10 })).map((point) => point.value)).toEqual([90]);
       expect(await runOneHostedClinicalEnrichment(input)).toBe("settled");
       expect(await runOneHostedClinicalEnrichment(input)).toBe("idle");
@@ -325,7 +329,7 @@ describe("clinical enrichment import-to-query flow", () => {
 
       const executeExtraction = vi.fn<NonNullable<HostedClinicalEnrichmentInput["executeExtraction"]>>(async (request) => {
         await request.beforeProviderEntry?.();
-        expect(request.source).toEqual({ rawRef: job.rawRef, sha256: job.sha256, mediaType: "text/plain", clinicalOccurredAt: OCCURRED_AT });
+        expect(request.source).toEqual({ rawRef: job.rawRef, sha256: job.sha256, mediaType: "text/plain", clinicalOccurredAt: OCCURRED_AT, recordedAt: job.fetchedAt });
         expect(request.extractedText).toBe(SOURCE_TEXT);
         return request.family !== "labs" ? empty : {
           status: "complete", records: [{ dateBasis: "document", dateEvidence: "Collected 2020-03-12T12:00:00Z", page: 1, excerpt: "Serum glucose 90 mg/dL.", payload: {
@@ -364,7 +368,7 @@ describe("clinical enrichment import-to-query flow", () => {
       expect(tests[0]?.attributes).toMatchObject({
         source: "import", rawRefs: [job.rawRef], specimenType: "serum",
         externalRef: { ...job.parentExternalRef, facet: expect.stringMatching(/^document-extraction-/u) },
-        evidence: [{ rawRef: job.rawRef, page: 1, excerpt: "Collected 2020-03-12T12:00:00Z · Serum glucose 90 mg/dL." }],
+        evidence: [{ rawRef: job.rawRef, excerpt: "Collected 2020-03-12T12:00:00Z · Serum glucose 90 mg/dL." }],
       });
       const points = await listMetricPoints(vaultRoot, { limit: 10 });
       expect(points).toEqual(expect.arrayContaining([expect.objectContaining({
