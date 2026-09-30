@@ -123,7 +123,6 @@ test.each(["ingress", "runtime"] as const)("rendered production standby keyrings
     ]),
   );
   const deploySource = {
-      HOSTED_EXECUTION_STANDBY_MODE: "allocate",
     ...requiredSecretFixtures,
     CF_BUNDLES_BUCKET: "hosted-bundles",
     CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",

@@ -36,7 +36,6 @@ describe("Cloudflare container rollout config", () => {
     total, legacy, expectedMain, expectedLegacy,
   }) => {
     const source = {
-      HOSTED_EXECUTION_STANDBY_MODE: "allocate",
       CF_BUNDLES_BUCKET: "hosted-bundles",
       CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
       CF_WORKER_NAME: "hosted-worker",
@@ -62,7 +61,7 @@ describe("Cloudflare container rollout config", () => {
       .toBe(Number(total ?? "1000") + 1);
     expect(containers[0]).not.toHaveProperty("constraints");
     expect(config.vars).toMatchObject({
-      HOSTED_EXECUTION_STANDBY_MODE: "allocate",
+      HOSTED_EXECUTION_STANDBY_MODE: "off",
       HOSTED_EXECUTION_STANDBY_TARGET: String(Math.min(2, expectedMain)),
     });
     expect(config.vars).not.toHaveProperty("CF_CONTAINER_MAX_INSTANCES");
@@ -83,7 +82,6 @@ describe("Cloudflare container rollout config", () => {
 
   it("renders native rollout steps without extra connection-age protection", () => {
     const environment = readHostedDeployAutomationEnvironment({
-      HOSTED_EXECUTION_STANDBY_MODE: "allocate",
       CF_BUNDLES_BUCKET: "hosted-bundles",
       CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
       CF_WORKER_NAME: "hosted-worker",
@@ -112,7 +110,6 @@ describe("Cloudflare container rollout config", () => {
 
   it("renders a single deploy-smoke rollout step for the one-instance smoke container", () => {
     const environment = readHostedDeployAutomationEnvironment({
-      HOSTED_EXECUTION_STANDBY_MODE: "allocate",
       CF_BUNDLES_BUCKET: "hosted-bundles",
       CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
       CF_WORKER_NAME: "hosted-worker",
@@ -139,7 +136,6 @@ describe("Cloudflare container rollout config", () => {
 
   it("keeps the checked-in wrangler scaffold aligned with the rendered rollout defaults", async () => {
     const environment = readHostedDeployAutomationEnvironment({
-      HOSTED_EXECUTION_STANDBY_MODE: "allocate",
       CF_BUNDLES_BUCKET: "hosted-bundles",
       CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
       CF_WORKER_NAME: "hosted-worker",

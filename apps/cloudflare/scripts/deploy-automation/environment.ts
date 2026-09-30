@@ -4,7 +4,7 @@ import {
 } from "@murphai/hosted-execution/env";
 
 import {
-  readHostedStandbyTarget, readHostedStandbyMode,
+  readHostedStandbyTarget,
 } from "../../src/standby-runner-contract.ts";
 
 import {
@@ -125,9 +125,6 @@ export function readHostedDeployAutomationEnvironment(
   const workerVars = readHostedWorkerVars(source);
   const capacity = readHostedRunnerContainerCapacity(source);
   const standbyTarget = readHostedStandbyTarget(source);
-  if (readHostedStandbyMode(workerVars) !== "allocate" || standbyTarget === 0) {
-    throw new Error("Background execution requires HOSTED_EXECUTION_STANDBY_MODE=allocate and HOSTED_EXECUTION_STANDBY_TARGET greater than zero.");
-  }
   if (standbyTarget > capacity.containerMaxInstances - capacity.legacyStandbyContainerMaxInstances) {
     throw new Error(
       "HOSTED_EXECUTION_STANDBY_TARGET must not exceed CF_CONTAINER_MAX_INSTANCES "

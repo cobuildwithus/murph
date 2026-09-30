@@ -1769,7 +1769,6 @@ async function createDeployArtifactSourceFixture(input: {
 
 function createDeployArtifactFixtureSource(): Record<string, string> {
   return {
-    HOSTED_EXECUTION_STANDBY_MODE: "allocate",
     CF_BUNDLES_BUCKET: "hosted-bundles",
     CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
     CF_PUBLIC_BASE_URL: "https://hosted-worker.example.test",

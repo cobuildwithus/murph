@@ -6,8 +6,8 @@
     "kind": "improvement",
     "priority": 2,
     "title": "Conversations get startup priority",
-    "summary": "Background syncing waits for ready capacity instead of starting a cold session that can delay your next message.",
-    "details": "An ongoing background session can still pick up your message. Background updates may wait when capacity is busy.",
+    "summary": "Your messages can take priority when background syncing is still starting up.",
+    "details": "Background syncing can still start on its own. If a session is already running, it can pick up your message directly.",
     "relevanceTags": [
       "conversations",
       "reliability"

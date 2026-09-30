@@ -61,7 +61,7 @@ async function ensureRuntimeProcessing(context: ReturnType<typeof createProcessi
   const { diagnostics } = context;
   if (!context.namespace) return retryProcessing(context, "missing_container_binding");
   const ctx = { ...context, namespace: context.namespace };
-  let claim = context.input.admission ?? await ctx.command({ operation: "claim", processingMode: ctx.mode });
+  let claim = await readRuntimeAdmission(ctx);
   let previousGeneration: string | undefined;
   // One completed owner, one expired retained target, then its fresh successor.
   // Contention beyond these bounded transitions belongs to the existing retry owner.
@@ -89,6 +89,16 @@ async function ensureRuntimeProcessing(context: ReturnType<typeof createProcessi
     if (admission < 2) claim = await ctx.command({ operation: "claim", processingMode: ctx.mode });
   }
   return retryProcessing(ctx, "claim_blocked");
+}
+
+async function readRuntimeAdmission(ctx: ProcessingContext) {
+  const admission = ctx.input.admission;
+  // An upstream admission is a snapshot. Refresh an unfinished background
+  // owner so the canonical claim can apply foreground priority atomically.
+  const refresh = ctx.mode === "default" && admission?.status === "existing"
+    && admission.owner?.userId === ctx.input.userId && admission.owner.phase === "starting"
+    && admission.owner.processingMode === "system_mailbox" && admission.owner.workspaceVersion === null;
+  return admission && !refresh ? admission : ctx.command({ operation: "claim", processingMode: ctx.mode });
 }
 
 function createProcessingContext(source: RuntimeProcessingSource, input: RuntimeProcessingInput, diagnostics: RuntimeProcessingDiagnostics) {
@@ -121,7 +131,7 @@ function retryProcessing(ctx: { diagnostics: RuntimeProcessingDiagnostics }, rea
   | "cutover_blocked" | "missing_container_binding"
   | "claim_blocked" | "retirement_pending" | "completion_unconfirmed" | "starting_fence_preserved"
   | "processing_mode_conflict" | "wake_unconfirmed" | "container_not_ready"
-  | "command_budget_exhausted" | "container_rpc_timeout" | "background_standby_deferred",
+  | "command_budget_exhausted" | "container_rpc_timeout",
   retryAtEpochMs = Date.now() + 3_000,
 ): HostedRuntimeEnsureProcessingResponse {
   ctx.diagnostics.details.runtimeProcessingRetryReason = reason;
@@ -166,8 +176,8 @@ async function reconcileExistingRuntime(ctx: ProcessingContext, owner: HostedRun
   // Age decides when to attempt retirement; it never proves stoppedness.
   const startingDeadline = owner.startedAt ? Date.parse(owner.startedAt) + 30_000 : 0;
   if (owner.phase === "starting" && startingDeadline > Date.now()) {
-    // Recheck readiness promptly; the retirement deadline is not a sleep deadline.
-    return retryProcessing(ctx, "starting_fence_preserved", ctx.mode === "default" ? Math.min(startingDeadline, Date.now() + 1_000) : startingDeadline);
+    return retryProcessing(ctx, "starting_fence_preserved",
+      ctx.mode === "default" ? Math.min(startingDeadline, Date.now() + 1_000) : startingDeadline);
   }
   return retireRuntime(ctx, owner);
 }
@@ -216,18 +226,23 @@ async function wakeExistingRuntime(ctx: ProcessingContext, owner: HostedRuntimeO
 }
 
 async function startClaimedRuntime(ctx: ProcessingContext, initialOwner: HostedRuntimeOwnerSnapshot): Promise<HostedRuntimeEnsureProcessingResponse | null> {
-  const claim = { owner: initialOwner };
-  let start;
-  try { start = await prepareClaimedRuntime(ctx, claim); }
-  catch (error) {
-    if (ctx.mode !== "system_mailbox") throw error;
-    start = "defer" as const;
-  }
-  // Keep retirement outside preparation recovery: an uncertain stop stays pinned.
-  if (start === "defer") return deferBackgroundRuntime(ctx, claim.owner);
-  if (start === "retire") return retireRuntime(ctx, claim.owner);
-  if ("kind" in start) return start;
-  const { owner, binding, container, ready, prepared } = start;
+  ctx.diagnostics.stage = "fresh_start";
+  observeRuntimeProcessingFence(ctx.diagnostics, { ...requireIdentity(initialOwner), processingMode: ctx.mode });
+  const preparation = createInvocationPreparation(ctx);
+  const prepare = preparation.prepareForFreshStart({ commandBudget: ctx.budget, input: ctx.input });
+  const target = await bindRuntimeTarget(ctx, initialOwner);
+  if (!target) return null;
+  const { owner, binding } = target;
+  if (binding.state !== "bound" || binding.userId !== ctx.input.userId || binding.claimId !== owner.allocationId
+    || binding.slotName !== owner.runnerContainerName) throw new Error("Hosted runtime target binding mismatch.");
+  const container = ctx.namespace.getByName(binding.slotName);
+  if (!container.ensureReadyForProcessing || !container.startSupervisedInvocation) throw new Error("Native runtime supervision is unavailable.");
+  const [ready, prepared] = await Promise.all([
+    ctx.step("container_readiness", () => container.ensureReadyForProcessing!({ userId: ctx.input.userId, orchestrationAttemptId: ctx.input.orchestrationAttemptId,
+      timeoutMs: readRuntimeProcessingCommandStepTimeoutMs({ budget: ctx.budget, stepTimeoutMs: 15_000 }) }), 15_000),
+    ctx.step("prepare_invocation", () => prepare(ownerToken(owner), binding)),
+  ]);
+  if (ready.kind !== "ready") return retryProcessing(ctx, "container_not_ready");
   const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(prepared.token.providerEgressToken!)));
   const launch = {
     providerEgressTokenHash: Array.from(digest, value => value.toString(16).padStart(2, "0")).join(""),
@@ -247,59 +262,21 @@ async function startClaimedRuntime(ctx: ProcessingContext, initialOwner: HostedR
   return acceptedProcessing(ctx, owner, "started");
 }
 
-async function prepareClaimedRuntime(ctx: ProcessingContext, claim: { owner: HostedRuntimeOwnerSnapshot }) {
-  ctx.diagnostics.stage = "fresh_start";
-  observeRuntimeProcessingFence(ctx.diagnostics, { ...requireIdentity(claim.owner), processingMode: ctx.mode });
-  // Foreground keeps its parallel workspace read. Background does no workspace
-  // preparation until it has obtained warm capacity.
-  const prepare = ctx.mode === "system_mailbox" ? null
-    : createInvocationPreparation(ctx).prepareForFreshStart({ commandBudget: ctx.budget, input: ctx.input });
-  const target = await bindRuntimeTarget(ctx, claim);
-  if (target === "defer" || target === "retire") return target;
-  const { owner, binding } = target;
-  if (binding.state !== "bound" || binding.userId !== ctx.input.userId || binding.claimId !== owner.allocationId
-    || binding.slotName !== owner.runnerContainerName) throw new Error("Hosted runtime target binding mismatch.");
-  const container = ctx.namespace.getByName(binding.slotName);
-  if (!container.ensureReadyForProcessing || !container.startSupervisedInvocation) throw new Error("Native runtime supervision is unavailable.");
-  const readinessInput = { userId: ctx.input.userId, orchestrationAttemptId: ctx.input.orchestrationAttemptId,
-    timeoutMs: readRuntimeProcessingCommandStepTimeoutMs({ budget: ctx.budget, stepTimeoutMs: ctx.mode === "system_mailbox" ? 3_000 : 15_000 }) };
-  if (ctx.mode === "system_mailbox") {
-    // No member workspace I/O until the warm probe succeeds. Keep command
-    // budget for exact retirement if preparation fails or times out.
-    if (!container.ensureWarmForBackgroundProcessing) return "defer" as const;
-    const ready = await ctx.step("background_readiness", () => container.ensureWarmForBackgroundProcessing!(readinessInput), 3_000);
-    if (ready.kind !== "ready") return "defer" as const;
-    const prepareBackground = createInvocationPreparation(ctx).prepareForFreshStart({ commandBudget: ctx.budget, input: ctx.input });
-    const prepared = await ctx.step("prepare_invocation", () => prepareBackground(ownerToken(owner), binding),
-      Math.max(1, ctx.budget.deadlineAtMs - Date.now() - 3_000));
-    return { owner, binding, container, ready, prepared };
-  }
-  const [ready, prepared] = await Promise.all([
-    ctx.step("container_readiness", () => container.ensureReadyForProcessing!(readinessInput), 15_000),
-    ctx.step("prepare_invocation", () => prepare!(ownerToken(owner), binding)),
-  ]);
-  if (ready.kind !== "ready") return retryProcessing(ctx, "container_not_ready");
-  return { owner, binding, container, ready, prepared };
-}
-
-async function bindRuntimeTarget(ctx: ProcessingContext, claim: { owner: HostedRuntimeOwnerSnapshot }): Promise<{ owner: HostedRuntimeOwnerSnapshot; binding: HostedStandbySlotBinding } | "defer" | "retire"> {
-  const { owner } = claim;
+async function bindRuntimeTarget(ctx: ProcessingContext, owner: HostedRuntimeOwnerSnapshot): Promise<{ owner: HostedRuntimeOwnerSnapshot; binding: HostedStandbySlotBinding } | null> {
   const releaseId = resolveHostedRunnerReleaseId(ctx.source);
   if (owner.runnerContainerName) {
     const target = owner.runnerContainerName;
     const slot = requireHostedRunnerSlotLifecycle(ctx.namespace.getByName(target));
     const binding = await ctx.step("resolve_retained_target", () => slot.resolveRetainedStandbySlot({ currentReleaseId: releaseId,
       region: HOSTED_RUNNER_REGION, slotName: target, userId: ctx.input.userId }));
-    if (binding.state !== "bound") return "retire";
+    if (binding.state !== "bound") { await retireRuntime(ctx, owner); return null; }
     return { owner, binding };
   }
   if (!isHostedStandbyClaimId(owner.allocationId)) throw new Error("Hosted allocation identity is invalid.");
   const allocationId = owner.allocationId;
   const candidate = await allocateRuntimeTarget(ctx, allocationId, releaseId);
-  if (!candidate) return "defer";
   const selected = await ctx.command({ operation: "select_target", ...requireIdentity(owner), runnerContainerName: candidate });
   if (!selected.owner?.runnerContainerName) throw new Error("Hosted runtime target selection lost ownership.");
-  claim.owner = selected.owner;
   const target = selected.owner.runnerContainerName;
   const targetIdentity = readHostedRunnerTargetIdentity(target);
   if (!targetIdentity || targetIdentity.releaseId !== releaseId) throw new Error("Hosted runtime target release mismatch.");
@@ -309,24 +286,15 @@ async function bindRuntimeTarget(ctx: ProcessingContext, claim: { owner: HostedR
   return { owner: selected.owner, binding: { ...bound, state: "bound" } };
 }
 
-/** A missed handoff never selected/bound a target. Late pool results remain
- * coordinator-owned orphans; stale owner identity cannot select or launch them. */
-async function deferBackgroundRuntime(ctx: ProcessingContext, owner: HostedRuntimeOwnerSnapshot): Promise<HostedRuntimeEnsureProcessingResponse> {
-  return await retireRuntime(ctx, owner) ?? retryProcessing(ctx, "background_standby_deferred",
-    Date.now() + 15_000 + Math.floor(Math.random() * 15_000));
-}
-
-async function allocateRuntimeTarget(ctx: ProcessingContext, allocationId: string, releaseId: string): Promise<string | null> {
-  const background = ctx.mode === "system_mailbox";
-  const fallback = background ? null : `runner--v-${releaseId}--${allocationId.slice("standby-claim-".length).replaceAll("-", "")}`;
-  if (readHostedStandbyMode(ctx.source) !== "allocate" || !ctx.source.STANDBY_COORDINATOR
-    || (!background && (ctx.mode !== "default"
-      || !(ctx.input.orchestration?.triggeredByWebDirect === true || ctx.input.conversationWorkPending === true)))) return fallback;
+async function allocateRuntimeTarget(ctx: ProcessingContext, allocationId: string, releaseId: string): Promise<string> {
+  const fallback = `runner--v-${releaseId}--${allocationId.slice("standby-claim-".length).replaceAll("-", "")}`;
+  if (ctx.mode !== "default" || readHostedStandbyMode(ctx.source) !== "allocate" || !ctx.source.STANDBY_COORDINATOR
+    || !(ctx.input.orchestration?.triggeredByWebDirect === true || ctx.input.conversationWorkPending === true)) return fallback;
   try {
-    const coordinator = ctx.source.STANDBY_COORDINATOR.getByName(resolveHostedStandbyCoordinatorName({ releaseId, region: HOSTED_RUNNER_REGION }));
-    const request = { claimId: allocationId, releaseId, region: HOSTED_RUNNER_REGION,
-      deadlineAtEpochMs: Math.min(ctx.budget.deadlineAtMs, Date.now() + HOSTED_STANDBY_CLAIM_TIMEOUT_MS) };
-    const standby = await ctx.step("claim_standby", () => coordinator.claimReadyStandby(request), HOSTED_STANDBY_CLAIM_TIMEOUT_MS);
+    const standby = await ctx.step("claim_standby", () => ctx.source.STANDBY_COORDINATOR!.getByName(resolveHostedStandbyCoordinatorName({ releaseId, region: HOSTED_RUNNER_REGION })).claimReadyStandby({
+      claimId: allocationId, releaseId, region: HOSTED_RUNNER_REGION,
+      deadlineAtEpochMs: Math.min(ctx.budget.deadlineAtMs, Date.now() + HOSTED_STANDBY_CLAIM_TIMEOUT_MS),
+    }), HOSTED_STANDBY_CLAIM_TIMEOUT_MS);
     return standby.outcome === "claimed" ? standby.slotName : fallback;
   } catch { return fallback; } // Unbound inventory retains its own orphan recovery.
 }

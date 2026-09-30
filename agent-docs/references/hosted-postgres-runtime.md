@@ -112,10 +112,27 @@ Provider effects continue to require their own live authorization.
 Registered/completed receipts survive activation loss. A duplicate registration
 cannot execute the attempt twice. An uncertain launch or stop retains the exact
 target; age can schedule reconciliation but cannot authorize its replacement.
-While the existing starting fence is preserved, retry at its 30-second deadline
-instead of polling every three seconds. An independent wake can still reach a
-ready child sooner. Expiry starts the ordinary exact retirement proof; it does
-not establish stoppedness or release authority.
+An admitted default claim takes priority over an unlaunched system-mailbox start.
+Under the existing member and owner locks, claim changes that owner to `retiring`
+only while its phase is `starting` and workspace version is null. This serializes
+with `prepare_launch`: if launch preparation wins first, foreground wakes that
+same child; if priority wins, stale background launch is rejected. The adapter
+refreshes a supplied pre-launch background admission before using it.
+
+Retirement cancels native readiness before waiting on the lifecycle lock, then
+uses the existing exact target stop and release before fresh foreground admission.
+Uncertain stop keeps ownership pinned. Background still reuses its bound warm
+target or cold-starts independently of pristine standby inventory. Pool size and
+allocation policy are unchanged. An empty foreground pool retains cold fallback;
+preemption can discard partial background cold-start work in that case.
+
+While a starting fence remains, foreground rechecks after at most one second;
+background keeps the 30-second startup deadline. Expiry starts ordinary exact
+retirement proof; it does not establish stoppedness or release authority.
+Deploy cancellation-capable Cloudflare before the Web claim change. Old Web keeps
+the startup fence until launch or expiry; old Cloudflare still retires safely but
+can wait for preparation before stopping. Existing state and RPC shapes remain
+compatible in both directions; rollback restores the older latency behavior.
 
 Completion revokes ordinary effects and records completion before the adapter
 releases ownership. Reuse additionally requires the exact native completed

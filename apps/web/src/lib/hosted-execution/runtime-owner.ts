@@ -38,6 +38,18 @@ export async function claimHostedRuntime(input: {
     }
     const existing = await lockHostedRuntimeOwnerRowTx(tx, input.userId);
     if (existing && existing.phase !== "idle") {
+      // Launch preparation takes these same locks. Once workspaceVersion is
+      // bound, foreground must wake the admitted child instead of replacing it.
+      // Before that point, revoke launch authority and let the existing exact
+      // retirement protocol stop preparation before admitting a new writer.
+      if (input.processingMode === "default" && existing.processingMode === "system_mailbox"
+        && existing.phase === "starting" && existing.workspaceVersion === null) {
+        const owner = await tx.hostedRuntimeOwner.update({
+          where: { userId: input.userId },
+          data: { phase: "retiring", platformAiUsageAllowed: false },
+        });
+        return { cutover, status: "existing", owner };
+      }
       return { cutover, status: "existing", owner: existing };
     }
     const now = input.now ?? new Date();

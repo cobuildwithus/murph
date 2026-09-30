@@ -2005,44 +2005,82 @@ the supported unified fleet cutover and adds no persistent format or rollback
 floor; deployment constraints remain in
 [`apps/cloudflare/DEPLOY.md`](../../apps/cloudflare/DEPLOY.md#retired-member-shell-prewarm-transport).
 
-The unified globally eligible runner inventory and background startup policy
-are owned by [the Cloudflare runner guide](../../apps/cloudflare/README.md#unified-runner-fleet-and-ready-inventory).
-Postgres claims the execution generation and opaque allocation identity before
-an immutable target is selected and bound. The coordinator prepares pristine,
-memberless containers outside that execution fence. Foreground and background
-use the same atomic claim and existing inventory target, with no extra slots or
-reserve. Preparation retains its existing two bounded lanes. Neither a pool
-claim nor an unbound slot grants workspace or
-provider authority.
+The release-scoped ENAM standby is a separate optimization. A memberless
+coordinator maintains at most one advertised
+pristine slot after exact release, image fingerprints, architecture,
+heavy-runtime, and content-free Codex App Server initialize/stop readiness all
+pass. In allocation mode, one storage transaction removes that slot from ready
+and records an opaque claim tombstone only for fence-free `default` work from
+authenticated Web-direct ingress with a validated direct-attempt identity or
+an authenticated request carrying `conversationWorkPending: true`. Temporal
+derives that fact from fresh admitted conversation lag; generic default mode
+alone does not qualify. Background-only processing and spoofed direct inputs
+keep the unchanged exact-user target. A trusted foreground replacement may claim the
+slot after the exact-user background fence is cleared rather than reusing a
+child that is still shutting down. The requesting `UserRunner`
+durably reserves the opaque stop target before immutable bind-once member
+attachment, then opens its normal write fence and restores the encrypted
+workspace. The real resident Codex App Server remains post-restore because its
+launch identity is member-specific. Coordinator claim and bind share one 1,000 ms
+deadline, capped by the remaining foreground command budget; no-ready,
+stale-release, or coordinator failure before slot ownership
+uses the unchanged exact-user cold target. A pending standby target is
+reconciled before fresh-claim eligibility. For a member-bound target, one
+bounded RPC to that standby-container owner validates the immutable slot, its
+release, and the exact member, then reads native-container liveness. Only an
+explicit warm status is `retained`; the durable `bound` row by itself is not.
+Warm retention renews the handoff idle window and may repeat for the same
+member without another coordinator claim. An explicit native stop or an exact
+prior-release binding enters the existing one-way `retiring` to `retired` scrub
+path. `UserRunner` clears only its exact stop target and only after that
+retirement settles, after which the same eligible authenticated conversation
+request may perform one normal fresh claim. Unknown native status,
+failed retirement, foreign-member state, contradictory release authority, or
+any result-identity mismatch retains the pending target and yields without a
+second container. An ambiguous bind after the opaque target is reserved follows
+the same retry rule, including when the retry arrives through Temporal.
+Replenishment, readiness re-proving, orphan retirement, and stale-release drain
+remain outside the accepted-message path. A claimed slot is never rebound or
+returned to ready. Group chats do not own standby lifecycle; the member's
+`UserRunner` remains the allocation and stop-target owner. Fenced preparation
+reuses the exact immutable binding receipt from allocation or retained resolution
+within that request, or reads it when no receipt exists. Invocation and wake
+authorize the live bound member inside the slot owner. Withdrawal and account
+deletion send that owner the exact slot/member target; the owner validates it and
+acknowledges only after native destruction and durable retirement. Callers need no
+binding readback after this acknowledgement. A member mismatch fails closed. A successful
+fresh-start acceptance records the closed standby allocation outcome, bounded
+reason, and elapsed milliseconds in the existing orchestration latency phase
+breakdown and structured log. The selection log records the same metadata
+before fence or readiness work so a later caller-budget exit remains
+diagnosable without adding member or container identifiers. Failed, retried, or
+superseded starts do not emit an accepted attribution.
 
-Background `system_mailbox` admission uses retained warm capacity or an existing ready slot.
-On a missed pool claim it retires and releases only its exact target-less owner
-and returns a jittered 15–30 second retry, without preparing a workspace or starting a cold
-container. Late pool results remain subject to coordinator orphan cleanup; the
-retired generation cannot select a target or launch. Once a target is selected,
-release requires its exact native retirement proof. Background readiness and
-invocation both reject cold startup and use native port I/O without the SDK
-automatic startup path. A bounded warm probe precedes workspace preparation. Unknown transport or cleanup results retain
-the existing fence and reconciliation path. Foreground admission and cold
-fallback remain available, while an active background runtime promotes in place.
+Normal idle or completed-invocation cleanup retires the immutable member slot
+only after native destruction succeeds and the interaction generation remains
+unchanged. It then sends a best-effort retirement notification to the existing
+user owner without awaiting that owner from the slot lifecycle lock. The user
+owner reads the exact slot's durable retired binding outside its admission lock,
+then conditionally clears only the matching pending target under that lock. An
+active write fence or replacement target prevents the clear. No retirement hint
+alone grants authority, and the notification adds no remote wait under the
+foreground admission lock. A missed notification retains ordinary next-admission
+reconciliation; the already-retired slot can answer without another native
+liveness or destroy request. Warm reuse and uncertain stops retain their existing
+ownership and recovery behavior. This uses existing slot states and bindings and
+requires no Web, Temporal, or container-image wire change.
 
-A foreground caller encountering `starting` rechecks within one second, capped
-at the existing thirty-second retirement threshold. Background retries preserve
-the existing threshold to avoid duplicate polling. The retirement threshold is
-never stoppedness evidence. Empty inventory can delay background freshness;
-`off`, `shadow`, and zero-target configurations cannot start fresh background
-mailbox invocations; production deployment rejects those configurations and
-requires explicit allocation mode without changing the existing off default. Infrastructure outages, workspace restore, and provider
-latency remain outside any strict foreground latency guarantee.
+Fresh allocation records `runnerTargetReconcileElapsedMs`, `standbyClaimElapsedMs`,
+and `runnerTargetBindElapsedMs` separately within the existing orchestration
+phase. Steps that were not needed record zero. `standbyAllocationElapsedMs` remains
+the complete allocation duration, including pending-target reconciliation and
+cold binding; it is not the coordinator RPC duration. Container readiness is
+recorded separately by the existing fresh-start timestamps.
 
-The new background warm-readiness RPC is additive and fails closed when unavailable.
-Old Workers keep their existing behavior until replaced; new Workers cannot
-request cold background readiness from an older receiver. Pool claims reuse the
-existing coordinator RPC. No Postgres schema, owner phase, Temporal request, or
-container-image job format changes. Validate `allocate` mode and the existing
-positive ready target before rollout. Shared slots can still be exhausted, so
-foreground retains its own cold fallback. Rollback restores the
-old startup behavior, not the new latency protection.
+Worker logs also report coordinator handler duration and remaining deadline,
+and caller RPC settlement duration, outcome and late completion. The existing
+opaque event identifier joins those records without message content or member
+credentials. Retry paths emit phase timings even when no runner is selected.
 
 The active-member replan durably
 appends the original conversation item. For an exact model-approved instant

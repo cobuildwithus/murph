@@ -1788,18 +1788,16 @@ Core execution tuning:
   Process replacement clears warmth rather than restoring a completed lease;
   DO replacement recovers the SDK task and checks the live process.
 
-- `HOSTED_EXECUTION_STANDBY_MODE` must already be explicitly `allocate`.
-  Its fallback remains `off`; deployment rejects missing mode, `off`, and `shadow`.
-  Fresh background mailbox work requires ready inventory, and silently disabling it would stall synchronization.
-  This prevents silently enabling idle capacity. Compatibility readers retain
-  those modes for older running Workers.
-- `HOSTED_EXECUTION_STANDBY_TARGET` defaults to `2` and deployment accepts positive
-  integers through `32`. It remains the total global ready inventory, shared
-  by foreground and background work; no extra slot or reserve is added. The
-  renderer validates this target against capacity after the legacy reservation.
-  Background uses retained warm targets or existing ready slots, never a cold
-  fallback. Empty capacity returns a jittered 15–30 second retry after releasing
-  the brief admission. Foreground retains its existing cold fallback.
+- `HOSTED_EXECUTION_STANDBY_MODE` defaults to `off`; `shadow` maintains ready
+  inventory without allocating it, and `allocate` lets authenticated foreground
+  conversation work claim it. Modes control inventory only; all fresh cold
+  targets use the unified fleet as well. Background-only work may reuse its
+  member-owned warm target but never consumes ready inventory. Pending targets
+  reconcile before new allocation. Invalid modes fail deploy/runtime parsing.
+- `HOSTED_EXECUTION_STANDBY_TARGET` defaults to `2`, accepts integers from `0`
+  through `32`, and cannot exceed the unified application's capacity. This is
+  a total global ready inventory, not a per-region reservation. Rendered Worker
+  config carries its canonical string value.
 - `CF_CONTAINER_MAX_INSTANCES` is the total member fleet budget (default `1000`
   for an unconfigured environment, with zero legacy reservation).
   `CF_LEGACY_STANDBY_CONTAINER_MAX_INSTANCES` reserves part of that total for
@@ -1817,7 +1815,7 @@ continue to work with omission, and no Web, database, pool-size, or environment
 change is needed. Before enabling the producer, prove the live Worker release
 contains the accepting parser. After deployment, exercise a signed Temporal
 default request derived from conversation lag and observe a claimed standby,
-then verify background-only work defers on an empty pool and ordinary runtime
+then verify background-only work remains excluded and ordinary runtime
 completion clears its exact fence. Producer rollback is compatible with the
 new receiver; roll back and drain the producer before any receiver rollback
 below this request contract.
@@ -1851,20 +1849,21 @@ limits at 648 unified plus 100 legacy, with one separate deploy-smoke instance.
 It does not reserve 100 ready containers. The new ready target is independently
 configured with `HOSTED_EXECUTION_STANDBY_TARGET=2`.
 
-The warm-only background release assumes the unified fleet cutover is complete.
-Deploy the Worker with `allocate` mode and a positive ready target; preserve
-all existing Durable Object exports, bindings, and migration history. No Web,
-Temporal, Postgres, or runner job-format rollout is required. The additive
-background warm-readiness RPC fails closed against older receivers;
-old Workers retain their earlier behavior until replaced. Warm health and
-background dispatch use native port requests without the SDK auto-start helper.
+Deploy the Worker and matching image with standby mode `off` first. Retain the
+existing Durable Object exports, bindings, and migration history, including `v7`.
+New warm and cold targets use `RUNNER_CONTAINER` and globally eligible placement;
+existing exact-user and ENAM standby references continue through their original
+namespace and exact retirement path. There is no new member coordinator or
+cross-namespace identity rewrite. Old coordinators drain their own pristine slots.
+A mixed rollout must prove both a retained legacy binding and a new opaque binding
+can complete or retire through their exact owner before allocation is enabled.
 
-Before rollout, verify the existing ready target and quota headroom. The target
-and container capacity stay unchanged. After rollout, verify effective mode,
-background deferral and later recovery, exact owner release, and
-foreground promotion of an active background runtime. Pristine preparations
-remain bounded by two shared lanes; no per-member cold preparation is added.
-Retained legacy bindings continue through their existing retirement paths.
+Use `shadow` to verify two current-release pristine slots can stay ready, failed
+preparations recover, and stale slots drain. Then enable `allocate` and verify
+concurrent authenticated foreground requests claim distinct slots, background-only
+starts do not claim inventory, and completion clears the member's exact fence.
+Mode changes do not require a Web or Temporal change; preserve the already deployed
+`conversationWorkPending` receiver/producer contract described above.
 
 Keep the legacy reservation until its running containers have drained. Reduce it
 explicitly as capacity is released; at `0`, the unified application receives the
@@ -1873,11 +1872,9 @@ binding while dormant stored references can still require recovery. Removing the
 binding or class requires separate proof that both live and dormant references
 are gone; a low running-container count alone is insufficient.
 
-Turning mode `off` is not a supported mitigation for this release: it strands
-fresh background work and the deploy renderer rejects it. A source rollback
-restores prior background cold-start behavior without a schema reversal. Once a
-new opaque target has been persisted, versions that cannot read that identity
-are below the rollback floor.
+Turning mode `off` stops speculative warm inventory; it does not undo the unified
+cold lifecycle or terminate bound member work. Once a new opaque target has been
+persisted, versions that cannot read that identity are below the rollback floor.
 Forward-deploy compatible fixes while retaining both namespace readers. Any actual
 Cloudflare rollback still requires explicit authorization for that exact action.
 
