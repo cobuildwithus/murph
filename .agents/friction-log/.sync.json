@@ -1521,6 +1521,10 @@
       "path": ".agents/friction-log/20260916152603-device-syncd-maximum/friction.md"
     },
     {
+      "issue": "cobuildwithus/murph#3840",
+      "path": ".agents/friction-log/20260916155845-environment-interrupted-recording/friction.md"
+    },
+    {
       "issue": "cobuildwithus/murph#3841",
       "path": ".agents/friction-log/20260916161600-playwright-smoke-server/friction.md"
     },
