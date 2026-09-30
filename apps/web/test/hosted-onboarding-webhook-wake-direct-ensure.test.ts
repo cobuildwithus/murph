@@ -1,3 +1,4 @@
+import { Prisma } from "@prisma/client";
 import {
   beforeEach,
   describe,
@@ -340,14 +341,20 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
     consoleInfo.mockRestore();
   });
 
-  it("logs only aggregate metadata when direct timing no longer matches", async () => {
+  it.each(["unmatched", "prisma", "unknown"])("keeps direct timing failure diagnostics private: %s", async (failure) => {
     const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const afterResponseTasks: Array<() => Promise<void>> = [];
-    mocks.recordHostedIngressDirectEnsureTiming.mockResolvedValueOnce({
-      matchedCount: 0,
-      recorded: false,
-      unmatchedCount: 1,
-    });
+    if (failure === "unmatched") {
+      mocks.recordHostedIngressDirectEnsureTiming.mockResolvedValueOnce({
+        matchedCount: 0, recorded: false, unmatchedCount: 1,
+      });
+    } else {
+      mocks.recordHostedIngressDirectEnsureTiming.mockRejectedValueOnce(failure === "prisma"
+        ? new Prisma.PrismaClientKnownRequestError("synthetic private SQL detail", {
+          clientVersion: "test", code: "P2028", meta: { privateField: "synthetic private value" },
+        })
+        : new Error("synthetic private detail"));
+    }
     mocks.ensureRuntimeProcessing.mockImplementationOnce(async (input: DirectEnsureInput) => {
       input.onTiming({
         directEnsureAction: "woken",
@@ -381,13 +388,18 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
       await Promise.all(afterResponseTasks.map((task) => task()));
 
       expect(consoleWarn).toHaveBeenCalledWith(
-        "Hosted direct ensure wake timing record did not match.",
-        {
+        failure === "unmatched" ? "Hosted direct ensure wake timing record did not match." : "Hosted direct ensure wake timing record failed.",
+        failure === "unmatched" ? {
           matchedCount: 0,
           source: "linq",
           unmatchedCount: 1,
+        } : {
+          errorName: failure === "prisma" ? "PrismaClientKnownRequestError" : "Error",
+          ...(failure === "prisma" ? { prismaCode: "P2028" } : {}),
+          source: "linq",
         },
       );
+      expect(JSON.stringify(consoleWarn.mock.calls)).not.toContain("synthetic private");
     } finally {
       consoleWarn.mockRestore();
     }

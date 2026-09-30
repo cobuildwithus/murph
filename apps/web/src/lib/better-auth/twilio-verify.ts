@@ -9,17 +9,19 @@ export interface HostedAuthSmsVerification {
 
 const phonePattern = /^\+[1-9]\d{6,14}$/u;
 const verificationPattern = /^VE[0-9a-f]{32}$/iu;
+type VerifyFailure = "invalid_request" | "configuration" | "transaction" | "transport"
+  | "aborted" | "timeout" | "provider_http" | "invalid_response" | "binding_mismatch";
 
 /** Only closed statuses and bound verification IDs escape this provider boundary. */
 export function hostedAuthSmsVerification(signal?: AbortSignal): HostedAuthSmsVerification {
   return {
     async send({ phoneNumber }) {
-      if (!phonePattern.test(phoneNumber)) throw unavailable("send");
+      if (!phonePattern.test(phoneNumber)) throw unavailable("send", "invalid_request");
       const result = await requestVerify("send", "Verifications", {
         To: phoneNumber, Channel: "sms", RiskCheck: "enable",
       }, signal);
       if (!result || result.status !== "pending" || result.to !== phoneNumber || result.channel !== "sms"
-        || typeof result.sid !== "string" || !verificationPattern.test(result.sid)) throw unavailable("send");
+        || typeof result.sid !== "string" || !verificationPattern.test(result.sid)) throw unavailable("send", "invalid_response");
       return result.sid;
     },
     async check({ phoneNumber, verificationSid, code }) {
@@ -28,7 +30,7 @@ export function hostedAuthSmsVerification(signal?: AbortSignal): HostedAuthSmsVe
         VerificationSid: verificationSid, Code: code,
       }, signal);
       if (!result) return false;
-      if (result.sid !== verificationSid || result.to !== phoneNumber || result.channel !== "sms") throw unavailable("check");
+      if (result.sid !== verificationSid || result.to !== phoneNumber || result.channel !== "sms") throw unavailable("check", "binding_mismatch");
       return result.status === "approved";
     },
   };
@@ -38,33 +40,64 @@ async function requestVerify(
   operation: "send" | "check", path: "Verifications" | "VerificationCheck",
   body: Record<string, string>, signal?: AbortSignal,
 ): Promise<Record<string, unknown> | null> {
-  try {
-    if (areHostedDomainRootProviderCallsDisabled()) throw new Error("Provider calls are forbidden inside auth transactions.");
-    const config = readVerifyConfig();
-    if (!config) throw unavailable(operation);
-    const { account, key, secret, service } = config;
-    const response = await fetch(`https://verify.twilio.com/v2/Services/${service}/${path}`, {
-      method: "POST", redirect: "error", cache: "no-store",
-      signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(10_000)]) : AbortSignal.timeout(10_000),
-      headers: {
-        authorization: `Basic ${Buffer.from(`${key}:${secret}`).toString("base64")}`,
-        "content-type": "application/x-www-form-urlencoded",
-      },
-      body: new URLSearchParams(body),
-    });
-    if (!response.ok) {
-      await response.body?.cancel();
-      // Verify removes expired, consumed and exhausted challenges. All other
-      // failures remain provider-unavailable, never successful verification.
-      if (operation === "check" && response.status === 404) return null;
-      throw unavailable(operation);
+  if (areHostedDomainRootProviderCallsDisabled()) throw unavailable(operation, "transaction");
+  const config = readVerifyConfig();
+  if (!config) throw unavailable(operation, "configuration");
+  const { account, key, secret, service } = config;
+  const response = await fetch(`https://verify.twilio.com/v2/Services/${service}/${path}`, {
+    method: "POST", redirect: "error", cache: "no-store",
+    signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(10_000)]) : AbortSignal.timeout(10_000),
+    headers: {
+      authorization: `Basic ${Buffer.from(`${key}:${secret}`).toString("base64")}`,
+      "content-type": "application/x-www-form-urlencoded",
+    },
+    body: new URLSearchParams(body),
+  }).catch((error: unknown) => {
+    const reason = signal?.aborted ? "aborted"
+      : error instanceof Error && error.name === "TimeoutError" ? "timeout" : "transport";
+    throw unavailable(operation, reason);
+  });
+  if (!response.ok) {
+    // Verify removes expired, consumed and exhausted challenges. All other
+    // failures remain provider-unavailable, never successful verification.
+    if (operation === "check" && response.status === 404) {
+      await response.body?.cancel().catch(() => {});
+      return null;
     }
-    const result: unknown = await response.json();
-    if (!result || typeof result !== "object" || Array.isArray(result)
-      || !("account_sid" in result) || result.account_sid !== account
-      || !("service_sid" in result) || result.service_sid !== service) throw unavailable(operation);
-    return result;
-  } catch { throw unavailable(operation); }
+    throw unavailable(operation, "provider_http", response.status, await readVerifyErrorCode(response));
+  }
+  const result: unknown = await response.json().catch(() => { throw unavailable(operation, "invalid_response"); });
+  if (!result || typeof result !== "object" || Array.isArray(result)
+    || !("account_sid" in result) || result.account_sid !== account
+    || !("service_sid" in result) || result.service_sid !== service) throw unavailable(operation, "binding_mismatch");
+  return result;
+}
+
+// Twilio messages can contain contacts. Retain only its numeric error code,
+// with a small read budget; never attach the provider body or thrown cause.
+async function readVerifyErrorCode(response: Response): Promise<number | undefined> {
+  const reader = response.body?.getReader();
+  if (!reader) return undefined;
+  const chunks: Uint8Array[] = [];
+  let bytes = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      bytes += value.byteLength;
+      if (bytes > 4096) return undefined;
+      chunks.push(value);
+    }
+    const result: unknown = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+    if (result && typeof result === "object" && "code" in result
+      && typeof result.code === "number" && Number.isInteger(result.code)
+      && result.code >= 10000 && result.code <= 99999) return result.code;
+  } catch { /* Missing diagnostics must preserve the provider's HTTP failure. */ }
+  finally {
+    await reader.cancel().catch(() => {});
+    reader.releaseLock();
+  }
+  return undefined;
 }
 
 function readVerifyConfig() {
@@ -77,8 +110,9 @@ function readVerifyConfig() {
   return { account, key, secret, service };
 }
 
-function unavailable(operation: "send" | "check") {
+function unavailable(operation: "send" | "check", reason: VerifyFailure, status?: number, providerCode?: number) {
   return hostedOnboardingError({
+    cause: new Error(`Twilio Verify ${operation}: ${reason}${status === undefined ? "" : `; HTTP ${status}`}${providerCode === undefined ? "" : `; code ${providerCode}`}.`),
     code: operation === "send" ? "AUTH_DELIVERY_UNAVAILABLE" : "AUTH_VERIFICATION_UNAVAILABLE",
     httpStatus: 503,
     message: operation === "send" ? "We could not send a sign-in code. Try again shortly."

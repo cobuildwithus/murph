@@ -3,6 +3,10 @@ in [the import-speed plan](exec-plans/completed/2026-09-24-garmin-import-speed.m
 
 # Murph Agent Docs Index
 
+Bounded device-webhook enqueue recovery is owned by `RELIABILITY.md`;
+private SMS provider failure diagnostics are owned by
+`../docs/hosted-auth-migration.md` under "SMS verification owner".
+
 Exercise image audit findings and published repair evidence are recorded in
 [the image audit](../artifacts/exercise-image-audit-2026-09-28.md);
 [the completed repair plan](exec-plans/completed/2026-09-28-exercise-image-audit.md)

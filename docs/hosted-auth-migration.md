@@ -117,6 +117,12 @@ response or a failure before its local save requires a new code request; it
 cannot be treated as approved. Start/check calls have a ten-second deadline,
 propagate request cancellation and do not retry automatically. Missing service
 configuration, rejected provider authority and malformed responses fail closed.
+Server-side failure causes retain only the operation, fixed failure stage,
+HTTP status and a five-digit numeric Twilio code read from at most 4 KiB.
+Provider prose, contacts, response bodies and original exceptions are discarded;
+the public authentication error remains unchanged. Use these diagnostics to
+distinguish configuration, transport and provider rejection before changing
+provider settings or delivery policy.
 
 Keep issuance off while deploying this owner. Old raw SMS records and new Verify
 records are mutually incompatible; users would need a fresh code if switching
