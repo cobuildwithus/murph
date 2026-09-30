@@ -10981,7 +10981,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
     }, 360_000,
   )
 
-  it.each(['available', 'missing', 'unavailable', 'previously_declined', 'usual_complete', 'usual_missing', 'unknown_history'] as const)(
+  it.each(['available', 'missing', 'unavailable', 'previously_declined', 'usual_complete', 'usual_missing', 'unknown_history', 'known_late_arrival', 'multiple_dates'] as const)(
     'handles wearable freshness recovery in a scheduled group update: %s',
     async (scenario) => {
       const config = await resolveRealCodexE2eConfig()
@@ -11028,7 +11028,8 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
           model: config.model, modelProvider: config.modelProvider,
           prompt: [
             'Scheduled group automation: daily-sleep-summary. Runs every day at 09:00 America/New_York.',
-            'Recipe: Share today’s sleep duration for everyone. Keep it short.',
+            scenario === 'multiple_dates' ? 'Recipe: Share sleep durations for August 3 and August 5 for everyone, labeling both dates. Keep it short.' : 'Recipe: Share today’s sleep duration for everyone. Keep it short.',
+            ...(scenario === 'known_late_arrival' ? ['Saved report context: On each of the last five mornings, Quinn’s sleep first appeared at 09:20, after the 09:00 report. The creator has not been offered a schedule change.'] : []),
             ...(scenario === 'previously_declined' ? ['Recent conversation: The report creator declined the offered later time and asked to keep the usual schedule.'] : []),
           ].join('\n'),
           reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
@@ -11040,7 +11041,9 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
         process.stdout.write(`[wearable-freshness-e2e] ${JSON.stringify({ scenario, reply })}\n`)
         expect(sharedRequests).toEqual([{
           projectionScopes: [{ projectionKind: 'sleep-duration-days.v0' }],
-          freshness: [{ projectionScopeKey: 'sleep-duration-days.v0', date: '2026-08-05' }],
+          freshness: scenario === 'multiple_dates'
+            ? expect.arrayContaining([{ projectionScopeKey: 'sleep-duration-days.v0', date: '2026-08-03' }, { projectionScopeKey: 'sleep-duration-days.v0', date: '2026-08-05' }])
+            : [{ projectionScopeKey: 'sleep-duration-days.v0', date: '2026-08-05' }],
         }])
         expect(automationRequests).toHaveLength(0)
         expect(readCapabilityRoutingActions(result.jsonEvents).filter((action) => action.kind === 'dynamic')).toHaveLength(1)
@@ -11054,7 +11057,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
         } else {
           expect(reply).toMatch(/Quinn/iu)
           if (scenario !== 'usual_complete') expect(reply).toMatch(/9:04/iu)
-          if (scenario === 'previously_declined' || scenario === 'usual_complete' || scenario === 'unknown_history') {
+          if (scenario !== 'known_late_arrival') {
             expect(reply).not.toMatch(/(?:move|delay|reschedul)[^.!?\n]{0,80}(?:30|half an hour|9:30)|\?/iu)
           } else {
             expect(reply).toMatch(/30(?:[- ]|\s*)min|half an hour|9:30/iu)

@@ -580,7 +580,9 @@ only for freshness requests. It introduces no Web transport field or history sto
 
 Scheduled missing-sleep replies include available results and the actual shared
 check time in the known schedule timezone. Only a missing current sleep date with
-recent reporting evidence may trigger a thirty-minute delay offer; unknown or
+recent reporting evidence and explicit evidence of usual arrival after the cutoff may
+trigger a thirty-minute delay offer. Recent shared history or completed polling alone
+does not establish late arrival. Unknown or
 long-absent reporters alone do not justify moving the group schedule. Only an authorized affirmative reply changes the
 existing automation through canonical inspect and versioned patch; timezone,
 recurrence, content and destination remain owned by that automation.
@@ -607,7 +609,10 @@ state. It returns only public source labels, coarse connection state, status
 observation times, and the honestly named connection-wide sync-job completion
 time. It excludes connection, account, device, and provider identifiers,
 credentials, provider payloads and errors, raw health values, and private
-diagnostics. A connection sync-job time is not evidence that a health record or
+diagnostics. Connected sources meeting the existing source-stall or recovery-notice
+silence policy are reported as `needs-attention`, without changing stored source
+status or exposing arrival timestamps. A subsequent receipt clears that derived
+attention state. A connection sync-job time is not evidence that a health record or
 challenge metric arrived. Device data is never produced by the grantor runtime
 or stored in the share snapshot column. Duplicate public labels select one
 complete observation from the latest connection `connectedAt` and source
