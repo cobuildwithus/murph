@@ -1,6 +1,6 @@
 # Reduce runtime admission database calls
 
-Status: active
+Status: completed
 Created: 2026-09-30
 Updated: 2026-09-30
 
@@ -40,4 +40,10 @@ Web-only implementation changes preserve command request/response shapes and dat
 - Product UX: Ready at the changed admission boundary; no claim of measured wall-clock or delivered-message improvement.
 - Changelog: not applicable; internal query-budget reduction with unchanged product behavior and no measured member-visible latency claim.
 - Opus 5.5 full candidate review: PASS, no correctness regressions. Accepted explicit AND composition and removed duplicated operation counts from the runtime reference; deferred an optional type split that adds no current behavior. Its suggested existing-owner consent coverage already exists in the sponsorship regression.
-- Final combined focused suite: 117 passed; Web typecheck and complexity guard passed after the review edits. Opus focused confirmation is pending; ReviewGPT, CI and production rollout remain pending.
+- Final combined focused suite: 117 passed; Web typecheck and complexity guard passed after the review edits.
+- CI identified older migration assertions that omitted the newly returned internal routing field. Updated four exact expected objects; no production behavior changed. Fully migrated PostgreSQL owner, access, migration, member-cutover and checkpoint suites: 93 passed. Web typecheck passed again.
+- ReviewGPT Round 1: PASS on `5649f375fd628b7e9f687b43aedc124c60dff43b`, with zero findings. Apollo selected GPT-6 Pro; guarded full snapshot, exact accepted turn, completed marker and capture identity validated. Capture took approximately ten minutes, above the 180-second minimum. The response specifically inspected eligibility composition, consent serialization, sponsorship, retention, routing, fencing and direct-wake recovery; proportionate to this bounded change.
+- Review: https://chatgpt.com/c/6abc8c5d-e1b8-83ea-8e1a-d9aac664bda0
+- Final parent review: retained the separate member lock, shared access policy and transaction-owned routing facts. No further justified production simplification. Post-review changes are isolated assertion corrections and explanatory documentation, exempt from another substantive review.
+- Implementation and local verification complete. PR #3915 owns final-head CI, the optional Opus follow-up confirmation, authorized merge, managed deployment and post-promotion observation; those delivery steps remain pending.
+Completed: 2026-09-30
