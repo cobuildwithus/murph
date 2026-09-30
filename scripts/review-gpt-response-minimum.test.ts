@@ -41,6 +41,57 @@ afterEach(() => {
 });
 
 describe("installed ReviewGPT marked-response minimum", () => {
+  it.each([false, true])("preserves truncated signature whitespace with changed signature=%s", (changed) => {
+    const signature = `${"s".repeat(319)} `;
+    const user = { ...committedUserTurn, signature };
+    const response = {
+      ...snapshot,
+      precedingUserMessageSignature: changed ? `${"s".repeat(319)}!` : signature,
+    };
+    const candidate = review.selectAssistantResponseCandidate(
+      { assistantSnapshots: [response] }, [], [], true, signature, user.turnId, user.turnIndex,
+    );
+    const attestation = review.modelAttestationForSnapshot("gpt-6-pro", response, true, signature);
+
+    if (changed) {
+      expect(candidate.snapshot).toBeNull();
+      expect(attestation.failure).toContain("committed user turn");
+    } else {
+      expect([candidate.snapshot?.precedingUserMessageSignature, attestation.failure])
+        .toEqual([signature, ""]);
+      const capture = review.buildThreadCaptureIdentity({
+        assistantSnapshot: response, committedUserTurn: user,
+        browserEndpoint: "http://127.0.0.1:9222",
+        chatUrl: "https://chatgpt.com/c/11111111-1111-4111-8111-111111111111",
+        targetId: "synthetic-target",
+      });
+      expect(capture.committedUserTurn.signature)
+        .toBe(`sha256:${createHash("sha256").update(signature).digest("hex")}`);
+    }
+  });
+
+  it("captures stable marked history-loading replies while preserving generation gates", () => {
+    const candidate = { text: responseText, hasCopyButton: true };
+    for (const status of ["Loading older messages…", "Loading older messages...", "Loading older messages"]) {
+      const generationActive = review.responseStatusTextIndicatesBusy(status);
+      expect(generationActive).toBe(false);
+      const stableCount = review.nextResponseStabilityCount({
+        stableCount: 3, candidateMatchesPrevious: true, candidateHasText: true, generationActive,
+      });
+      const input = { candidate, generationActive, stableCount, stablePollsRequired: 4,
+        isDeepResearchMode: false, sawGenerationActive: true, responseMarker: "REVIEW_COMPLETE" };
+      expect(review.shouldFinishAssistantResponseWait(input)).toBe(true);
+      expect(review.shouldFinishAssistantResponseWait({ ...input, stableCount: 3 })).toBe(false);
+      expect(review.shouldFinishAssistantResponseWait({ ...input,
+        candidate: { text: "Still reviewing", hasCopyButton: true },
+      })).toBe(false);
+      expect(review.shouldFinishAssistantResponseWait({ ...input, generationActive: true })).toBe(false);
+    }
+    for (const status of ["Loading", "Generating response", "Loading older messages… Thinking"]) {
+      expect(review.responseStatusTextIndicatesBusy(status)).toBe(true);
+    }
+  });
+
   it("assembles a nonce-bound prompt without model self-confirmation", () => {
     const prompt = review.appendResponseCapturePrompt("Review the synthetic change.", {
       shouldSend: true, shouldWaitForResponse: true, isDeepResearchMode: false,

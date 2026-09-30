@@ -25,3 +25,14 @@ Expected: capture completes. Observed: statusBusy=true keeps the waiter active.
 ## Context
 
 Observed twice with history loading present. Exact-metadata recovery confirmed the accepted turn and completed reply; no stop control or capability-limit notice was present. Recovery required neither a duplicate send nor weakened identity/model gates. This is a busy-state classification issue, distinct from hard-refresh transport failure and exact-thread recovery.
+
+## Resolution
+
+Upstream [ReviewGPT PR #6](https://github.com/cobuildwithus/review-gpt/pull/6)
+fixes the history-only busy-state classification. Murph
+now pins the registry release 0.5.151, which includes that fix and the separately
+reviewed exact-identity recovery in
+[ReviewGPT PR #8](https://github.com/cobuildwithus/review-gpt/pull/8). The installed-package
+regression accepts a stable completed reply while history loads, and retains
+negative controls for genuine generation, instability and a missing marker.
+Accepted-turn, model, artifact and minimum-duration gates remain enforced.
