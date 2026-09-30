@@ -2375,6 +2375,13 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
     const baseRunnerInput: HostedWorkspaceRunnerInput = {
       awaitBackgroundMaintenanceBarrier: async (barrier) => {
         if (!startExactDetachedAssistantAsk) {
+          if (
+            barrier.foregroundConversationWorkObserved()
+            && !runtimeOwnerHandoffRequested
+            && !backgroundWorkSignal.aborted
+          ) {
+            detachedAssistantAskController?.resume();
+          }
           return;
         }
         await barrier.drainPendingForegroundWake();
@@ -5872,8 +5879,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           );
           if (!runtimeOwnerHandoffRequested && !backgroundWorkSignal.aborted) {
             // Continued foreground work keeps this invocation alive after a
-            // checkpoint. Resume both paused read controllers as well.
-            detachedAssistantAskController?.resume();
+            // checkpoint. Resume its paused clinical continuation as well.
             clinicalEnrichmentController?.resume();
           }
           result = await runWorkspaceForegroundPass({
@@ -6063,6 +6069,18 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           const runtimeStateDirtyAfterMailboxImport = runtimeStateDirty;
           runtimeStateDirty = runtimeStateDirtyBeforeMailboxImport;
           try {
+            // Full work admission may release retained Ask kicks only when no
+            // checkpointed effects await draining. Checkpoint-safe import alone
+            // preserves the paused successor; actual foreground batches resume
+            // at their own admission boundary.
+            if (
+              input.systemMailboxAdmission === "all"
+              && readyDurableCheckpointEffects.length === 0
+              && !runtimeOwnerHandoffRequested
+              && !backgroundWorkSignal.aborted
+            ) {
+              detachedAssistantAskController?.resume();
+            }
             return await runForegroundPass({
               ...wakeInput,
               providerStartCriticalPath: foregroundProviderStartCriticalPath,

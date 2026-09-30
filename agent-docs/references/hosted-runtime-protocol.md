@@ -60,13 +60,19 @@ The live ownership split is:
   quiet window. Claimed detached Asks publish their existing expiry before
   preparation dirties the workspace, protecting preparation and execution until
   settlement or expiry. Both detached Ask and clinical enrichment controllers
-  pause before snapshots and stay paused through checkpoint-only effect drain
-  and return. If the same invocation continues foreground work, its existing
-  continuation boundary resumes both unless background work is aborted or owner
-  handoff has started. Shutdown and owner handoff still abort and requeue the
-  exact child. Other active-child deadlines and save-before-effect ordering
-  still apply. This lets background runs reach ordinary container cleanup,
-  including its 60-second safety recheck, without another runtime idle delay.
+  pause before snapshots. Outside the existing exact-Ask barrier, detached Ask
+  resumes only for observed foreground conversation work (including an initial
+  batch) or work admitted through the full mailbox path when no ready durable
+  checkpoint effects remain. A due committed assistant wake permits only
+  checkpoint-safe system import; that import and routine checkpoint/effect
+  follow-up passes do not themselves resume Ask.
+  Detached Ask stays paused through checkpoint-only effect drain and return.
+  Its admission paths remain gated by background abort and owner handoff.
+  Clinical enrichment retains its existing foreground-pass resume boundary.
+  Shutdown and owner handoff still abort and requeue the exact child. Other
+  active-child deadlines and save-before-effect ordering still apply. This lets
+  background runs reach ordinary container cleanup, including its 60-second
+  safety recheck, without another runtime idle delay.
   The exact assistant wake projected directly by the current foreground
   assistant phase may run once before that floor without checkpointing. The
   exact phone-call-result, usage-referral-reward, legacy `aask_done_*`, and
