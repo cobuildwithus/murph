@@ -145,26 +145,53 @@ All fresh member execution uses the selected globally eligible runner target,
 target before promotion; both use the same lifecycle implementation. See
 `DEPLOY.md` for preparation, exact-image admission and drain ownership.
 Warm and cold allocations use the same opaque target identity and lifecycle.
-`HOSTED_EXECUTION_STANDBY_TARGET` selects the number of pristine ready slots:
-its default is `2`, and valid values are integers from `0` through `32`. This is
-one global inventory, not a separate target in every region.
+`HOSTED_EXECUTION_STANDBY_TARGET` reserves pristine ready slots for foreground
+work: its default is `2`, and valid values are integers from `0` through `32`.
+Deployment requires `allocate` mode and a positive target. In allocation mode, the same global coordinator maintains
+one additional surplus slot for background work. Deployment validates the total
+against available application capacity after the legacy reservation.
 
-`HOSTED_EXECUTION_STANDBY_MODE` controls inventory only:
+`HOSTED_EXECUTION_STANDBY_MODE` controls inventory and fresh background capacity:
 
-- `off` (the default) retires coordinator-owned slots and advertises none.
+- `off` retires coordinator-owned slots and advertises none.
 - `shadow` maintains and measures the configured inventory without allocating it.
-- `allocate` offers ready slots to authenticated foreground conversation work.
+- `allocate` (the deployment default) offers ready slots to authenticated foreground conversation work
+  and surplus slots to background mailbox work.
 
-Only fence-free `default` work from validated Web-direct ingress or an
-authenticated request carrying `conversationWorkPending: true` may claim a slot.
-Temporal derives that fact from fresh admitted conversation lag. Background-only
-work reuses its own warm target or starts a cold target in the same fleet.
-A missed or unavailable claim falls back to that same cold allocation lifecycle.
-Each claim immediately fills a deficit using any free preparation lane, including
-while another preparation is pending. At most two preparations run concurrently;
-SQLite reservations and recovery alarms retain reset and retry ownership. The
-coordinator owns only pristine inventory and abandoned handoff cleanup, not member
-execution or capacity leases.
+Fresh `default` work from validated Web-direct ingress or an authenticated
+request carrying `conversationWorkPending: true` may claim any ready slot.
+Temporal derives that fact from fresh admitted conversation lag. A missed
+foreground claim retains its existing cold fallback.
+
+`system_mailbox` reuses a retained warm target or claims only above the full
+foreground reserve in the coordinator's atomic transaction. It never falls back
+to a cold start. Empty, unavailable, or disabled inventory releases the newly
+claimed target-less Postgres owner and returns `retry_later` with 15–30 seconds of jitter; no workspace
+preparation starts on that path. Durable mailbox work remains pending. With
+`off`, `shadow`, or a zero target, fresh background execution waits for inventory
+to be enabled; retained warm execution and active-runtime wakes still work.
+The deploy renderer rejects those configurations to prevent silent background
+starvation. Low-level compatibility readers retain them for old deployments.
+
+A dedicated background claim RPC fails closed on old coordinators. Background
+readiness uses a dedicated warm-only receiver RPC with a three-second bound.
+Workspace preparation starts only after warm proof, with budget reserved for
+retirement on failure. Health and dispatch use native port I/O rather than the
+SDK transport that automatically starts stopped shells. Invocation readiness also
+rejects a stopped shell instead of restarting it. A stale or failed retained
+shell follows exact retirement before another admission. An uncertain stop or
+owner response preserves existing reconciliation. Foreground callers recheck
+starting ownership after at most one second; the thirty-second startup deadline
+still governs when to attempt exact retirement, never proof of stoppedness.
+Active background invocations continue to promote in place.
+
+Each claim immediately fills a deficit using any free preparation lane. At most
+two preparations run concurrently across the shared inventory; background demand
+cannot start additional per-member cold containers. SQLite reservations and
+recovery alarms retain reset and retry ownership. The coordinator owns only
+pristine inventory and abandoned handoff cleanup, not member execution or
+capacity leases. This bounds startup fanout and protects ready inventory; it is
+not a cap on active member invocations or downstream provider concurrency.
 The public banner and health response expose the effective mode, and deployment
 smoke checks the newly deployed Worker version against the rendered mode.
 

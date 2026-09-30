@@ -15,6 +15,8 @@ export const HOSTED_STANDBY_CLAIM_TIMEOUT_MS = 1_000;
 export const HOSTED_STANDBY_READY_TIMEOUT_MS = 75_000;
 export const HOSTED_STANDBY_ORPHAN_GRACE_MS = 2 * 60_000;
 export const HOSTED_STANDBY_RETRY_MS = 30_000;
+// One extra pristine slot; the configured foreground inventory is never borrowed.
+export const HOSTED_BACKGROUND_STANDBY_TARGET = 1;
 
 export type HostedStandbyMode = "allocate" | "off" | "shadow";
 
@@ -43,6 +45,8 @@ export interface HostedStandbyCoordinatorState {
 
 export interface HostedStandbyCoordinatorStubLike {
   claimReadyStandby(input: HostedStandbyClaimRequest): Promise<HostedStandbyClaimResult>;
+  /** Separate RPC: old coordinators must fail closed rather than ignore priority. */
+  claimReadyBackgroundStandby?(input: HostedStandbyClaimRequest): Promise<HostedStandbyClaimResult>;
   ensureReadyStandby(input: {
     releaseId: string;
     region: HostedRunnerRegion;
@@ -206,6 +210,13 @@ export function readHostedStandbyTarget(
     throw new TypeError("HOSTED_EXECUTION_STANDBY_TARGET must be an integer from 0 to 32.");
   }
   return value;
+}
+
+/** Preparation stays bounded by the existing coordinator lanes. */
+export function readHostedStandbyInventoryTarget(source: Readonly<Record<string, unknown>>): number {
+  const foreground = readHostedStandbyTarget(source);
+  return foreground > 0 && readHostedStandbyMode(source) === "allocate"
+    ? foreground + HOSTED_BACKGROUND_STANDBY_TARGET : foreground;
 }
 
 export function readHostedStandbyReleaseId(

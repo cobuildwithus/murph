@@ -28,7 +28,6 @@ describe("Cloudflare container rollout config", () => {
     { total: "748", legacy: "100", expectedMain: 648, expectedLegacy: 100 },
     { total: "648", legacy: "0", expectedMain: 648, expectedLegacy: 0 },
     { total: "748", legacy: "0", expectedMain: 748, expectedLegacy: 0 },
-    { total: "1", legacy: "0", expectedMain: 1, expectedLegacy: 0 },
     { total: "3", legacy: "1", expectedMain: 2, expectedLegacy: 1 },
     { total: "5", legacy: "2", expectedMain: 3, expectedLegacy: 2 },
     { total: "7", legacy: "3", expectedMain: 4, expectedLegacy: 3 },
@@ -42,7 +41,7 @@ describe("Cloudflare container rollout config", () => {
       ...REQUIRED_HOSTED_CRYPTO_WORKER_VARS,
       CF_CONTAINER_MAX_INSTANCES: total,
       CF_LEGACY_STANDBY_CONTAINER_MAX_INSTANCES: legacy,
-      HOSTED_EXECUTION_STANDBY_TARGET: String(Math.min(2, expectedMain)),
+      HOSTED_EXECUTION_STANDBY_TARGET: String(Math.min(2, expectedMain - 1)),
     };
     const config = buildHostedWranglerDeployConfig(readHostedDeployAutomationEnvironment(source));
     const containers = config.containers as Array<{
@@ -61,8 +60,8 @@ describe("Cloudflare container rollout config", () => {
       .toBe(Number(total ?? "1000") + 1);
     expect(containers[0]).not.toHaveProperty("constraints");
     expect(config.vars).toMatchObject({
-      HOSTED_EXECUTION_STANDBY_MODE: "off",
-      HOSTED_EXECUTION_STANDBY_TARGET: String(Math.min(2, expectedMain)),
+      HOSTED_EXECUTION_STANDBY_MODE: "allocate",
+      HOSTED_EXECUTION_STANDBY_TARGET: String(Math.min(2, expectedMain - 1)),
     });
     expect(config.vars).not.toHaveProperty("CF_CONTAINER_MAX_INSTANCES");
     expect(config.vars).not.toHaveProperty("CF_LEGACY_STANDBY_CONTAINER_MAX_INSTANCES");

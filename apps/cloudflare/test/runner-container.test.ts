@@ -2132,6 +2132,59 @@ describe("RunnerContainer", () => {
     expect(destroy).toHaveBeenCalledTimes(1);
   });
 
+  it("does not cold-start a stopped runner for background readiness or launch", async () => {
+    const { container, containerFetch, startAndWaitForPorts } = createContainerDouble();
+    expect(await container.ensureWarmForBackgroundProcessing({ timeoutMs: 7_500, userId: "member_123" }))
+      .toEqual({ kind: "not_warm" });
+    await expect(container.invoke({ userId: "member_123", timeoutMs: 7_500,
+      job: { kind: "workspace-invocation", request: { ...createRunnerRequest("evt_background_stopped"), processingMode: "system_mailbox" } },
+    })).rejects.toThrow("already-warm runner");
+    expect(startAndWaitForPorts).not.toHaveBeenCalled();
+    expect(containerFetch).not.toHaveBeenCalled();
+  });
+
+  it("bypasses the SDK auto-start transport for background health and dispatch", async () => {
+    const { container, containerFetch, startAndWaitForPorts } = createContainerDouble({ initialStatus: "running", platformRunning: true });
+    const sdkFetch = vi.fn(async () => { throw new Error("Auto-start transport must not run."); });
+    Object.assign(container, { containerFetch: sdkFetch });
+    expect(await container.ensureWarmForBackgroundProcessing({ timeoutMs: 7_500, userId: "member_123" }))
+      .toMatchObject({ kind: "ready" });
+    await container.invoke({ userId: "member_123", timeoutMs: 7_500,
+      job: { kind: "workspace-invocation", request: { ...createRunnerRequest("evt_background_native_transport"), processingMode: "system_mailbox" } },
+    });
+    expect(sdkFetch).not.toHaveBeenCalled();
+    expect(startAndWaitForPorts).not.toHaveBeenCalled();
+    expect(containerFetch.mock.calls.some(([url]) => String(url).endsWith("/internal/workspace-invocation"))).toBe(true);
+  });
+
+  it("does not restart a background target that stops between readiness and launch", async () => {
+    const { container, startAndWaitForPorts, containerFetch } = createContainerDouble({ initialStatus: "running" });
+    expect(await container.ensureWarmForBackgroundProcessing({ timeoutMs: 7_500, userId: "member_123" }))
+      .toMatchObject({ kind: "ready" });
+    await container.destroy();
+    await expect(container.invoke({ userId: "member_123", timeoutMs: 7_500,
+      job: { kind: "workspace-invocation", request: { ...createRunnerRequest("evt_background_stops_before_launch"), processingMode: "system_mailbox" } },
+    })).rejects.toThrow("already-warm runner");
+    expect(startAndWaitForPorts).not.toHaveBeenCalled();
+    expect(containerFetch.mock.calls.some(([url]) => String(url).endsWith("/internal/workspace-invocation"))).toBe(false);
+  });
+
+  it("uses a healthy warm runner for background readiness without starting it", async () => {
+    const { container, startAndWaitForPorts } = createContainerDouble({ initialStatus: "running" });
+    expect(await container.ensureWarmForBackgroundProcessing({ timeoutMs: 7_500, userId: "member_123" }))
+      .toMatchObject({ kind: "ready", action: "already_warm" });
+    expect(startAndWaitForPorts).not.toHaveBeenCalled();
+  });
+
+  it("rejects failed warm health without cold restarting for background work", async () => {
+    const { container, startAndWaitForPorts } = createContainerDouble({ initialStatus: "running",
+      containerFetch: vi.fn(async () => new Response("unavailable", { status: 503 })),
+    });
+    await expect(container.ensureWarmForBackgroundProcessing({ timeoutMs: 7_500, userId: "member_123" }))
+      .rejects.toThrow("HTTP 503");
+    expect(startAndWaitForPorts).not.toHaveBeenCalled();
+  });
+
   it("ensureReadyForProcessing starts and health-checks without invoking workspace work", async () => {
     const { container, containerFetch, startAndWaitForPorts } = createContainerDouble();
 
@@ -5853,6 +5906,7 @@ describe("RunnerContainer", () => {
         const started = createDeferred<void>();
         let activeJobCount = 0;
         const { container, destroy } = createContainerDouble({
+          initialStatus: "running",
           containerFetch: vi.fn(async (url: string) => {
             if (url.endsWith("/health")) return Response.json({
               ...createRunnerHealthResult(), activeJobCount,

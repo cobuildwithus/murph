@@ -507,7 +507,7 @@ describe("hosted deploy automation helpers", () => {
     expect(config.vars.HOSTED_EXECUTION_WEB_CONTROL_TIMEOUT_MS).toBe("30000");
     expect(config.vars.HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS).toBe("180000");
     expect(config.vars.HOSTED_EXECUTION_RUNNER_LIFECYCLE_REEVALUATION_MS).toBe("60000");
-    expect(config.vars.HOSTED_EXECUTION_STANDBY_MODE).toBe("off");
+    expect(config.vars.HOSTED_EXECUTION_STANDBY_MODE).toBe("allocate");
     expect(config.vars.HOSTED_EXECUTION_STANDBY_TARGET).toBe("2");
     expect(config.vars.CF_CONTAINER_MAX_INSTANCES).toBeUndefined();
     expect(config.vars.CF_LEGACY_STANDBY_CONTAINER_MAX_INSTANCES).toBeUndefined();
@@ -627,7 +627,8 @@ describe("hosted deploy automation helpers", () => {
     })).toThrow(/CF_(?:LEGACY_STANDBY_)?CONTAINER_MAX_INSTANCES/u);
   });
 
-  it.each(["off", "shadow", "allocate"])("forwards %s mode and the ready inventory target", (mode) => {
+  it("forwards allocate mode and the ready inventory target", () => {
+    const mode = "allocate";
     const environment = readHostedDeployAutomationEnvironment({
       CF_BUNDLES_BUCKET: "hosted-bundles",
       CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
@@ -676,13 +677,34 @@ describe("hosted deploy automation helpers", () => {
     expect(() => readHostedDeployAutomationEnvironment({
       ...source,
       HOSTED_EXECUTION_STANDBY_TARGET: "3",
-    })).toThrow(/HOSTED_EXECUTION_STANDBY_TARGET must not exceed/u);
-    for (const target of ["0", "2"]) {
+    })).toThrow(/HOSTED_EXECUTION_STANDBY_TARGET.*must not exceed/u);
+    for (const target of ["1"]) {
       expect(readHostedDeployAutomationEnvironment({
         ...source,
         HOSTED_EXECUTION_STANDBY_TARGET: target,
       }).workerVars.HOSTED_EXECUTION_STANDBY_TARGET).toBe(target);
     }
+  });
+
+  it.each([{ mode: "off", target: "2" }, { mode: "shadow", target: "2" }, { mode: "allocate", target: "0" }])(
+    "rejects deployment without fresh background capacity: %j", ({ mode, target }) => {
+      expect(() => readHostedDeployAutomationEnvironment({
+        CF_BUNDLES_BUCKET: "hosted-bundles", CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
+        CF_WORKER_NAME: "hosted-worker", ...REQUIRED_HOSTED_CRYPTO_WORKER_VARS,
+        HOSTED_EXECUTION_STANDBY_MODE: mode, HOSTED_EXECUTION_STANDBY_TARGET: target,
+      })).toThrow(/Background execution requires/u);
+    });
+
+  it("includes the background surplus when validating allocate-mode capacity", () => {
+    const source = {
+      CF_BUNDLES_BUCKET: "hosted-bundles", CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
+      CF_WORKER_NAME: "hosted-worker", ...REQUIRED_HOSTED_CRYPTO_WORKER_VARS,
+      CF_CONTAINER_MAX_INSTANCES: "3", CF_LEGACY_STANDBY_CONTAINER_MAX_INSTANCES: "1",
+      HOSTED_EXECUTION_STANDBY_MODE: "allocate",
+    };
+    expect(() => readHostedDeployAutomationEnvironment({ ...source, HOSTED_EXECUTION_STANDBY_TARGET: "2" }))
+      .toThrow(/background surplus/u);
+    expect(readHostedDeployAutomationEnvironment({ ...source, HOSTED_EXECUTION_STANDBY_TARGET: "1" }).workerVars.HOSTED_EXECUTION_STANDBY_TARGET).toBe("1");
   });
 
   it("binds generated deploy config to the prepared runner fingerprints", () => {
@@ -903,7 +925,7 @@ describe("hosted deploy automation helpers", () => {
       ...expectedRequiredHostedCryptoWorkerVars(),
       HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "exa,hosted-email,linq,mapbox,telegram",
       HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "600000",
-      HOSTED_EXECUTION_STANDBY_MODE: "off",
+      HOSTED_EXECUTION_STANDBY_MODE: "allocate",
       HOSTED_EXECUTION_STANDBY_TARGET: "2",
       HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT: "production",
     });

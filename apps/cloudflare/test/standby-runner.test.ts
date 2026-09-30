@@ -630,7 +630,7 @@ describe("RunnerContainer slot lifecycle", () => {
 
 describe("StandbyRunnerCoordinatorDurableObject", () => {
   it("keeps transition inventory claimable and refillable through promotion with exact claim replay", async () => {
-    const h = createCoordinatorHarness({ target: "2" });
+    const h = createCoordinatorHarness({ inventorySize: "2" });
     h.ensure();
     await h.flush();
     const claimId = createHostedStandbyClaimId();
@@ -665,7 +665,7 @@ describe("StandbyRunnerCoordinatorDurableObject", () => {
     const state = createDurableObjectState(new DatabaseSync(":memory:"), pending);
     const slots = new Map<string, ReturnType<typeof createStandbyContainerHarness>>();
     const environment = {
-      ...TRANSITION_ENV, HOSTED_EXECUTION_STANDBY_MODE: "allocate", HOSTED_EXECUTION_STANDBY_TARGET: "2",
+      ...TRANSITION_ENV, HOSTED_EXECUTION_STANDBY_MODE: "allocate", HOSTED_EXECUTION_STANDBY_TARGET: "1",
       RUNNER_CONTAINER: { getByName(slotName: string) {
         let slot = slots.get(slotName);
         if (!slot) {
@@ -701,7 +701,7 @@ describe("StandbyRunnerCoordinatorDurableObject", () => {
   });
 
   it("warms a candidate without making it claimable, then reuses that inventory on promotion", async () => {
-    const h = createCoordinatorHarness({ target: "2" });
+    const h = createCoordinatorHarness({ inventorySize: "2" });
     const active = { bank: "primary", id: RELEASE_ID, bundleFingerprint: "a".repeat(64), sourceFingerprint: "b".repeat(64) };
     const candidate = { bank: "next", id: "next-candidate", bundleFingerprint: "c".repeat(64), sourceFingerprint: "d".repeat(64) };
     const nextGet = vi.fn(h.runnerGet);
@@ -720,6 +720,52 @@ describe("StandbyRunnerCoordinatorDurableObject", () => {
     // Promotion consumes the already-ready slot; it does not await a new startup.
     expect(prepareCount(h)).toBe(preparedCount);
     await h.flush();
+  });
+
+  it("keeps the full foreground reserve during a burst of background claims and replays after reset", async () => {
+    const h = createCoordinatorHarness({ inventorySize: "3" });
+    h.ensure();
+    await h.flush();
+    expect(h.environment.HOSTED_EXECUTION_STANDBY_TARGET).toBe("2");
+    const requests = Array.from({ length: 100 }, () => ({
+      claimId: createHostedStandbyClaimId(), deadlineAtEpochMs: Date.now() + 1_000,
+      releaseId: RELEASE_ID, region: HOSTED_RUNNER_REGION,
+    }));
+    const results = requests.map(request => h.coordinator.claimReadyBackgroundStandby(request));
+    expect(results.filter(result => result.outcome === "claimed")).toHaveLength(1);
+    expect(h.coordinator.readStandbyCoordinatorState().readySlotNames).toHaveLength(2);
+    expect(countClaimTombstones(h.db)).toBe(1);
+    const recovered = createCoordinatorHarness({ inventorySize: "3", db: copyCoordinatorDatabase(h.db) });
+    expect(recovered.coordinator.claimReadyBackgroundStandby(requests[0]!)).toEqual(results[0]);
+    expect(countClaimTombstones(recovered.db)).toBe(1);
+    expect(h.claim().outcome).toBe("claimed");
+    expect(h.claim().outcome).toBe("claimed");
+    expect(h.claim().outcome).toBe("no_ready_slot");
+    await Promise.all([h.flush(), recovered.flush()]);
+  });
+
+  it("prepares surplus without a member fence and cleans an abandoned background handoff", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(CLAIMED_AT_MS);
+    const gate = createDeferred<void>();
+    const h = createCoordinatorHarness({ inventorySize: "3", prepare: () => gate.promise });
+    const request = { claimId: createHostedStandbyClaimId(), deadlineAtEpochMs: Date.now() + 1_000,
+      releaseId: RELEASE_ID, region: HOSTED_RUNNER_REGION };
+    expect(h.coordinator.claimReadyBackgroundStandby(request)).toEqual({ outcome: "no_ready_slot" });
+    await until(() => h.slots.size === 2);
+    for (const slot of h.slots.values()) expect(await slot.readStandbySlotBinding()).toMatchObject({ state: "unbound", userId: null });
+    expect(countClaimTombstones(h.db)).toBe(0);
+    gate.resolve(undefined);
+    await h.flush();
+    const claim = h.coordinator.claimReadyBackgroundStandby(request);
+    expect(claim.outcome).toBe("claimed");
+    if (claim.outcome !== "claimed") throw new Error("Expected surplus handoff.");
+    h.environment.HOSTED_EXECUTION_STANDBY_MODE = "off";
+    vi.setSystemTime(Date.now() + HOSTED_STANDBY_ORPHAN_GRACE_MS + 1);
+    await h.coordinator.alarm();
+    await h.flush();
+    expect(countClaimTombstones(h.db)).toBe(0);
+    expect(await h.slots.get(claim.slotName)?.readStandbySlotBinding()).toMatchObject({ state: "retired" });
   });
 
   it("strictly bounds the configured target and defaults absent or blank values", () => {
@@ -815,7 +861,7 @@ describe("StandbyRunnerCoordinatorDurableObject", () => {
 
   it("keeps target zero idle and ENAM coordinators cleanup-only", async () => {
     for (const region of [HOSTED_RUNNER_REGION, HOSTED_STANDBY_REGION]) {
-      const h = createCoordinatorHarness({ target: region === HOSTED_RUNNER_REGION ? "0" : "2" });
+      const h = createCoordinatorHarness({ inventorySize: region === HOSTED_RUNNER_REGION ? "0" : "2" });
       h.coordinator.ensureReadyStandby({ releaseId: RELEASE_ID, region });
       await h.flush();
       assert.deepEqual(h.coordinator.readStandbyCoordinatorState().readySlotNames, []);
@@ -834,7 +880,7 @@ describe("StandbyRunnerCoordinatorDurableObject", () => {
     const gates: ReturnType<typeof createDeferred<void>>[] = [];
     let active = 0;
     let peak = 0;
-    const h = createCoordinatorHarness({ target: "5", async prepare() {
+    const h = createCoordinatorHarness({ inventorySize: "5", async prepare() {
       active += 1;
       peak = Math.max(peak, active);
       const gate = createDeferred<void>();
@@ -905,7 +951,7 @@ describe("StandbyRunnerCoordinatorDurableObject", () => {
     const gate = createDeferred<void>();
     let active = 0;
     let peak = 0;
-    const h = createCoordinatorHarness({ target: "5", async prepare() {
+    const h = createCoordinatorHarness({ inventorySize: "5", async prepare() {
       active += 1;
       peak = Math.max(peak, active);
       await gate.promise;
@@ -1007,7 +1053,7 @@ describe("StandbyRunnerCoordinatorDurableObject", () => {
       h.ensure();
       gate.resolve(undefined);
       await h.flush();
-      const expected = change === "one" ? 1 : 0;
+      const expected = change === "one" ? 2 : 0;
       assert.equal(h.coordinator.readStandbyCoordinatorState().readySlotNames.length, expected);
       assert.equal(h.coordinator.readStandbyCoordinatorState().provisioningSlotNames.length, 0);
       assert.equal(h.slots.size, 2);
@@ -1250,7 +1296,7 @@ describe("StandbyRunnerCoordinatorDurableObject", () => {
   it("keeps a timed-out retirement until late completion is proven by a later binding read", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(CLAIMED_AT_MS);
-    const h = createCoordinatorHarness({ target: "1" });
+    const h = createCoordinatorHarness({ mode: "shadow", inventorySize: "1" });
     h.ensure();
     await h.flush();
     const [name, slot] = [...h.slots.entries()][0] ?? [];
@@ -1276,7 +1322,7 @@ describe("StandbyRunnerCoordinatorDurableObject", () => {
   });
 
   it("replaces a failed preparation without ever re-preparing its unresolved drain target", async () => {
-    const h = createCoordinatorHarness({ target: "1", async prepare(input) {
+    const h = createCoordinatorHarness({ mode: "shadow", inventorySize: "1", async prepare(input) {
       if (h.slots.size === 1) {
         h.slots.get(input.slotName)?.readStandbySlotCoordinatorState
           .mockRejectedValue(new Error("binding unavailable"));
@@ -1297,7 +1343,7 @@ describe("StandbyRunnerCoordinatorDurableObject", () => {
   });
 
   it("preserves inventory on a mismatched binding proof rather than retiring another target", async () => {
-    const h = createCoordinatorHarness({ target: "1" });
+    const h = createCoordinatorHarness({ mode: "shadow", inventorySize: "1" });
     h.ensure();
     await h.flush();
     const entry = [...h.slots.entries()][0];
@@ -1329,7 +1375,7 @@ describe("StandbyRunnerCoordinatorDurableObject", () => {
     vi.useFakeTimers();
     vi.setSystemTime(CLAIMED_AT_MS);
     const gate = createDeferred<void>();
-    const h = createCoordinatorHarness({ target: "1", prepare: () => gate.promise });
+    const h = createCoordinatorHarness({ mode: "shadow", inventorySize: "1", prepare: () => gate.promise });
     h.ensure();
     await until(() => h.slots.size === 1);
     const [name, slot] = [...h.slots.entries()][0] ?? [];
@@ -1477,7 +1523,7 @@ describe("hosted-local standby readiness route", () => {
 function createCoordinatorHarness(input: {
   db?: DatabaseSync;
   mode?: "off" | "shadow" | "allocate";
-  target?: string;
+  inventorySize?: string;
   prepare?: (input: Parameters<HostedStandbyRunnerContainerStubLike["prepareStandbySlot"]>[0]) => Promise<void>;
 } = {}) {
   const pending: Promise<unknown>[] = [];
@@ -1508,7 +1554,8 @@ function createCoordinatorHarness(input: {
   } = {
     CF_VERSION_METADATA: { id: RELEASE_ID },
     HOSTED_EXECUTION_STANDBY_MODE: input.mode ?? "allocate",
-    HOSTED_EXECUTION_STANDBY_TARGET: input.target,
+    // Tests specify total inventory; allocate mode adds one surplus slot.
+    HOSTED_EXECUTION_STANDBY_TARGET: String(Math.max(0, Number(input.inventorySize ?? "2") - (input.mode === "shadow" ? 0 : 1))),
     RUNNER_CONTAINER: { getByName: runnerGet },
     STANDBY_RUNNER_CONTAINER: { getByName: legacyGet },
   };

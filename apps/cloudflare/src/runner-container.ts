@@ -272,7 +272,7 @@ export type RunnerContainerEnsureReadyForProcessingResult =
     }
   | {
       action?: never;
-      kind: "cleanup_unsettled";
+      kind: "cleanup_unsettled" | "not_warm";
     };
 
 export interface RunnerContainerColdStartTiming {
@@ -323,6 +323,9 @@ export interface HostedExecutionContainerStubLike extends Partial<HostedRunnerSl
     userId: string;
   }): Promise<RunnerWorkspaceInvocationAbortStatus>;
   destroyInstance(): Promise<void>;
+  ensureWarmForBackgroundProcessing?(
+    input: RunnerContainerEnsureReadyForProcessingInput,
+  ): Promise<RunnerContainerEnsureReadyForProcessingResult>;
   ensureReadyForProcessing?(
     input: RunnerContainerEnsureReadyForProcessingInput,
   ): Promise<RunnerContainerEnsureReadyForProcessingResult>;
@@ -1312,8 +1315,20 @@ export class RunnerContainer extends Container {
     return createActiveRuntimeUserFence(active);
   }
 
+  async ensureWarmForBackgroundProcessing(
+    payload: RunnerContainerEnsureReadyForProcessingInput,
+  ): Promise<RunnerContainerEnsureReadyForProcessingResult> {
+    return this.ensureProcessingReadiness(payload, true);
+  }
+
   async ensureReadyForProcessing(
     payload: RunnerContainerEnsureReadyForProcessingInput,
+  ): Promise<RunnerContainerEnsureReadyForProcessingResult> {
+    return this.ensureProcessingReadiness(payload, false);
+  }
+
+  private async ensureProcessingReadiness(
+    payload: RunnerContainerEnsureReadyForProcessingInput, warmOnly: boolean,
   ): Promise<RunnerContainerEnsureReadyForProcessingResult> {
     this.authorizeBoundUser(payload.userId);
     this.noteContainerInteraction();
@@ -1346,9 +1361,11 @@ export class RunnerContainer extends Container {
             {
               startupFailureObservation,
               surfaceCleanupUnsettled: true,
+              warmOnly,
             },
           );
         } catch (error) {
+          if (error instanceof BackgroundRunnerNotWarmError) return { kind: "not_warm" as const };
           if (error instanceof RunnerContainerCleanupUnsettledError) {
             return { kind: "cleanup_unsettled" as const };
           }
@@ -2474,7 +2491,9 @@ export class RunnerContainer extends Container {
         userId: routeUserId,
       });
       const dispatchContainerEnsureReadyStartedAtEpochMs = Date.now();
-      await this.ensureContainerReady(input, operationAbortController.signal);
+      await this.ensureContainerReady(input, operationAbortController.signal, {
+        warmOnly: input.job.request.processingMode === "system_mailbox",
+      });
       this.clearRecentReadinessProof();
       cleanupWarmContainerOnFailure = true;
       this.noteRunnerActivity("container-ready");
@@ -2490,9 +2509,9 @@ export class RunnerContainer extends Container {
         phase: "container.ready",
         userId: routeUserId,
       });
-      const runnerRequest = this.containerFetch(
-        RUNNER_EXECUTE_URL,
-        {
+      const fetchInvocation = (url: string, init: RequestInit) => input.job.request.processingMode === "system_mailbox"
+        ? this.fetchWarmContainer(url, init) : this.containerFetch(url, init);
+      const runnerRequest = fetchInvocation(RUNNER_EXECUTE_URL, {
           body: JSON.stringify({
             hostedRuntimeArchitectureVersion: HOSTED_RUNTIME_ARCHITECTURE_VERSION,
             job: input.job,
@@ -2854,12 +2873,21 @@ export class RunnerContainer extends Container {
     }
   }
 
+  /** The SDK containerFetch auto-starts stopped shells. Background health and
+   * dispatch use the native port so a stop between proof and I/O cannot restart. */
+  private async fetchWarmContainer(url: string, init: RequestInit): Promise<Response> {
+    if (!this.ctx.container || this.ctx.container.running === false) throw new BackgroundRunnerNotWarmError();
+    this.noteRunnerActivity("background-warm-fetch");
+    return this.ctx.container.getTcpPort(RUNNER_PORT).fetch(url, init);
+  }
+
   private async ensureContainerReady(
     input: Pick<HostedExecutionContainerInvokeInput, "timeoutMs" | "userId">,
     operationAbortSignal: AbortSignal,
     options: {
       startupFailureObservation?: RunnerContainerStartupFailureObservation;
       surfaceCleanupUnsettled?: boolean;
+      warmOnly?: boolean;
     } = {},
   ): Promise<RunnerContainerEnsureReadyResult> {
     const readinessStartedAt = Date.now();
@@ -2951,6 +2979,7 @@ export class RunnerContainer extends Container {
           readinessTimeoutMs,
           this.environment,
           operationAbortSignal,
+          options.warmOnly ? (url, init) => this.fetchWarmContainer(url, init) : undefined,
         );
         const readyStart = this.recordContainerReady(
           "cold-start-ready",
@@ -3030,9 +3059,7 @@ export class RunnerContainer extends Container {
       }
     }
     throwIfRunnerContainerOperationAborted(operationAbortSignal);
-    if (readHostedRunnerDeployment(this.environment)?.previous?.id === resolveHostedRunnerReleaseId(this.environment)) {
-      throw new Error("Previous runner release cannot start a new container.");
-    }
+    assertRunnerColdStartAllowed(this.environment, options.warmOnly === true);
     if (options.startupFailureObservation) {
       options.startupFailureObservation.stage = "cold_start_or_ports";
     }
@@ -4841,6 +4868,7 @@ async function assertRunnerHealthy(
   timeoutMs: number,
   environment: RunnerContainerEnvironmentSource,
   signal?: AbortSignal,
+  fetchWarm?: (url: string, init: RequestInit) => Promise<Response>,
 ): Promise<RunnerContainerHealthMetadata> {
   const timeoutSignal = AbortSignal.timeout(timeoutMs);
   const abortSignal = signal
@@ -4848,10 +4876,9 @@ async function assertRunnerHealthy(
     : timeoutSignal;
   let response: Response;
   try {
-    response = await container.containerFetch(RUNNER_HEALTH_URL, {
-      method: "GET",
-      signal: abortSignal,
-    });
+    const init = { method: "GET", signal: abortSignal };
+    response = await (fetchWarm ? fetchWarm(RUNNER_HEALTH_URL, init)
+      : container.containerFetch(RUNNER_HEALTH_URL, init));
   } catch (error) {
     throwIfRunnerContainerOperationAborted(abortSignal);
     throw error;
@@ -5584,5 +5611,17 @@ function copyRuntimeWakeHandlerTiming(
   ] as const) {
     const value = Number(headers.get(header));
     if (Number.isSafeInteger(value) && value > 0) diagnostics[key] = value;
+  }
+}
+
+class BackgroundRunnerNotWarmError extends Error {
+  constructor() { super("Background execution requires an already-warm runner."); }
+}
+
+/** Warm-only execution and previous releases share the same cold-start gate. */
+function assertRunnerColdStartAllowed(environment: Readonly<Record<string, unknown>>, warmOnly: boolean): void {
+  if (warmOnly) throw new BackgroundRunnerNotWarmError();
+  if (readHostedRunnerDeployment(environment)?.previous?.id === resolveHostedRunnerReleaseId(environment)) {
+    throw new Error("Previous runner release cannot start a new container.");
   }
 }
