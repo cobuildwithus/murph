@@ -490,10 +490,12 @@ describeRealCodex('real clinical document extraction journeys', () => {
         onProviderUsage: ({ usage }) => { recordRealCodexProviderUsage(usage.usage) },
       })
       expect(providerEntries).toBe(1)
-      expect(result.status).toBe('blocked')
-      expect(result.reason).toMatch(/weight|unit/iu)
-      expect(result.records).toHaveLength(1)
-      const record = result.records[0]!
+      expect(result.status).toBe('complete')
+      expect(result.records).toHaveLength(2)
+      const weight = result.records.find((entry) => entry.payload.kind === 'note')
+      expect(weight?.payload).toMatchObject({ kind: 'note', clinicalFact: { category: 'observation', value: 80 } })
+      expect(weight?.payload.kind === 'note' && weight.payload.clinicalFact?.unit).toBeUndefined()
+      const record = result.records.find((entry) => entry.payload.kind === 'measurement')!
       expect(record.payload).toMatchObject({ kind: 'measurement', occurredAt,
         measurements: [{ metric: 'resting-heart-rate', value: 73, unit: 'bpm' }] })
       expect(record.excerpt).toBeTruthy()
@@ -597,7 +599,7 @@ describeRealCodex('real clinical document extraction journeys', () => {
       const writesBefore = await listWriteOperationMetadataPaths(fixture.vault)
       const result = await executeClinicalDocumentExtraction({
         workspaceRoot: fixture.vault, documentPath, timeZone: 'UTC', extractedText: sourceText,
-        source: { rawRef, sha256: createHash('sha256').update(sourceText).digest('hex'), mediaType: 'text/plain' },
+        source: { rawRef, sha256: createHash('sha256').update(sourceText).digest('hex'), mediaType: 'text/plain', recordedAt: '2026-07-10T12:00:00.000Z' },
         family: 'history', codexCommand: fixture.codexCommand, codexHome: fixture.codexHome,
         env: fixture.env, model: config.model, modelProvider: config.modelProvider, reasoningEffort: 'low',
         beforeProviderEntry: async () => { providerEntries += 1 },
@@ -642,20 +644,21 @@ describeRealCodex('real clinical document extraction journeys', () => {
       const writesBefore = await listWriteOperationMetadataPaths(fixture.vault)
       const result = await executeClinicalDocumentExtraction({
         workspaceRoot: fixture.vault, documentPath, timeZone: 'UTC', extractedText: sourceText,
-        source: { rawRef, sha256: createHash('sha256').update(sourceText).digest('hex'), mediaType: 'text/plain' },
+        source: { rawRef, sha256: createHash('sha256').update(sourceText).digest('hex'), mediaType: 'text/plain', recordedAt: '2026-07-10T12:00:00.000Z' },
         family: 'history', codexCommand: fixture.codexCommand, codexHome: fixture.codexHome,
         env: fixture.env, model: config.model, modelProvider: config.modelProvider, reasoningEffort: 'low',
         beforeProviderEntry: async () => { providerEntries += 1 },
         onProviderUsage: ({ usage }) => { recordRealCodexProviderUsage(usage.usage) },
       })
       expect(providerEntries).toBe(1)
-      expect(result.status).toBe('blocked')
-      expect(result.records).toHaveLength(3)
-      expect(result.records.map((record) => new Date(record.payload.occurredAt).toISOString()).sort())
+      expect(result.status).toBe('complete')
+      expect(result.records).toHaveLength(4)
+      const dated = result.records.filter((record) => record.dateBasis === 'document')
+      const undated = result.records.find((record) => record.dateBasis === 'unknown')
+      expect(undated?.payload).toMatchObject({ kind: 'note', clinicalFact: { clinicalDate: null } })
+      expect(dated.map((record) => new Date(record.payload.kind === 'note' ? record.payload.clinicalFact!.clinicalDate! : record.payload.occurredAt).toISOString()).sort())
         .toEqual(['2020-03-12T12:00:00.000Z', '2025-02-03T15:00:00.000Z', '2026-07-10T12:00:00.000Z'])
-      expect(result.records.every((record) => record.dateBasis === 'document' && Boolean(record.dateEvidence))).toBe(true)
-      expect(result.records.every((record) => sourceText.includes(record.dateEvidence!))).toBe(true)
-      expect(result.reason).toMatch(/unknown|undated|date/iu)
+      expect(dated.every((record) => Boolean(record.dateEvidence) && sourceText.includes(record.dateEvidence!))).toBe(true)
       expect(await listWriteOperationMetadataPaths(fixture.vault)).toEqual(writesBefore)
       expect(await readFile(documentPath, 'utf8')).toBe(sourceText)
       process.stdout.write(`[clinical-date-live] ${JSON.stringify({ status: result.status, records: result.records, reason: result.reason })}\n`)

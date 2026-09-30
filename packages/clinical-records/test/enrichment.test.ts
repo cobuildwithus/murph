@@ -41,6 +41,13 @@ const complete = (payload: unknown) => ({
 });
 
 describe("clinical document extraction proposals", () => {
+  it("requires typed content in fresh history while retaining frozen legacy notes", () => {
+    expect(clinicalDocumentExtractionOutputSchemaForFamily("history").safeParse(complete(note)).success).toBe(true);
+    expect(() => parseClinicalDocumentExtractionOutput("history", complete(note))).toThrow();
+    const payload = { ...note, clinicalFact: { category: "medication-order", label: "Historical order",
+      subject: "member", clinicalDate: null, statement: "The provider recorded an instruction not to take the named medication.", status: "do-not-take" } };
+    expect(parseClinicalDocumentExtractionOutput("history", { ...complete(payload), records: [{ payload, dateBasis: "unknown", excerpt: payload.note }] }).records).toHaveLength(1);
+  });
   it("admits only the assigned family's clinical record kinds", () => {
     const cases = [
       ["labs", lab],

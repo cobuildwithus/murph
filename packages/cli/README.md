@@ -61,6 +61,17 @@ When you need to read from the vault, use this chooser:
 - `vault-cli wearables day` or `wearables ... list` for semantic wearable summaries
 - family `manifest` commands for immutable import provenance
 
+Clinical runtime imports save source statements as note events with a typed
+`clinicalFact` object. `clinical-note payload-schema` describes the fields for
+`clinical-note import-json --input @fact.json`; `show <event-id>` reads them back.
+Use `search query "<question or finding>"` to locate them, or
+`list --tag clinical-fact-family-history` to filter runtime facts by category.
+A null clinical date means unknown, even when the containing note has a
+documentation timestamp.
+Missing units stay absent, and source history does not establish a current
+diagnosis or a dose taken. Imports with the same external reference replay
+through the canonical event owner.
+
 Use `intake import answers.json --assessment-type clinical-observation` to
 preserve structured questionnaire answers or dated provider history without
 turning them into current diagnoses or medication use. Add

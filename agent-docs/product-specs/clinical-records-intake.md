@@ -62,6 +62,19 @@ labs, measurements and history, writes accepted facts with source evidence,
 and resumes frozen results without asking the model again. A corrected or
 withdrawn source retires its older extracted facts.
 
+Structured source-fact notes retain category, question or label, value, explicit
+unit, status, subject, coding and qualifiers. These include questionnaire answers,
+scores, exam findings, social and family history, medication orders, procedures,
+immunizations, encounters and care plans. The note's timestamp dates its source
+statement; a null clinical date remains unknown. Missing units are not inferred,
+and historical orders never establish medication use or an active diagnosis.
+`clinical-note import-json` and `show` expose the same canonical fields.
+
+RTF text is eligible for background extraction. Long text continues through
+bounded overlapping windows. Unreviewed embedded images, unsupported formats,
+ambiguous evidence and saturated extraction limits remain explicit coverage
+holds; safely supported sibling facts still import.
+
 Already structured records need no model call. Records held for unsafe status,
 modifiers, ambiguity or missing import prerequisites stay held. Extraction may
 recover some facts while leaving others unresolved; it does not establish
@@ -327,11 +340,13 @@ ranges hold the containing observation for review instead of being dropped.
 For a qualitative laboratory result, valid numeric reference bounds and their
 units are preserved as bounded reference text alongside supplied range text;
 no numeric result, result unit, or numeric comparison is inferred.
-Explicitly dated observations without a supported metric mapping are preserved
+Observations without a supported metric mapping are preserved
 as source notes with their original values, codes, and qualifiers. Missing-unit
 vitals can also become source notes, without fabricating a unit or normalized
 measurement. Ambiguous coding, incompatible declared units, unsafe modifiers,
-and undated observations remain held. JSON object key order does not change
+and malformed dates remain held. An otherwise eligible undated source answer
+can be retained as documentation at its source revision; its clinical date stays
+unknown. JSON object key order does not change
 source-note identity or content on replay.
 Preemption requeues the same run without discarding or replaying completed page
 progress. Web current-run authority is checked immediately before raw evidence

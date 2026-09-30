@@ -873,3 +873,6 @@ Hosted enrichment read/repair concurrency proof is recorded in
 
 Complete historical clinical hold-shape coverage is recorded in
 [hold histories](exec-plans/completed/2026-09-29-clinical-hold-histories.md).
+
+Structured clinical facts in normal runtime imports are tracked in
+[the runtime facts plan](exec-plans/active/2026-09-29-clinical-runtime-facts.md).

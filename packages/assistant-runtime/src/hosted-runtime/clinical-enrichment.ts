@@ -171,6 +171,7 @@ async function extractClinicalEnrichmentFamilies({ input, work, prepared, signal
         timeZone: work.timeZone,
         deadlineAt,
         family, extractedText: prepared.extractedText, renderedPages: prepared.renderedPages,
+        textWindow: prepared.textWindow,
         scratchRoots: prepared.scratchRoots,
         onProviderUsage(event) { usages.push({ family, event }); },
       };
@@ -193,7 +194,10 @@ async function extractClinicalEnrichmentFamilies({ input, work, prepared, signal
   if (labs?.status !== "fulfilled" || measurements?.status !== "fulfilled" || history?.status !== "fulfilled") {
     throw new Error("Clinical extraction families did not settle.");
   }
-  return { labs: labs.value, measurements: measurements.value, history: history.value };
+  const historyOutput: ClinicalDocumentExtractionOutput = prepared.coverageWarning
+    ? { ...history.value, status: "blocked", reason: [history.value.reason, prepared.coverageWarning].filter(Boolean).join(" ").slice(0, 500) }
+    : history.value;
+  return { labs: labs.value, measurements: measurements.value, history: historyOutput };
 }
 
 async function settleClinicalEnrichmentFailure({ input, work, state, stage, error, now }: {

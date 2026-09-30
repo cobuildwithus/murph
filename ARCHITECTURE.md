@@ -1195,15 +1195,15 @@ One GPT-5.6 Luna turn at medium reasoning extracts all families for one resource
 with shell and dynamic tools disabled and the existing 120-second deadline.
 The provider receives selected clinical text, excluding identifier fields,
 patient routing references and revision metadata. Literal evidence and date
-provenance are required before canonical apply; unsupported dates stay held
-without a correction call. Clinical assertion code/system pairs must exactly
+provenance are required before canonical apply. Native events with unsupported
+dates stay held; typed source-fact notes retain an explicit null clinical date. Clinical assertion code/system pairs must exactly
 match a source coding. Whole-page hashes attest storage while resource
 hashes isolate caching and derived fact identity across records on the same page.
 
-Structured jobs use `murph.clinical-enrichment.v2`; attachment-only jobs retain
-v1. New readers accept both. Older runtimes cannot consume v2 checkpoints, so
-new jobs must stay with upgraded exclusive workspace owners and rollback must
-retain a v2-capable reader. No database or raw-manifest migration is required.
+New enrichment jobs and newly frozen proposals use `murph.clinical-enrichment.v3`.
+Readers still accept v1/v2 jobs and frozen legacy proposals. Older runtimes
+cannot consume typed source-fact notes or v3 checkpoints, so upgrade readers
+before enabling new writers and retain a v3-capable reader on rollback. No database or raw-manifest migration is required.
 
 Before freezing proposals, extraction uses the shared date consistency check
 with the vault timezone. An affected family gets one read-only, date-only
@@ -1227,7 +1227,7 @@ back accepted writes before advancing the page. Host-owned date provenance tags
 and evidence travel with accepted records. Missing date provenance is held for
 both fresh and previously frozen proposals. Document evidence must contain a
 matching full date and no conflicting dates; valid siblings continue to import.
-Extraction cache v3 binds original source identity, media type and parent
+Extraction cache v4 binds original source identity, media type and parent
 clinical-date context. Fresh extraction uses the verified retained-byte digest;
 cached source-based proposals resolve against each current attested parent.
 Derived records use the attested parent source identity, an extraction facet and
@@ -1240,6 +1240,28 @@ relationship; unresolved combinations remain explicit holds.
 It performs no model call. Missing or unsupported documents before extraction,
 exhausted document retries and ambiguous facts remain explicit holds while later
 documents can progress. Invalid manifests or changed prepared sources fail closed.
+Typed source facts live in the existing canonical note event's optional
+`clinicalFact` field. It carries category, label, subject, statement, nullable
+clinical date, optional scalar value/unit/status, exact coding pairs and bounded
+qualifiers. Category tags and allowlisted private search terms support retrieval;
+shared safe search retains its existing structured-payload exclusion. Query
+projection v35 rebuilds the private index. Questionnaire answers, scores, family history, old orders, exam
+findings and care plans remain source statements, not current diagnoses,
+normalized measurements or doses taken. The host dates an undated note using
+the parent documentation time or retrieval time; its clinicalDate remains null.
+Explicit clinical dates need literal date evidence. FHIR coding namespaces must
+match source pairs. Frozen proposals, source facets, corrections, query readback
+and CLI imports use the existing event owner; no assessment side ledger is added.
+
+Text documents use 12,000-code-point windows with 1,000-code-point overlap and
+the existing durable page cursor. Window assignments are shell-free and cannot
+reread the full document; the host attests original bytes. RTF visible text is
+decoded without executing fields or embedded objects; unsupported encodings and
+malformed groups remain held. The new RTF reader does not change deterministic
+parent prose at an existing source revision. Embedded media not visually
+reviewed and record-limit saturation remain explicit coverage holds, while
+supported text facts can be saved. Text-window ordinals are not printed pages.
+
 Enrichment does not establish complete chart coverage or overwrite structured
 FHIR facts through a model decision.
 
