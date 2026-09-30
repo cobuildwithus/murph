@@ -586,7 +586,7 @@ is recorded in [`2026-09-18-ios-canary-deployment-continuity.md`](exec-plans/com
 | `agent-docs/exec-plans/completed/2026-09-28-frog-log-presence.md` | Boolean presence metadata classification and raw-payload rejection regression proof. | Historical tooling evidence | Low | 2026-09-28 |
 | `agent-docs/exec-plans/completed/2026-09-23-gpt6-defaults.md` | GPT-6 managed inference defaults and focused model-selection proof. | Completed execution plan | Medium | 2026-09-23 |
 | `agent-docs/exec-plans/completed/2026-09-29-gpt61-sol-default.md` | GPT-6.1 Sol defaults, saved reminder upgrades, and Codex 0.159.1 compatibility. | Completed execution plan | Medium | 2026-09-29 |
-| `agent-docs/exec-plans/active/2026-09-29-gpt61-sol-rollout.md` | Authorized two-stage GPT-6.1 Sol deployment. | Active execution plan | Medium | 2026-09-29 |
+| `agent-docs/exec-plans/completed/2026-09-29-gpt61-sol-rollout.md` | Reviewed GPT-6.1 Sol implementation and staged release prerequisites. | Completed source-delivery plan | Medium | 2026-09-29 |
 | `agent-docs/exec-plans/completed/2026-09-23-vault-share-background.md` | Isolated checkpoint projection that continues across foreground replies; ownership and verification. | Hosted vault-share background execution | Medium | 2026-09-23 |
 | `agent-docs/exec-plans/completed/2026-09-28-junction-record-window.md` | Bounded recovery for oversized Junction hourly-feature days. | Device-sync recovery plan | Medium | 2026-09-28 |
 | `agent-docs/exec-plans/completed/2026-09-28-checkpoint-failure-stage-telemetry.md` | Fixed-vocabulary checkpoint rejection-stage observation and response-preservation proof. | Completed telemetry implementation evidence | Low | 2026-09-28 |
