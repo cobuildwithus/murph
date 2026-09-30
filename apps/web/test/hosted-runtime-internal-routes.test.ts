@@ -3365,6 +3365,55 @@ describe("hosted runtime internal web routes", () => {
     });
   });
 
+  it("acknowledges stale runtime telemetry without persistence, recovery, or alerts", async () => {
+    mocks.requireHostedCloudflareCallbackRequest.mockRejectedValueOnce(hostedOnboardingError({
+      code: "HOSTED_RUNTIME_OWNER_STALE",
+      httpStatus: 409,
+      message: "Synthetic retired runtime.",
+    }));
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const response = await runtimeLogRoute.POST(jsonRequest(
+        "/api/internal/hosted-runtime/log",
+        { entries: [{ at: FIXED_NOW, component: "runner", eventCode: "runner.accepted_attempt_failed", level: "error", phase: "invoke" }] },
+      ));
+      expect(response.status).toBe(200);
+      expect(parseHostedRuntimeLogResponse(await response.json())).toEqual({ loggedCount: 0 });
+      expect(mocks.recordHostedRuntimeLogs).not.toHaveBeenCalled();
+      expect(mocks.claimHostedAcceptedAttemptFailureRecheck).not.toHaveBeenCalled();
+      expect(mocks.signalHostedRuntimeRecheckRuntime).not.toHaveBeenCalled();
+      expect(mocks.hasHostedPersonalPatternsRunAlert).not.toHaveBeenCalled();
+      expect(mocks.after).not.toHaveBeenCalled();
+      expect(warn).not.toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it.each([
+    ["HOSTED_CLOUDFLARE_CALLBACK_UNAUTHORIZED", 401],
+    ["HOSTED_CLOUDFLARE_CALLBACK_REPLAYED", 401],
+    ["HOSTED_RUNTIME_RESOURCE_RETIRED", 409],
+    ["HOSTED_RUNTIME_OWNER_STALE", 503],
+  ])("preserves runtime log admission failures for %s with status %i", async (code, httpStatus) => {
+    mocks.requireHostedCloudflareCallbackRequest.mockRejectedValueOnce(hostedOnboardingError({
+      code, httpStatus, message: "Synthetic callback rejection.",
+    }));
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const response = await runtimeLogRoute.POST(jsonRequest("/api/internal/hosted-runtime/log", { entries: [] }));
+      expect(response.status).toBe(httpStatus);
+      expect(await response.json()).toMatchObject({ error: { code } });
+      expect(mocks.recordHostedRuntimeLogs).not.toHaveBeenCalled();
+      expect(mocks.claimHostedAcceptedAttemptFailureRecheck).not.toHaveBeenCalled();
+      expect(mocks.after).not.toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+      error.mockRestore();
+    }
+  });
+
   it("writes the maximum runtime log batch with a single database call", async () => {
     // The callback accepts 50 entries and the pool defaults to 15 clients, so
     // one Prisma call per entry would make the pool the request's concurrency
@@ -3391,6 +3440,23 @@ describe("hosted runtime internal web routes", () => {
     });
     expect(mocks.recordHostedRuntimeLogs).toHaveBeenCalledOnce();
     expect(mocks.recordHostedRuntimeLogs.mock.calls[0]?.[0]?.entries).toHaveLength(50);
+  });
+
+  it("does not turn a persistence failure into a discarded telemetry acknowledgement", async () => {
+    mocks.recordHostedRuntimeLogs.mockRejectedValueOnce(hostedOnboardingError({
+      code: "HOSTED_RUNTIME_OWNER_STALE", httpStatus: 409, message: "Synthetic persistence failure.",
+    }));
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const response = await runtimeLogRoute.POST(jsonRequest("/api/internal/hosted-runtime/log", {
+        entries: [{ at: FIXED_NOW, component: "mailbox", eventCode: "mailbox.imported", level: "info", phase: "import" }],
+      }));
+      expect(response.status).toBe(409);
+      expect(await response.json()).toMatchObject({ error: { code: "HOSTED_RUNTIME_OWNER_STALE" } });
+      expect(mocks.recordHostedRuntimeLogs).toHaveBeenCalledOnce();
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it("schedules a Personal Patterns alert after runtime logs persist", async () => {

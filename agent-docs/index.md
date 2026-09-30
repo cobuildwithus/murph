@@ -3,6 +3,10 @@ in [the import-speed plan](exec-plans/completed/2026-09-24-garmin-import-speed.m
 
 # Murph Agent Docs Index
 
+Late runtime telemetry retirement semantics are owned by
+`references/hosted-postgres-runtime.md`; focused proof is recorded in
+[`retired runtime telemetry`](exec-plans/completed/2026-09-29-runtime-log-retired.md).
+
 Bounded device-webhook enqueue recovery is owned by `RELIABILITY.md`;
 private SMS provider failure diagnostics are owned by
 `../docs/hosted-auth-migration.md` under "SMS verification owner".
