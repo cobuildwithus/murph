@@ -1,6 +1,6 @@
 # Foreground priority during background cold startup
 
-Status: active
+Status: completed
 Created: 2026-09-30
 Updated: 2026-09-30
 
@@ -55,11 +55,11 @@ message timing remains a post-deploy check; no deployment is included.
 ## Verification
 
 - Implementation complete: canonical conditional retirement, cancellable readiness,
-  supplied-admission refresh and one-second foreground startup rechecks.
-- Focused Cloudflare proof: 418 tests passed across runtime orchestration, native
+  supplied-admission refresh and one-second foreground rechecks behind a starting background owner.
+- Focused Cloudflare proof: 421 tests passed across runtime orchestration, native
   container lifecycle and standby lifecycle/coordinator suites. The orchestration
-  suite passed again after the admission helper cleanup (57 tests).
-- Real PostgreSQL proof: 73 tests passed on an isolated loopback database, including
+  suite passed again after the admission helper cleanup (60 tests).
+- Real PostgreSQL proof: 76 tests passed on an isolated loopback database, including
   both lock acquisition orders, stale launch rejection, exact target release and
   denied foreground admission.
 - Cloudflare and Web typechecks passed. Changelog validation: 39 tests passed.
@@ -68,6 +68,25 @@ message timing remains a post-deploy check; no deployment is included.
 - Product UX: Ready for PR review. Both cold-only background and foreground with
   ready/empty standby inventory retain progress. Uncertain stop never grants a
   replacement; already-prepared background keeps the existing promotion path.
-- Requested Opus review and exact-head ReviewGPT/CI remain pending. No production
+- Actual Claude Opus 5.5 review confirmed the fence and cancellation boundaries.
+  Accepted immediate canonical re-admission after competing retirement/release,
+  narrower background-only fast rechecks and stronger pool-exclusion proof.
+  Added a 32-caller PostgreSQL burst proving one retirement and one successor.
+  Rejected extra failure-reconciliation calls and idle cleanup policy: the public
+  Temporal contract already retries activity errors and recovers retiring owners.
+  Preemption covers all unlaunched preparation, including retained warm targets;
+  no extra persistent readiness fact was introduced. Intentional cancellation
+  retains existing startup-failure diagnostics; no paging rule change is in scope.
+- Exact-head ReviewGPT/CI remain pending. No production
   deployment or external timing guarantee is included. Earlier warm-only evidence
   is superseded.
+
+## Completion boundary
+
+Implementation and local verification are complete. Opus findings were triaged
+against current owners; the bounded release-race correction and focused proof
+landed. The current main branch was merged without conflicts, preserving its
+provider-egress changes. The PR retains its required exact-head external review
+and CI gates, which are recorded in the PR evidence after this implementation
+snapshot. Deployment remains separate.
+Completed: 2026-09-30

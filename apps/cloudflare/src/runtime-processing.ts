@@ -95,10 +95,14 @@ async function readRuntimeAdmission(ctx: ProcessingContext) {
   const admission = ctx.input.admission;
   // An upstream admission is a snapshot. Refresh an unfinished background
   // owner so the canonical claim can apply foreground priority atomically.
-  const refresh = ctx.mode === "default" && admission?.status === "existing"
+  const refresh = isForegroundBehindBackground(ctx, admission?.owner) && admission?.status === "existing"
     && admission.owner?.userId === ctx.input.userId && admission.owner.phase === "starting"
-    && admission.owner.processingMode === "system_mailbox" && admission.owner.workspaceVersion === null;
+    && admission.owner.workspaceVersion === null;
   return admission && !refresh ? admission : ctx.command({ operation: "claim", processingMode: ctx.mode });
+}
+
+function isForegroundBehindBackground(ctx: ProcessingContext, owner: HostedRuntimeOwnerSnapshot | null | undefined): boolean {
+  return ctx.mode === "default" && owner?.processingMode === "system_mailbox";
 }
 
 function createProcessingContext(source: RuntimeProcessingSource, input: RuntimeProcessingInput, diagnostics: RuntimeProcessingDiagnostics) {
@@ -144,7 +148,7 @@ function acceptedProcessing(ctx: ProcessingContext, owner: HostedRuntimeOwnerSna
 
 async function retireRuntime(ctx: ProcessingContext, owner: HostedRuntimeOwnerSnapshot): Promise<HostedRuntimeEnsureProcessingResponse | null> {
   const identity = requireIdentity(owner);
-  if ((await ctx.command({ operation: "retire", ...identity, completed: false })).status !== "updated") return retryProcessing(ctx, "retirement_pending");
+  if ((await ctx.command({ operation: "retire", ...identity, completed: false })).status !== "updated") return null;
   if (owner.runnerContainerName) {
     const target = owner.runnerContainerName;
     const slot = requireHostedRunnerSlotLifecycle(ctx.namespace.getByName(target));
@@ -153,8 +157,10 @@ async function retireRuntime(ctx: ProcessingContext, owner: HostedRuntimeOwnerSn
     const binding = await ctx.step("read_retired_binding", () => slot.readStandbySlotBinding());
     if (binding.state !== "retired" || binding.slotName !== target) return retryProcessing(ctx, "retirement_pending");
   }
-  return (await ctx.command({ operation: "release", ...identity, runnerContainerName: owner.runnerContainerName })).status === "updated"
-    ? null : retryProcessing(ctx, "retirement_pending");
+  await ctx.command({ operation: "release", ...identity, runnerContainerName: owner.runnerContainerName });
+  // A competing caller may already have advanced ownership. Re-admit rather
+  // than sleep; the generation guard prevents reusing an unreleased owner.
+  return null;
 }
 
 /** A null result requests fresh canonical admission after settled recovery. */
@@ -177,7 +183,7 @@ async function reconcileExistingRuntime(ctx: ProcessingContext, owner: HostedRun
   const startingDeadline = owner.startedAt ? Date.parse(owner.startedAt) + 30_000 : 0;
   if (owner.phase === "starting" && startingDeadline > Date.now()) {
     return retryProcessing(ctx, "starting_fence_preserved",
-      ctx.mode === "default" ? Math.min(startingDeadline, Date.now() + 1_000) : startingDeadline);
+      isForegroundBehindBackground(ctx, owner) ? Math.min(startingDeadline, Date.now() + 1_000) : startingDeadline);
   }
   return retireRuntime(ctx, owner);
 }

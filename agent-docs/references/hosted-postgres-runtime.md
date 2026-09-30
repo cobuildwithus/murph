@@ -126,8 +126,8 @@ target or cold-starts independently of pristine standby inventory. Pool size and
 allocation policy are unchanged. An empty foreground pool retains cold fallback;
 preemption can discard partial background cold-start work in that case.
 
-While a starting fence remains, foreground rechecks after at most one second;
-background keeps the 30-second startup deadline. Expiry starts ordinary exact
+While a system-mailbox starting fence remains, foreground rechecks after at most
+one second. Other startup waits keep the 30-second startup deadline. Expiry starts ordinary exact
 retirement proof; it does not establish stoppedness or release authority.
 Deploy cancellation-capable Cloudflare before the Web claim change. Old Web keeps
 the startup fence until launch or expiry; old Cloudflare still retires safely but
