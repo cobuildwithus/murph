@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { HOSTED_EXECUTION_TIMESTAMP_HEADER } from "@murphai/hosted-execution/contracts";
 import { runWithHostedMailboxFetchTiming } from "../src/lib/hosted-mailbox/fetch-timing";
-import { recordPrismaOperationTiming, startPrismaPoolAcquisitionTiming } from "../src/lib/prisma-operation-timing";
+import { recordPrismaOperationTiming, startPrismaPoolAcquisitionTiming, startPrismaQueryTiming } from "../src/lib/prisma-operation-timing";
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -23,7 +23,10 @@ describe("mailbox fetch timing", () => {
       const acquired = startPrismaPoolAcquisitionTiming({ idleConnections: 0, totalConnections: 0, waitingRequests: 0 });
       clock = 410;
       acquired?.();
-      recordPrismaOperationTiming("$queryRaw", 420);
+      const queried = startPrismaQueryTiming();
+      clock = 420;
+      queried?.(false);
+      recordPrismaOperationTiming("$queryRaw", 420, 0);
       clock = 430;
       timing.authenticated();
       timing.start("transaction_acquire");
@@ -41,6 +44,8 @@ describe("mailbox fetch timing", () => {
       signedRequestToHandlerMs: 2000, totalMs: 705,
       phaseMs: { authentication: 430, transaction_acquire: 20, authority: 250, mailbox: 5 },
       poolAcquisitionCount: 1, poolAcquireMs: [400], dbOperationCount: 1, dbTotalMs: 420,
+      dbOperationStartMs: [0], poolAcquireStartMs: [10],
+      dbQueryStartMs: [410], dbQueryMs: [10], dbQueryFailed: [false], dbQueryCount: 1,
     });
     expect(JSON.stringify(log.mock.calls)).not.toContain("private");
   });
