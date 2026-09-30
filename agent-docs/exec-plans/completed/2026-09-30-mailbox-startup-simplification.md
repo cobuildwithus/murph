@@ -1,6 +1,6 @@
 # Simplify hosted mailbox startup and database work
 
-Status: active
+Status: completed
 Created: 2026-09-30
 Updated: 2026-09-30
 
@@ -46,9 +46,13 @@ No new authoritative state, service, cache, dependency, scheduler, or configurat
 ## Verification
 
 - Local bundled application startup graph: 658,565 to 461,963 bytes, 150 to 82 modules, with external dependencies excluded. Unrelated metric definitions and device-sync modules disappear. This is a diagnostic build, not a deployed latency result.
-- Fresh-process diagnostic import trials initially showed median 241 ms to 213 ms; production impact still requires deployed telemetry.
+- Both production-mode Next builds pass. Static startup chunks fall from 1,450,347 bytes / 28 chunks to 976,795 bytes / 20 chunks. Across 20 fresh processes per build, alternating order after two warmups, median module load falls from 122.9 ms to 109.1 ms; CPU falls from 144.2 ms to 130.6 ms. This local Node 24 comparison excludes platform, network and first Prisma operation latency.
 - Focused parser/helper/vault-share/observability package tests: 241 passed. Mailbox/logging/consent tests: 82 passed. Route/import/crypto tests and real PostgreSQL callback/nonce tests pass.
 - Real PostgreSQL proof requires one envelope query and retains missing-workspace, cross-member, missing-envelope, and malformed-envelope rejection. Existing signed callback tests retain replay and stale-owner rejection.
 - Web typecheck and targeted lint passed (one pre-existing unused fixture parameter warning). Complexity guard passed; moved function bodies are exact moves with unchanged complexity debt.
 - Production-mode Web build, TypeScript compatibility check, all 387 Health Commons trace checks, and relocated emitted-route checks passed. Snapshot tests: 6 passed; usage allowance/credits tests: 186 passed.
-- Final PR/review/CI evidence pending. Broad exact-head verification remains CI-owned.
+- Synthetic same-pool first-raw-query experiment: direct pg reduced the first operation from 66.3 ms to 10.1 ms but increased the following Prisma transaction from 24.2 ms to 77.8 ms; total changed only from 112.2 ms to 108.9 ms. This is a local initialization probe, not a complete authenticated callback benchmark; it does not justify another production driver path.
+- Final ReviewGPT round 1 passed on `82ea4d16998188a3b314a8889f40527246bd8b44`, with zero findings. The managed Mountain lane selected GPT-6 Pro, captured the exact full snapshot and completed after more than ten minutes. Reviewer independently checked source/AST equivalence and authority flow; it did not run the repository test suite. One pre-send packaging retry moved ignored diagnostic bundles out of application source directories; it was not a substantive review round.
+- CI exposed an outdated public-export allowlist and an incomplete billing mock. Test-only corrections retain the explicit export allowlist and real capacity constants. Full hosted-execution suite: 805 passed, one existing opt-in skip. Stripe reconciliation: 58 passed. Web typecheck passed after these corrections. No production changes followed the reviewed commit.
+- Parent final review found no remaining implementation changes. Exact-head CI, merge and deployed telemetry remain external completion gates on PR #3933; no deployed latency result is claimed here. The temporary baseline checkout was retired through the guarded helper.
+Completed: 2026-09-30
