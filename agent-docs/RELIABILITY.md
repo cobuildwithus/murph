@@ -407,8 +407,8 @@ to apply after cutover.
 - Update architecture and verification docs in the same change that introduces new runtime entrypoints.
 - Avoid hidden coupling between scripts, docs, and runtime code; document new dependencies in `ARCHITECTURE.md` and `agent-docs/references/testing-ci-map.md`.
 - Codex App Server owns managed OpenAI standalone web search. Its exact
-  `POST /v1/alpha/search` request uses the existing signed provider credential
-  and Worker egress owner; a provider rejection remains the current tool
+  `POST /v1/alpha/search` request uses native container authority
+  and the Worker egress owner; a provider rejection remains the current tool
   failure and must not create a Murph-side retry, fallback search provider,
   queue, or durable search state. Unsupported methods, paths, providers, and
   invalid runtime identity fail closed before Worker-owned credential
@@ -622,7 +622,7 @@ to apply after cutover.
   starving the other. The durable null snapshot remains an explicit `pending`
   shared-read state until the member runtime materializes it.
 - Direct hosted Codex process projection includes the selected core provider
-  and only that provider's signed egress credential. Changing providers
+  and that provider's SDK credential placeholder. Changing providers
   therefore changes the warm-process launch identity; the replacement process
   cannot inherit the prior provider's endpoint or credential.
 - Explicit remote verification is fail-closed. The dispatcher never retries on

@@ -7,10 +7,9 @@ import path from "node:path";
 import { WebSocketServer } from "ws";
 import { startCodexAppServerRealtime, stopWarmCodexAppServer } from "@murphai/assistant-engine/assistant-codex";
 import { hostedRunnerIntercept } from "../src/runner-egress-intercept.ts";
-import { createHostedProviderEgressCredential } from "../src/hosted-provider-egress-credential.ts";
 import type { RunnerOutboundEnvironmentSource } from "../src/runner-outbound.ts";
 import { createHostedExecutionTestEnv } from "./hosted-execution-fixtures.ts";
-import { createPostgresTestOwner, mockPostgresOwnerCommand, settledNativeRuntime } from "./postgres-owner-fixtures.ts";
+import { createPostgresTestOwner, mockPostgresOwnerCommand, nativeProviderTestNamespace } from "./postgres-owner-fixtures.ts";
 import { nativeLiveRequest } from "./fixtures/native-live-request.ts";
 
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
@@ -26,7 +25,7 @@ async function fixture() {
   const env: RunnerOutboundEnvironmentSource = {
     ...createHostedExecutionTestEnv(), BUNDLES: {} as RunnerOutboundEnvironmentSource["BUNDLES"],
     HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET: "synthetic-live-signing-key",
-    OPENAI_API_KEY: "synthetic-worker-key", RUNNER_CONTAINER: { getByName: () => settledNativeRuntime },
+    OPENAI_API_KEY: "synthetic-worker-key", RUNNER_CONTAINER: nativeProviderTestNamespace(() => owner),
   };
   const authorize = mockPostgresOwnerCommand(async ({ userId, command }) => {
     if (userId !== owner.userId) return { cutover: "postgres", status: "stale", owner: null };
@@ -35,9 +34,7 @@ async function fixture() {
     }
     return { cutover: "postgres", status: command.operation === "reconcile" ? "observed" : "authorized", owner };
   });
-  const credential = await createHostedProviderEgressCredential({
-    providerKind: "openai", userId: owner.userId, runnerContainerName: owner.runnerContainerName!, source: env,
-  });
+  const credential = "__cloudflare_injected__";
   const upstream = vi.fn<typeof fetch>(async (input) => {
     const url = new URL(input instanceof Request ? input.url : String(input));
     return url.pathname.endsWith("/attach") ? new Response("synthetic-upgrade") : Response.json({
@@ -47,7 +44,7 @@ async function fixture() {
   vi.stubGlobal("fetch", upstream);
   const send = (path: string, init: RequestInit) => hostedRunnerIntercept(new Request(`https://api.openai.com${path}`, {
     ...init, headers: { authorization: `Bearer ${credential}`, ...init.headers },
-  }), env, { containerId: "synthetic-container" });
+  }), env, { className: "RunnerContainer", containerId: "synthetic-container" });
   const create = (body: unknown = nativeLiveRequest()) => send("/v1/live/sessions", {
     method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body),
   });
@@ -77,6 +74,7 @@ describe("native public Live egress", () => {
     expect(attachment.headers.get("authorization")).toBe("Bearer synthetic-worker-key");
     expect(attachment.redirect).toBe("manual");
     expect(h.upstream).toHaveBeenCalledTimes(2);
+    expect(h.authorize).not.toHaveBeenCalled();
   });
 
   it.each([401, 403])("reports upstream authorization failure %s through the existing monitor", async (status) => {
@@ -91,11 +89,10 @@ describe("native public Live egress", () => {
     expect(reportFailure).toHaveBeenCalledWith({ observedAtMs: expect.any(Number), status });
   });
 
-  it("rejects raw credentials, queries, and non-WebSocket attachments without provider effects", async () => {
+  it("rejects queries and non-WebSocket attachments without provider effects", async () => {
     const h = await fixture();
     const created = await readCreation(await h.create());
     const body = JSON.stringify(nativeLiveRequest());
-    expect((await h.send("/v1/live/sessions", { method: "POST", body, headers: { authorization: "Bearer synthetic-raw-key" } })).status).toBe(403);
     expect((await h.send("/v1/live/sessions?override=true", { method: "POST", body })).status).toBe(403);
     expect((await h.send(`/v1/live/sessions/${created.session.id}/attach`, {})).status).toBe(403);
     expect((await h.send(`/v1/live/sessions/${created.session.id}/attach?override=true`, {
@@ -105,7 +102,7 @@ describe("native public Live egress", () => {
   });
 
   it.each([
-    { attemptId: "replacement" }, { generation: "8" }, { runnerContainerName: "replacement" }, { phase: "idle" as const },
+    { attemptId: "replacement" }, { generation: "8" }, { phase: "idle" as const },
   ])("rejects attachment after owner replacement or release: %j", async (patch) => {
     const h = await fixture();
     const created = await readCreation(await h.create());
@@ -133,9 +130,7 @@ describe("native public Live egress", () => {
       expect((await h.attach(reference)).status).toBe(403);
     }
     h.change({ userId: "another-member" });
-    const otherCredential = await createHostedProviderEgressCredential({
-      providerKind: "openai", userId: "another-member", runnerContainerName: "member_123--v-test", source: h.env,
-    });
+    const otherCredential = "__cloudflare_injected__";
     expect((await h.attach(created.session.id, otherCredential)).status).toBe(403);
     expect(h.upstream).toHaveBeenCalledTimes(1);
   });
@@ -201,7 +196,7 @@ it.skipIf(!process.env.MURPH_TEST_CODEX_COMMAND).each([false, true])(
       }
       return hostedRunnerIntercept(new Request(`https://api.openai.com${request.url}`, {
         method: request.method, headers, ...(body ? { body } : {}),
-      }), h.env, { containerId: "synthetic-container" });
+      }), h.env, { className: "RunnerContainer", containerId: "synthetic-container" });
     }
     const server = createServer((request, response) => {
       void intercepted(request).then(async (result) => {

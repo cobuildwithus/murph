@@ -97,8 +97,8 @@ The owner row has a monotonically increasing generation and one attempt. Its
 phases are `idle -> starting -> active -> retiring -> idle`. Claim records an
 allocation ID before an external allocation call. Target selection records the
 immutable slot before native binding. Preparation binds workspace start version,
-processing mode, the provider-token hash, encrypted inference settings, and
-managed-AI allowance once. The opaque provider token travels only in the job.
+processing mode, encrypted inference settings, and managed-AI allowance once.
+New invocations do not mint provider bearer credentials.
 The workspace checkpoint compare-and-swap version is independent of generation.
 
 Input preparation and native readiness overlap. The native slot submits the
@@ -108,7 +108,7 @@ Web authority together; startup does not make a second `authorize_effect` call.
 The existing readiness response advertises this capability. During mixed
 Worker/controller deployments, callers of older controllers still prepare through
 Web before the controller's authorization call; older callers remain supported.
-Provider effects continue to require their own live authorization.
+Provider effects read their native controller receipt and binding.
 Registered/completed receipts survive activation loss. A duplicate registration
 cannot execute the attempt twice. An uncertain launch or stop retains the exact
 target; age can schedule reconciliation but cannot authorize its replacement.
@@ -169,18 +169,29 @@ until completion or the existing retirement/shutdown path ends its ownership.
 This is not an immediate-cancellation guarantee. Deleted members remain blocked;
 their retained owner rows exist only for cleanup.
 
-Provider effects still authenticate their exact runtime identity or credential,
-apply provider operation policy, and enforce managed spending limits. The same
-Web authorization response selects routing and authorizes against one current
-statement snapshot of the cutover gate, member existence, and runtime owner.
-Provider-token and exact-runtime checks do not start a transaction, acquire row
-locks, or make a separate routing query. The callback remains necessary to reject
-retired or replaced credentials; native container identity alone is not authority. Draining, stale, or failed
-Postgres authorization never falls back to legacy. No positive-allowance cache
-or standalone UserRunner callback preflight is added. Deploy Web's combined
-backend-selection/authorization response before its Worker consumer: older Web
-rejects exact-header authorization for legacy members instead of returning their
-backend. Existing Workers remain compatible with the new Web behavior.
+Provider effects use Cloudflare's platform-supplied container ID and class to
+resolve the exact native controller. Its immutable member binding and registered
+invocation receipt provide attempt/generation, admitted inference configuration,
+and initial spending allowance. Pending or denied usage settlements remain a
+native negative latch. The Worker retains operation policy and real provider
+secrets; no request header, bearer token, or sentinel grants provider authority.
+There is one controller RPC and no Web/Postgres authorization callback on this
+ordinary path. Completion and native retirement revoke new provider calls;
+already admitted effects may finish. Existing Live resource attachment keeps
+its exact member/attempt/generation signature so cancellation can finish while
+retiring. Postgres remains admission, canonical mutation, and billing authority.
+A database-only retirement/deletion is not an instantaneous native stop: the
+existing exact retirement path owns that boundary.
+
+The receipt gains one nullable SQLite provider-context column. A predeployment
+registered receipt imports missing context once from its exact Web owner, then
+persists it through eviction; fresh launches write context before execution.
+Remove this migration branch after old invocations drain. Web's old provider
+reader and token-hash schema remain for deployed Workers during rollout, but
+new Workers never call `authorize_provider`. Those old readers and exact-runtime
+Web preflights use one committed-state SQL snapshot, without transaction locks
+or an extra routing query. Internal signed Web callbacks keep exact ownership
+checks; this change removes only the provider credential/callback path.
 
 Lock order is the cutover gate, member, runtime owner, then workspace/mailbox and
 resource rows. Transactions contain bounded database work only, with five-second

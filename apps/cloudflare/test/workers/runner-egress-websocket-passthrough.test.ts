@@ -1,6 +1,6 @@
 import { afterEach, expect, test, vi } from "vitest";
 import { HOSTED_RUNTIME_OWNER_PATH } from "@murphai/hosted-execution/runtime-owner";
-import { createPostgresTestOwner, forbiddenLegacyRuntime, settledNativeRuntime } from "../postgres-owner-fixtures.ts";
+import { createPostgresTestOwner, forbiddenLegacyRuntime, nativeProviderTestNamespace } from "../postgres-owner-fixtures.ts";
 import { createHostedExecutionTestEnv } from "../hosted-execution-fixtures.ts";
 import { hostedRunnerIntercept, HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL } from "../../src/runner-egress-intercept.ts";
 import { HOSTED_RUNNER_BOUND_USER_ID_HEADER } from "../../src/runner-outbound/headers.ts";
@@ -38,7 +38,7 @@ async function openSocket(allowed: boolean | null, authorized = true) {
     BUNDLES: {} as RunnerOutboundEnvironmentSource["BUNDLES"],
     OPENAI_API_KEY: "synthetic-provider-key",
     USER_RUNNER: forbiddenLegacyRuntime,
-    RUNNER_CONTAINER: { getByName: () => settledNativeRuntime },
+    RUNNER_CONTAINER: nativeProviderTestNamespace(() => authorized ? createPostgresTestOwner() : null),
   };
   const response = await hostedRunnerIntercept(new Request("https://api.openai.com/v1/responses", {
     headers: {
@@ -50,7 +50,7 @@ async function openSocket(allowed: boolean | null, authorized = true) {
       connection: "Upgrade", upgrade: "websocket",
       "sec-websocket-key": "dGhlIHNhbXBsZSBub25jZQ==", "sec-websocket-version": "13",
     },
-  }), environment, { containerId: "member_123--v-test" });
+  }), environment, { className: "RunnerContainer", containerId: "member_123--v-test" });
   return { access, provider, providerFetch, response, upgraded };
 }
 

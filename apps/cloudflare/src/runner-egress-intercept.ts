@@ -1,5 +1,5 @@
 import { parseHostedRuntimeUsageRecordResponse } from "@murphai/hosted-execution/parsers";
-import { authorizePostgresRuntimeProvider } from "./runtime-provider-authorization.ts";
+import { readNativeRuntimeProviderAuthority } from "./runtime-provider-authorization.ts";
 import { Buffer } from "node:buffer";
 import { waitUntil } from "cloudflare:workers";
 
@@ -78,10 +78,6 @@ import {
   readAllowedHostedLinqOperation,
   type HostedLinqProviderOperation,
 } from "./runner-egress-linq-policy.ts";
-import {
-  isHostedProviderEgressCredential,
-  verifyHostedProviderEgressCredential,
-} from "./hosted-provider-egress-credential.ts";
 import {
   readHostedProviderCredentialDiagnosticKind,
 } from "./hosted-provider-credential-diagnostics.ts";
@@ -291,6 +287,7 @@ interface ProviderPathMatch {
 
 interface HostedRunnerOutboundContext {
   containerId?: string;
+  className?: string;
   waitUntil?: (promise: Promise<unknown>) => void;
 }
 
@@ -298,22 +295,8 @@ interface HostedRunnerDiagnosticBodySource {
   arrayBuffer(): Promise<ArrayBuffer>;
 }
 
-type HostedProviderEgressValidationMode =
-  | "deploy_smoke_live_model_turn"
-  | "exact_headers"
-  | "missing_identity"
-  | "provider_egress_credential"
-  | "provider_egress_token";
-type HostedProviderEgressRejectReason =
-  | "write_fence_mismatch"
-  | "bound_user_missing"
-  | "exact_write_fence_rejected"
-  | "provider_egress_credential_invalid"
-  | "provider_egress_credential_provider_mismatch"
-  | "provider_egress_credential_signature_mismatch"
-  | "provider_egress_credential_validation_error"
-  | "provider_egress_token_missing"
-  | "usage_settlement_pending";
+type HostedProviderEgressValidationMode = "deploy_smoke_live_model_turn" | "native_container";
+type HostedProviderEgressRejectReason = "bound_container_inactive" | "usage_settlement_pending";
 
 interface HostedProviderEgressAuthorization {
   authorized: boolean;
@@ -325,9 +308,6 @@ interface HostedProviderEgressAuthorization {
   rejectReason?: HostedProviderEgressRejectReason;
   runtimeAuthorityHeadersPresent: boolean;
   userId: string | null;
-  validationError?: unknown;
-  validationErrorCode?: string;
-  validationErrorName?: string;
   writeFence: HostedProviderEgressWriteFenceMetadata | null;
 }
 
@@ -731,21 +711,15 @@ async function maybeHandleHostedDataApiRequest(input: {
   if (!upstreamBaseUrl) {
     return new Response("Hosted data API upstream is not configured.", { status: 500 });
   }
-  const bearerCredential = readBearerCredential(input.request.headers);
-  if (!bearerCredential) {
-    return disallowedProviderEgress();
-  }
 
   const startedAt = Date.now();
-  const authorization = await authorizeNativeHostedProviderCredential({
-    credential: bearerCredential,
+  const authorization = await authorizeHostedProviderEgress({
+    ctx: input.ctx,
+    userId: input.userId,
     env: input.env,
     providerKind: "murph_data_api",
     request: input.request,
   });
-  if (!authorization) {
-    return disallowedProviderEgress();
-  }
   if (!authorization.authorized) {
     return unauthorizedProviderEgress({
       authorization,
@@ -924,19 +898,13 @@ async function maybeHandleHostedTranscribeRequest(input: {
   }
 
   const startedAt = Date.now();
-  const providerCredential = readBearerCredential(input.request.headers);
-  if (!providerCredential) {
-    return disallowedProviderEgress();
-  }
-  const authorization = await authorizeNativeHostedProviderCredential({
-    credential: providerCredential,
+  const authorization = await authorizeHostedProviderEgress({
+    ctx: input.ctx,
+    userId: input.userId,
     env: input.env,
     providerKind: "workers_ai_transcribe",
     request: input.request,
   });
-  if (!authorization) {
-    return disallowedProviderEgress();
-  }
   if (!authorization.authorized) {
     return unauthorizedProviderEgress({
       authorization,
@@ -1242,7 +1210,6 @@ async function maybeHandleCustomInferenceRequest(input: {
   if (
     input.request.method !== "POST"
     || input.url.pathname !== "/v1/responses"
-    || !hasBearerCredentialSentinel(input.request.headers)
   ) {
     return disallowedProviderEgress();
   }
@@ -1456,20 +1423,13 @@ async function maybeHandleOpenAiRequest(input: {
   if (!isAllowedOpenAiRequest(input.request, pathnameSuffix)) {
     return disallowedProviderEgress();
   }
-  const bearerCredential = readBearerCredential(input.request.headers);
-  if (!bearerCredential) {
-    return disallowedProviderEgress();
-  }
 
   const startedAt = Date.now();
-  const authorization = await authorizeHostedOpenAiProviderEgress({
+  const authorization = await authorizeHostedProviderEgress({
     ...input,
-    bearerCredential,
+    providerKind: "openai",
     openAiPathnameSuffix: pathnameSuffix,
   });
-  if (!authorization) {
-    return disallowedProviderEgress();
-  }
   if (!authorization.authorized) {
     return unauthorizedProviderEgress({
       authorization,
@@ -1570,11 +1530,9 @@ async function handleHostedLiveCreation(input: {
   upstreamFetchImpl?: typeof fetch; userId: string | null; ctx?: HostedRunnerOutboundContext;
 }): Promise<Response> {
   if (input.request.method !== "POST" || input.url.search) return disallowedProviderEgress();
-  const bearerCredential = readBearerCredential(input.request.headers);
-  if (!bearerCredential || !isHostedProviderEgressCredential(bearerCredential)) return disallowedProviderEgress();
   const startedAt = Date.now();
-  const authorization = await authorizeHostedOpenAiProviderEgress({ ...input, bearerCredential });
-  if (!authorization?.authorized || !authorization.writeFence) return disallowedProviderEgress();
+  const authorization = await authorizeHostedProviderEgress({ ...input, providerKind: "openai" });
+  if (!authorization.authorized || !authorization.writeFence) return disallowedProviderEgress();
   const body = await readBoundedRequestBody(input.request, HOSTED_OPENAI_LIVE_BODY_LIMIT);
   if (body === null) return new Response("Payload Too Large", { status: 413 });
   if (!isHostedLiveCreationBody(body)) return new Response("Invalid Live request.", { status: 400 });
@@ -1596,10 +1554,8 @@ async function handleHostedLiveAttachment(input: {
   env: RunnerOutboundEnvironmentSource; upstreamFetchImpl?: typeof fetch; ctx?: HostedRunnerOutboundContext;
 }): Promise<Response> {
   if (input.request.method !== "GET" || input.url.search || !isWebSocketUpgradeRequest(input.request.headers)) return disallowedProviderEgress();
-  const credential = readBearerCredential(input.request.headers);
-  if (!credential) return disallowedProviderEgress();
   const startedAt = Date.now();
-  const resource = await authorizeHostedLiveAttachment({ credential, reference: input.reference, source: input.env });
+  const resource = await authorizeHostedLiveAttachment({ caller: input.ctx, reference: input.reference, source: input.env });
   if (!resource) return disallowedProviderEgress();
   const url = new URL(createProviderUpstreamUrl(input.url, input.pathMatch));
   url.pathname = url.pathname.replace(`/${input.reference}/attach`, `/${encodeURIComponent(resource.sessionId)}/attach`);
@@ -1608,7 +1564,7 @@ async function handleHostedLiveAttachment(input: {
   // This grants attachment only to an existing exact-owner resource, including
   // closure after revocation. It cannot create another Live session.
   const response = await fetchAuthorizedProviderUpstream({
-    authorization: { authorized: true, mode: "provider_egress_credential", durationMs: Date.now() - startedAt,
+    authorization: { authorized: true, mode: "native_container", durationMs: Date.now() - startedAt,
       providerEgressTokenPresent: false, runtimeAuthorityHeadersPresent: false,
       userId: resource.owner.userId, writeFence: { ...resource.owner, workspaceVersion: null } },
     providerKind: "openai", request: input.request, startedAt, url: input.url,
@@ -1665,20 +1621,14 @@ async function maybeHandleVeniceRequest(input: {
     return disallowedProviderEgress();
   }
 
-  const credential = readBearerCredential(input.request.headers);
-  if (!credential) {
-    return disallowedProviderEgress();
-  }
   const startedAt = Date.now();
-  const authorization = await authorizeNativeHostedProviderCredential({
-    credential,
+  const authorization = await authorizeHostedProviderEgress({
+    ctx: input.ctx,
+    userId: input.userId,
     env: input.env,
     providerKind: "venice",
     request: input.request,
   });
-  if (!authorization) {
-    return disallowedProviderEgress();
-  }
   if (!authorization.authorized) {
     return unauthorizedProviderEgress({
       authorization,
@@ -2097,9 +2047,6 @@ async function maybeHandleXaiRequest(input: {
   if (input.request.method !== "POST" || pathnameSuffix !== "/v1/responses") {
     return disallowedProviderEgress();
   }
-  if (!hasBearerCredentialSentinel(input.request.headers)) {
-    return disallowedProviderEgress();
-  }
 
   const startedAt = Date.now();
   const authorization = await authorizeHostedProviderEgress({
@@ -2470,24 +2417,18 @@ async function maybeHandleExaRequest(input: {
   if (!isAllowedExaRequest(input.request.method, pathnameSuffix)) {
     return disallowedProviderEgress();
   }
-  const providerCredential = input.request.headers.get("x-api-key")?.trim() ?? "";
-  if (!providerCredential) {
-    return disallowedProviderEgress();
-  }
   if (input.url.search || input.url.hash) {
     return disallowedProviderEgress();
   }
 
   const startedAt = Date.now();
-  const authorization = await authorizeNativeHostedProviderCredential({
-    credential: providerCredential,
+  const authorization = await authorizeHostedProviderEgress({
+    ctx: input.ctx,
+    userId: input.userId,
     env: input.env,
     providerKind: "exa",
     request: input.request,
   });
-  if (!authorization) {
-    return disallowedProviderEgress();
-  }
   if (!authorization.authorized) {
     return unauthorizedProviderEgress({
       authorization,
@@ -2596,21 +2537,15 @@ async function maybeHandleMapboxRequest(input: {
   if (!isAllowedMapboxRequest(input.request.method, pathnameSuffix)) {
     return disallowedProviderEgress();
   }
-  const providerCredential = input.url.searchParams.get("access_token")?.trim() ?? "";
-  if (!providerCredential) {
-    return disallowedProviderEgress();
-  }
 
   const startedAt = Date.now();
-  const authorization = await authorizeNativeHostedProviderCredential({
-    credential: providerCredential,
+  const authorization = await authorizeHostedProviderEgress({
+    ctx: input.ctx,
+    userId: input.userId,
     env: input.env,
     providerKind: "mapbox",
     request: input.request,
   });
-  if (!authorization) {
-    return disallowedProviderEgress();
-  }
   if (!authorization.authorized) {
     return unauthorizedProviderEgress({
       authorization,
@@ -2667,15 +2602,6 @@ async function maybeHandleLinqRequest(input: {
     emitHostedLinqProviderPolicyRejection({
       request: input.request,
       reason: "operation_not_allowed",
-      userId: input.userId,
-    });
-    return disallowedProviderEgress();
-  }
-  if (!hasBearerCredentialSentinel(input.request.headers)) {
-    emitHostedLinqProviderPolicyRejection({
-      providerOperation,
-      request: input.request,
-      reason: "credential_sentinel_missing",
       userId: input.userId,
     });
     return disallowedProviderEgress();
@@ -2866,10 +2792,6 @@ function isAllowedExaRequest(method: string, pathname: string): boolean {
   );
 }
 
-function hasBearerCredentialSentinel(headers: Headers): boolean {
-  return readBearerCredential(headers) === HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL;
-}
-
 function readBearerCredential(headers: Headers): string | null {
   const value = headers.get("authorization")?.trim() ?? "";
   const match = /^Bearer\s+(.+)$/iu.exec(value);
@@ -2948,93 +2870,28 @@ async function authorizeHostedProviderEgress(input: {
   userId: string | null;
 }): Promise<HostedProviderEgressAuthorization> {
   const startedAt = Date.now();
-  const runtimeAuthorityHeadersPresent = hostedRuntimeAuthorityHeadersPresent(
-    input.request.headers,
-  );
-  if (input.userId && runtimeAuthorityHeadersPresent) {
-    const writeFence = readRuntimeLogWriteFenceMetadata({
-      headers: input.request.headers,
-      userId: input.userId,
+  const owner = await readNativeRuntimeProviderAuthority(input.env, input.ctx);
+  if (!owner && input.providerKind === "openai") {
+    const smoke = await authorizeHostedProviderEgressDeploySmokeLiveModelTurn({
+      ctx: input.ctx, env: input.env, startedAt, userId: input.userId,
+      providerEgressTokenPresent: false, runtimeAuthorityHeadersPresent: false,
+      deploySmokeLiveModelTurnModel: await readDeploySmokeLiveModelTurnOpenAiModel({
+        pathnameSuffix: input.openAiPathnameSuffix ?? "", request: input.request }),
     });
-    if (writeFence) {
-      const validation = await authorizePostgresRuntimeProvider({ env: input.env, userId: input.userId,
-        command: { operation: "authorize_effect", attemptId: writeFence.attemptId, generation: writeFence.leaseGeneration, runnerContainerName: null, managedAi: false },
-        managed: HOSTED_PLATFORM_METERED_PROVIDER_KINDS.has(input.providerKind) || input.providerKind === "workers_ai_transcribe",
-      });
-      return postgresProviderAuthorization(validation, { startedAt, userId: input.userId, mode: "exact_headers", runtimeAuthorityHeadersPresent, providerEgressTokenPresent: false });
-    }
-    return {
-      authorized: false,
-      durationMs: Date.now() - startedAt,
-      mode: "exact_headers",
-      providerEgressTokenPresent: false,
-      rejectReason: "exact_write_fence_rejected",
-      runtimeAuthorityHeadersPresent,
-      userId: input.userId,
-      writeFence: null,
-    };
+    if (smoke) return smoke;
   }
-
-  const providerEgressToken = readHostedProviderEgressToken(input.request);
-  if (input.userId && providerEgressToken) {
-    return await authorizeHostedProviderEgressToken({
-      activeUserId: input.userId,
-      providerKind: input.providerKind,
-      env: input.env,
-      providerEgressToken,
-      providerEgressTokenPresent: true,
-      runtimeAuthorityHeadersPresent,
-      startedAt,
-    });
-  }
-
-  if (input.providerKind === "openai") {
-    // Deploy-smoke live model turn: the post-deploy managed-container smoke
-    // runs one real codex turn from the dedicated deploy-smoke container,
-    // which has no active user runtime. Authorize that egress only when the
-    // originating container id belongs to the deploy-smoke namespace AND that
-    // Durable Object reports an in-flight live-turn fence, so the window is
-    // both identity- and time-scoped. Production turns authorize through a
-    // provider credential, exact runtime headers, or a provider token.
-    const deploySmokeLiveModelTurnModel = await readDeploySmokeLiveModelTurnOpenAiModel({
-      pathnameSuffix: input.openAiPathnameSuffix ?? "",
-      request: input.request,
-    });
-    const deploySmokeLiveModelTurn = await authorizeHostedProviderEgressDeploySmokeLiveModelTurn({
-      ctx: input.ctx,
-      deploySmokeLiveModelTurnModel,
-      env: input.env,
-      providerEgressTokenPresent: providerEgressToken !== null,
-      runtimeAuthorityHeadersPresent,
-      startedAt,
-      userId: input.userId,
-    });
-    if (deploySmokeLiveModelTurn) {
-      return deploySmokeLiveModelTurn;
-    }
-  }
-
-  if (!input.userId) {
-    return {
-      authorized: false,
-      durationMs: Date.now() - startedAt,
-      mode: "missing_identity",
-      providerEgressTokenPresent: providerEgressToken !== null,
-      rejectReason: "bound_user_missing",
-      runtimeAuthorityHeadersPresent,
-      userId: null,
-      writeFence: null,
-    };
-  }
+  const settlementPending = owner?.settlementPending
+    && (HOSTED_PLATFORM_METERED_PROVIDER_KINDS.has(input.providerKind) || input.providerKind === "workers_ai_transcribe");
   return {
-    authorized: false,
-    durationMs: Date.now() - startedAt,
-    mode: "provider_egress_token",
-    providerEgressTokenPresent: false,
-    rejectReason: "provider_egress_token_missing",
-    runtimeAuthorityHeadersPresent,
-    userId: input.userId,
-    writeFence: null,
+    authorized: Boolean(owner) && !owner?.retiring && !settlementPending,
+    durationMs: Date.now() - startedAt, mode: "native_container",
+    providerEgressTokenPresent: false, runtimeAuthorityHeadersPresent: false,
+    userId: owner?.userId ?? null,
+    ...(owner ? { platformAiUsageAllowed: owner.platformAiUsageAllowed, customInferenceEnvelope: owner.customInferenceEnvelope } : {}),
+    ...(settlementPending ? { rejectReason: "usage_settlement_pending" as const }
+      : !owner || owner.retiring ? { rejectReason: "bound_container_inactive" as const } : {}),
+    writeFence: owner ? { attemptId: owner.attemptId, leaseGeneration: owner.generation,
+      workspaceVersion: owner.workspaceVersion, userId: owner.userId } : null,
   };
 }
 
@@ -3061,6 +2918,7 @@ async function authorizeHostedProviderEgressDeploySmokeLiveModelTurn(input: {
   const namespace = readHostedRunnerDeploySmokeContainerNamespace(input.env);
   if (
     !containerId
+    || input.ctx?.className !== "DeploySmokeRunnerContainer"
     || !namespace
     || typeof namespace.idFromString !== "function"
     || typeof namespace.get !== "function"
@@ -3122,126 +2980,6 @@ function isHostedDeploySmokeLiveModelTurnFenceResult(value: unknown): value is {
       || typeof (value as { model?: unknown }).model === "string"
     ),
   );
-}
-
-function readHostedProviderEgressToken(request: Request): string | null {
-  const token = request.headers.get(HOSTED_PROVIDER_EGRESS_TOKEN_HEADER)?.trim();
-  return token ? token : null;
-}
-
-async function authorizeHostedOpenAiProviderEgress(input: {
-  bearerCredential: string;
-  ctx?: HostedRunnerOutboundContext;
-  env: RunnerOutboundEnvironmentSource;
-  openAiPathnameSuffix?: string;
-  request: Request;
-  userId: string | null;
-}): Promise<HostedProviderEgressAuthorization | null> {
-  if (isHostedProviderEgressCredential(input.bearerCredential)) {
-    return await authorizeHostedProviderEgressCredential({
-      credential: input.bearerCredential,
-      env: input.env,
-      providerKind: "openai",
-      request: input.request,
-    });
-  }
-
-  if (input.bearerCredential !== HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL) {
-    return null;
-  }
-
-  return await authorizeHostedProviderEgress({
-    ctx: input.ctx,
-    env: input.env,
-    openAiPathnameSuffix: input.openAiPathnameSuffix,
-    providerKind: "openai",
-    request: input.request,
-    userId: input.userId,
-  });
-}
-
-async function authorizeHostedProviderEgressCredential(input: {
-  credential: string;
-  env: RunnerOutboundEnvironmentSource;
-  providerKind: string;
-  request: Request;
-}): Promise<HostedProviderEgressAuthorization> {
-  const startedAt = Date.now();
-  const runtimeAuthorityHeadersPresent = hostedRuntimeAuthorityHeadersPresent(
-    input.request.headers,
-  );
-  const providerEgressTokenPresent = readHostedProviderEgressToken(input.request) !== null;
-  let verification: Awaited<ReturnType<typeof verifyHostedProviderEgressCredential>>;
-  try {
-    verification = await verifyHostedProviderEgressCredential({
-      credential: input.credential,
-      source: input.env,
-    });
-  } catch (error) {
-    const validationErrorName = readHostedExecutionSafeErrorName(error);
-    return {
-      authorized: false,
-      durationMs: Date.now() - startedAt,
-      mode: "provider_egress_credential",
-      providerEgressTokenPresent,
-      rejectReason: "provider_egress_credential_validation_error",
-      runtimeAuthorityHeadersPresent,
-      userId: null,
-      validationError: error,
-      validationErrorCode: deriveHostedExecutionErrorCode(error),
-      ...(validationErrorName ? { validationErrorName } : {}),
-      writeFence: null,
-    };
-  }
-  if (!verification.ok) {
-    return {
-      authorized: false,
-      durationMs: Date.now() - startedAt,
-      mode: "provider_egress_credential",
-      providerEgressTokenPresent,
-      rejectReason: verification.rejectReason,
-      runtimeAuthorityHeadersPresent,
-      userId: null,
-      writeFence: null,
-    };
-  }
-
-  if (verification.claims.providerKind !== input.providerKind) {
-    return {
-      authorized: false,
-      durationMs: Date.now() - startedAt,
-      mode: "provider_egress_credential",
-      providerEgressTokenPresent,
-      rejectReason: "provider_egress_credential_provider_mismatch",
-      runtimeAuthorityHeadersPresent,
-      userId: verification.claims.userId,
-      writeFence: null,
-    };
-  }
-
-  const validation = await authorizePostgresRuntimeProvider({ env: input.env, userId: verification.claims.userId,
-    command: { operation: "authorize_provider", runnerContainerName: verification.claims.runnerContainerName, providerEgressTokenHash: null, providerKind: input.providerKind },
-    managed: HOSTED_PLATFORM_METERED_PROVIDER_KINDS.has(input.providerKind) || input.providerKind === "workers_ai_transcribe",
-  });
-  return postgresProviderAuthorization(validation, { startedAt, userId: verification.claims.userId, mode: "provider_egress_credential", runtimeAuthorityHeadersPresent, providerEgressTokenPresent });
-}
-
-async function authorizeHostedProviderEgressToken(input: {
-  providerKind: string;
-  activeUserId: string;
-  env: RunnerOutboundEnvironmentSource;
-  providerEgressToken: string;
-  providerEgressTokenPresent: boolean;
-  runtimeAuthorityHeadersPresent: boolean;
-  startedAt: number;
-}): Promise<HostedProviderEgressAuthorization> {
-  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(input.providerEgressToken)));
-  const providerEgressTokenHash = Array.from(digest, value => value.toString(16).padStart(2, "0")).join("");
-  const validation = await authorizePostgresRuntimeProvider({ env: input.env, userId: input.activeUserId,
-    command: { operation: "authorize_provider", runnerContainerName: null, providerEgressTokenHash, providerKind: input.providerKind },
-    managed: HOSTED_PLATFORM_METERED_PROVIDER_KINDS.has(input.providerKind) || input.providerKind === "workers_ai_transcribe",
-  });
-  return postgresProviderAuthorization(validation, { ...input, userId: input.activeUserId, mode: "provider_egress_token" });
 }
 
 function unauthorizedProviderEgress(input: {
@@ -3350,7 +3088,7 @@ function emitHostedProviderEgressDiagnostic(input: {
   upstreamDurationMs: number | null;
   url: URL;
 }): void {
-  const diagnosticError = input.error ?? input.authorization.validationError;
+  const diagnosticError = input.error;
   const errorCode = diagnosticError ? deriveHostedExecutionErrorCode(diagnosticError) : null;
   const errorName = diagnosticError ? readHostedExecutionSafeErrorName(diagnosticError) : null;
   const providerBearerCredentialKind = input.providerKind === "openai"
@@ -3380,8 +3118,6 @@ function emitHostedProviderEgressDiagnostic(input: {
       ...(providerBearerCredentialKind
         ? { providerBearerCredentialKind }
         : {}),
-      providerEgressCredentialPresent:
-        input.authorization.mode === "provider_egress_credential",
       providerEgressTokenPresent: input.authorization.providerEgressTokenPresent,
       runtimeAuthorityHeadersPresent: input.authorization.runtimeAuthorityHeadersPresent,
       userIdPresent: input.authorization.userId !== null,
@@ -3398,18 +3134,6 @@ function emitHostedProviderEgressDiagnostic(input: {
         ? {
             providerEgressRejectReason: input.authorization.rejectReason,
             writeFenceValidationRejectReason: input.authorization.rejectReason,
-          }
-        : {}),
-      ...(input.authorization.validationErrorCode
-        ? {
-            providerEgressValidationErrorCode: input.authorization.validationErrorCode,
-            writeFenceValidationErrorCode: input.authorization.validationErrorCode,
-          }
-        : {}),
-      ...(input.authorization.validationErrorName
-        ? {
-            providerEgressValidationErrorName: input.authorization.validationErrorName,
-            writeFenceValidationErrorName: input.authorization.validationErrorName,
           }
         : {}),
     },
@@ -3872,26 +3596,6 @@ function uniqueProviderHosts(...hosts: string[]): string[] {
 function normalizeProviderHostname(hostname: string): string {
   return hostname.toLowerCase().replace(/\.+$/u, "");
 }
-async function authorizeNativeHostedProviderCredential(input: {
-  credential: string;
-  env: RunnerOutboundEnvironmentSource;
-  providerKind: string;
-  request: Request;
-}): Promise<HostedProviderEgressAuthorization | null> {
-  if (isHostedProviderEgressCredential(input.credential)) {
-    return await authorizeHostedProviderEgressCredential(input);
-  }
-  if (input.credential !== HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL) {
-    return null;
-  }
-  return await authorizeHostedProviderEgress({
-    env: input.env,
-    providerKind: input.providerKind,
-    request: input.request,
-    userId: readHostedRunnerBoundUserId(input.request),
-  });
-}
-
 async function checkHostedImageGenerationAccess(input: {
   authorization: HostedProviderEgressAuthorization;
   env: RunnerOutboundEnvironmentSource;
@@ -3929,20 +3633,4 @@ async function checkHostedImageGenerationAccess(input: {
     code: "MURPH_IMAGE_ACCESS_UNAVAILABLE",
     message: "Image generation access could not be confirmed. Try again later.",
   } }, { status: 503 });
-}
-
-function postgresProviderAuthorization(
-  validation: Awaited<ReturnType<typeof authorizePostgresRuntimeProvider>>,
-  input: { startedAt: number; userId: string; mode: HostedProviderEgressValidationMode; providerEgressTokenPresent: boolean; runtimeAuthorityHeadersPresent: boolean },
-): HostedProviderEgressAuthorization {
-  const owner = validation?.owner;
-  return {
-    authorized: Boolean(owner) && !validation?.settlementPending,
-    durationMs: Date.now() - input.startedAt, mode: input.mode,
-    providerEgressTokenPresent: input.providerEgressTokenPresent, runtimeAuthorityHeadersPresent: input.runtimeAuthorityHeadersPresent,
-    userId: input.userId,
-    ...(owner ? { platformAiUsageAllowed: owner.platformAiUsageAllowed, customInferenceEnvelope: owner.customInferenceEnvelope } : {}),
-    ...(validation?.settlementPending ? { rejectReason: "usage_settlement_pending" as const } : !owner ? { rejectReason: "write_fence_mismatch" as const } : {}),
-    writeFence: owner?.attemptId ? { attemptId: owner.attemptId, leaseGeneration: owner.generation, workspaceVersion: owner.workspaceVersion, userId: input.userId } : null,
-  };
 }

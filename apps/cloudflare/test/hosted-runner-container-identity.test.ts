@@ -564,11 +564,7 @@ describe("hosted runner container identity", () => {
     expect(JSON.stringify(prepared.job)).not.toContain(runtimeTarget.endpointUrl);
     expect(JSON.stringify(prepared.job)).not.toContain(runtimeTarget.auth.secret);
 
-    if (!token.providerEgressToken) {
-      throw new Error("Expected a provider egress token on the active fence.");
-    }
     const validation = await stateStore.readBoundInvocation({
-      providerEgressToken: token.providerEgressToken,
       userId: TEST_USER_ID,
     });
     expect(validation).not.toBeNull();
@@ -681,11 +677,7 @@ describe("hosted runner container identity", () => {
     });
     expect(invokedContainerNames).toEqual([]);
     expect(prepared.job.request.processingMode).toBe("system_mailbox");
-    if (!prepared.token.providerEgressToken) {
-      throw new Error("Expected a provider egress token on the active fence.");
-    }
     await expect(stateStore.readBoundInvocation({
-      providerEgressToken: prepared.token.providerEgressToken,
       userId: TEST_USER_ID,
     })).resolves.toMatchObject({
       platformAiUsageAllowed: false,
@@ -733,11 +725,7 @@ describe("hosted runner container identity", () => {
 
     expect(prepared.job.request.processingMode).toBeUndefined();
     expect(prepared.job.request.assistantExecutionBlocked).toBeUndefined();
-    if (!prepared.token.providerEgressToken) {
-      throw new Error("Expected a provider egress token on the active fence.");
-    }
     await expect(stateStore.readBoundInvocation({
-      providerEgressToken: prepared.token.providerEgressToken,
       userId: TEST_USER_ID,
     })).resolves.toMatchObject({
       platformAiUsageAllowed: false,
@@ -790,11 +778,7 @@ describe("hosted runner container identity", () => {
       workspaceVersion: "0",
     });
 
-    if (!token.providerEgressToken) {
-      throw new Error("Expected a provider egress token on the active fence.");
-    }
     const validation = await stateStore.readBoundInvocation({
-      providerEgressToken: token.providerEgressToken,
       userId: TEST_USER_ID,
     });
     expect(validation).toMatchObject({
@@ -1245,7 +1229,7 @@ function createPreparationOwnerFixture() {
   return {
     reserveRunnerContainerStopTarget: async (_input: { runnerContainerName: string; userId: string }) => true,
     async beginWriteFence(input: { runnerContainerName?: string; userId: string; processingMode?: RunnerWriteFenceToken["processingMode"] }): Promise<RunnerWriteFenceToken> {
-      token = { attemptId: "synthetic-attempt", generation: "1", kind: "runtime", processingMode: input.processingMode ?? "default", providerEgressToken: "synthetic-egress-token", runnerContainerName: input.runnerContainerName ?? null, startedAt: FIXED_NOW, userId: input.userId, workspaceVersion: null };
+      token = { attemptId: "synthetic-attempt", generation: "1", kind: "runtime", processingMode: input.processingMode ?? "default", runnerContainerName: input.runnerContainerName ?? null, startedAt: FIXED_NOW, userId: input.userId, workspaceVersion: null };
       return token;
     },
     readWriteFenceToken: async (_userId?: string) => token,

@@ -21,7 +21,7 @@ vi.mock("../src/runtime-invocation-preparation.ts", () => ({
     prepareForFreshStart() {
       return async (token: RunnerWriteFenceToken) => {
         const bound = await this.input.bindInvocation({ token, workspaceVersion: "0", customInferenceEnvelope: null, platformAiUsageAllowed: true });
-        return { customInferenceEnvelope: null, platformAiUsageAllowed: true, job: { request: { providerEgressToken: bound.providerEgressToken } }, token: bound, input: {}, workspaceVersion: "0", workspaceCheckpointedAt: null };
+        return { customInferenceEnvelope: null, platformAiUsageAllowed: true, job: { request: {} }, token: bound, input: {}, workspaceVersion: "0", workspaceCheckpointedAt: null };
       };
     }
   },
@@ -571,15 +571,10 @@ describe("Postgres runtime orchestration", () => {
     expect(container.retireStandbySlot).not.toHaveBeenCalled();
     expect(container.ensureProcessing).toHaveBeenCalledTimes(state === "retiring" ? 0 : 1);
     expect(container.startSupervisedInvocation).toHaveBeenCalledTimes(1);
-    const token = container.startSupervisedInvocation.mock.calls[0]?.[0]?.job.request.providerEgressToken;
-    expect(token).toMatch(/^provider-egress-[a-f0-9]{64}$/u);
-    const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(token!)));
-    const hash = Array.from(digest, value => value.toString(16).padStart(2, "0")).join("");
     expect(container.startSupervisedInvocation).toHaveBeenCalledWith(expect.objectContaining({
-      launch: expect.objectContaining({ providerEgressTokenHash: hash }),
+      launch: expect.objectContaining({ providerEgressTokenHash: null }),
     }));
     expect(vi.mocked(commandHostedRuntimeOwner).mock.calls.map(([input]) => input.command.operation))
       .toEqual([...(state === "web-admitted" ? [] : ["claim"]), "claim", "accepted"]);
-    expect(JSON.stringify(vi.mocked(commandHostedRuntimeOwner).mock.calls)).not.toContain(token);
   });
 });
