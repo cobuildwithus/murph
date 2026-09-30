@@ -1425,6 +1425,10 @@
       "path": ".agents/friction-log/20260912202546-changelog-focused-test/friction.md"
     },
     {
+      "issue": "cobuildwithus/murph#3797",
+      "path": ".agents/friction-log/20260912202940-dashboard-smoke-rendering/friction.md"
+    },
+    {
       "issue": "cobuildwithus/murph#3798",
       "path": ".agents/friction-log/20260912232828-vercel-github-deployment/friction.md"
     },
@@ -1707,6 +1711,10 @@
     {
       "issue": "cobuildwithus/murph#3894",
       "path": ".agents/friction-log/20260925115544-frog-publish-rebuilds/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3895",
+      "path": ".agents/friction-log/20260925120258-vault-validation-rejects/friction.md"
     },
     {
       "issue": "cobuildwithus/murph#3897",
