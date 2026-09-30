@@ -1,6 +1,9 @@
+import type { PrismaClient } from "@prisma/client";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  isHostedRuntimeInactiveAccessError: vi.fn(),
+  requireHostedRuntimeMembersActiveAccessForUpdateTx: vi.fn(),
 	buildHostedVaultShareGenerationToken: vi.fn(),
 	replaceHostedVaultShareProjectionSnapshot: vi.fn(),
 	findActiveHostedVaultShares: vi.fn(),
@@ -34,6 +37,17 @@ vi.mock("@/src/lib/hosted-vault-share/projection-store", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/family-plan", () => ({}));
+vi.mock("@/src/lib/hosted-mailbox/runtime-access", () => ({
+  isHostedRuntimeInactiveAccessError: mocks.isHostedRuntimeInactiveAccessError,
+  requireHostedRuntimeMembersActiveAccessForUpdateTx:
+    mocks.requireHostedRuntimeMembersActiveAccessForUpdateTx,
+}));
+vi.mock("@/src/lib/hosted-onboarding/member-access", () => ({
+  readActiveHostedMemberAccessIds: vi.fn(),
+}));
+import { setHostedSecureBoxStringTestCodecForTests } from "@/src/lib/hosted-crypto/secure-box";
+import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
+import type { HostedVaultShareReplacementDeferralReason } from "@/src/lib/hosted-vault-share/projection-store";
 import {
   buildHostedVaultShareProjectionScopeKey,
   HOSTED_VAULT_SHARE_BROAD_ACTIVITY_MINUTES_SEMANTICS,
@@ -198,11 +212,22 @@ function buildRawRequest(body: unknown, signal?: AbortSignal): Request {
 function deliveryEffectControls() {
   return {
     deadlineAtEpochMs: expect.any(Number),
+    onDeferral: expect.any(Function),
     signal: expect.any(AbortSignal),
   };
 }
 
-async function expectDeferredDelivery(response: Response, reason: string) {
+function createPrismaClientTestDouble(value: object): PrismaClient {
+  // The real store reaches only this transaction seam. The composed proof
+  // supplies and asserts every access, lock, and conditional-update operation.
+  return value as PrismaClient;
+}
+
+async function expectDeferredDelivery(
+  response: Response,
+  reason: string,
+  replacementDeferralReason?: HostedVaultShareReplacementDeferralReason,
+) {
   expect(response.status).toBe(503);
   expect(response.headers.get("cache-control")).toBe("no-store");
   expect(await response.text()).toBe(JSON.stringify({
@@ -217,6 +242,7 @@ async function expectDeferredDelivery(response: Response, reason: string) {
     {
       schema: "murph.hosted-vault-share-delivery-deferred.v1",
       reason,
+      ...(replacementDeferralReason === undefined ? {} : { replacementDeferralReason }),
     },
   );
 }
@@ -374,6 +400,8 @@ describe("vault-share deliver route", () => {
   beforeEach(() => {
     vi.resetAllMocks();
     vi.spyOn(console, "warn").mockImplementation(() => {});
+    mocks.isHostedRuntimeInactiveAccessError.mockReturnValue(false);
+    mocks.requireHostedRuntimeMembersActiveAccessForUpdateTx.mockResolvedValue(undefined);
     mocks.requireHostedCloudflareCallbackRequest.mockResolvedValue("member_grantor");
     mocks.findActiveHostedVaultShares.mockResolvedValue([ACTIVE_SHARE]);
 		mocks.hasUnmaterializedHostedVaultShareProjectionGeneration.mockResolvedValue(false);
@@ -383,6 +411,7 @@ describe("vault-share deliver route", () => {
 
   afterEach(() => {
     vi.mocked(console.warn).mockRestore();
+    setHostedSecureBoxStringTestCodecForTests(null);
   });
 
   it("keeps the maximum parser-valid workouts delivery body within the ingress limit", () => {
@@ -787,11 +816,14 @@ describe("vault-share deliver route", () => {
 			});
 		}
 
-		mocks.replaceHostedVaultShareProjectionSnapshot.mockResolvedValue("no-active-share");
+		mocks.replaceHostedVaultShareProjectionSnapshot.mockImplementation(async (input) => {
+      input.onDeferral?.("inactive_access");
+      return "no-active-share";
+    });
 
 		const response = await deliverRoute.POST(buildRequest(VALID_BODY));
 
-		await expectDeferredDelivery(response, "replacement_no_active_share");
+		await expectDeferredDelivery(response, "replacement_no_active_share", "inactive_access");
 		expect(mocks.replaceHostedVaultShareProjectionSnapshot).toHaveBeenCalledTimes(1);
 	});
 
@@ -823,14 +855,17 @@ describe("vault-share deliver route", () => {
     mocks.requireHostedCloudflareCallbackRequest.mockResolvedValue(share.grantorMemberId);
     mocks.findActiveHostedVaultShares.mockResolvedValue([share]);
     mocks.buildHostedVaultShareGenerationToken.mockReturnValue(body.expectedGenerationToken);
-    mocks.replaceHostedVaultShareProjectionSnapshot.mockResolvedValue("no-active-share");
+    mocks.replaceHostedVaultShareProjectionSnapshot.mockImplementation(async (input) => {
+      input.onDeferral?.("conditional_update_not_applied");
+      return "no-active-share";
+    });
     const request = buildRequest(body);
     request.headers.set("authorization", "Bearer synthetic-private-token");
     request.headers.set("x-private-fixture", "synthetic-private-header");
 
     const response = await deliverRoute.POST(request);
 
-    await expectDeferredDelivery(response, "replacement_no_active_share");
+    await expectDeferredDelivery(response, "replacement_no_active_share", "conditional_update_not_applied");
     expect(mocks.replaceHostedVaultShareProjectionSnapshot).toHaveBeenCalledExactlyOnceWith({
       ...deliveryEffectControls(),
       records: body.records,
@@ -838,6 +873,112 @@ describe("vault-share deliver route", () => {
       sourceWorkspaceVersion: body.sourceWorkspaceVersion,
     });
     expect(JSON.stringify(vi.mocked(console.warn).mock.calls)).not.toContain("synthetic-private");
+  });
+
+  it.each([
+    "inactive_access",
+    "source_workspace_changed",
+    "conditional_update_not_applied",
+  ] as const)("logs the first settled store deferral once: %s", async (firstReason) => {
+    const store = await vi.importActual<
+      typeof import("@/src/lib/hosted-vault-share/projection-store")
+    >("@/src/lib/hosted-vault-share/projection-store");
+    setHostedSecureBoxStringTestCodecForTests({
+      decrypt: ({ value }) => value,
+      encrypt: () => "sealed:synthetic",
+    });
+    const queryRaw = vi.fn().mockResolvedValue([{
+      version: BigInt(VALID_BODY.sourceWorkspaceVersion),
+    }]);
+    const updateMany = vi.fn().mockResolvedValue({ count: 1 });
+    const tx = { $queryRaw: queryRaw, hostedVaultShare: { updateMany } };
+    const transaction = vi.fn(async (callback: (value: typeof tx) => Promise<unknown>) => callback(tx));
+    const prisma = createPrismaClientTestDouble({ $transaction: transaction });
+    const inactiveError = new Error("Synthetic private access failure.");
+    mocks.isHostedRuntimeInactiveAccessError.mockImplementation((error) => error === inactiveError);
+    mocks.findActiveHostedVaultShares.mockResolvedValue([
+      ACTIVE_SHARE,
+      SECOND_SHARE,
+      { ...SECOND_SHARE, id: "share_3", destinationMemberId: "member_third_referee" },
+    ]);
+    const laterReason = firstReason === "inactive_access" ? "source_workspace_changed" : "inactive_access";
+    const reasons = [firstReason, laterReason];
+    mocks.replaceHostedVaultShareProjectionSnapshot.mockImplementation(
+      async (input: Parameters<typeof store.replaceHostedVaultShareProjectionSnapshot>[0]) => {
+        const reason = reasons.shift();
+        if (reason === "inactive_access") {
+          mocks.requireHostedRuntimeMembersActiveAccessForUpdateTx.mockRejectedValueOnce(inactiveError);
+        } else if (reason === "source_workspace_changed") {
+          queryRaw.mockResolvedValueOnce([]);
+        } else if (reason === "conditional_update_not_applied") {
+          updateMany.mockResolvedValueOnce({ count: 0 });
+        }
+        return store.replaceHostedVaultShareProjectionSnapshot({ ...input, prisma });
+      },
+    );
+
+    const response = await deliverRoute.POST(buildRequest(VALID_BODY));
+
+    await expectDeferredDelivery(response, "replacement_no_active_share", firstReason);
+    expect(transaction).toHaveBeenCalledTimes(3);
+    expect(mocks.replaceHostedVaultShareProjectionSnapshot).toHaveBeenCalledTimes(3);
+    await expect(updateMany.mock.results.at(-1)?.value).resolves.toEqual({ count: 1 });
+  });
+
+  it.each(["scope", "delivery"] as const)(
+    "does not log a deferral when a later %s failure takes precedence",
+    async (failure) => {
+      vi.spyOn(console, "error").mockImplementation(() => {});
+      mocks.findActiveHostedVaultShares.mockResolvedValue([ACTIVE_SHARE, SECOND_SHARE]);
+      mocks.replaceHostedVaultShareProjectionSnapshot
+        .mockImplementationOnce(async (input) => {
+          input.onDeferral?.("source_workspace_changed");
+          return "no-active-share";
+        })
+        .mockRejectedValueOnce(failure === "scope"
+          ? new HostedDomainRootEnvelopeUnavailableError({ domain: "ingress" })
+          : new Error("Synthetic delivery failure."));
+
+      const response = await deliverRoute.POST(buildRequest(VALID_BODY));
+
+      expect(response.status).toBe(503);
+      expect(await response.json()).toEqual({
+        error: {
+          code: failure === "scope"
+            ? HOSTED_VAULT_SHARE_SCOPE_FAILED_ERROR_CODE
+            : HOSTED_VAULT_SHARE_DELIVERY_FAILED_ERROR_CODE,
+          message: "Hosted vault-share delivery failed. Retry the request.",
+          retryable: true,
+        },
+      });
+      expect(console.warn).not.toHaveBeenCalled();
+    },
+  );
+
+  it("emits no deferral diagnostic before callback authentication", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    mocks.requireHostedCloudflareCallbackRequest.mockRejectedValueOnce(hostedOnboardingError({
+      code: "SYNTHETIC_UNAUTHORIZED",
+      httpStatus: 401,
+      message: "Synthetic callback rejection.",
+    }));
+
+    const response = await deliverRoute.POST(buildRequest(VALID_BODY));
+
+    expect(response.status).toBe(401);
+    expect(await response.json()).toEqual({
+      error: {
+        code: "SYNTHETIC_UNAUTHORIZED",
+        message: "Synthetic callback rejection.",
+        retryable: false,
+      },
+    });
+    expect(console.warn).not.toHaveBeenCalledWith(
+      "Hosted vault-share delivery deferred.",
+      expect.anything(),
+    );
+    expect(mocks.findActiveHostedVaultShares).not.toHaveBeenCalled();
+    expect(mocks.replaceHostedVaultShareProjectionSnapshot).not.toHaveBeenCalled();
   });
 
   it("serializes the maximum destination fanout through the replacement boundary", async () => {

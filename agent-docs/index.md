@@ -862,6 +862,8 @@ is superseded historical evidence. `packages/query/README.md` owns the read poli
 `packages/vault-usecases/README.md` owns public-path tests and benchmark commands.
 Vault-share deferral diagnostic work is tracked in
 [`vault-share deferral observability`](exec-plans/completed/2026-09-25-vault-share-deferral-observability.md).
+Replacement-guard attribution and synthetic preservation proof are tracked in
+[`vault-share replacement diagnostics`](exec-plans/completed/2026-09-30-vault-share-replacement-diagnostics.md).
 
 Focused sleep-list implementation, local proof and external review are recorded in
 [`focused sleep-list read`](exec-plans/completed/2026-09-28-sleep-list-latency.md).

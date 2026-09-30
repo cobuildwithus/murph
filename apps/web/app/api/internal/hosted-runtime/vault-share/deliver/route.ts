@@ -34,6 +34,7 @@ import {
   findActiveHostedVaultSharePage,
   hasUnmaterializedHostedVaultShareProjectionGeneration,
   replaceHostedVaultShareProjectionSnapshot,
+  type HostedVaultShareReplacementDeferralReason,
 } from "@/src/lib/hosted-vault-share/projection-store";
 import { readOptionalJsonObject } from "@/src/lib/http";
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
@@ -143,6 +144,7 @@ export const POST = withJsonError(async (request: Request) => {
   let deliveryFailed = false;
   let scopeFailed = false;
   let deliveryDeferred = false;
+  let replacementDeferralReason: HostedVaultShareReplacementDeferralReason | undefined;
 
   for (const share of page.shares) {
     if (effectSignal.aborted || Date.now() >= effectDeadlineAtEpochMs) {
@@ -158,6 +160,7 @@ export const POST = withJsonError(async (request: Request) => {
       const outcome = await replaceHostedVaultShareProjectionSnapshot({
         deadlineAtEpochMs: effectDeadlineAtEpochMs,
         memberTimeZone: body.memberTimeZone,
+        onDeferral: (reason) => { replacementDeferralReason ??= reason; },
         ...(body.projectionMode ? { projectionMode: body.projectionMode } : {}),
         records,
         share,
@@ -205,7 +208,10 @@ export const POST = withJsonError(async (request: Request) => {
     );
   }
   if (deliveryDeferred) {
-    throw createHostedVaultShareDeliveryDeferredError("replacement_no_active_share");
+    throw createHostedVaultShareDeliveryDeferredError(
+      "replacement_no_active_share",
+      replacementDeferralReason,
+    );
   }
 
   return jsonOk(buildHostedVaultShareDeliverPageResponse(
@@ -245,11 +251,13 @@ function createHostedVaultShareDeliveryDeferredError(
     | "stale_generation_unmaterialized"
     | "inactive_generation_unmaterialized"
     | "replacement_no_active_share",
+  replacementDeferralReason?: HostedVaultShareReplacementDeferralReason,
 ): Error {
   try {
     console.warn("Hosted vault-share delivery deferred.", {
       schema: "murph.hosted-vault-share-delivery-deferred.v1",
       reason,
+      ...(replacementDeferralReason === undefined ? {} : { replacementDeferralReason }),
     });
   } catch {
     // Best-effort telemetry must not change the deferred response.
