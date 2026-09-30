@@ -3,6 +3,10 @@ in [the import-speed plan](exec-plans/completed/2026-09-24-garmin-import-speed.m
 
 # Murph Agent Docs Index
 
+Late runtime telemetry retirement semantics are owned by
+`references/hosted-postgres-runtime.md`; focused proof is recorded in
+[`retired runtime telemetry`](exec-plans/completed/2026-09-29-runtime-log-retired.md).
+
 Exercise image audit findings and published repair evidence are recorded in
 [the image audit](../artifacts/exercise-image-audit-2026-09-28.md);
 [the completed repair plan](exec-plans/completed/2026-09-28-exercise-image-audit.md)

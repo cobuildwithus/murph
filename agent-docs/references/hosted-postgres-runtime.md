@@ -343,6 +343,14 @@ outcome, elapsed time, observed fence and a finite retry reason. Telemetry canno
 delay the control response or change its result; orchestration correlation uses
 the existing domain-separated hash rather than retaining the raw attempt ID.
 
+Runtime log uploads still authenticate the signed callback, consume its nonce,
+and check runtime ownership. When that admission rejects a stale owner with
+`HOSTED_RUNTIME_OWNER_STALE` (409), the log route acknowledges the discarded
+batch with `loggedCount: 0`. Bounded shutdown drains can leave uploads in flight
+after retirement; these uploads cannot persist logs, request a recovery wake,
+or schedule alerts. Other callback failures retain their existing error response,
+and operational routes retain their stale-owner rejection.
+
 ### Reserved target retirement
 
 A selected target can remain unbound when its bind RPC times out before commit.
