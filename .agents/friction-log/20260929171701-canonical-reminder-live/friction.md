@@ -22,3 +22,13 @@ Build the test runtime and run `pnpm test:assistant:live -- --test 'real model c
 ## Context
 
 This blocks the broad reminder journey during model migration validation. The existing saved-reminder model-upgrade journey exercises the migration boundary separately.
+
+
+## Resolution
+
+The canonical reminder journey now supplies a synthetic implementation of the
+hosted automation port on creation and cancellation, backed by production core
+persistence and cron timing. Assertions follow the hosted save/patch contract and
+the saved reminder model. Deterministic tests reproduce the missing-port failure,
+exercise the real dynamic-tool dispatcher, and verify canonical writes, stale
+updates, and cancellation. Full live-model execution is separate proof.
