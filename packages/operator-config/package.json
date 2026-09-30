@@ -193,7 +193,8 @@
     "@murphai/gateway-core": "workspace:*",
     "@murphai/messaging-ingress": "workspace:*",
     "@murphai/query": "workspace:*",
-    "@murphai/runtime-state": "workspace:*"
+    "@murphai/runtime-state": "workspace:*",
+    "mpg123-decoder": "1.0.3"
   },
   "devDependencies": {
     "zod": "^4.4.3"
