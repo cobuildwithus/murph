@@ -1301,12 +1301,448 @@
       "path": ".agents/friction-log/20260910003445-public-auth-smoke/friction.md"
     },
     {
+      "issue": "cobuildwithus/murph#3759",
+      "path": ".agents/friction-log/20260911111842-frog-workflow-guard/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3760",
+      "path": ".agents/friction-log/20260911115620-release-audit-tests/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3761",
+      "path": ".agents/friction-log/20260911115919-scheduled-image-reminder/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3762",
+      "path": ".agents/friction-log/20260911121741-hosted-image-success/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3763",
+      "path": ".agents/friction-log/20260911124015-foreground-priority-proof/friction.md"
+    },
+    {
       "issue": "cobuildwithus/murph#3768",
       "path": ".agents/friction-log/20260911125157-public-main-merges/friction.md"
     },
     {
+      "issue": "cobuildwithus/murph#3769",
+      "path": ".agents/friction-log/20260911125815-latency-postgresql-overlap/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3770",
+      "path": ".agents/friction-log/20260911130000-standby-claim-late/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3771",
+      "path": ".agents/friction-log/20260911132158-foreground-priority-wake/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3772",
+      "path": ".agents/friction-log/20260911142552-foreground-priority-e2e/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3775",
+      "path": ".agents/friction-log/20260911150508-wearable-browser-cleanup/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3776",
+      "path": ".agents/friction-log/20260911151457-linq-inventory-concurrency/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3777",
+      "path": ".agents/friction-log/20260911154151-foreground-recovery-proof/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3778",
+      "path": ".agents/friction-log/20260911154251-foreground-continuation-proof/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3779",
+      "path": ".agents/friction-log/20260911160331-whoop-headed-smoke/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3780",
+      "path": ".agents/friction-log/20260911162042-recovery-concurrency-proof/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3781",
+      "path": ".agents/friction-log/20260911175059-verification-can-report/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3782",
+      "path": ".agents/friction-log/20260911184523-linq-e2e-sender/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3783",
+      "path": ".agents/friction-log/20260911184822-documented-changelog-test/friction.md"
+    },
+    {
       "issue": "cobuildwithus/murph#3784",
       "path": ".agents/friction-log/20260911194130-hosted-release-proof/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3785",
+      "path": ".agents/friction-log/20260911204430-research-scout-live/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3786",
+      "path": ".agents/friction-log/20260911204728-nested-nutrition-goal/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3787",
+      "path": ".agents/friction-log/20260911211229-environment-handoff-provider/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3788",
+      "path": ".agents/friction-log/20260911222531-scheduled-telegram-proof/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3789",
+      "path": ".agents/friction-log/20260912120041-wearable-persisted-page/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3790",
+      "path": ".agents/friction-log/20260912165946-wearable-browser-progress/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3791",
+      "path": ".agents/friction-log/20260912190301-open-gallery-dialogs/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3792",
+      "path": ".agents/friction-log/20260912193323-linq-group-isolation/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3793",
+      "path": ".agents/friction-log/20260912194712-live-wearable-e2e/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3794",
+      "path": ".agents/friction-log/20260912201348-standby-claim-deadline/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3796",
+      "path": ".agents/friction-log/20260912202546-changelog-focused-test/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3798",
+      "path": ".agents/friction-log/20260912232828-vercel-github-deployment/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3799",
+      "path": ".agents/friction-log/20260913133528-automatic-meal-closeout/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3800",
+      "path": ".agents/friction-log/20260913163119-journal-calendar-live/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3811",
+      "path": ".agents/friction-log/20260913200131-journal-live-fixtures/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3812",
+      "path": ".agents/friction-log/20260913213526-vercel-source-preview/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3813",
+      "path": ".agents/friction-log/20260914000950-linq-transport-fixture/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3814",
+      "path": ".agents/friction-log/20260914001524-nutrition-preview-refresh/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3815",
+      "path": ".agents/friction-log/20260914001723-nutrition-app-card/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3821",
+      "path": ".agents/friction-log/20260914002624-linq-transport-test/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3822",
+      "path": ".agents/friction-log/20260914011334-canary-observer-fixtures/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3823",
+      "path": ".agents/friction-log/20260914113548-mailbox-retention-test/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3824",
+      "path": ".agents/friction-log/20260914115433-review-archive-omits/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3825",
+      "path": ".agents/friction-log/20260914220332-host-slot-tests/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3826",
+      "path": ".agents/friction-log/20260914223156-environment-publication-test/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3827",
+      "path": ".agents/friction-log/20260915111749-pr-complexity-evidence/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3828",
+      "path": ".agents/friction-log/20260915182910-vercel-initial-web/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3829",
+      "path": ".agents/friction-log/20260915195106-foreground-acceptance-test/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3834",
+      "path": ".agents/friction-log/20260915212542-secondary-worktree-https/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3835",
+      "path": ".agents/friction-log/20260915214405-reviewgpt-packaging-exceeds/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3836",
+      "path": ".agents/friction-log/20260916013146-workspace-boundary-scan/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3837",
+      "path": ".agents/friction-log/20260916120949-native-hosted-local/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3838",
+      "path": ".agents/friction-log/20260916144024-viewport-proof-can/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3839",
+      "path": ".agents/friction-log/20260916152603-device-syncd-maximum/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3841",
+      "path": ".agents/friction-log/20260916161600-playwright-smoke-server/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3842",
+      "path": ".agents/friction-log/20260916234022-static-src-import/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3843",
+      "path": ".agents/friction-log/20260917005800-managed-snapshot-completion-latency/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3845",
+      "path": ".agents/friction-log/20260917105228-runtime-log-postgresql/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3846",
+      "path": ".agents/friction-log/20260917125211-hosted-local-e2e/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3847",
+      "path": ".agents/friction-log/20260917132913-action-approval-database/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3848",
+      "path": ".agents/friction-log/20260917142016-hosted-local-terminal/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3849",
+      "path": ".agents/friction-log/20260917165152-hosted-local-barrier/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3850",
+      "path": ".agents/friction-log/20260917232632-hosted-release-fixtures/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3851",
+      "path": ".agents/friction-log/20260918003121-native-ios-production/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3852",
+      "path": ".agents/friction-log/20260918105444-runner-cleanup-deadline/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3853",
+      "path": ".agents/friction-log/20260918131046-websocket-fixture-tears/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3854",
+      "path": ".agents/friction-log/20260919163920-worker-startup-profiling/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3855",
+      "path": ".agents/friction-log/20260919165050-video-analysis-fixtures/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3856",
+      "path": ".agents/friction-log/20260919165658-video-analysis-fixtures/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3857",
+      "path": ".agents/friction-log/20260919172523-video-analysis-fixtures/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3858",
+      "path": ".agents/friction-log/20260919172848-video-analysis-test/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3859",
+      "path": ".agents/friction-log/20260920164940-playwright-reduced-motion/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3860",
+      "path": ".agents/friction-log/20260920224038-restaurant-live-fixture/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3861",
+      "path": ".agents/friction-log/20260921090814-hosted-local-startup/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3863",
+      "path": ".agents/friction-log/20260921123509-orchestration-contracts-load/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3864",
+      "path": ".agents/friction-log/20260921131850-native-codex-source/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3865",
+      "path": ".agents/friction-log/20260921175713-native-voice-fixture/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3866",
+      "path": ".agents/friction-log/20260921193531-junction-empty-poll/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3867",
+      "path": ".agents/friction-log/20260921194335-junction-empty-poll/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3868",
+      "path": ".agents/friction-log/20260921202352-vault-share-timestamp/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3869",
+      "path": ".agents/friction-log/20260922121712-playwright-installer-rejects/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3870",
+      "path": ".agents/friction-log/20260922122240-vault-share-sleep/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3871",
+      "path": ".agents/friction-log/20260922123437-vault-share-source/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3872",
+      "path": ".agents/friction-log/20260922125031-vault-share-sleep/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3874",
+      "path": ".agents/friction-log/20260922131441-playwright-apt-validation/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3876",
+      "path": ".agents/friction-log/20260922153836-playwright-apt-timeout/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3877",
+      "path": ".agents/friction-log/20260922173529-personal-patterns-live/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3878",
+      "path": ".agents/friction-log/20260922181638-goal-source-hover/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3879",
+      "path": ".agents/friction-log/20260922185718-playwright-apt-policy/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3880",
+      "path": ".agents/friction-log/20260922190937-raw-payload-logging/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3881",
+      "path": ".agents/friction-log/20260922191915-partial-runtime-signal/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3882",
+      "path": ".agents/friction-log/20260922203005-hosted-local-catalog/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3883",
+      "path": ".agents/friction-log/20260922220019-travel-live-proof/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3884",
+      "path": ".agents/friction-log/20260923093310-canonical-live-assistant/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3886",
+      "path": ".agents/friction-log/20260923133343-voice-reminder-reply/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3887",
+      "path": ".agents/friction-log/20260923204734-goal-setup-live/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3888",
+      "path": ".agents/friction-log/20260923210144-live-workout-card/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3889",
+      "path": ".agents/friction-log/20260923235336-opening-identity-live/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3891",
+      "path": ".agents/friction-log/20260924200255-follow-through-live/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3892",
+      "path": ".agents/friction-log/20260924211524-latency-alert-e2e/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3893",
+      "path": ".agents/friction-log/20260925111609-foreground-runtime-suite/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3894",
+      "path": ".agents/friction-log/20260925115544-frog-publish-rebuilds/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3897",
+      "path": ".agents/friction-log/20260925125910-reviewgpt-rejects-regular/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3898",
+      "path": ".agents/friction-log/20260928140031-required-web-ci/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3900",
+      "path": ".agents/friction-log/20260928170911-system-mailbox-entrypoint/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3901",
+      "path": ".agents/friction-log/20260928172418-reviewgpt-rejects-regular/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3902",
+      "path": ".agents/friction-log/20260928210939-scheduled-image-reminder/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3903",
+      "path": ".agents/friction-log/20260929171701-canonical-reminder-live/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3904",
+      "path": ".agents/friction-log/20260929180356-provider-handoff-e2e/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3908",
+      "path": ".agents/friction-log/20260929211000-fresh-web-typecheck/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3912",
+      "path": ".agents/friction-log/20260929210114-fresh-web-typecheck/friction.md"
     }
   ],
   "version": 1

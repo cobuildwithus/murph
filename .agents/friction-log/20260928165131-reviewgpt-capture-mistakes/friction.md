@@ -1,6 +1,7 @@
 ---
 title: 'ReviewGPT capture mistakes history loading for active response generation'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3899'
 ---
 
 ## Expected Behavior

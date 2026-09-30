@@ -1,6 +1,7 @@
 ---
 title: 'ReviewGPT same-thread retry stalls at a disabled send button'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3873'
 ---
 
 ## Expected Behavior

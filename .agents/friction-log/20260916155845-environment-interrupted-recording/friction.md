@@ -1,6 +1,7 @@
 ---
 title: 'Environment interrupted-recording test asserts exact wake timestamps under load'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3840'
 ---
 
 ## Expected Behavior

@@ -1,6 +1,7 @@
 ---
 title: 'Vault validation rejects valid clinical FHIR manifests and nested page references'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3895'
 ---
 
 ## Expected Behavior

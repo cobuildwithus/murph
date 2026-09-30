@@ -1,6 +1,7 @@
 ---
 title: 'Dashboard smoke rendering falls back to the client after an invalid element error'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3797'
 ---
 
 ## Expected Behavior
