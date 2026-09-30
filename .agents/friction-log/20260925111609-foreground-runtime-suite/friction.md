@@ -20,3 +20,11 @@ Affected cases cover joining an aborted projection, continuing after a definitiv
 ## Context
 
 Observed during synthetic local regression verification. Repeated with the changed production files restored to the task baseline, reproducing all five failures. The underlying fixture or runtime cause remains unestablished; investigate separately from typing order.
+
+## Resolution
+
+The prepared test-runtime build now includes the assistant-runtime package and
+checks the published capture-worker entrypoint. The matching clean target also
+removes its generated output. Previously the build could succeed without that
+worker, so real vault-share capture failed before the expected effects. Focused
+entrypoint tests retain their real worker and existing outcome assertions.

@@ -29,6 +29,9 @@
       "path": "./packages/assistant-engine"
     },
     {
+      "path": "./packages/assistant-runtime"
+    },
+    {
       "path": "./packages/vault-usecases"
     },
     {

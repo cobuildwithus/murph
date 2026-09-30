@@ -312,3 +312,11 @@ System-mailbox preparation reads continuation ownership only when the requested
 selection has eligible items. A selection that neither admits work nor retires
 a covered hint leaves mailbox state untouched; idle housekeeping is not a reason
 to rewrite the mailbox on a fresh conversation's path.
+
+## Focused tests
+
+Run `pnpm build:test-runtime:prepared` before invoking the package Vitest config
+from a fresh checkout. Vault-share entrypoint cases use the real isolated capture
+worker through its published package entrypoint; Vitest source aliases do not
+compile that separate Node worker. The prepared build includes this package and
+checks the compiled worker and its public import before reporting success.
