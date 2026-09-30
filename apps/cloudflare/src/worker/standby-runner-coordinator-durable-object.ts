@@ -22,7 +22,6 @@ import {
   readHostedStandbyReleaseId,
   readHostedStandbySlotReleaseId,
   readHostedStandbyTarget,
-  readHostedStandbyInventoryTarget,
   type HostedStandbyClaimRequest,
   type HostedStandbyClaimResult,
   type HostedStandbyCoordinatorState,
@@ -89,14 +88,6 @@ export class StandbyRunnerCoordinatorDurableObject extends DurableObject {
   }
 
   claimReadyStandby(input: HostedStandbyClaimRequest): HostedStandbyClaimResult {
-    return this.claimReady(input, 0);
-  }
-
-  claimReadyBackgroundStandby(input: HostedStandbyClaimRequest): HostedStandbyClaimResult {
-    return this.claimReady(input, readHostedStandbyTarget(this.environment));
-  }
-
-  private claimReady(input: HostedStandbyClaimRequest, foregroundReserve: number): HostedStandbyClaimResult {
     requireReleaseAndRegion(input);
     if (!isHostedStandbyClaimId(input.claimId)) {
       throw new TypeError("Hosted standby claim id is invalid.");
@@ -120,7 +111,7 @@ export class StandbyRunnerCoordinatorDurableObject extends DurableObject {
       }
       if (input.deadlineAtEpochMs <= Date.now()) return { outcome: "deadline_expired" };
       this.rebalance();
-      const slotName = this.store.claimReadySlot(input.claimId, Date.now(), foregroundReserve);
+      const slotName = this.store.claimReadySlot(input.claimId, Date.now());
       return slotName ? { outcome: "claimed", slotName } : { outcome: "no_ready_slot" };
     });
     emitHostedExecutionStructuredLog({
@@ -130,7 +121,6 @@ export class StandbyRunnerCoordinatorDurableObject extends DurableObject {
         standbyClaimHandlerElapsedMs: Math.max(0, Date.now() - startedAtMs),
         standbyClaimRemainingBudgetMs: Math.max(0, input.deadlineAtEpochMs - startedAtMs),
         standbyClaimRpcOutcome: result.outcome,
-        standbyForegroundReserve: foregroundReserve,
       },
       message: "Hosted standby coordinator answered a claim.",
       phase: "runtime.starting",
@@ -166,7 +156,7 @@ export class StandbyRunnerCoordinatorDurableObject extends DurableObject {
   }
 
   private desiredTarget(): number {
-    const target = readHostedStandbyInventoryTarget(this.environment);
+    const target = readHostedStandbyTarget(this.environment);
     const state = this.store.readState();
     return state.releaseId !== null && state.region === HOSTED_RUNNER_REGION
       && state.releaseId === this.currentReleaseId(state.releaseId)
@@ -494,12 +484,11 @@ class StandbyRunnerCoordinatorStore {
       FROM standby_claim_tombstone WHERE claim_id = ?`, claimId).toArray()[0] ?? null;
   }
 
-  claimReadySlot(claimId: string, now: number, reserve: number): string | null {
-    const rows = this.sql.exec<{ slot_name: string }>(`SELECT slot_name
+  claimReadySlot(claimId: string, now: number): string | null {
+    const row = this.sql.exec<{ slot_name: string }>(`SELECT slot_name
       FROM standby_coordinator_slot WHERE phase = 'ready'
-      ORDER BY check_at_ms, slot_name LIMIT ?`, reserve + 1).toArray();
-    if (rows.length <= reserve) return null;
-    const row = rows[0]!;
+      ORDER BY check_at_ms, slot_name LIMIT 1`).toArray()[0];
+    if (!row) return null;
     this.forgetSlot(row.slot_name);
     this.sql.exec(`INSERT INTO standby_claim_tombstone
       (claim_id, slot_name, claimed_at_ms, check_at_ms) VALUES (?, ?, ?, ?)`,

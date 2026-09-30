@@ -289,7 +289,7 @@ Worker activation and container changes.
 
 The conservative capacity target is 702 member-application slots plus one smoke
 slot. At two vCPUs per container this reserves 1,406 vCPUs and leaves about 700
-member-bound slots after the two-slot foreground reserve and one background surplus. Against a measured 1,500-vCPU limit that
+member-bound slots after two standbys. Against a measured 1,500-vCPU limit that
 leaves 94 vCPUs before other applications. Require fresh CPU, memory, and disk
 accounting and preserve an explicit operational margin. A 748-slot ceiling plus
 smoke would consume 1,498 vCPUs and leave almost no CPU headroom; it is a maximum
@@ -1793,10 +1793,10 @@ Core execution tuning:
   requires ready inventory, and silently disabling it would stall synchronization.
   Compatibility readers retain those modes for older running Workers.
 - `HOSTED_EXECUTION_STANDBY_TARGET` defaults to `2` and deployment accepts positive
-  integers through `32`. It is the protected foreground reserve. The global
-  coordinator maintains one additional surplus slot for background admission;
-  the renderer validates reserve plus surplus against capacity after the legacy
-  reservation. Background uses retained warm targets or surplus, never a cold
+  integers through `32`. It remains the total global ready inventory, shared
+  by foreground and background work; no extra slot or reserve is added. The
+  renderer validates this target against capacity after the legacy reservation.
+  Background uses retained warm targets or existing ready slots, never a cold
   fallback. Empty capacity returns a jittered 15–30 second retry after releasing
   the brief admission. Foreground retains its existing cold fallback.
 - `CF_CONTAINER_MAX_INSTANCES` is the total member fleet budget (default `1000`
@@ -1816,7 +1816,7 @@ continue to work with omission, and no Web, database, pool-size, or environment
 change is needed. Before enabling the producer, prove the live Worker release
 contains the accepting parser. After deployment, exercise a signed Temporal
 default request derived from conversation lag and observe a claimed standby,
-then verify background-only work cannot consume the protected reserve and ordinary runtime
+then verify background-only work defers on an empty pool and ordinary runtime
 completion clears its exact fence. Producer rollback is compatible with the
 new receiver; roll back and drain the producer before any receiver rollback
 below this request contract.
@@ -1851,16 +1851,16 @@ It does not reserve 100 ready containers. The new ready target is independently
 configured with `HOSTED_EXECUTION_STANDBY_TARGET=2`.
 
 The warm-only background release assumes the unified fleet cutover is complete.
-Deploy the Worker with `allocate` mode and a positive foreground reserve; preserve
+Deploy the Worker with `allocate` mode and a positive ready target; preserve
 all existing Durable Object exports, bindings, and migration history. No Web,
-Temporal, Postgres, or runner job-format rollout is required. Separate additive
-background claim and warm-readiness RPCs fail closed against older receivers;
+Temporal, Postgres, or runner job-format rollout is required. The additive
+background warm-readiness RPC fails closed against older receivers;
 old Workers retain their earlier behavior until replaced. Warm health and
 background dispatch use native port requests without the SDK auto-start helper.
 
-Before rollout, verify the renderer's reserve-plus-surplus capacity check and
-existing quota headroom. After rollout, verify the effective mode, ready reserve
-and surplus, background deferral and later recovery, exact owner release, and
+Before rollout, verify the existing ready target and quota headroom. The target
+and container capacity stay unchanged. After rollout, verify effective mode,
+background deferral and later recovery, exact owner release, and
 foreground promotion of an active background runtime. Pristine preparations
 remain bounded by two shared lanes; no per-member cold preparation is added.
 Retained legacy bindings continue through their existing retirement paths.

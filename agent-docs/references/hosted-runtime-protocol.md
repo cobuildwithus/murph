@@ -2009,13 +2009,13 @@ The unified globally eligible runner inventory and background startup policy
 are owned by [the Cloudflare runner guide](../../apps/cloudflare/README.md#unified-runner-fleet-and-ready-inventory).
 Postgres claims the execution generation and opaque allocation identity before
 an immutable target is selected and bound. The coordinator prepares pristine,
-memberless containers outside that execution fence. Its atomic foreground claim
-can consume any ready slot; its separate background claim preserves the full
-configured foreground reserve. One surplus slot shares the existing two bounded
-preparation lanes. Neither a pool claim nor an unbound slot grants workspace or
+memberless containers outside that execution fence. Foreground and background
+use the same atomic claim and existing inventory target, with no extra slots or
+reserve. Preparation retains its existing two bounded lanes. Neither a pool
+claim nor an unbound slot grants workspace or
 provider authority.
 
-Background `system_mailbox` admission uses retained warm capacity or that surplus.
+Background `system_mailbox` admission uses retained warm capacity or an existing ready slot.
 On a missed pool claim it retires and releases only its exact target-less owner
 and returns a jittered 15–30 second retry, without preparing a workspace or starting a cold
 container. Late pool results remain subject to coordinator orphan cleanup; the
@@ -2035,12 +2035,13 @@ mailbox invocations; production deployment rejects those configurations and
 defaults to allocation mode. Infrastructure outages, workspace restore, and provider
 latency remain outside any strict foreground latency guarantee.
 
-The new background RPCs are additive and fail closed when unavailable. Old
-Workers keep their existing behavior until replaced; new Workers cannot borrow
-foreground reserve from an older coordinator or request cold background readiness
-from an older receiver. No Postgres schema, owner phase, Temporal request, or
-container-image job format changes. Validate `allocate` mode, positive foreground
-reserve, and capacity for its one surplus before rollout. Rollback restores the
+The new background warm-readiness RPC is additive and fails closed when unavailable.
+Old Workers keep their existing behavior until replaced; new Workers cannot
+request cold background readiness from an older receiver. Pool claims reuse the
+existing coordinator RPC. No Postgres schema, owner phase, Temporal request, or
+container-image job format changes. Validate `allocate` mode and the existing
+positive ready target before rollout. Shared slots can still be exhausted, so
+foreground retains its own cold fallback. Rollback restores the
 old startup behavior, not the new latency protection.
 
 The active-member replan durably

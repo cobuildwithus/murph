@@ -322,11 +322,9 @@ async function allocateRuntimeTarget(ctx: ProcessingContext, allocationId: strin
       || !(ctx.input.orchestration?.triggeredByWebDirect === true || ctx.input.conversationWorkPending === true)))) return fallback;
   try {
     const coordinator = ctx.source.STANDBY_COORDINATOR.getByName(resolveHostedStandbyCoordinatorName({ releaseId, region: HOSTED_RUNNER_REGION }));
-    if (background && !coordinator.claimReadyBackgroundStandby) return fallback;
     const request = { claimId: allocationId, releaseId, region: HOSTED_RUNNER_REGION,
       deadlineAtEpochMs: Math.min(ctx.budget.deadlineAtMs, Date.now() + HOSTED_STANDBY_CLAIM_TIMEOUT_MS) };
-    const standby = await ctx.step("claim_standby", () => background
-      ? coordinator.claimReadyBackgroundStandby!(request) : coordinator.claimReadyStandby(request), HOSTED_STANDBY_CLAIM_TIMEOUT_MS);
+    const standby = await ctx.step("claim_standby", () => coordinator.claimReadyStandby(request), HOSTED_STANDBY_CLAIM_TIMEOUT_MS);
     return standby.outcome === "claimed" ? standby.slotName : fallback;
   } catch { return fallback; } // Unbound inventory retains its own orphan recovery.
 }

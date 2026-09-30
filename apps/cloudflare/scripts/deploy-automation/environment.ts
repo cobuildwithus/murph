@@ -4,7 +4,7 @@ import {
 } from "@murphai/hosted-execution/env";
 
 import {
-  readHostedStandbyTarget, readHostedStandbyInventoryTarget, readHostedStandbyMode,
+  readHostedStandbyTarget, readHostedStandbyMode,
 } from "../../src/standby-runner-contract.ts";
 
 import {
@@ -128,9 +128,9 @@ export function readHostedDeployAutomationEnvironment(
   if (readHostedStandbyMode(workerVars) !== "allocate" || standbyTarget === 0) {
     throw new Error("Background execution requires HOSTED_EXECUTION_STANDBY_MODE=allocate and HOSTED_EXECUTION_STANDBY_TARGET greater than zero.");
   }
-  if (readHostedStandbyInventoryTarget(workerVars) > capacity.containerMaxInstances - capacity.legacyStandbyContainerMaxInstances) {
+  if (standbyTarget > capacity.containerMaxInstances - capacity.legacyStandbyContainerMaxInstances) {
     throw new Error(
-      "HOSTED_EXECUTION_STANDBY_TARGET plus its background surplus must not exceed CF_CONTAINER_MAX_INSTANCES "
+      "HOSTED_EXECUTION_STANDBY_TARGET must not exceed CF_CONTAINER_MAX_INSTANCES "
       + "minus CF_LEGACY_STANDBY_CONTAINER_MAX_INSTANCES.",
     );
   }

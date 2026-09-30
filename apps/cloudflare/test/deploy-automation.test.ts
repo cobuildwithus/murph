@@ -678,7 +678,7 @@ describe("hosted deploy automation helpers", () => {
       ...source,
       HOSTED_EXECUTION_STANDBY_TARGET: "3",
     })).toThrow(/HOSTED_EXECUTION_STANDBY_TARGET.*must not exceed/u);
-    for (const target of ["1"]) {
+    for (const target of ["1", "2"]) {
       expect(readHostedDeployAutomationEnvironment({
         ...source,
         HOSTED_EXECUTION_STANDBY_TARGET: target,
@@ -694,18 +694,6 @@ describe("hosted deploy automation helpers", () => {
         HOSTED_EXECUTION_STANDBY_MODE: mode, HOSTED_EXECUTION_STANDBY_TARGET: target,
       })).toThrow(/Background execution requires/u);
     });
-
-  it("includes the background surplus when validating allocate-mode capacity", () => {
-    const source = {
-      CF_BUNDLES_BUCKET: "hosted-bundles", CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
-      CF_WORKER_NAME: "hosted-worker", ...REQUIRED_HOSTED_CRYPTO_WORKER_VARS,
-      CF_CONTAINER_MAX_INSTANCES: "3", CF_LEGACY_STANDBY_CONTAINER_MAX_INSTANCES: "1",
-      HOSTED_EXECUTION_STANDBY_MODE: "allocate",
-    };
-    expect(() => readHostedDeployAutomationEnvironment({ ...source, HOSTED_EXECUTION_STANDBY_TARGET: "2" }))
-      .toThrow(/background surplus/u);
-    expect(readHostedDeployAutomationEnvironment({ ...source, HOSTED_EXECUTION_STANDBY_TARGET: "1" }).workerVars.HOSTED_EXECUTION_STANDBY_TARGET).toBe("1");
-  });
 
   it("binds generated deploy config to the prepared runner fingerprints", () => {
     const environment = readHostedDeployAutomationEnvironment({
