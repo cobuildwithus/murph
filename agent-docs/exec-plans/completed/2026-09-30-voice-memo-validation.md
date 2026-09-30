@@ -1,6 +1,6 @@
 # Validate generated voice memo audio before upload
 
-Status: active
+Status: completed
 Created: 2026-09-30
 Updated: 2026-09-30
 
@@ -54,3 +54,4 @@ are recorded in the PR.
 
 The reproduction is synthetic; it does not establish the cause of any particular
 previously delivered attachment. No live delivery calls were made.
+Completed: 2026-09-30
