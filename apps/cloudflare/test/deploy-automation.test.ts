@@ -205,6 +205,7 @@ describe("hosted deploy automation helpers", () => {
       },
     });
     const environment = readHostedDeployAutomationEnvironment({
+      HOSTED_EXECUTION_STANDBY_MODE: "allocate",
       CF_BUNDLES_BUCKET: "hosted-bundles",
       CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
       CF_CONTAINER_INSTANCE_TYPE: "standard-1",
@@ -546,6 +547,7 @@ describe("hosted deploy automation helpers", () => {
 
   it("passes an explicit preview OIDC environment through to generated Worker vars", () => {
     const environment = readHostedDeployAutomationEnvironment({
+      HOSTED_EXECUTION_STANDBY_MODE: "allocate",
       CF_BUNDLES_BUCKET: "hosted-bundles-staging",
       CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-staging",
       CF_WORKER_NAME: "hosted-worker-staging",
@@ -566,6 +568,7 @@ describe("hosted deploy automation helpers", () => {
     for (const runnerReadyTimeout of ["60000ms", "1e3"]) {
       expect(() =>
         readHostedDeployAutomationEnvironment({
+          HOSTED_EXECUTION_STANDBY_MODE: "allocate",
           CF_BUNDLES_BUCKET: "hosted-bundles",
           CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
           CF_RUNNER_READY_TIMEOUT_MS: runnerReadyTimeout,
@@ -578,6 +581,7 @@ describe("hosted deploy automation helpers", () => {
 
   it("does not give the legacy application a second default capacity budget", () => {
     const environment = readHostedDeployAutomationEnvironment({
+      HOSTED_EXECUTION_STANDBY_MODE: "allocate",
       CF_BUNDLES_BUCKET: "hosted-bundles",
       CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
       CF_CONTAINER_MAX_INSTANCES: "250",
@@ -594,6 +598,7 @@ describe("hosted deploy automation helpers", () => {
     "rejects the obsolete independent standby capacity input %j",
     (obsoleteValue) => {
       expect(() => readHostedDeployAutomationEnvironment({
+        HOSTED_EXECUTION_STANDBY_MODE: "allocate",
         CF_BUNDLES_BUCKET: "hosted-bundles",
         CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
         CF_CONTAINER_MAX_INSTANCES: "748",
@@ -617,6 +622,7 @@ describe("hosted deploy automation helpers", () => {
     { CF_LEGACY_STANDBY_CONTAINER_MAX_INSTANCES: "749" },
   ])("rejects invalid member capacity inputs %j", (capacity) => {
     expect(() => readHostedDeployAutomationEnvironment({
+      HOSTED_EXECUTION_STANDBY_MODE: "allocate",
       CF_BUNDLES_BUCKET: "hosted-bundles",
       CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
       CF_WORKER_NAME: "hosted-worker",
@@ -645,6 +651,7 @@ describe("hosted deploy automation helpers", () => {
 
   it("requires an explicit legacy reservation when migrating a configured total", () => {
     expect(() => readHostedDeployAutomationEnvironment({
+      HOSTED_EXECUTION_STANDBY_MODE: "allocate",
       CF_BUNDLES_BUCKET: "hosted-bundles",
       CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
       CF_WORKER_NAME: "hosted-worker",
@@ -656,6 +663,7 @@ describe("hosted deploy automation helpers", () => {
   it.each(["-1", "1.5", "33", "2x", "9007199254740992"])(
     "rejects invalid ready inventory target %j", (target) => {
       expect(() => readHostedDeployAutomationEnvironment({
+        HOSTED_EXECUTION_STANDBY_MODE: "allocate",
         CF_BUNDLES_BUCKET: "hosted-bundles",
         CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
         CF_WORKER_NAME: "hosted-worker",
@@ -667,6 +675,7 @@ describe("hosted deploy automation helpers", () => {
 
   it("bounds ready inventory by the unified application capacity after legacy reservation", () => {
     const source = {
+      HOSTED_EXECUTION_STANDBY_MODE: "allocate",
       CF_BUNDLES_BUCKET: "hosted-bundles",
       CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
       CF_WORKER_NAME: "hosted-worker",
@@ -686,7 +695,7 @@ describe("hosted deploy automation helpers", () => {
     }
   });
 
-  it.each([{ mode: "off", target: "2" }, { mode: "shadow", target: "2" }, { mode: "allocate", target: "0" }])(
+  it.each([{ mode: undefined, target: "2" }, { mode: "off", target: "2" }, { mode: "shadow", target: "2" }, { mode: "allocate", target: "0" }])(
     "rejects deployment without fresh background capacity: %j", ({ mode, target }) => {
       expect(() => readHostedDeployAutomationEnvironment({
         CF_BUNDLES_BUCKET: "hosted-bundles", CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
@@ -697,6 +706,7 @@ describe("hosted deploy automation helpers", () => {
 
   it("binds generated deploy config to the prepared runner fingerprints", () => {
     const environment = readHostedDeployAutomationEnvironment({
+      HOSTED_EXECUTION_STANDBY_MODE: "allocate",
       CF_BUNDLES_BUCKET: "hosted-bundles",
       CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
       CF_WORKER_NAME: "hosted-worker",
@@ -717,6 +727,7 @@ describe("hosted deploy automation helpers", () => {
 
   it("keeps the checked-in wrangler scaffold aligned with generated container sizing and durable object config", async () => {
     const environment = readHostedDeployAutomationEnvironment({
+      HOSTED_EXECUTION_STANDBY_MODE: "allocate",
       CF_BUNDLES_BUCKET: "murph-hosted-bundles-enam",
       CF_BUNDLES_PREVIEW_BUCKET: "murph-hosted-bundles-preview-enam",
       CF_WORKER_NAME: "murph-hosted",
@@ -872,6 +883,7 @@ describe("hosted deploy automation helpers", () => {
     // value. Required vars are exempt: the scaffold holds placeholders and
     // deploys supply them from the GitHub environment.
     const environment = readHostedDeployAutomationEnvironment({
+      HOSTED_EXECUTION_STANDBY_MODE: "allocate",
       CF_BUNDLES_BUCKET: "murph-hosted-bundles-enam",
       CF_BUNDLES_PREVIEW_BUCKET: "murph-hosted-bundles-preview-enam",
       CF_WORKER_NAME: "murph-hosted",
@@ -886,7 +898,9 @@ describe("hosted deploy automation helpers", () => {
     ) as {
       vars: Record<string, string>;
     };
-    const requiredVarNames = new Set<string>(HOSTED_WORKER_REQUIRED_VAR_NAMES);
+    // Standby must be opted into explicitly; its scaffold fallback stays off.
+    expect(checkedInConfig.vars.HOSTED_EXECUTION_STANDBY_MODE).toBe("off");
+    const requiredVarNames = new Set<string>([...HOSTED_WORKER_REQUIRED_VAR_NAMES, "HOSTED_EXECUTION_STANDBY_MODE"]);
     const scaffoldDefaultVars = Object.fromEntries(
       Object.entries(checkedInConfig.vars).filter(([key]) => !requiredVarNames.has(key)),
     );
@@ -902,6 +916,7 @@ describe("hosted deploy automation helpers", () => {
 
   it("ignores removed deploy alias inputs and keeps only canonical worker vars", () => {
     const environment = readHostedDeployAutomationEnvironment({
+      HOSTED_EXECUTION_STANDBY_MODE: "allocate",
       CF_BUNDLES_BUCKET: "hosted-bundles",
       CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
       CF_WORKER_NAME: "hosted-worker",
@@ -921,6 +936,7 @@ describe("hosted deploy automation helpers", () => {
 
   it("passes explicit runner env profiles through to worker vars", () => {
     const environment = readHostedDeployAutomationEnvironment({
+      HOSTED_EXECUTION_STANDBY_MODE: "allocate",
       CF_BUNDLES_BUCKET: "hosted-bundles",
       CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
       CF_WORKER_NAME: "hosted-worker",
@@ -943,6 +959,7 @@ describe("hosted deploy automation helpers", () => {
       ["1", "1"],
     ] as const) {
       const environment = readHostedDeployAutomationEnvironment({
+        HOSTED_EXECUTION_STANDBY_MODE: "allocate",
         CF_BUNDLES_BUCKET: "hosted-bundles",
         CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
         CF_WORKER_NAME: "hosted-worker",
@@ -964,6 +981,7 @@ describe("hosted deploy automation helpers", () => {
 
   it("defaults runner env profiles to the full hosted integration set", () => {
     const environment = readHostedDeployAutomationEnvironment({
+      HOSTED_EXECUTION_STANDBY_MODE: "allocate",
       CF_BUNDLES_BUCKET: "hosted-bundles",
       CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
       CF_WORKER_NAME: "hosted-worker",
@@ -978,6 +996,7 @@ describe("hosted deploy automation helpers", () => {
 
   it("accepts a custom JSON container instance type for generated deploy config", () => {
     const environment = readHostedDeployAutomationEnvironment({
+      HOSTED_EXECUTION_STANDBY_MODE: "allocate",
       CF_BUNDLES_BUCKET: "hosted-bundles",
       CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
       CF_CONTAINER_INSTANCE_TYPE: "{\"vcpu\":0.5,\"memory_mib\":2048,\"disk_mb\":8192}",
@@ -994,6 +1013,7 @@ describe("hosted deploy automation helpers", () => {
 
   it("keeps container SSH disabled when retired SSH inputs are still present", () => {
     const environment = readHostedDeployAutomationEnvironment({
+      HOSTED_EXECUTION_STANDBY_MODE: "allocate",
       CF_BUNDLES_BUCKET: "hosted-bundles",
       CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
       CF_CONTAINER_SSH_KEY_NAME: "debug-key",
@@ -1025,6 +1045,7 @@ describe("hosted deploy automation helpers", () => {
   it("rejects invalid custom container instance JSON", () => {
     expect(() =>
       readHostedDeployAutomationEnvironment({
+        HOSTED_EXECUTION_STANDBY_MODE: "allocate",
         CF_BUNDLES_BUCKET: "hosted-bundles",
         CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
         CF_CONTAINER_INSTANCE_TYPE: "{\"vcpu\":0.5,\"memory_mib\":2048}",
@@ -1189,6 +1210,7 @@ describe("hosted deploy automation helpers", () => {
     }).OPENAI_ENTERPRISE_API_KEY).toBeUndefined();
 
     expect(readHostedDeployAutomationEnvironment({
+      HOSTED_EXECUTION_STANDBY_MODE: "allocate",
       CF_BUNDLES_BUCKET: "hosted-bundles",
       CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
       CF_WORKER_NAME: "hosted-worker",
@@ -1199,6 +1221,7 @@ describe("hosted deploy automation helpers", () => {
     }).workerVars.HOSTED_ASSISTANT_API_KEY_ENV).toBeUndefined();
 
     expect(readHostedDeployAutomationEnvironment({
+      HOSTED_EXECUTION_STANDBY_MODE: "allocate",
       CF_BUNDLES_BUCKET: "hosted-bundles",
       CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
       CF_WORKER_NAME: "hosted-worker",
@@ -1221,6 +1244,7 @@ describe("hosted deploy automation helpers", () => {
 
   it("requires the presign bucket to match the canonical R2 binding", () => {
     expect(() => readHostedDeployAutomationEnvironment({
+      HOSTED_EXECUTION_STANDBY_MODE: "allocate",
       CF_BUNDLES_BUCKET: "hosted-bundles",
       CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
       CF_WORKER_NAME: "hosted-worker",

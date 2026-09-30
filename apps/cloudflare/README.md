@@ -152,9 +152,9 @@ by available application capacity after the legacy reservation.
 
 `HOSTED_EXECUTION_STANDBY_MODE` controls inventory and fresh background capacity:
 
-- `off` retires coordinator-owned slots and advertises none.
+- `off` (the unchanged default) retires coordinator-owned slots and advertises none.
 - `shadow` maintains and measures the configured inventory without allocating it.
-- `allocate` (the deployment default) offers ready slots to authenticated foreground conversation work
+- `allocate` (required explicitly for deployment) offers ready slots to authenticated foreground conversation work
   and background mailbox work.
 
 Fresh `default` work from validated Web-direct ingress or an authenticated
@@ -170,7 +170,8 @@ preparation starts on that path. Durable mailbox work remains pending. With
 `off`, `shadow`, or a zero target, fresh background execution waits for inventory
 to be enabled; retained warm execution and active-runtime wakes still work.
 The deploy renderer rejects those configurations to prevent silent background
-starvation. Low-level compatibility readers retain them for old deployments.
+starvation; it never enables a pool implicitly. Low-level compatibility readers
+retain them for old deployments.
 
 Background readiness uses a dedicated warm-only receiver RPC with a three-second
 bound and fails closed against older receivers. Pool claims use the existing RPC.

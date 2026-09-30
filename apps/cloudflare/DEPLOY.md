@@ -1788,10 +1788,11 @@ Core execution tuning:
   Process replacement clears warmth rather than restoring a completed lease;
   DO replacement recovers the SDK task and checks the live process.
 
-- `HOSTED_EXECUTION_STANDBY_MODE` defaults to `allocate` in rendered deployments.
-  Deployment rejects `off` and `shadow`: fresh background mailbox work now
-  requires ready inventory, and silently disabling it would stall synchronization.
-  Compatibility readers retain those modes for older running Workers.
+- `HOSTED_EXECUTION_STANDBY_MODE` must already be explicitly `allocate`.
+  Its fallback remains `off`; deployment rejects missing mode, `off`, and `shadow`.
+  Fresh background mailbox work requires ready inventory, and silently disabling it would stall synchronization.
+  This prevents silently enabling idle capacity. Compatibility readers retain
+  those modes for older running Workers.
 - `HOSTED_EXECUTION_STANDBY_TARGET` defaults to `2` and deployment accepts positive
   integers through `32`. It remains the total global ready inventory, shared
   by foreground and background work; no extra slot or reserve is added. The

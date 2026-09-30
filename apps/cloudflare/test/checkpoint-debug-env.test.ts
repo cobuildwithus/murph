@@ -28,6 +28,7 @@ const REQUIRED_HOSTED_CRYPTO_WORKER_VARS = {
 describe("hosted checkpoint debug deploy env", () => {
   it("passes optional checkpoint debug vars into worker vars", () => {
     const environment = readHostedDeployAutomationEnvironment({
+      HOSTED_EXECUTION_STANDBY_MODE: "allocate",
       CF_BUNDLES_BUCKET: "hosted-bundles",
       CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
       CF_WORKER_NAME: "hosted-worker",

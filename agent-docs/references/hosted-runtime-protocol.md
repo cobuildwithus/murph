@@ -2032,7 +2032,7 @@ the existing threshold to avoid duplicate polling. The retirement threshold is
 never stoppedness evidence. Empty inventory can delay background freshness;
 `off`, `shadow`, and zero-target configurations cannot start fresh background
 mailbox invocations; production deployment rejects those configurations and
-defaults to allocation mode. Infrastructure outages, workspace restore, and provider
+requires explicit allocation mode without changing the existing off default. Infrastructure outages, workspace restore, and provider
 latency remain outside any strict foreground latency guarantee.
 
 The new background warm-readiness RPC is additive and fails closed when unavailable.

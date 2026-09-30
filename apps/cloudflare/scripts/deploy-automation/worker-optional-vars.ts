@@ -76,7 +76,7 @@ export const HOSTED_WORKER_OPTIONAL_VAR_DEFAULTS: Partial<
   // of forwarding raw provider env into the hosted child runtime.
   HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "exa,hosted-email,linq,mapbox,telegram",
   HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "600000",
-  HOSTED_EXECUTION_STANDBY_MODE: "allocate",
+  HOSTED_EXECUTION_STANDBY_MODE: "off",
   HOSTED_EXECUTION_STANDBY_TARGET: "2",
   HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT: "production",
 };
