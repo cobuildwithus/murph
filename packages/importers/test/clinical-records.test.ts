@@ -16,7 +16,7 @@ import {
   type ClinicalImportPlan,
   type ClinicalImportUpsertPayload,
 } from "@murphai/clinical-records";
-import { findEventByExternalRef, importEventBatch, initializeVault, upsertEvent, withCanonicalWriteLock } from "@murphai/core";
+import { findEventByExternalRef, importEventBatch, initializeVault, upsertEvent, validateVault, withCanonicalWriteLock } from "@murphai/core";
 import {
   buildClinicalImportPlanFromSnapshot,
   clinicalPlanToEventImportDecisions,
@@ -63,6 +63,25 @@ afterEach(async () => {
 });
 
 describe("buildClinicalImportPlanFromSnapshot", () => {
+  it("keeps a hash-bound imported clinical observation valid under whole-vault validation", async () => {
+    const vaultRoot = await writeClinicalFixture({
+      resourceFiles: [{ resourceType: "Observation", relativePath: "Observation/page-1.json", count: 1 }],
+      pages: { "Observation/page-1.json": {
+        resourceType: "Observation", id: "synthetic-pulse", status: "final",
+        effectiveDateTime: "2026-07-01T12:00:00.000Z",
+        code: { coding: [{ system: "http://loinc.org", code: "8867-4", display: "Heart rate" }] },
+        valueQuantity: { value: 70, unit: "bpm" },
+      } },
+    });
+    await initializeVault({ vaultRoot });
+    const plan = await planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot });
+    const imported = await importEventBatch({ vaultRoot, apply: true, decisions: executableDecisions(plan) });
+    expect(imported.createdCount).toBe(1);
+    expect((await validateVault({ vaultRoot })).issues).toEqual([]);
+    await writeFile(path.join(vaultRoot, path.posix.dirname(MANIFEST_PATH), "Observation/page-1.json"), "{}");
+    expect((await validateVault({ vaultRoot })).issues).toContainEqual(expect.objectContaining({ code: "RAW_MANIFEST_INVALID" }));
+  });
+
   it.each([
     { code: { text: "Example assessment" }, valueInteger: 3 },
     { code: { text: "Example assessment ".repeat(20) }, valueInteger: 3 },
