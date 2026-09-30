@@ -883,7 +883,7 @@ export async function startHostedLocalDevStack(input: {
 
     const tlsProxyProcess = config.skipWeb
       ? null
-      : maybeStartTlsProxy({
+      : await maybeStartTlsProxy({
         pipeOutput: input.pipeOutput,
         runtimeEnv,
         stderrTarget: input.stderrTarget,
@@ -2592,12 +2592,12 @@ function writeRunnerContainerSmokeWarning(
   );
 }
 
-function maybeStartTlsProxy(input: {
+async function maybeStartTlsProxy(input: {
   pipeOutput?: boolean;
   runtimeEnv: NodeJS.ProcessEnv;
   stderrTarget?: NodeJS.WritableStream;
   stdoutTarget?: NodeJS.WritableStream;
-}): BufferedNamedChildProcess | null {
+}): Promise<BufferedNamedChildProcess | null> {
   if (input.runtimeEnv.MURPH_DEV_SKIP_TLS_PROXY === "1") {
     return null;
   }
@@ -2625,6 +2625,16 @@ function maybeStartTlsProxy(input: {
       "[tls-proxy] Caddyfile found but `caddy` is not on PATH; skipping local HTTPS proxy. Install with `brew install caddy` to enable.\n",
     );
     return null;
+  }
+
+  if (requiresManagedHttps) {
+    await assertPortAvailable(
+      "127.0.0.1",
+      Number(new URL(HOSTED_LOCAL_HTTPS_ORIGIN).port),
+      "Canonical local HTTPS is already owned by another listener. "
+      + "Obtain an explicit handoff from its owner before starting this stack, "
+      + "or use MURPH_DEV_SKIP_TLS_PROXY=1 for direct HTTP work without browser authentication or OAuth.",
+    );
   }
 
   return spawnChildProcess("tls-proxy", "caddy", [
