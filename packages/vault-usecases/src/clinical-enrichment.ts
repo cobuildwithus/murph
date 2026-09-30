@@ -367,13 +367,13 @@ function findExtractedRecord(rows: CanonicalEntity[], externalRef: ExternalRef) 
 
 function clinicalProposalDate(
   record: ClinicalDocumentExtractionOutput["records"][number],
-  parent: { clinicalOccurredAt?: string; retrievedAt: string },
+  parent: { clinicalOccurredAt?: string; parentRevision: string },
   timeZone: string,
 ): ClinicalDocumentExtractionPayload | null {
   const payload = record.payload;
   if (!clinicalExtractionDateIsSupported(record, parent.clinicalOccurredAt, timeZone)) return null;
   if (payload.kind === "note" && payload.clinicalFact) {
-    return { ...payload, noteType: "clinical_fact", occurredAt: payload.clinicalFact.clinicalDate ?? parent.clinicalOccurredAt ?? parent.retrievedAt };
+    return { ...payload, noteType: "clinical_fact", occurredAt: payload.clinicalFact.clinicalDate ?? parent.clinicalOccurredAt ?? parent.parentRevision };
   }
   if (record.dateBasis === "document") return payload;
   if (record.dateBasis === "source") {

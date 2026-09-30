@@ -445,7 +445,10 @@ canonical action derives source identity and raw/page provenance, checks existin
 facts, applies accepted proposals, and reads back the writes before advancing.
 It makes no model call. The host checks the immutable parent status and uses
 the canonical vault timezone for overlap and readback. Derived facts retain
-parent revision authority; later corrections or withdrawals retire older
+parent revision authority. Undated typed notes use the parent clinical timestamp
+or stable source revision as their documentation timestamp while clinicalDate
+stays null. Reimporting an unchanged revision on a later day preserves the same
+canonical note and allows the enrichment queue to continue. Later corrections or withdrawals retire older
 extraction facets, and stale queued proposals become explicit holds. Eligible
 scanned documents retain a neutral canonical source receipt even when text
 parsing cannot recover content. Lab publication requires supported specimen

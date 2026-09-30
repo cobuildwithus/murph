@@ -1248,7 +1248,8 @@ shared safe search retains its existing structured-payload exclusion. Query
 projection v35 rebuilds the private index. Questionnaire answers, scores, family history, old orders, exam
 findings and care plans remain source statements, not current diagnoses,
 normalized measurements or doses taken. The host dates an undated note using
-the parent documentation time or retrieval time; its clinicalDate remains null.
+the parent clinical timestamp or stable source revision; its clinicalDate remains
+null. Recapturing an unchanged revision cannot move that note to another day.
 Explicit clinical dates need literal date evidence. FHIR coding namespaces must
 match source pairs. Frozen proposals, source facets, corrections, query readback
 and CLI imports use the existing event owner; no assessment side ledger is added.
