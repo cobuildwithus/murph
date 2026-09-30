@@ -3,6 +3,9 @@ in [the import-speed plan](exec-plans/completed/2026-09-24-garmin-import-speed.m
 
 # Murph Agent Docs Index
 
+Runtime claim eligibility and reuse of transaction-validated routing facts are
+owned by [Hosted Postgres runtime ownership](references/hosted-postgres-runtime.md).
+
 Late runtime telemetry retirement semantics are owned by
 `references/hosted-postgres-runtime.md`; focused proof is recorded in
 [`retired runtime telemetry`](exec-plans/completed/2026-09-29-runtime-log-retired.md).
