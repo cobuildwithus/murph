@@ -130,8 +130,9 @@ Checkpointed historical scan progress, including empty-date coverage, is owned
 by `agent-docs/RELIABILITY.md` and `packages/device-syncd/README.md`.
 
 Checkpoint-aware operational stall alerts, including bounded publication time
-for deferred device jobs and checkpoint-confirmed runnable cycling windows,
-are specified in `agent-docs/RELIABILITY.md`.
+for deferred device jobs, checkpoint-confirmed runnable cycling windows, and
+current-owner foreground checkpoint grace for imported activation/device-sync
+mailbox heads, are specified in `agent-docs/RELIABILITY.md`.
 Cycling-window correction and focused proof are recorded in
 [`2026-09-20-device-cycling-alert.md`](exec-plans/completed/2026-09-20-device-cycling-alert.md).
 The original productive-pass and conversation implementation is tracked in
