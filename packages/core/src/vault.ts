@@ -1,3 +1,4 @@
+import { clinicalRawSnapshotDirectory, groupClinicalRawSnapshotFiles, validateClinicalRawSnapshot } from "./clinical-raw-validation.ts";
 import { listAuditShardPaths } from "./audit-storage.ts";
 import path from "node:path";
 import { isDeepStrictEqual } from "node:util";
@@ -673,7 +674,7 @@ function resolveJsonlFamilyPostValidator(
 }
 
 function rawManifestDirectoryForArtifact(relativePath: string): string {
-  return path.posix.dirname(relativePath);
+  return clinicalRawSnapshotDirectory(relativePath) ?? path.posix.dirname(relativePath);
 }
 
 function isEnvelopeBasedInboxRawPath(relativePath: string): boolean {
@@ -1211,16 +1212,19 @@ async function validateRawImportManifests(vaultRoot: string): Promise<Validation
   const inboxCaptureDirectories = new Set<string>();
   const inboxAttachmentManifestFiles = new Set<string>();
   const manifestFiles: string[] = [];
+  const clinicalFiles = groupClinicalRawSnapshotFiles(rawFiles);
   const manifestDirectories = new Set<string>();
 
   for (const relativePath of rawFiles) {
+    const clinicalDirectory = clinicalRawSnapshotDirectory(relativePath);
     const inboxCaptureDirectory = inboxCaptureRootForRawPath(relativePath);
 
     if (inboxCaptureDirectory !== null) {
       inboxCaptureDirectories.add(inboxCaptureDirectory);
     }
 
-    if (isRawManifestFileName(path.posix.basename(relativePath))) {
+    if (isRawManifestFileName(path.posix.basename(relativePath))
+      && (clinicalDirectory === null || relativePath === `${clinicalDirectory}/manifest.json`)) {
       if (isEnvelopeBasedInboxRawPath(relativePath)) {
         if (relativePath === inboxAttachmentManifestPathForCaptureDirectory(path.posix.dirname(path.posix.dirname(relativePath)))) {
           inboxAttachmentManifestFiles.add(relativePath);
@@ -1240,7 +1244,7 @@ async function validateRawImportManifests(vaultRoot: string): Promise<Validation
       continue;
     }
 
-    artifactDirectories.add(directory);
+    artifactDirectories.add(rawManifestDirectoryForArtifact(relativePath));
   }
 
   const issues: ValidationIssue[] = [];
@@ -1282,7 +1286,10 @@ async function validateRawImportManifests(vaultRoot: string): Promise<Validation
   }
 
   for (const manifestPath of manifestFiles.sort()) {
-    issues.push(...(await validateRawManifestFile(vaultRoot, manifestPath)));
+    const clinicalDirectory = clinicalRawSnapshotDirectory(manifestPath);
+    issues.push(...(clinicalDirectory !== null && manifestPath === `${clinicalDirectory}/manifest.json`
+      ? await validateClinicalRawSnapshot(vaultRoot, manifestPath, clinicalFiles.get(clinicalDirectory) ?? [])
+      : await validateRawManifestFile(vaultRoot, manifestPath)));
   }
 
   for (const manifestPath of [...inboxAttachmentManifestFiles].sort()) {

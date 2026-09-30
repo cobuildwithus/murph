@@ -884,3 +884,5 @@ Hosted enrichment read/repair concurrency proof is recorded in
 
 Complete historical clinical hold-shape coverage is recorded in
 [hold histories](exec-plans/completed/2026-09-29-clinical-hold-histories.md).
+
+Clinical raw validation repair plan: [`2026-09-29-frog-3895-clinical-validation.md`](exec-plans/active/2026-09-29-frog-3895-clinical-validation.md).
