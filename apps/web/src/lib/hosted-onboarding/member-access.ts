@@ -305,37 +305,38 @@ export function activeHostedMemberAccessWhere(): Prisma.HostedMemberWhereInput {
   };
 }
 
+/** Canonical single-member access, including current participant sponsorship. */
+export function activeHostedMemberAccessWithParticipantsWhere(now = new Date()): Prisma.HostedMemberWhereInput {
+  return {
+    suspendedAt: null,
+    OR: [
+      activeHostedMemberAccessWhere(),
+      {
+        threadContainer: {
+          is: {
+            participants: {
+              some: {
+                ...activeHostedThreadContainerParticipantWhere({ now }),
+                participant: activeHostedMemberAccessWhere(),
+              },
+            },
+          },
+        },
+      },
+    ],
+  };
+}
+
 export async function readActiveHostedMemberAccess(input: {
   memberId: string;
   now?: Date;
   prisma?: HostedOnboardingReadClient;
 }): Promise<boolean> {
   const prisma = input.prisma ?? getPrisma();
-  // Keep boolean gates in one SQL statement instead of hydrating the member,
-  // memberships, groups, container and owner through separate relation reads.
+  // Keep boolean gates in one SQL statement instead of hydrating related rows.
   const member = await prisma.hostedMember.findUnique({
     select: { id: true },
-    where: {
-      id: input.memberId,
-      suspendedAt: null,
-      OR: [
-        activeHostedMemberAccessWhere(),
-        {
-          threadContainer: {
-            is: {
-              participants: {
-                some: {
-                  ...activeHostedThreadContainerParticipantWhere({
-                    now: input.now ?? new Date(),
-                  }),
-                  participant: activeHostedMemberAccessWhere(),
-                },
-              },
-            },
-          },
-        },
-      ],
-    },
+    where: { ...activeHostedMemberAccessWithParticipantsWhere(input.now), id: input.memberId },
   });
   return member !== null;
 }

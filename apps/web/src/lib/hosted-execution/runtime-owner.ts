@@ -4,10 +4,10 @@ import { randomUUID } from "node:crypto";
 import type { HostedRuntimeOwner, Prisma, PrismaClient } from "@prisma/client";
 import type { HostedWorkspaceInvocationProcessingMode } from "@murphai/hosted-execution/runtime-control";
 
-import { readActiveHostedMemberAccess } from "../hosted-onboarding/member-access";
+import { activeHostedMemberAccessWithParticipantsWhere } from "../hosted-onboarding/member-access";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { lockHostedMemberRow } from "../hosted-onboarding/shared";
-import { readHostedHealthDataConsentState } from "../legal/consent";
+import { hostedHealthDataConsentNotRevokedWhere } from "../legal/consent";
 import type { HostedRuntimeBackend } from "@murphai/hosted-execution/runtime-migration";
 import { lockHostedRuntimeMemberCutoverTx } from "./runtime-cutover";
 
@@ -26,20 +26,19 @@ export async function claimHostedRuntime(input: {
   processingMode: HostedWorkspaceInvocationProcessingMode;
   now?: Date;
 }): Promise<
-  | { status: "claimed" | "existing"; owner: HostedRuntimeOwner }
-  | { status: "blocked"; reason: "cutover" | "admission" }
+  | { cutover: "postgres"; status: "claimed" | "existing"; owner: HostedRuntimeOwner }
+  | { cutover: HostedRuntimeBackend; status: "blocked"; reason: "cutover" | "admission" }
 > {
   return input.prisma.$transaction(async (tx) => {
-    if (await lockHostedRuntimeMemberCutoverTx(tx, input.userId) !== "postgres") {
-      return { status: "blocked", reason: "cutover" };
-    }
+    const cutover = await lockHostedRuntimeMemberCutoverTx(tx, input.userId);
+    if (cutover !== "postgres") return { cutover, status: "blocked", reason: "cutover" };
     await lockHostedMemberRow(tx, input.userId);
     if (!await runtimeAdmissionAllowedTx(tx, input.userId, input.processingMode)) {
-      return { status: "blocked", reason: "admission" };
+      return { cutover, status: "blocked", reason: "admission" };
     }
     const existing = await lockHostedRuntimeOwnerRowTx(tx, input.userId);
     if (existing && existing.phase !== "idle") {
-      return { status: "existing", owner: existing };
+      return { cutover, status: "existing", owner: existing };
     }
     const now = input.now ?? new Date();
     const attemptId = `rt_${randomUUID()}`;
@@ -63,7 +62,7 @@ export async function claimHostedRuntime(input: {
     const owner = existing
       ? await tx.hostedRuntimeOwner.update({ where: { userId: input.userId }, data })
       : await tx.hostedRuntimeOwner.create({ data: { ...data, userId: input.userId, migrationPhase: "postgres" } });
-    return { status: "claimed", owner };
+    return { cutover, status: "claimed", owner };
   }, OWNER_TRANSACTION_OPTIONS);
 }
 
@@ -288,13 +287,18 @@ async function runtimeAdmissionAllowedTx(
   userId: string,
   processingMode: string | null,
 ): Promise<boolean> {
-  const member = await tx.hostedMember.findUnique({ where: { id: userId }, select: { suspendedAt: true } });
-  if (!member || member.suspendedAt !== null
-    || await readHostedHealthDataConsentState({ prisma: tx, memberId: userId }) === "revoked") {
-    return false;
-  }
-  return processingMode === "inbox_media_retention"
-    || await readActiveHostedMemberAccess({ prisma: tx, memberId: userId });
+  // Keep this statement after the member lock: a waiting claim must observe
+  // consent withdrawal committed by the previous lock holder.
+  const member = await tx.hostedMember.findUnique({
+    select: { id: true },
+    where: {
+      suspendedAt: null,
+      ...hostedHealthDataConsentNotRevokedWhere(),
+      ...(processingMode === "inbox_media_retention" ? {} : activeHostedMemberAccessWithParticipantsWhere()),
+      id: userId,
+    },
+  });
+  return member !== null;
 }
 
 export async function lockHostedRuntimeOwnerRowTx(tx: OwnerTransaction, userId: string): Promise<HostedRuntimeOwner | null> {
