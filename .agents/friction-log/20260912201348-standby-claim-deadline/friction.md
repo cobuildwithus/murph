@@ -1,6 +1,7 @@
 ---
 title: 'Standby claim deadline test depends on real-clock millisecond timing'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3794'
 ---
 
 ## Expected Behavior

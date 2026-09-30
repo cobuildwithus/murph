@@ -1,0 +1,19 @@
+{
+  "publishedOn": "2026-09-29",
+  "order": 100,
+  "item": {
+    "id": "faster-message-recovery",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Fewer delays after a connection failure",
+    "summary": "Murph can recover sooner when a connection fails as it starts processing your message.",
+    "details": "A failed startup request no longer adds an unnecessary waiting period before processing can resume.",
+    "relevanceTags": [
+      "messaging",
+      "reliability"
+    ],
+    "sourcePullRequests": [
+      3832
+    ]
+  }
+}

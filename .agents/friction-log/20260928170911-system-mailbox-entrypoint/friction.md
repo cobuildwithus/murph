@@ -22,3 +22,11 @@ Run `pnpm install --frozen-lockfile --offline`, then `pnpm exec vitest run --con
 ## Context
 
 The identical failures were reproduced with both edited production source files restored to the base revision. They obscure verification of an unrelated empty-selection optimization.
+
+## Resolution
+
+The prepared test-runtime build now includes the assistant-runtime package and
+checks the published capture-worker entrypoint. The matching clean target also
+removes its generated output. Previously the build could succeed without that
+worker, so real vault-share capture failed before the expected effects. Focused
+entrypoint tests retain their real worker and existing outcome assertions.

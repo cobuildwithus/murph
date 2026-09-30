@@ -67,10 +67,33 @@ beforeEach(() => {
 })
 
 describe('automation model continuity', () => {
+  it.each(['automation-cron', 'automation-auto-reply'] as const)(
+    'upgrades an inherited GPT-6 Sol target only during %s', (turnTrigger) => {
+      const target = requireTarget('gpt-6-sol', 'high', 'openai')
+      const session = createGroupSession(target, null)
+      const input = { prompt: 'Send the reminder.', turnTrigger, vault: '/vault' }
+      const route = resolveAssistantTurnRoute(input, null, resolvedSession(session))
+      expect(route.providerOptions).toMatchObject({ model: 'gpt-6.1-sol', reasoningEffort: 'high' })
+      const explicitEffort = resolveAssistantTurnRoute({ ...input, assistantTargetOverride: { reasoningEffort: 'medium' } }, null, resolvedSession(session))
+      expect(explicitEffort.providerOptions).toMatchObject({ model: 'gpt-6.1-sol', reasoningEffort: 'medium' })
+      const reply = resolveAssistantTurnRoute({ prompt: 'Thanks.', vault: '/vault' }, null, resolvedSession(session))
+      expect(reply.providerOptions).toMatchObject({ model: 'gpt-6-sol', reasoningEffort: 'high' })
+      expect(session.target).toEqual(target)
+    },
+  )
+
+  it('keeps inherited custom-provider Sol ids literal', () => {
+    const target = requireTarget('gpt-6-sol', 'high', HOSTED_CUSTOM_INFERENCE_CODEX_MODEL_PROVIDER_ID)
+    const session = createGroupSession(target, null)
+    const route = resolveAssistantTurnRoute({ prompt: 'Send the reminder.', turnTrigger: 'automation-cron', vault: '/vault' }, null, resolvedSession(session))
+    expect(route.providerOptions).toMatchObject({ model: 'gpt-6-sol', modelProvider: HOSTED_CUSTOM_INFERENCE_CODEX_MODEL_PROVIDER_ID })
+  })
+
   it.each([
+    ['gpt-6-sol', 'gpt-6.1-sol'],
     ['gpt-5.6-luna', 'gpt-6-luna'],
-    ['gpt-5.6-sol', 'gpt-6-sol'],
-    ['gpt-5.6-terra', 'gpt-6-sol'],
+    ['gpt-5.6-sol', 'gpt-6.1-sol'],
+    ['gpt-5.6-terra', 'gpt-6.1-sol'],
   ])('upgrades a saved %s pin only for its OpenAI execution', (storedModel, model) => {
     const preference = Object.freeze({ model: storedModel })
     const envelope = buildAssistantAutomationTurnEnvelope({
@@ -127,7 +150,7 @@ describe('automation model continuity', () => {
     },
   )
 
-  it.each(['gpt-6-luna', 'gpt-6-sol', 'gpt-6-astra', 'custom-openai-model'])(
+  it.each(['gpt-6-luna', 'gpt-6.1-sol', 'gpt-6-astra', 'custom-openai-model'])(
     'preserves a model without a replacement entry: %s', (model) => {
       const session = createGroupSession(requireTarget('gpt-6-sol', 'low', 'openai'), null)
       const route = resolveAssistantTurnRoute(createAutomationInput({ model, reasoningEffort: 'medium' }), null, resolvedSession(session))
@@ -152,14 +175,14 @@ describe('automation model continuity', () => {
     const preference = Object.freeze({ model: 'gpt-5.6-terra' })
     const session = createGroupSession(requireTarget('gpt-6-sol', 'low', 'openai'), null)
     const route = resolveAssistantTurnRoute(createAutomationInput(preference), null, resolvedSession(session))
-    expect(route.providerOptions).toMatchObject({ model: 'gpt-6-sol', reasoningEffort: 'low' })
+    expect(route.providerOptions).toMatchObject({ model: 'gpt-6.1-sol', reasoningEffort: 'low' })
     expect(preference.model).toBe('gpt-5.6-terra')
   })
 
   it.each([
-    ['gpt-6-sol', 'gpt-6-sol'],
+    ['gpt-6-sol', 'gpt-6.1-sol'],
     ['gpt-6-luna', 'gpt-6-luna'],
-    ['gpt-5.6-terra', 'gpt-6-sol'],
+    ['gpt-5.6-terra', 'gpt-6.1-sol'],
   ])(
     'keeps saved %s dormant through Venice retries and reactivates it on OpenAI',
     (model, openaiModel) => {

@@ -1,6 +1,7 @@
 ---
 title: 'Nested nutrition goal unions erase concrete Codex card declarations'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3786'
 ---
 
 ## Expected Behavior

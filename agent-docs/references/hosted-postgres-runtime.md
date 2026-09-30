@@ -47,21 +47,19 @@ retired legacy alarm and run-until-idle HTTP controls are unavailable.
 
 ## Claim, launch, completion, and recovery
 
-The ensure-processing request accepts an optional canonical Postgres admission
-response (`claimed` or `existing`). Only authenticated Web OIDC callers can
-supply it; the Worker validates its member binding before container work. Web
-can run its existing claim command locally and carry the result to the Worker,
-removing the initial Worker-to-Web callback. Requests without admission still
-claim through Web, including the separately deployed Temporal caller. Completion
-recovery still claims successors through Web; supplied snapshots never replace
-conditional database mutations or native attempt/generation checks.
+Best-effort Web direct wakes send no admission snapshot. The Worker claims
+through Web's canonical Postgres command after receiving the request, just as
+it does for Temporal. A failed Web dispatch therefore cannot leave a starting
+reservation that blocks the durable wake. Each explicit retry reads current
+admission through that same Worker callback. No compensating release is safe
+or necessary at the Web transport boundary.
 
-Deploy the accepting Worker before enabling Web to send admission. Old Web and
-Temporal callers remain supported by the new Worker. New Web is incompatible
-with an older strict Worker parser. Roll back Web and let it converge before
-rolling Worker below this reader floor. Publish reader and producer in separate
-PRs because Web deploys independently on merge. No protocol flag or cached
-admission is needed. Web must obtain a fresh snapshot for each direct retry.
+The optional canonical admission response (`claimed` or `existing`) remains
+supported for deployed Web callers. Only authenticated Web OIDC
+callers can supply it; the Worker validates its member binding before container
+work. Supplied snapshots never replace conditional database mutations or native
+attempt/generation checks. Requests without admission are accepted by both old
+and new Workers, so this caller change needs no coordinated Worker deployment.
 
 Existing compatible owners are woken immediately after Postgres admission. The
 native wake validates the exact attempt and generation; an accepted wake needs

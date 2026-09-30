@@ -1,10 +1,12 @@
 import { runWithPrismaOperationTimings, type PrismaOperationTiming } from "@/src/lib/prisma-operation-timing";
 import { reconcileHostedRuntimeUploads } from "@/src/lib/hosted-execution/runtime-upload-recovery";
-const uploadRecovery = vi.hoisted(() => ({ purge: vi.fn() }));
+const uploadRecovery = vi.hoisted(() => ({ purge: vi.fn(), ensure: vi.fn() }));
 vi.mock("@/src/lib/hosted-execution/control", () => ({
-  readHostedExecutionControlClientIfConfigured: () => ({ purgeRuntimeResource: uploadRecovery.purge }),
+  readHostedExecutionControlClientIfConfigured: () => ({ purgeRuntimeResource: uploadRecovery.purge, ensureRuntimeProcessing: uploadRecovery.ensure }),
 }));
 import { randomUUID } from "node:crypto";
+import { createCloudflareHostedControlClient } from "@murphai/cloudflare-hosted-control/client";
+import { startHostedDirectRuntimeWakeBestEffort } from "@/src/lib/hosted-execution/direct-runtime-wake";
 import { readFile } from "node:fs/promises";
 import { Prisma, type HostedRuntimeOwner, type PrismaClient } from "@prisma/client";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
@@ -92,6 +94,37 @@ describe.skipIf(!enabled)("Postgres runtime ownership", () => {
     if (result.status === "blocked") throw new Error(`Unexpected admission rejection: ${result.reason}`);
     return result;
   }
+
+  it.each([false, true])("leaves admission available after failed direct transport (retained target: %s)", async retainedTarget => {
+    const userId = await member();
+    if (retainedTarget) {
+      await observer.hostedRuntimeOwner.create({ data: {
+        userId, migrationPhase: "postgres", phase: "idle", generation: 1n,
+        allocationId: "standby-claim-11111111-1111-4111-8111-111111111111",
+        runnerContainerName: "synthetic-retained-runner",
+      } });
+    }
+    const before = await observer.hostedRuntimeOwner.findUnique({ where: { userId } });
+    const fetchImpl = vi.fn<typeof fetch>().mockRejectedValue(new TypeError("fetch failed"));
+    const client = createCloudflareHostedControlClient({
+      baseUrl: "https://runtime.example.test", getBearerToken: async () => "synthetic-token", fetchImpl,
+    });
+    uploadRecovery.ensure.mockImplementation(client.ensureRuntimeProcessing);
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      await startHostedDirectRuntimeWakeBestEffort({ userId, source: "linq" });
+      expect(fetchImpl).toHaveBeenCalledOnce();
+      expect(await observer.hostedRuntimeOwner.findUnique({ where: { userId } })).toEqual(before);
+      // The same canonical claim used by the Worker's Temporal callback must
+      // acquire immediately, rather than return an abandoned starting owner.
+      expect(await executeHostedRuntimeOwnerCommand({
+        prisma: second, userId, command: { operation: "claim", processingMode: "default" },
+      })).toMatchObject({ cutover: "postgres", status: "claimed", owner: { phase: "starting" } });
+    } finally {
+      warning.mockRestore();
+      uploadRecovery.ensure.mockReset();
+    }
+  });
 
   it("reads callback authority in the three lock queries without fetching either row twice", async () => {
     const userId = await member();

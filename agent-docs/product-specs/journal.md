@@ -132,7 +132,7 @@ logistics-only checks while preserving explicit requests and uncertain cases.
 Useful plans remain saved silently; there is at most one useful follow-up per
 event or trip and no default end-plus-one-hour question.
 
-The morning pass uses `gpt-6-sol` with low reasoning effort for contextual
+The morning pass uses `gpt-6.1-sol` with low reasoning effort for contextual
 reconciliation of existing reminders as well as connected plans. Cron admits it
 even when there is no connected-context ledger or connected account, because
 member-supplied facts can still require reminder repairs. The skill checks saved
