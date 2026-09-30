@@ -192,8 +192,15 @@ async function reconcileCompletedRuntime(ctx: ProcessingContext, owner: HostedRu
 async function wakeExistingRuntime(ctx: ProcessingContext, owner: HostedRuntimeOwnerSnapshot): Promise<HostedRuntimeEnsureProcessingResponse | null> {
   if (owner.phase === "retiring" || !owner.runnerContainerName || owner.workspaceVersion === null) return null;
   if (owner.processingMode === "inbox_media_retention" && ctx.mode !== "inbox_media_retention") return null;
-  if (ctx.mode === "inbox_media_retention" && owner.processingMode !== ctx.mode) return retryProcessing(ctx, "processing_mode_conflict");
   const identity = requireIdentity(owner);
+  if (ctx.mode === "inbox_media_retention" && owner.processingMode !== ctx.mode) {
+    // A mode mismatch protects live work, not a failed invocation's stale owner.
+    // Inactive owners still pass through receipt, startup, and retirement proof.
+    const live = await readRuntimeFenceLivenessBestEffort({ commandBudget: ctx.budget,
+      identity: { ...identity, leaseGeneration: identity.generation, userId: ctx.input.userId },
+      runnerContainerName: owner.runnerContainerName, runnerContainerNamespace: ctx.namespace, stepTimeoutMs: 1_000 });
+    return live.outcome === "inactive" ? null : retryProcessing(ctx, "processing_mode_conflict");
+  }
   ctx.diagnostics.stage = "active_wake";
   const wake = await ensureActiveRuntimeProcessing({ activeRuntime: {
     ...(ctx.input.voiceCallId ? { voiceCallId: ctx.input.voiceCallId } : {}),

@@ -74,6 +74,11 @@ no separate invocation receipt read. Unaccepted wakes still reconcile completed
 receipts and prove an inactive fence before release. Retiring owners and
 retention work that needs replacement follow the existing recovery path without
 a wake. Unknown wake acknowledgments never authorize replacement by themselves.
+Conflicting retention admission checks the existing native liveness seam before
+deferring to another mode. An inactive owner enters the same receipt, startup
+grace, and exact retirement/release path; active, mismatched, or unavailable
+liveness keeps the conflict retry. A stale processing mode alone cannot strand
+an invocation that failed before recording completion.
 
 After exact completed-receipt and inactive-fence proof, recovery uses the existing
 combined completion/release command. A stale acknowledgment requests fresh
