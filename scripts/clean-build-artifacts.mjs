@@ -77,6 +77,7 @@ const CLEAN_GROUPS = {
     "packages/runtime-state",
     "packages/operator-config",
     "packages/assistant-engine",
+    "packages/assistant-runtime",
     "packages/assistant-cli",
     "packages/setup-cli",
     "packages/gateway-core",
