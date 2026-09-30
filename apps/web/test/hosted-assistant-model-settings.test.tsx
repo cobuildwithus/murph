@@ -134,16 +134,16 @@ test("GPT-6 models are available on Pulse and identify the active fallback accur
     canUpgradeToEdge: true,
     configurationAvailable: true,
     initialDormantSolPreference: true,
-    initialModel: "gpt-6-sol",
+    initialModel: "gpt-6.1-sol",
     initialProvider: "openai",
     solAvailable: false,
   }));
   const { document } = parseHTML(markup);
-  const sol = document.querySelector('input[id="assistant-model-gpt-6-sol"]');
+  const sol = document.querySelector('input[id="assistant-model-gpt-6.1-sol"]');
   const luna = document.querySelector('input[id="assistant-model-gpt-6-luna"]');
   assert.deepEqual(
     [...document.querySelectorAll("input")].map((input) => input.getAttribute("value")),
-    ["gpt-6-luna", "gpt-6-sol", "gpt-6-astra"],
+    ["gpt-6-luna", "gpt-6.1-sol", "gpt-6-astra"],
   );
   assert.ok(sol?.hasAttribute("checked"));
   assert.equal(sol?.hasAttribute("disabled"), false);

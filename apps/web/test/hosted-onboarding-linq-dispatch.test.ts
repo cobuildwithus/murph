@@ -5,8 +5,6 @@ import {
 } from "@murphai/runtime-state";
 import { HostedBillingStatus, type HostedLinqDailyState, type Prisma } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { runtimeAdmission } from "./support/hosted-runtime-admission-fixture";
-import * as runtimeOwnerControl from "@/src/lib/hosted-execution/runtime-owner-control";
 
 import {
   prepareHostedCryptoDomainRootCandidates,
@@ -8273,7 +8271,6 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     });
     const typingResult = createDeferred<{ ok: boolean; status: number }>();
     mocks.getPrisma.mockReturnValue(prisma);
-    vi.spyOn(runtimeOwnerControl, "executeHostedRuntimeOwnerCommand").mockResolvedValue(runtimeAdmission(memberId));
     const ensureRuntimeProcessing = vi.fn();
     mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({
       ensureRuntimeProcessing,

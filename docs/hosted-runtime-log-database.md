@@ -1524,9 +1524,10 @@ static field names are admitted:
 - `food search-labels`: query, limit.
 - `knowledge show`: slug (required positional argument in `packages/cli/src/commands/knowledge.ts`).
 - `measurement entry list`: metric, from, to, limit (only these top-level options from `packages/cli/src/commands/measurement.ts`; no metric array indices).
+- `event list`: kind, from, to, tag, experiment, limit (the command and its shared list factory), plus the fixed Incur invocation field arguments.
 - `event payload-schema`: kind, for (required public kind and optional literal `import-jsonl` surface in `packages/cli/src/commands/event.ts`).
 - `knowledge upsert`: body, slug, title, pageType, status, clearLibraryLinks,
-  relatedSlug, librarySlug, sourcePath.
+  relatedSlug, librarySlug, sourcePath, plus the fixed Incur invocation field arguments.
 - `knowledge append-section`: slug, heading, body, title, position, sourcePath.
 
 Issue codes use the closed standard vocabulary in `CliValidationDiagnostic`;
@@ -1631,6 +1632,19 @@ list with no provider calls or filesystem changes, plus byte-identical output
 and exits with timing disabled/enabled. No prompt, schema or dynamic-tool change
 is implied by these synthetic probes.
 
+The `event list` fields and `knowledge upsert` invocation-field admission use
+that same reader-first rollout, including warm engine/profile and completion
+consumers. Older readers omit the new tuples and coalesce equal code/stage pairs,
+retaining calls, phases, outcomes, report counts and drops; existing knowledge
+option detail remains readable. New readers accept old producers unchanged and
+cannot reconstruct omitted detail. The fixed invocation field is retained where
+the source supplies it in `fieldErrors` or `publicIssues`; original exceptions
+without it remain code/stage-only. Do not infer it from an error name or message. Set
+`MURPH_CLI_EVENT_INVOCATION_VALIDATION_COMPAT_BASE` to the actual pre-extension
+commit for the history-backed runtime-state test. No schema bump, migration,
+backfill or new event is required. Only after approved telemetry rollout and
+consumer/producer convergence, observe natural traffic; do not induce calls.
+
 The `knowledge show`, `event payload-schema` and `measurement entry list` field
 extensions use that same consumer-first Web/reader, then runner/CLI-producer
 rollout. Run the history-backed reader tests with
@@ -1726,12 +1740,20 @@ needed for this extension's unchanged output contract.
 
 #### Command-specific validation inspection (including singletons)
 
-For `automation list`, `knowledge show`, `event payload-schema` and
-`measurement entry list` with `VALIDATION_ERROR / validation`, **any newly
+For `automation list`, `knowledge show`, `knowledge upsert`, `event list`,
+`event payload-schema` and `measurement entry list` with
+`VALIDATION_ERROR / validation`, **any newly
 attributed event warrants inspection, including one event in one turn**; the two-turn
 implementation-investigation threshold above does not gate this inspection.
 Attribution is not an automatic behavior or prompt change. Reproduce the exact
 attributed path synthetically and establish its cause before proposing one.
+For the event-list/upsert probe, `arguments / custom` identifies an Incur
+invocation rejection, not a particular option or its value. A specific option
+such as `limit / too_big` supports inspecting that option's existing contract;
+it does not authorize changing the limit. Absent detail remains unresolved,
+including historical upsert failures; do not infer their field or cause from
+these synthetic probes. These are selected issue observations within CLI calls,
+not additional failures to sum with action-completion diagnostics.
 This extension does not classify connected-app result-size failures, missing
 knowledge pages, generic shell exits, profile `other`, exercise-card failures or
 turn-level provider loss. None can be equated with these input rejections.
@@ -1759,7 +1781,8 @@ WITH rows AS MATERIALIZED (
   FROM rows
   CROSS JOIN LATERAL jsonb_array_elements(t -> 'commands') c
   WHERE t ->> 'schema' = 'murph.cli-timing.v1'
-    AND c ->> 'command' IN ('automation list', 'knowledge show', 'event payload-schema', 'measurement entry list')
+    AND c ->> 'command' IN ('automation list', 'knowledge show', 'knowledge upsert',
+      'event list', 'event payload-schema', 'measurement entry list')
     AND c ->> 'outcome' = 'error'
 ), per_turn AS (
   SELECT turn_id, c ->> 'command' AS command, f.field, f.issue_code, f.missing,
@@ -1769,6 +1792,11 @@ WITH rows AS MATERIALIZED (
     SELECT CASE
              WHEN c ->> 'command' = 'automation list' AND e -> 'validation' ->> 'field' IN ('limit', 'status')
                OR c ->> 'command' = 'knowledge show' AND e -> 'validation' ->> 'field' = 'slug'
+               OR c ->> 'command' = 'knowledge upsert' AND e -> 'validation' ->> 'field' IN (
+                 'body', 'slug', 'title', 'pageType', 'status', 'clearLibraryLinks',
+                 'relatedSlug', 'librarySlug', 'sourcePath', 'arguments')
+               OR c ->> 'command' = 'event list' AND e -> 'validation' ->> 'field' IN (
+                 'kind', 'from', 'to', 'tag', 'experiment', 'limit', 'arguments')
                OR c ->> 'command' = 'event payload-schema' AND e -> 'validation' ->> 'field' IN ('kind', 'for')
                OR c ->> 'command' = 'measurement entry list' AND e -> 'validation' ->> 'field' IN ('metric', 'from', 'to', 'limit')
              THEN e -> 'validation' ->> 'field' END AS field,

@@ -245,8 +245,12 @@ describe("completion client, router, and native receipt composition", () => {
     ]);
     expect(f.receipts.read()).toEqual({ ...f.identity, state: "completed", immediateRecheckRequested: true });
     expect(f.input).toEqual(before);
-    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledTimes(2);
-    for (const [log] of mocks.emitHostedExecutionStructuredLog.mock.calls) {
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledTimes(4);
+    const receiptLogs = mocks.emitHostedExecutionStructuredLog.mock.calls.filter(
+      ([entry]) => entry.details?.runtimeCompletionReceiptOutcome !== undefined,
+    );
+    expect(receiptLogs).toHaveLength(2);
+    for (const [log] of receiptLogs) {
       expect(log).toMatchObject({ level: "info", details: { runtimeCompletionReceiptOutcome: "recorded" } });
     }
   });
@@ -318,7 +322,7 @@ describe("completion client, router, and native receipt composition", () => {
       ...(canonicalRejected ? [{ operation: "complete", ...f.identity, settledRunnerContainerName: null, immediateRecheckRequested: false }] : []),
     ]);
     expect(f.receipts.read()).toEqual(canonicalRejected ? { ...f.identity, state: "completed", immediateRecheckRequested: false } : before);
-    expectCompletionLog("warn", false, reason);
+    expectCompletionLog("warn", false, reason, canonicalRejected);
   });
 
   it.each(["binding", "RPC"])("warns when the native %s is unavailable", async (missing) => {
@@ -338,9 +342,9 @@ describe("completion client, router, and native receipt composition", () => {
   });
 });
 
-function expectCompletionLog(level: "info" | "warn", completed: boolean, reason?: HostedRuntimeCompletionReceiptReason) {
-  expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledOnce();
-  const [entry] = mocks.emitHostedExecutionStructuredLog.mock.calls[0]!;
+function expectCompletionLog(level: "info" | "warn", completed: boolean, reason?: HostedRuntimeCompletionReceiptReason, canonicalCalled = false) {
+  expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledTimes(canonicalCalled ? 2 : 1);
+  const [entry] = mocks.emitHostedExecutionStructuredLog.mock.calls.at(-1)!;
   const log = buildHostedExecutionStructuredLogRecord(entry);
   expect(log.level).toBe(level);
   expect(log.userId).toBeNull();

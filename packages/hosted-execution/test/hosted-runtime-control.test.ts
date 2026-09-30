@@ -398,6 +398,7 @@ describe("hosted runtime control contracts", () => {
 
   it("parses the hosted assistant product models and nullable default override", () => {
     expect(HOSTED_ASSISTANT_PRODUCT_MODELS).toEqual([
+      "gpt-6.1-sol",
       "gpt-6-sol",
       "gpt-6-luna",
       HOSTED_ASSISTANT_LUNA_MODEL,
@@ -405,6 +406,7 @@ describe("hosted runtime control contracts", () => {
       "gpt-6-astra",
     ]);
     expect(HOSTED_ASSISTANT_MODEL_OVERRIDES).toEqual([
+      "gpt-6.1-sol",
       "gpt-6-sol",
       "gpt-6-luna",
       HOSTED_ASSISTANT_LUNA_MODEL,

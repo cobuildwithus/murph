@@ -626,6 +626,12 @@ const HOSTED_AI_USAGE_ALLOWANCE_OPENAI_MODEL_PRICES: Record<
   HostedAiUsageAllowancePricedModel,
   HostedAiUsageAllowanceModelPrice
 > = {
+  "gpt-6.1-sol": {
+    cachedInputUsdMicrosPerMillionTokens: 100_000n,
+    cacheWriteUsdMicrosPerMillionTokens: 2_500_000n,
+    inputUsdMicrosPerMillionTokens: 2_000_000n,
+    outputUsdMicrosPerMillionTokens: 10_000_000n,
+  },
   "gpt-6-sol": {
     cachedInputUsdMicrosPerMillionTokens: 200_000n,
     cacheWriteUsdMicrosPerMillionTokens: 2_500_000n,
@@ -727,6 +733,20 @@ const HOSTED_AI_USAGE_ALLOWANCE_GPT_6_SOL_LUNA_TOKEN_PRICING_BASES = {
 } as const;
 
 const HOSTED_AI_USAGE_ALLOWANCE_MODEL_TOKEN_PRICING_BASES = {
+  "gpt-6.1-sol": {
+    standard: {
+      ...HOSTED_AI_USAGE_ALLOWANCE_GPT_6_SOL_LUNA_TOKEN_PRICING_BASES.standard,
+      pricingVersion: "openai-api-pricing-2026-09-29-gpt-6.1-sol-standard",
+    },
+    "openai-flex": {
+      ...HOSTED_AI_USAGE_ALLOWANCE_GPT_6_SOL_LUNA_TOKEN_PRICING_BASES["openai-flex"],
+      pricingVersion: "openai-api-pricing-2026-09-29-gpt-6.1-sol-openai-flex",
+    },
+    "openai-priority": {
+      ...HOSTED_AI_USAGE_ALLOWANCE_GPT_6_SOL_LUNA_TOKEN_PRICING_BASES["openai-priority"],
+      pricingVersion: "openai-api-pricing-2026-09-29-gpt-6.1-sol-openai-priority",
+    },
+  },
   "gpt-6-sol": HOSTED_AI_USAGE_ALLOWANCE_GPT_6_SOL_LUNA_TOKEN_PRICING_BASES,
   "gpt-6-luna": HOSTED_AI_USAGE_ALLOWANCE_GPT_6_SOL_LUNA_TOKEN_PRICING_BASES,
   "gpt-6-astra": {
@@ -3803,7 +3823,7 @@ function resolveHostedAiUsageAllowanceModelPrices(input: {
   const cumulativeCodexUsage = input.record.usageExtractionSourcePath
     ?.endsWith("tokenUsage.total.delta") === true;
   // Exact individual requests above 272K pay long-context rates in every bucket.
-  if (input.model.startsWith("gpt-6-") && !cumulativeCodexUsage
+  if ((input.model.startsWith("gpt-6-") || input.model === "gpt-6.1-sol") && !cumulativeCodexUsage
       && normalizeTokenCount(input.record.inputTokens) > 272_000n) {
     return {
       cachedInputUsdMicrosPerMillionTokens: prices.cachedInputUsdMicrosPerMillionTokens * 2n,

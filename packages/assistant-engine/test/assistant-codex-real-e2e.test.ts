@@ -1011,7 +1011,7 @@ afterAll(() => {
     )
   }
 })
-const DEFAULT_REAL_CODEX_MODEL = 'gpt-6-sol'
+const DEFAULT_REAL_CODEX_MODEL = 'gpt-6.1-sol'
 const REAL_CODEX_HOSTED_CONFIG_OVERRIDES = [
   'allow_login_shell=false',
   'features.plugins=false',
@@ -8409,7 +8409,10 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
     720_000,
   )
 
-  it('runs a saved legacy Luna reminder on the current OpenAI model without rewriting it', async () => {
+  it.each([
+    ['gpt-5.6-luna', 'gpt-6-luna'],
+    ['gpt-6-sol', 'gpt-6.1-sol'],
+  ])('runs a saved %s reminder on the current OpenAI model without rewriting it', async (savedModel, expectedModel) => {
     const config = await resolveRealCodexE2eConfig()
     const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-automation-model-upgrade-e2e-'))
     const binDirectory = path.join(workingDirectory, 'bin')
@@ -8418,7 +8421,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
       await materializeRealWorkoutVaultCli({ binDirectory, commandLogPath, vaultRoot: workingDirectory })
       await initializeVault({ timezone: 'UTC', vaultRoot: workingDirectory })
       const saved = await upsertAutomation({
-        assistantTargetOverride: { model: 'gpt-5.6-luna' },
+        assistantTargetOverride: { model: savedModel },
         continuityPolicy: 'fresh',
         instructions: 'Send this self-contained reminder now: put the recycling bin outside. No lookups or other actions are needed.',
         now: new Date('2026-09-23T12:00:00.000Z'),
@@ -8448,7 +8451,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
       const target = resolveAutomationAssistantTargetOverrideForTarget(saved.record.assistantTargetOverride, createAssistantModelTarget({
         model: config.model, modelProvider: config.modelProvider ?? 'openai', provider: 'codex-cli', reasoningEffort: 'low',
       }))
-      expect(target).toMatchObject({ model: 'gpt-6-luna', reasoningEffort: 'low' })
+      expect(target).toMatchObject({ model: expectedModel, reasoningEffort: 'low' })
       if (!target?.model) throw new Error('Expected upgraded model.')
       const result = await executeRealCodexAppServerTurn({
         approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
@@ -11041,7 +11044,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
     }, 360_000,
   )
 
-  it.each(['available', 'missing', 'unavailable', 'previously_declined', 'usual_complete', 'usual_missing', 'unknown_history'] as const)(
+  it.each(['available', 'missing', 'unavailable', 'previously_declined', 'usual_complete', 'usual_missing', 'unknown_history', 'known_late_arrival', 'multiple_dates'] as const)(
     'handles wearable freshness recovery in a scheduled group update: %s',
     async (scenario) => {
       const config = await resolveRealCodexE2eConfig()
@@ -11088,7 +11091,8 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
           model: config.model, modelProvider: config.modelProvider,
           prompt: [
             'Scheduled group automation: daily-sleep-summary. Runs every day at 09:00 America/New_York.',
-            'Recipe: Share today’s sleep duration for everyone. Keep it short.',
+            scenario === 'multiple_dates' ? 'Recipe: Share sleep durations for August 3 and August 5 for everyone, labeling both dates. Keep it short.' : 'Recipe: Share today’s sleep duration for everyone. Keep it short.',
+            ...(scenario === 'known_late_arrival' ? ['Saved report context: On each of the last five mornings, Quinn’s sleep first appeared at 09:20, after the 09:00 report. The creator has not been offered a schedule change.'] : []),
             ...(scenario === 'previously_declined' ? ['Recent conversation: The report creator declined the offered later time and asked to keep the usual schedule.'] : []),
           ].join('\n'),
           reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
@@ -11100,7 +11104,9 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
         process.stdout.write(`[wearable-freshness-e2e] ${JSON.stringify({ scenario, reply })}\n`)
         expect(sharedRequests).toEqual([{
           projectionScopes: [{ projectionKind: 'sleep-duration-days.v0' }],
-          freshness: [{ projectionScopeKey: 'sleep-duration-days.v0', date: '2026-08-05' }],
+          freshness: scenario === 'multiple_dates'
+            ? expect.arrayContaining([{ projectionScopeKey: 'sleep-duration-days.v0', date: '2026-08-03' }, { projectionScopeKey: 'sleep-duration-days.v0', date: '2026-08-05' }])
+            : [{ projectionScopeKey: 'sleep-duration-days.v0', date: '2026-08-05' }],
         }])
         expect(automationRequests).toHaveLength(0)
         expect(readCapabilityRoutingActions(result.jsonEvents).filter((action) => action.kind === 'dynamic')).toHaveLength(1)
@@ -11114,7 +11120,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
         } else {
           expect(reply).toMatch(/Quinn/iu)
           if (scenario !== 'usual_complete') expect(reply).toMatch(/9:04/iu)
-          if (scenario === 'previously_declined' || scenario === 'usual_complete' || scenario === 'unknown_history') {
+          if (scenario !== 'known_late_arrival') {
             expect(reply).not.toMatch(/(?:move|delay|reschedul)[^.!?\n]{0,80}(?:30|half an hour|9:30)|\?/iu)
           } else {
             expect(reply).toMatch(/30(?:[- ]|\s*)min|half an hour|9:30/iu)

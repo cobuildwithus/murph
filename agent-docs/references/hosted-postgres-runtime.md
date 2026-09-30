@@ -47,21 +47,26 @@ retired legacy alarm and run-until-idle HTTP controls are unavailable.
 
 ## Claim, launch, completion, and recovery
 
-The ensure-processing request accepts an optional canonical Postgres admission
-response (`claimed` or `existing`). Only authenticated Web OIDC callers can
-supply it; the Worker validates its member binding before container work. Web
-can run its existing claim command locally and carry the result to the Worker,
-removing the initial Worker-to-Web callback. Requests without admission still
-claim through Web, including the separately deployed Temporal caller. Completion
-recovery still claims successors through Web; supplied snapshots never replace
-conditional database mutations or native attempt/generation checks.
+Runtime admission keeps the member lock before one composed eligibility read
+(suspension, explicit consent withdrawal, and canonical direct or sponsored
+access; retention still skips only the access requirement). Claim returns its
+locked routing result; target selection and launch preparation also reuse the
+Postgres gate proved by their ownership transaction instead of rereading it
+after commit.
 
-Deploy the accepting Worker before enabling Web to send admission. Old Web and
-Temporal callers remain supported by the new Worker. New Web is incompatible
-with an older strict Worker parser. Roll back Web and let it converge before
-rolling Worker below this reader floor. Publish reader and producer in separate
-PRs because Web deploys independently on merge. No protocol flag or cached
-admission is needed. Web must obtain a fresh snapshot for each direct retry.
+Best-effort Web direct wakes send no admission snapshot. The Worker claims
+through Web's canonical Postgres command after receiving the request, just as
+it does for Temporal. A failed Web dispatch therefore cannot leave a starting
+reservation that blocks the durable wake. Each explicit retry reads current
+admission through that same Worker callback. No compensating release is safe
+or necessary at the Web transport boundary.
+
+The optional canonical admission response (`claimed` or `existing`) remains
+supported for deployed Web callers. Only authenticated Web OIDC
+callers can supply it; the Worker validates its member binding before container
+work. Supplied snapshots never replace conditional database mutations or native
+attempt/generation checks. Requests without admission are accepted by both old
+and new Workers, so this caller change needs no coordinated Worker deployment.
 
 Existing compatible owners are woken immediately after Postgres admission. The
 native wake validates the exact attempt and generation; an accepted wake needs
@@ -69,6 +74,11 @@ no separate invocation receipt read. Unaccepted wakes still reconcile completed
 receipts and prove an inactive fence before release. Retiring owners and
 retention work that needs replacement follow the existing recovery path without
 a wake. Unknown wake acknowledgments never authorize replacement by themselves.
+Conflicting retention admission checks the existing native liveness seam before
+deferring to another mode. An inactive owner enters the same receipt, startup
+grace, and exact retirement/release path; active, mismatched, or unavailable
+liveness keeps the conflict retry. A stale processing mode alone cannot strand
+an invocation that failed before recording completion.
 
 After exact completed-receipt and inactive-fence proof, recovery uses the existing
 combined completion/release command. A stale acknowledgment requests fresh
@@ -343,6 +353,14 @@ outcome, elapsed time, observed fence and a finite retry reason. Telemetry canno
 delay the control response or change its result; orchestration correlation uses
 the existing domain-separated hash rather than retaining the raw attempt ID.
 
+Runtime log uploads still authenticate the signed callback, consume its nonce,
+and check runtime ownership. When that admission rejects a stale owner with
+`HOSTED_RUNTIME_OWNER_STALE` (409), the log route acknowledges the discarded
+batch with `loggedCount: 0`. Bounded shutdown drains can leave uploads in flight
+after retirement; these uploads cannot persist logs, request a recovery wake,
+or schedule alerts. Other callback failures retain their existing error response,
+and operational routes retain their stale-owner rejection.
+
 ### Reserved target retirement
 
 A selected target can remain unbound when its bind RPC times out before commit.
@@ -352,3 +370,14 @@ fencing admissions. A target with no persisted claim retires without one even
 when the Postgres reservation supplies its allocation claim. Bound targets
 still reject a mismatched claim or member. Failed native destruction leaves the
 slot retiring for the existing retry; delayed binds cannot resurrect it.
+
+### Processing deadline and settled recovery
+
+The processing command owns its deadline independently of the timeout for one
+Web callback. Native readiness retains its 15-second bound inside the command;
+Web owner callbacks retain their shorter per-request bound. An expired command
+preserves uncertain ownership and cannot launch a detached successor.
+
+After exact native retirement and an acknowledged canonical release, processing
+uses the existing bounded admission loop immediately. Failed or uncertain
+retirement/release still retries; elapsed time alone never proves stoppedness.

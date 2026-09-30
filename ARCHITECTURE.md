@@ -1039,6 +1039,19 @@ PostgreSQL proofs compare decisions and SQL counts with the former query strateg
 including direct, sponsored, and group access; query count alone is not evidence
 of production CPU or latency improvement.
 
+Mailbox fetch diagnostics reuse the request-local Prisma timing collector to
+record operation, pool-checkout, and physical pg query start offsets on one
+monotonic clock. Query duration includes network, server execution, and response
+decoding after checkout; it is not server-only SQL time. The physical-client hook
+covers pooled queries and transaction statements once, and queued checkout
+callbacks restore the requesting async context before dispatch. Existing
+first/slow/failed request records expose only the first 24 timings per category,
+counts, and query failure flags, never SQL, parameters, results, or error text.
+These categories can overlap; they must not be summed as sequential phases.
+Vercel's native infrastructure waterfall is configured separately through project
+tracing for the production `/api/internal/hosted-mailbox/fetch` path. No tracing
+SDK or new telemetry destination is required.
+
 ### Canonical Automation Support Lifecycles
 
 Early onboarding stall recovery is a canonical one-shot enrolled by existing
@@ -1601,12 +1614,12 @@ native `spawn_agent.model` field and never mutates that saved configuration.
 Web exposes the native field only when its existing assistant-configuration
 resolution confirms that the current managed runtime is authorized for the
 full product-model catalog; missing authority and custom inference fail closed.
-The production image defaults to a catalog containing GPT-6 Sol and Luna plus
-GPT-5.6 Luna and Sol. CLI 0.158.0 supplies every entry from its native catalog;
-there is no separate launch-catalog supplement. All GPT-6 entries retain
+The production image defaults to a catalog containing GPT-6.1 Sol and GPT-6 Luna plus
+GPT-5.6 Luna and Sol, retaining GPT-6 Sol for saved conversation preferences. CLI 0.159.1 supplies every entry from its native catalog;
+there is no separate launch-catalog supplement. All GPT-6 and GPT-6.1 entries retain
 the native 272K context limit. The image fails validation for missing entries. Web separately derives Astra authority from the canonical available models
 and managed OpenAI provider; only an explicitly authorized workspace selects the
-expanded image-owned Astra catalog. Missing authority retains the four-model
+expanded image-owned Astra catalog. Missing authority retains the five-model
 catalog, preserving Edge and group delegation while Codex's native validation
 rejects Astra before a provider request. Catalog selection changes the native
 launch key, so a warm process cannot retain an earlier catalog after access changes.
@@ -1638,7 +1651,7 @@ Only the authoritative
 web response updates an ephemeral invocation-local projection; web remains the
 sole durable owner, and a later invocation rereads the preference there.
 For a synthetic thread-container member, the same input-bound path accepts
-model changes only. Null selects GPT-6 Sol,
+model changes only. Null selects GPT-6.1 Sol,
 while explicit older-model or GPT-6 Luna choices use the member's existing nullable model
 field. Provider and reasoning stay fixed to OpenAI and `low`; no participant
 identity, plan state, or private preference enters the room path.
@@ -1857,18 +1870,20 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
 
   Nullable hosted-member model and reasoning preferences are web-owned,
   billing-gated control facts. Managed OpenAI personal and group chats default
-  to GPT-6 Sol. Active members may select GPT-6 Sol or Luna and the existing
+  to GPT-6.1 Sol. Active members may select GPT-6.1 Sol or Luna and the existing
   GPT-5.6 Luna; GPT-5.6 Sol and GPT-6 Astra retain their premium gates.
-  Saved Terra preferences now resolve to GPT-6 Sol; other explicit choices stay
+  Saved Terra preferences now resolve to GPT-6.1 Sol; other explicit choices stay
   saved, while a null preference follows the default. New managed recipes and
-  automation guidance use GPT-6 Luna for fixed cues and GPT-6 Sol for contextual
+  automation guidance use GPT-6 Luna for fixed cues and GPT-6.1 Sol for contextual
   work, including the Personal Patterns job. Web opening replies
   also use GPT-6 Luna. At scheduled execution,
   automation pins use a reviewed OpenAI replacement map: GPT-5.6 Luna becomes
-  GPT-6 Luna, and GPT-5.6 Sol or Terra becomes GPT-6 Sol. Provider-neutral
+  GPT-6 Luna, and GPT-6 Sol, GPT-5.6 Sol, or Terra becomes GPT-6.1 Sol. Provider-neutral
   envelopes and canonical records retain the authored pin; resolution happens
   after the executing provider is known and before default reasoning is derived.
-  Explicit reasoning survives; an omitted value uses the replacement model's
+  Scheduled turns that inherit an explicitly saved GPT-6 Sol conversation target
+  also use GPT-6.1 Sol, preserving inherited reasoning and the conversation target.
+  Explicit reasoning survives; an omitted pinned value uses the replacement model's
   default. Venice retains its supported GPT-5.6 targets; retired Terra inherits
   the supported Venice conversation target. Explicit custom-provider model IDs
   stay literal, and unsupported inherited managed preferences remain
@@ -1876,7 +1891,7 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   new runtime code activates replacements on the next execution. Future versions
   require a reviewed map update, and rollback restores prior resolution.
   Venice uses GPT-5.6 Sol as its fallback and supports only its
-  existing mapped models; GPT-6 Sol and Luna selection requires OpenAI. The
+  existing mapped models; GPT-6.1 Sol and GPT-6 Luna selection requires OpenAI. The
   common reasoning set remains `low`/`medium`/`high`/`xhigh`, with low represented
   by an absent reasoning override. Web always projects the resolved model
   explicitly so a runner environment cannot restore an older default.

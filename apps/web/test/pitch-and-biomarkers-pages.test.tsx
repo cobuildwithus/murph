@@ -88,11 +88,11 @@ test("PitchPage metadata and route entrypoint render the deck landmark", () => {
   assert.equal(pitchMetadata.title, "Murph · Pitch");
   assert.equal(
     pitchMetadata.description,
-    "Murph turns group chats into health challenges. The AI referee for step bets, sleep experiments, and friend challenges across iMessage, WhatsApp, and Telegram.",
+    "Murph is your personal AI health team. It learns from your wearables, bloodwork, and health history, texts you first, and runs health challenges in your group chats.",
   );
   assert.deepEqual(pitchMetadata.openGraph?.images, [
     {
-      alt: "Murph, the AI referee for health challenges.",
+      alt: "Murph, your personal AI health team.",
       height: 630,
       type: "image/png",
       url: "/pitch/opengraph-image",
@@ -105,20 +105,15 @@ test("PitchPage metadata and route entrypoint render the deck landmark", () => {
   assert.match(markup, /<main[^>]*data-pitch-deck="true"/);
   assert.match(markup, /data-pitch-chrome="true"/);
   assert.match(markup, /aria-label="Slide 1: Title"/);
-  assert.match(markup, /The social layer for health experiments\./);
-  assert.match(markup, /MRR grew 61% in the 30 days through September 2/);
-  assert.match(markup, /12% weekly compound MRR growth/);
-  assert.match(markup, /\+44% paying customers/);
-  assert.match(markup, /7 msgs \/ day \/ active user/);
-  assert.match(markup, /1,623 messages exchanged August 26–September 1/);
-  assert.match(markup, /49 per weekly active user/);
-  assert.match(markup, /9 group chats active August 26–September 1/);
-  assert.match(markup, /115 total messages that week/);
-  assert.doesNotMatch(markup, /MRR grew 103% in the last 30 days/);
-  assert.doesNotMatch(markup, /18% w\/w MRR growth/);
-  assert.doesNotMatch(markup, /\+82% paying customers/);
-  assert.doesNotMatch(markup, /3,003 messages exchanged last week/);
-  assert.doesNotMatch(markup, /255 messages to Murph last week/);
+  assert.match(markup, /Your personal<br\/>AI health team\./);
+  assert.match(markup, /Live since July\. Revenue up every month\./);
+  assert.match(markup, /\$431/);
+  assert.match(markup, /paying customers/);
+  assert.match(markup, /monthly active users/);
+  assert.match(markup, /\$3\.7B/);
+  assert.doesNotMatch(markup, /The social layer for health experiments/);
+  assert.doesNotMatch(markup, /MRR grew 61% in the 30 days through September 2/);
+  assert.doesNotMatch(markup, /12% weekly compound MRR growth/);
   assert.match(markup, /Scroll or use arrow keys/);
   assert.match(markup, /01 \/ 13/);
 });

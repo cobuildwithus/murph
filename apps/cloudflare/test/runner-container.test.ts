@@ -5512,6 +5512,51 @@ describe("RunnerContainer", () => {
     }
   });
 
+  it("keeps activity expiry cycling while a real invocation holds the lifecycle lock", async () => {
+    const invocationStarted = createDeferred<void>();
+    const runnerResponse = createDeferred<Response>();
+    const { container, destroy } = createContainerDouble({
+      containerFetch: vi.fn(async (url: string) => {
+        if (url.endsWith("/health")) {
+          return Response.json(createRunnerHealthResult());
+        }
+        invocationStarted.resolve();
+        return await runnerResponse.promise;
+      }),
+    });
+    const invocation = container.invoke({
+      job: { kind: "workspace-invocation", request: createRunnerRequest() },
+      timeoutMs: 60_000,
+      userId: "member_123",
+    });
+    await invocationStarted.promise;
+    let invocationFinished = false;
+    void invocation.then(() => { invocationFinished = true; });
+    const expiries: Promise<void>[] = [];
+    vi.useFakeTimers();
+    try {
+      for (let cycle = 0; cycle < 3; cycle += 1) {
+        vi.setSystemTime(Date.now() + 60_000);
+        let expiryFinished = false;
+        const expiry = container.onActivityExpired();
+        expiries.push(expiry);
+        void expiry.then(() => { expiryFinished = true; });
+        await vi.advanceTimersByTimeAsync(1);
+        expect(expiryFinished).toBe(true);
+        expect(invocationFinished).toBe(false);
+        expect(destroy).not.toHaveBeenCalled();
+        const schedules = await container.listSchedules("onActivityExpired");
+        expect(schedules).toHaveLength(1);
+        expect((schedules[0]?.time ?? 0) * 1_000).toBeGreaterThan(Date.now());
+      }
+    } finally {
+      vi.useRealTimers();
+      runnerResponse.resolve(Response.json(createRunnerResult()));
+      await invocation;
+      await Promise.all(expiries);
+    }
+  });
+
   it("records activity-expiry diagnostics while yielding to active workspace work", async () => {
     vi.useFakeTimers();
 

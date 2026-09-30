@@ -48,3 +48,11 @@ audit-only physical changes remain outside its source freshness manifest.
 `findEventsByExternalRefs` resolves a caller-bounded batch with two ledger scans,
 reusing single-reference latest-record, moved-identity and deletion semantics.
 Callers that couple this read to mutation hold the canonical write lock across both.
+
+### Clinical raw evidence validation
+
+Whole-vault validation recognizes the clinical manifest contract for FHIR
+snapshots. It checks connection/retrieval path identity and the immutable hashes
+of declared resource pages, downloaded documents, and batch predecessors. Nested
+pages belong to their snapshot manifest; unbound files remain validation errors.
+Clinical interpretation, patient binding, and pagination remain importer-owned.

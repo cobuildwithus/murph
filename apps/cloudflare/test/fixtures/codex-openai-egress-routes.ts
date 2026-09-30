@@ -5,11 +5,11 @@
  * source-tree review rather than trusting one platform's binary layout.
  */
 export const PINNED_CODEX_OPENAI_EGRESS_INVENTORY = {
-  upstreamCommit: "064c6b8c737f5b41d171fdda80bd9ef10ad06eb3",
+  upstreamCommit: "8e68a98ef03cdde76d2e6800791ebdf1b3b95b24",
   upstreamSourceRoot: "codex-rs/codex-api/src",
-  upstreamSourceTree: "26c7039c960602c8638759d74133307a54c72be9",
-  upstreamTag: "rust-v0.158.0",
-  version: "0.158.0",
+  upstreamSourceTree: "7ea79ec139a8dd7cfffdde84026a6786fb73a271",
+  upstreamTag: "rust-v0.159.1",
+  version: "0.159.1",
   baseRelativeProviderRoutes: [
     "alpha/search",
     "guardian",
@@ -377,6 +377,12 @@ export const PINNED_CODEX_OPENAI_EGRESS_INVENTORY = {
       disposition: "binary_false_positive",
       owner: "dependency",
       reason: "This exact Linux printable token joins unrelated serialized field labels; the pinned provider source has no such HTTP route.",
+    },
+    {
+      candidate: "/v1/raterowscols",
+      disposition: "binary_false_positive",
+      owner: "dependency",
+      reason: "The 0.159.1 Linux release joins rtc_avas/v1/ to serialized rate, rows, and cols labels before Exec. The pinned provider source has no such HTTP route.",
     },
     {
       candidate: "/v1/resp",

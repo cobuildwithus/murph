@@ -32,7 +32,21 @@ import { HostedAssistantModelSettings } from "@/src/components/settings/hosted-a
 import { Separator } from "@/src/components/ui/separator";
 import { isMurphAndroidAppEnabled } from "@murphai/hosted-execution/env";
 import { HOSTED_PUBLIC_REFERRAL_REWARDS } from "@/src/lib/hosted-growth/referral-program";
-import { ValidationSlide } from "../pitch/_components/slides";
+import {
+  AskSlide,
+  BusinessModelSlide,
+  CompetitionSlide,
+  ExperimentSlide,
+  InsightSlide,
+  MoatSlide,
+  ProblemSlide,
+  ProductSlide,
+  SpreadSlide,
+  TeamSlide,
+  TitleSlide,
+  ValidationSlide,
+  WhyNowSlide,
+} from "../pitch/_components/slides";
 import {
   projectHostedVaultShareProjectionDisplays,
   resolveHostedGroupAccessOfferProjectionScopes,
@@ -108,6 +122,23 @@ function StudySection({
     </section>
   );
 }
+
+// Every pitch deck slide, in deck order, each under its own anchor.
+const PITCH_SLIDE_STUDIES = [
+  { id: "pitch-title-slide", Slide: TitleSlide },
+  { id: "pitch-problem-slide", Slide: ProblemSlide },
+  { id: "pitch-insight-slide", Slide: InsightSlide },
+  { id: "pitch-why-now-slide", Slide: WhyNowSlide },
+  { id: "pitch-product-slide", Slide: ProductSlide },
+  { id: "pitch-experiment-slide", Slide: ExperimentSlide },
+  { id: "pitch-spread-slide", Slide: SpreadSlide },
+  { id: "pitch-progress-slide", Slide: ValidationSlide },
+  { id: "pitch-competition-slide", Slide: CompetitionSlide },
+  { id: "pitch-moat-slide", Slide: MoatSlide },
+  { id: "pitch-business-model-slide", Slide: BusinessModelSlide },
+  { id: "pitch-team-slide", Slide: TeamSlide },
+  { id: "pitch-ask-slide", Slide: AskSlide },
+] as const;
 
 export function SectionsContent({
   category,
@@ -247,12 +278,12 @@ export function SectionsContent({
             >
               <ModelSettingsHoverPreview>
                 <HostedAssistantModelSettings
-                  availableModels={["gpt-6-sol", "gpt-6-luna", "gpt-5.6-luna", "gpt-5.6-sol", "gpt-6-astra"]}
+                  availableModels={["gpt-6.1-sol", "gpt-6-sol", "gpt-6-luna", "gpt-5.6-luna", "gpt-5.6-sol", "gpt-6-astra"]}
                   canUpgradeToEdge={false}
                   configurationAvailable
                   customInferenceAvailable
                   initialDormantSolPreference={false}
-                  initialModel="gpt-6-sol"
+                  initialModel="gpt-6.1-sol"
                   initialProvider="openai"
                   solAvailable
                   veniceAvailable
@@ -858,15 +889,18 @@ export function SectionsContent({
         <>
           <Separator />
 
-          <StudySection title="Pitch deck progress slide">
-            <div
-              id="pitch-progress-slide"
-              data-design-section="pitch-progress-slide"
-              className="-mx-5 overflow-hidden sm:-mx-8 lg:-mx-12"
-              inert
-            >
-              <ValidationSlide />
-            </div>
+          <StudySection title="Pitch deck slides">
+            {PITCH_SLIDE_STUDIES.map(({ id, Slide }) => (
+              <div
+                key={id}
+                id={id}
+                data-design-section={id}
+                className="-mx-5 overflow-hidden sm:-mx-8 lg:-mx-12"
+                inert
+              >
+                <Slide />
+              </div>
+            ))}
           </StudySection>
 
           <Separator />

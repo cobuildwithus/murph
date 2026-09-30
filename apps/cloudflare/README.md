@@ -218,6 +218,8 @@ equivalent runtime. Configuration or simulated savings are not deployed savings.
 
 Hosted assistant delivery recovery comes from the encrypted local runtime outbox state inside the workspace checkpoint plus web-owned hosted-runtime logs/status.
 The runner container sends runtime internal Worker requests to normal virtual hosts such as `results.worker`, `runner-control.worker`, and `web-control.worker`. Cloudflare Container outbound interception routes those requests back into Worker-owned handlers, using the runtime write-fence headers as authority. After returning a successful invocation result, the container entrypoint clears the invocation's wake and abort pointers and cleans request transport, then sends the exact result, attempt, and generation through `runner-control.worker` to the Postgres runtime owner. Active work remains counted until that completion callback settles, preserving admission and shutdown-drain fencing. Web applies the existing exact completion compare-and-swap, so an activation reset cannot strand a completed write fence and a successor cannot race a process that still reports busy. The ordinary outer result remains the normal completion path; the one-second best-effort receipt logs `recorded` or `not_recorded` and never changes that result. Optional closed receipt reasons classify an already-completed generation only when the owner has `completedAt`, is idle, and has released its attempt (the warm target may remain); a strictly newer generation means only `superseded`, not completion or delivery. These obsolete callbacks remain `completed: false` / `not_recorded` and log at info. Unconfirmed owners, native receipt mismatches, canonical completion rejections, malformed receipts, HTTP/transport errors, and timeouts remain warnings. Boolean-only receipts stay compatible across Worker/container versions; missing or unknown reasons never suppress a false-receipt warning, and reasons cannot override successful completion. No recovery queue, alarm, poller, persisted promise, or second state owner is added.
+
+The shared canonical completion publisher additionally emits one failure-isolated info observation per existing call after it settles: `runtimeCompletionCaller` is `runtime_callback` without native settlement evidence or `native_invocation` when the call supplies the settled target. The latter includes exact native-receipt reconciliation and does not exclusively identify the outer supervisor. `runtimeCompletionOutcome` is `updated` for an acknowledged canonical update, `not_updated` for a settled non-update, or `unconfirmed` when the call throws. The event reuses `workspaceAttemptId` correlation; user identity is handled by the existing structured-log redaction. It contains no target, generation, error text, or payload and adds no I/O, retry, timer, or control decision. Join this observation to callback warnings on the exact attempt: a newer attempt cannot prove the older one completed, and canonical acknowledgment does not prove message delivery. Missing observations on older Workers or unexercised paths remain unknown.
 Shared runtime ports cannot supply raw Web-control methods or paths. They must use a branded route descriptor from the same registry that derives the Worker proxy allowlist; bounded query-bearing and device-connect variants can only bind to an already-registered pathname. Cloudflare typecheck rejects an unregistered caller at compile time, and the Node route-contract suite enumerates the registry to prove each exact method/path is allowed while the opposite method and path variants remain blocked.
 The phone-call start port is one bounded `web-control.worker` callback into `apps/web`; its protocol floor is 45 seconds even when the generic web-control timeout is 30 seconds, so the web-owned 40-second aggregate deadline finishes before the caller gives up. Deploy and prove convergence of this 45-second Cloudflare caller before deploying a web build with the 40-second deadline. The longer caller is backward compatible with older web builds; an old 30-second caller is not compatible with the 40-second web deadline, so Cloudflare cannot be rolled back below 45 seconds while that web build is active. Retell credentials and provider calls remain web-owned and are never forwarded into the runner.
 `murph.plan_usage` uses one allowlisted signed `web-control.worker` callback.
@@ -610,6 +612,12 @@ facts. Postgres owns runtime admission and resource cleanup; there is no per-use
 coordination Durable Object or alarm.
 RunnerContainer reuses the Containers SDK's own scheduling/alarm owner solely
 for safe idle-container cleanup, not mailbox or checkpoint scheduling.
+Activity expiry rearms that schedule and yields to a registered invocation before
+taking the lifecycle lock. The invocation holds that lock until its response
+settles; waiting behind it would strand the current SDK alarm instead of letting
+the next alarm run. Destructive cleanup still takes the lock and rechecks the
+interaction generation after external ownership reads. This removes an
+application-owned alarm stall, not the platform's ability to reset a controller.
 
 Optional execution vars and secrets:
 
@@ -716,6 +724,12 @@ account/member identifiers, or incident row contents. Existing authorization and
 private deployment boundaries still apply.
 
 ## Private Operational Telemetry
+
+Successful warm ensure-processing requests omit the detached processing summary
+only when they complete within one second. Slower successes retain the existing
+native wake entry, dispatch, response, and handler timing fields, so platform
+dispatch delay can be distinguished from work inside the runner. Logging remains
+detached and cannot extend the command budget or change admission.
 
 OpenAI Responses upgrades return the upstream `Response` and unaccepted
 `webSocket` unchanged. Cloudflare forwards the connection; native Codex owns
@@ -1147,12 +1161,12 @@ image recipe; no manual binary installation or separate release service is neede
 
 ### Astra model catalog
 
-The native runner image has a default GPT-6 Sol/Luna and GPT-5.6 Sol/Luna catalog and an expanded
+The native runner image has a default GPT-6.1 Sol, GPT-6 Sol/Luna, and GPT-5.6 Sol/Luna catalog and an expanded
 `.astra` catalog with `gpt-6-astra` and OpenAI Flex support. The runtime chooses
 the latter only from Web's explicit Max/OpenAI workspace authorization. Missing
 authority, Edge, group, and Venice runtimes retain the default catalog and its
 existing delegation choices. The
-pinned Codex 0.158.0 release supplies every entry natively; the image validates
+pinned Codex 0.159.1 release supplies every entry natively; the image validates
 its bundled catalog without a separate launch supplement. Murph supplies its own base
 instructions for each turn.
 The Astra context window remains at most 272,000 tokens, verified while building the

@@ -23,6 +23,11 @@ Email-only accounts wait for a direct iMessage route; native sharing does not wo
 over SMS/RCS. Linq cannot confirm handset presentation or contact saving. See the
 [provider contract](https://docs.linqapp.com/channel/imessage/guides/contact-cards/).
 
+Native cards and requested vCards consult the existing line/chat egress policy
+before reserving or sending. Every saved vCard requires exactly one active self
+handle. Browser handoff issuance, like download, requires an assigned or pending
+texting line and returns the existing retryable not-ready response otherwise.
+
 ## Purpose
 
 Runtime-owned terminal Linq send failures have one bounded retry through the

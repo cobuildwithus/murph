@@ -9,7 +9,7 @@ import {
 } from "./runtime-owner";
 
 type CommandInput = { prisma: PrismaClient; userId: string; command: HostedRuntimeOwnerCommand };
-type CommandResult = { status: HostedRuntimeOwnerResponse["status"]; owner: HostedRuntimeOwner | null };
+type CommandResult = { cutover?: HostedRuntimeOwnerResponse["cutover"]; status: HostedRuntimeOwnerResponse["status"]; owner: HostedRuntimeOwner | null };
 type IdentityCommand = Extract<HostedRuntimeOwnerCommand, { attemptId: string }>;
 
 /** Durable ownership commands. The HTTP boundary owns advisory completion hints. */
@@ -31,7 +31,7 @@ export async function executeHostedRuntimeOwnerCommand(input: CommandInput): Pro
     return parseHostedRuntimeOwnerResponse({ cutover: backend, status: "blocked", owner: null });
   }
   const result = await executeCommand({ ...input, command: input.command });
-  const cutover = backend ?? await readHostedRuntimeMemberBackend(input.prisma, input.userId);
+  const cutover = result.cutover ?? backend ?? await readHostedRuntimeMemberBackend(input.prisma, input.userId);
   return parseHostedRuntimeOwnerResponse({ cutover, status: result.status, owner: projectOwner(result.owner) });
 }
 
@@ -47,7 +47,7 @@ async function executeCommand(input: Omit<CommandInput, "command"> & { command: 
     }
     case "claim": {
       const result = await claimHostedRuntime({ prisma, userId, processingMode: command.processingMode });
-      return { status: result.status, owner: result.status === "blocked" ? null : result.owner };
+      return { cutover: result.cutover, status: result.status, owner: result.status === "blocked" ? null : result.owner };
     }
     case "target_retired":
       return mutated(await recordHostedRuntimeTargetRetired({ ...command, prisma, userId }));
@@ -61,9 +61,9 @@ async function executeIdentityCommand(input: Omit<CommandInput, "command"> & { c
   const identity = { userId, attemptId: command.attemptId, generation: command.generation };
   switch (command.operation) {
     case "select_target":
-      return { status: "updated", owner: await selectHostedRuntimeTarget({ prisma, identity, runnerContainerName: command.runnerContainerName }) };
+      return { cutover: "postgres", status: "updated", owner: await selectHostedRuntimeTarget({ prisma, identity, runnerContainerName: command.runnerContainerName }) };
     case "prepare_launch":
-      return { status: "updated", owner: await prepareHostedRuntimeLaunch({ ...command, prisma, identity }) };
+      return { cutover: "postgres", status: "updated", owner: await prepareHostedRuntimeLaunch({ ...command, prisma, identity }) };
     case "accepted":
       return mutated(await recordHostedRuntimeAccepted({ prisma, identity }));
     case "record_failure":

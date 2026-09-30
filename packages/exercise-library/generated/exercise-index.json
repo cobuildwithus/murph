@@ -1,5 +1,5 @@
 {
-  "catalogHash": "sha256:37bb37014633cedfd2f77ac1da4cf1679227132d82f4fc5e39d71adc71ff5954",
+  "catalogHash": "sha256:18b95184cf374127d59da79a09568fa498381f9a572e08c1919f93efcd8e1641",
   "generatedAt": null,
   "items": [
     {
@@ -27555,7 +27555,7 @@
     {
       "category": "Neck & Upper Traps",
       "commonness": "variant",
-      "description": "Press hand against the side of the face while gently resisting rotation.",
+      "description": "Press the side of your face gently into your hand while keeping your head still.",
       "environment": [
         "at_home"
       ],
@@ -33820,7 +33820,7 @@
     {
       "category": "Hips & Glutes",
       "commonness": "common",
-      "description": "Pull one knee diagonally across the chest to stretch the outer hip.",
+      "description": "Lie on your back and gently draw one bent knee diagonally toward the opposite shoulder for an outer-hip stretch.",
       "environment": [
         "at_home"
       ],

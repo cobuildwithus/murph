@@ -1507,7 +1507,7 @@ test("Junction empty continuation produces only a receipt without health outputs
   assert.ok(prepared.ingestReceipt);
 });
 
-test.each([false, true])("Junction preserves fetched empty summary imports with bounded=%s", async (bounded) => {
+test.each([false, true])("Junction skips fetched empty summary imports with bounded=%s", async (bounded) => {
   const importedSnapshots: JunctionSnapshotInput[] = [];
   const provider = createJunctionProvider(async (input) => {
     const pathname = new URL(readUrl(input)).pathname;
@@ -1525,13 +1525,12 @@ test.each([false, true])("Junction preserves fetched empty summary imports with 
   const result = await executeJunctionJob(provider, context, createJob("reconcile", {
     windowStart: "2026-03-27T00:00:00.000Z", windowEnd: "2026-04-03T00:00:00.000Z",
   }));
-  assert.equal(importedSnapshots.length, 1);
-  assert.deepEqual(importedSnapshots[0]!.summaries, { activity: [] });
+  assert.equal(importedSnapshots.length, 0);
   if (bounded) {
     const continuation = result.scheduledJobs?.find((job) => job.payload?.summaryPhaseComplete === true);
     assert.ok(continuation);
     await executeJunctionJob(provider, context, createJobFromInput(continuation));
-    assert.equal(importedSnapshots.length, 1);
+    assert.equal(importedSnapshots.length, 0);
   }
 });
 
@@ -1661,9 +1660,8 @@ test("Junction yieldable reconcile bounds maximum provider projection to fixed s
     }),
   );
 
-  // One read projects the inventory and one fixed read admits the imported
-  // summary; neither count grows with provider cardinality.
-  assert.equal(sourceReads, 2);
+  // One read projects inventory; empty summaries need no import admission.
+  assert.equal(sourceReads, 1);
   assert.equal(sourceUpserts, JUNCTION_MAX_USER_PROVIDERS);
   assert.equal(result.scheduledJobs?.[0]?.payload?.summaryPhaseComplete, true);
 });
