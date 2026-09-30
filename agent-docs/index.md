@@ -673,6 +673,10 @@ The separate registration activation and composed import proof remain active in
 
 Structured clinical source recovery is tracked in
 [`2026-09-29-clinical-structured-enrichment.md`](exec-plans/completed/2026-09-29-clinical-structured-enrichment.md).
+
+Structured clinical facts in normal runtime imports are tracked in
+[the runtime facts plan](exec-plans/completed/2026-09-29-clinical-runtime-facts.md).
+
 Literal evidence selection and focused model proof are tracked in
 [`clinical evidence quotes`](exec-plans/completed/2026-09-29-clinical-evidence-quotes.md).
 Assessment classification and source links through the intake CLI are tracked in
@@ -898,7 +902,7 @@ Hosted enrichment read/repair concurrency proof is recorded in
 Complete historical clinical hold-shape coverage is recorded in
 [hold histories](exec-plans/completed/2026-09-29-clinical-hold-histories.md).
 
-Structured clinical facts in normal runtime imports are tracked in
-[the runtime facts plan](exec-plans/completed/2026-09-29-clinical-runtime-facts.md).
+Clinical raw validation repair plan: [`2026-09-29-frog-3895-clinical-validation.md`](exec-plans/active/2026-09-29-frog-3895-clinical-validation.md).
 
-Clinical raw validation repair plan: [`2026-09-29-frog-3895-clinical-validation.md`](exec-plans/completed/2026-09-29-frog-3895-clinical-validation.md).
+Mailbox startup dependency reduction and single-query ingress context proof are tracked in
+[mailbox startup simplification](exec-plans/completed/2026-09-30-mailbox-startup-simplification.md).

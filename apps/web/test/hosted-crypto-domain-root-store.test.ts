@@ -3866,8 +3866,9 @@ function createCapturingTransaction(): HostedCryptoTestTransaction {
 
       const rootKeyId = values.find((value): value is string =>
         typeof value === "string" && value.startsWith("udrk:"));
-      const domain = values.find((value): value is HostedDomainRootKeyEnvelopeV1["domain"] =>
-        value === "control" || value === "device" || value === "ingress" || value === "runtime");
+      const domain = sql.includes("domain = 'ingress'::hosted_crypto_domain") ? "ingress"
+        : values.find((value): value is HostedDomainRootKeyEnvelopeV1["domain"] =>
+          value === "control" || value === "device" || value === "ingress" || value === "runtime");
       const envelope = persistedEnvelopes.find((candidate) =>
         candidate.userId === userId
         && candidate.domain === domain

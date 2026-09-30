@@ -11,7 +11,7 @@ import type {
 import {
   isHostedWorkspaceSnapshotV2Ref,
   parseHostedExecutionSnapshotRef,
-} from "./parsers.ts";
+} from "./parsers/cursor.ts";
 
 export const HOSTED_WORKSPACE_SNAPSHOT_CONTENT_TYPE = "application/octet-stream";
 export const HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_SESSION_SCHEMA =

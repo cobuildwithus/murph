@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { assistantVoiceOptions, resolveAssistantVoiceOptionElevenLabsVoiceId } from '@murphai/contracts'
 import { generateElevenLabsVoiceMemoAudio } from '@murphai/operator-config/elevenlabs-runtime'
@@ -66,7 +67,7 @@ function createLinqRuntime(
 
 describe('managed voice memo runtime boundary', () => {
   it.each(assistantVoiceOptions)('preserves saved $id voice selection through v4 generation', async (voice) => {
-    const audioBytes = new Uint8Array([1, 2, 3])
+    const audioBytes = new Uint8Array(readFileSync(new URL('../../../fixtures/generated-audio/speech.mp3', import.meta.url)))
     const fetchImplementation = vi.fn(async () => new Response(audioBytes))
     const runtime = createVoiceMemoToolRuntimeFromEnv({
       env: {

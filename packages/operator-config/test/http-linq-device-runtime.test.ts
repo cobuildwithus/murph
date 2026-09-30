@@ -2159,6 +2159,7 @@ test('linq runtime creates, uploads, and sends voice memo attachments without re
     providerThreadId: 'chat-123',
     target: 'chat-123',
     voiceMemoAttachmentId: 'attachment_voice_1',
+    voiceMemoDurationMs: null,
     voiceMemoUrl: 'https://cdn.example.test/voice-memo.mp3',
   })
 

@@ -17,6 +17,7 @@ import {
   normalizeNullableString,
 } from './text/shared.js'
 import { VaultCliError } from './vault-cli-errors.js'
+import { assertGeneratedMp3Audio } from './generated-audio.js'
 
 const DEFAULT_ELEVENLABS_API_BASE_URL = 'https://api.elevenlabs.io'
 const DEFAULT_ELEVENLABS_MODEL_ID = 'eleven_v4'
@@ -279,14 +280,20 @@ async function requestElevenLabsAudio(input: {
   const startedAtMs = Date.now()
   try {
     const stream = await input.request(client, requestOptions)
+    const bytes = await readElevenLabsAudioStream(stream)
+    await assertGeneratedMp3Audio(bytes, timeout.signal)
     return {
-      bytes: await readElevenLabsAudioStream(stream),
+      bytes,
       contentType: 'audio/mpeg',
       filenameExtension: 'mp3',
     }
   } catch (error) {
     if (input.signal?.aborted) {
       throw timeout.signal.reason ?? error
+    }
+
+    if (error instanceof VaultCliError && error.code === 'ELEVENLABS_INVALID_AUDIO') {
+      throw error
     }
 
     if (
