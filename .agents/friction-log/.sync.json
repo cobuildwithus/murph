@@ -1645,6 +1645,10 @@
       "path": ".agents/friction-log/20260922125031-vault-share-sleep/friction.md"
     },
     {
+      "issue": "cobuildwithus/murph#3873",
+      "path": ".agents/friction-log/20260922125940-reviewgpt-same-thread/friction.md"
+    },
+    {
       "issue": "cobuildwithus/murph#3874",
       "path": ".agents/friction-log/20260922131441-playwright-apt-validation/friction.md"
     },
@@ -1727,6 +1731,10 @@
     {
       "issue": "cobuildwithus/murph#3898",
       "path": ".agents/friction-log/20260928140031-required-web-ci/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3899",
+      "path": ".agents/friction-log/20260928165131-reviewgpt-capture-mistakes/friction.md"
     },
     {
       "issue": "cobuildwithus/murph#3900",
