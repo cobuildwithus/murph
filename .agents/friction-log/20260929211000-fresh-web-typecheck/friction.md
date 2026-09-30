@@ -21,3 +21,10 @@ After a frozen install, `pnpm --dir apps/web typecheck` fails with TS2307 for `@
 ## Context
 
 Focused Web verification requires an additional dependency-preparation step. No production data or environment credentials are needed to reproduce it.
+
+## Resolution
+
+Web's source-based typecheck now maps the declared clinical-records importer
+entrypoint through its existing TypeScript path table. A real-compiler regression
+proves resolution with the package's generated output absent. The normal Web
+typecheck remains no-emit and needs no sibling package build.

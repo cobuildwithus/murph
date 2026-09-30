@@ -15,18 +15,21 @@ import {
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 describe("workspace source resolution", () => {
-  it("resolves the Web device-sync service through source when package dist is absent", () => {
+  it.each([
+    { packageName: "device-syncd", entry: "service.ts", specifier: "@murphai/device-syncd/service", symbol: "SqliteDeviceSyncStore" },
+    { packageName: "importers", entry: "clinical-records/index.ts", specifier: "@murphai/importers/clinical-records", symbol: "readClinicalAttachmentText" },
+  ])("resolves $specifier through Web source when package dist is absent", ({ packageName, entry, specifier, symbol }) => {
     const fixtureRoot = fs.mkdtempSync(path.join(tmpdir(), "murph-web-source-"));
     const webDir = path.join(fixtureRoot, "apps/web");
-    const packageDir = path.join(fixtureRoot, "packages/device-syncd");
-    const servicePath = path.join(packageDir, "src/service.ts");
+    const packageDir = path.join(fixtureRoot, "packages", packageName);
+    const servicePath = path.join(packageDir, "src", entry);
 
     try {
       fs.mkdirSync(webDir, { recursive: true });
       fs.mkdirSync(path.dirname(servicePath), { recursive: true });
       fs.mkdirSync(path.join(webDir, "node_modules/@murphai"), { recursive: true });
-      fs.symlinkSync(packageDir, path.join(webDir, "node_modules/@murphai/device-syncd"), "dir");
-      for (const relativePath of ["tsconfig.base.json", "packages/device-syncd/package.json", "packages/device-syncd/src/service.ts"]) {
+      fs.symlinkSync(packageDir, path.join(webDir, "node_modules/@murphai", packageName), "dir");
+      for (const relativePath of ["tsconfig.base.json", `packages/${packageName}/package.json`, `packages/${packageName}/src/${entry}`]) {
         fs.copyFileSync(path.join(repoRoot, relativePath), path.join(fixtureRoot, relativePath));
       }
       const config = JSON.parse(fs.readFileSync(path.join(repoRoot, "apps/web/tsconfig.json"), "utf8"));
@@ -37,7 +40,7 @@ describe("workspace source resolution", () => {
       config.compilerOptions.plugins = [];
       delete config.compilerOptions.tsBuildInfoFile;
       fs.writeFileSync(path.join(webDir, "tsconfig.json"), JSON.stringify(config));
-      fs.writeFileSync(path.join(webDir, "probe.ts"), 'import { SqliteDeviceSyncStore } from "@murphai/device-syncd/service";\nvoid SqliteDeviceSyncStore;\n');
+      fs.writeFileSync(path.join(webDir, "probe.ts"), `import { ${symbol} } from "${specifier}";\nvoid ${symbol};\n`);
 
       const output = execFileSync(process.execPath, [
         path.join(repoRoot, "scripts/run-typescript.mjs"),

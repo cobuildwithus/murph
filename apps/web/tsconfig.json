@@ -285,6 +285,9 @@
       "@murphai/importers": [
         "../../packages/importers/src/index.ts"
       ],
+      "@murphai/importers/clinical-records": [
+        "../../packages/importers/src/clinical-records/index.ts"
+      ],
       "@murphai/importers/device-providers/provider-descriptors": [
         "../../packages/importers/src/device-providers/provider-descriptors.ts"
       ],
