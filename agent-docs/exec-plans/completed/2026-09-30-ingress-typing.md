@@ -1,6 +1,6 @@
 # Start admitted direct-message typing during ingress
 
-Status: active
+Status: completed
 
 Outcome: Show typing while an admitted direct message waits for runtime callbacks.
 Reaches: Existing direct Linq conversations; signup and runtime reply ownership stay unchanged.
@@ -22,10 +22,11 @@ Web-owned first turns, denied access, and late admission keep their current path
 Runtime authority, model admission, actual replies, and alert thresholds remain
 with their existing owners. No schema, new scheduler, or protocol change.
 
-## Remaining work
+## Delivery
 
-- Scoped commit and applicable PR/review gates.
-- Production timing after managed Web deployment remains operational proof.
+- Implementation and focused proof are complete in PR #3929.
+- Production timing after managed Web deployment remains operational proof;
+  this task does not claim deployment or live timing verification.
 
 ## Verification and parent review
 
@@ -47,3 +48,10 @@ with their existing owners. No schema, new scheduler, or protocol change.
 - Read-only database and hosting-provider evidence confirmed both delayed
   conversations eventually delivered replies. Production timing and handset
   presentation after deployment are not claimed by local tests.
+
+- Final independent ReviewGPT round passed on implementation commit
+  `9ae03a9c72b40fdc6743a276f726bc92bfa57827`, with zero blocking findings
+  and 36 isolated synthetic checks. Final closeout changes only this plan;
+  exact-head required CI remains the PR handoff gate.
+Updated: 2026-09-30
+Completed: 2026-09-30
