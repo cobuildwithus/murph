@@ -5872,7 +5872,8 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           );
           if (!runtimeOwnerHandoffRequested && !backgroundWorkSignal.aborted) {
             // Continued foreground work keeps this invocation alive after a
-            // checkpoint. Resume its paused clinical continuation as well.
+            // checkpoint. Resume both paused read controllers as well.
+            detachedAssistantAskController?.resume();
             clinicalEnrichmentController?.resume();
           }
           result = await runWorkspaceForegroundPass({

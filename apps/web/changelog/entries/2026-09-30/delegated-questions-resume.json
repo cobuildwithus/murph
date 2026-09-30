@@ -1,0 +1,17 @@
+{
+  "publishedOn": "2026-09-30",
+  "order": 100,
+  "item": {
+    "id": "delegated-questions-resume",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "More reliable answers across chats",
+    "summary": "Murph can resume an approved question to another chat after saving progress, reducing requests that stall before their deadline.",
+    "details": "Existing sharing permissions, answer destinations, and deadlines still apply.",
+    "relevanceTags": [
+      "groups",
+      "reliability"
+    ],
+    "sourcePullRequests": []
+  }
+}

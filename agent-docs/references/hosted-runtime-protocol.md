@@ -59,7 +59,11 @@ The live ownership split is:
   checkpoints as soon as its work settles; it neither creates nor extends that
   quiet window. Claimed detached Asks publish their existing expiry before
   preparation dirties the workspace, protecting preparation and execution until
-  settlement or expiry. Shutdown and owner handoff still abort and requeue the
+  settlement or expiry. Both detached Ask and clinical enrichment controllers
+  pause before snapshots and stay paused through checkpoint-only effect drain
+  and return. If the same invocation continues foreground work, its existing
+  continuation boundary resumes both unless background work is aborted or owner
+  handoff has started. Shutdown and owner handoff still abort and requeue the
   exact child. Other active-child deadlines and save-before-effect ordering
   still apply. This lets background runs reach ordinary container cleanup,
   including its 60-second safety recheck, without another runtime idle delay.
