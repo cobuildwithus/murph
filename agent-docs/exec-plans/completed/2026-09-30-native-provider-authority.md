@@ -1,6 +1,6 @@
 # Remove remote provider authorization
 
-Status: active
+Status: completed
 Created: 2026-09-30
 Updated: 2026-09-30
 
@@ -92,3 +92,32 @@ the next billable call is blocked. Explicit-success clearing and mismatched
 identity rejection also pass. All 597 affected provider, internal callback,
 hosted-local wrapper, and settlement tests pass. The separate CI alert fixture
 now asserts only the remaining image-access call; all 17 workerd tests pass.
+
+## Final review and verification
+
+ReviewGPT round 4 passed commit
+`83639563d79bda787e8d58fe92fcd0733f0c6333`, confirming the accepted billing
+finding is resolved. Its independent production-module probes covered outage
+persistence, identity rejection, exact-success clearing, concurrent reports,
+monotonic denial, completion, namespace selection, and legacy receipt migration.
+No Critical, High, or material Complexity Collapse finding qualified. The
+reviewer inspected supplied composed tests but did not rerun repository suites
+without dependencies; local checks and CI supply that evidence.
+
+Parent review confirms authenticated caller coordinates reach internal usage
+forwarding and every direct metering path. Native pending evidence precedes
+the signed Web usage callback, which retains canonical authorization and ledger
+ownership. The remediation adds no new state or retry owner.
+
+Cloudflare and Web typechecks, the focused provider/adapter and native lifecycle
+proof, all 597 remediation tests, all 17 workerd tests, complexity, docs drift,
+and whitespace checks pass. CI's Cloudflare verification, build/typecheck, Web
+tests, PostgreSQL suites, and billing proof pass on the reviewed candidate.
+The final PR records remaining package-coverage and documentation-closure CI.
+
+Product UX: Ready for reduced authorization work at the existing typing point.
+PR: https://github.com/cobuildwithus/murph/pull/3929
+Only this evidence closure follows the reviewed production code. No deployment
+or live-message test was performed; post-deployment end-to-end timing remains
+necessary to quantify the improvement.
+Completed: 2026-09-30
