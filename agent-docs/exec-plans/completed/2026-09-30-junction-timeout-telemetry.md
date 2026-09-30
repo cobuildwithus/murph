@@ -1,6 +1,6 @@
 # Junction timeout headroom and failure diagnostics
 
-Status: active
+Status: completed
 Created: 2026-09-30
 Updated: 2026-09-30
 
@@ -49,3 +49,6 @@ Initial candidate: 405 focused device-sync tests, 141 hosted maintenance tests, 
 Two local validation findings were returned to ReviewGPT: one test assertion loses its index signature after matcher narrowing, and timeout-stage construction increases the request method's complexity debt by one. Required revision and affected revalidation remain pending.
 
 ReviewGPT remediation was applied exactly after checksum verification. Final affected checks pass: 110 Junction client/backfill/transport tests; 141 hosted maintenance tests; device-syncd and assistant-runtime typechecks; complexity guard (Junction client debt 77 to 76; request method complexity 44). Unchanged service/parser proof retains the earlier passing result. Parent review accepts the bounded scope and confirms no runtime-apply diagnostic writer is added. Public changelog presentation uses the content-only rendering route. Product UX: Ready for PR review; deployment benefit remains unmeasured.
+
+Implementation and local verification are complete in PR #3936. The PR owns remaining exact-head ReviewGPT/CI gates; this plan closure does not claim those gates have passed. No merge, deployment, or production recovery is included. Retain the new timeout signal under existing retention and evaluate its usefulness after an approved rollout using bounded 24-hour aggregates of failure count, stage, configured timeout, and header presence.
+Completed: 2026-09-30
