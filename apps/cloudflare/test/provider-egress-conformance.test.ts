@@ -1,6 +1,6 @@
-import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { createPostgresTestOwner, mockPostgresOwnerCommand, forbiddenLegacyRuntime } from "./postgres-owner-fixtures.ts";
+import type { TestProviderContext } from "./postgres-owner-fixtures.ts";
+import { createPostgresTestOwner, forbiddenLegacyRuntime, nativeProviderTestNamespace } from "./postgres-owner-fixtures.ts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -52,9 +52,6 @@ import {
 import type {
   RunnerOutboundEnvironmentSource,
 } from "../src/runner-outbound.ts";
-import type {
-  WorkerProviderEgressTokenValidationResult,
-} from "../src/worker-contracts.ts";
 import {
   createHostedExecutionTestEnv,
 } from "./hosted-execution-fixtures.ts";
@@ -109,8 +106,8 @@ afterEach(() => {
 
 describe("hosted provider egress conformance", () => {
   it("drives generated runner env and the real Linq card client through Worker egress to HTTP", async () => {
-    const validateRuntimeProviderEgressToken = vi.fn(
-      createProviderEgressTokenValidationResult,
+    const readProviderContext = vi.fn(
+      createProviderContextResult,
     );
     const validateRuntimeWriteFence = vi.fn(async () => {
       throw new Error("Provider fetch should authorize with the invocation token.");
@@ -121,7 +118,7 @@ describe("hosted provider egress conformance", () => {
     try {
       const env = {
         ...createProviderInterceptEnv({
-          validateRuntimeProviderEgressToken,
+          readProviderContext,
           validateRuntimeWriteFence,
         }),
         HOSTED_ASSISTANT_PROVIDER: "openai",
@@ -163,7 +160,7 @@ describe("hosted provider egress conformance", () => {
       });
       expect(runnerEnv.LINQ_API_TOKEN).toBe(HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL);
       expect(validateRuntimeWriteFence).not.toHaveBeenCalled();
-      expect(validateRuntimeProviderEgressToken).toHaveBeenCalledTimes(2);
+      expect(readProviderContext).toHaveBeenCalledTimes(2);
       expect(forwarded).toHaveLength(2);
       expect(forwarded[0]).toMatchObject({
         body: { address: "+15550000001", from: "+15550000000" },
@@ -209,7 +206,7 @@ describe("hosted provider egress conformance", () => {
         },
       ),
       createProviderInterceptEnv({ validateRuntimeWriteFence }),
-      { containerId: "opaque-container-id" },
+      { className: "RunnerContainer", containerId: "opaque-container-id" },
     );
 
     expect(response.status).toBe(403);
@@ -218,14 +215,14 @@ describe("hosted provider egress conformance", () => {
   });
 
   it("drives every hosted Telegram client route through the production provider-fetch boundary", async () => {
-    const validateRuntimeProviderEgressToken = vi.fn(
-      createProviderEgressTokenValidationResult,
+    const readProviderContext = vi.fn(
+      createProviderContextResult,
     );
     const validateRuntimeWriteFence = vi.fn(async () => {
       throw new Error("Provider fetch should authorize with the invocation token.");
     });
     const env = createProviderInterceptEnv({
-      validateRuntimeProviderEgressToken,
+      readProviderContext,
       validateRuntimeWriteFence,
     });
     const forwarded: ForwardedRequest[] = [];
@@ -355,7 +352,7 @@ describe("hosted provider egress conformance", () => {
       "https://api.telegram.org/file/bottelegram-worker-secret/photos/file_1.jpg",
     );
     expect(validateRuntimeWriteFence).not.toHaveBeenCalled();
-    expect(validateRuntimeProviderEgressToken).toHaveBeenCalledTimes(10);
+    expect(readProviderContext).toHaveBeenCalledTimes(10);
     assertAuthorityHeadersStripped(forwarded);
   });
 });
@@ -428,7 +425,7 @@ function createProductionProviderFetch(
       return await hostedRunnerIntercept(
         request,
         env,
-        { containerId: "opaque-container-id" },
+        { className: "RunnerContainer", containerId: "opaque-container-id" },
       );
     },
     {
@@ -455,37 +452,34 @@ async function readForwardedBody(request: Request): Promise<unknown> {
 }
 
 function createProviderInterceptEnv(input: {
-  validateRuntimeProviderEgressToken?: (input: {
-    providerEgressTokenHash: string;
+  readProviderContext?: (input: {
     userId: string;
-  }) => Promise<WorkerProviderEgressTokenValidationResult>;
+  }) => Promise<TestProviderContext>;
   validateRuntimeWriteFence: (input: {
     attemptId: string;
     generation: string;
     userId: string;
   }) => Promise<boolean>;
 }): RunnerOutboundEnvironmentSource {
-  mockPostgresOwnerCommand(async ({ userId, command }) => {
-    if (command.operation !== "authorize_provider" || !command.providerEgressTokenHash) throw new Error("Unexpected owner operation.");
-    const result = await input.validateRuntimeProviderEgressToken?.({ userId, providerEgressTokenHash: command.providerEgressTokenHash });
-    return { cutover: "postgres", status: result?.owns ? "authorized" : "stale", owner: result?.owns ? createPostgresTestOwner({ userId, attemptId: result.attemptId, generation: result.leaseGeneration, workspaceVersion: result.workspaceVersion }) : null };
-  });
   const env: RunnerOutboundEnvironmentSource = {
     ...createHostedExecutionTestEnv(),
     BUNDLES: {} as RunnerOutboundEnvironmentSource["BUNDLES"],
     LINQ_API_TOKEN: "linq-worker-secret",
     TELEGRAM_BOT_TOKEN: "telegram-worker-secret",
     USER_RUNNER: forbiddenLegacyRuntime,
+    RUNNER_CONTAINER: nativeProviderTestNamespace(async () => {
+      const result = await input.readProviderContext?.({ userId: "member_123" });
+      return result?.owns ? createPostgresTestOwner({ userId: result.userId, attemptId: result.attemptId,
+        generation: result.leaseGeneration, workspaceVersion: result.workspaceVersion }) : null;
+    }),
   };
   return env;
 }
 
-async function createProviderEgressTokenValidationResult(input: {
-  providerEgressTokenHash: string;
+async function createProviderContextResult(input: {
   userId: string;
-}): Promise<WorkerProviderEgressTokenValidationResult> {
+}): Promise<TestProviderContext> {
   expect(input).toEqual({
-    providerEgressTokenHash: createHash("sha256").update(PROVIDER_EGRESS_TOKEN).digest("hex"),
     userId: "member_123",
   });
   return {

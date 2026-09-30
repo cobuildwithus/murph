@@ -232,9 +232,8 @@ async function startClaimedRuntime(ctx: ProcessingContext, initialOwner: HostedR
     ctx.step("prepare_invocation", () => prepare(ownerToken(owner), binding)),
   ]);
   if (ready.kind !== "ready") return retryProcessing(ctx, "container_not_ready");
-  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(prepared.token.providerEgressToken!)));
   const launch = {
-    providerEgressTokenHash: Array.from(digest, value => value.toString(16).padStart(2, "0")).join(""),
+    providerEgressTokenHash: null,
     customInferenceEnvelope: prepared.customInferenceEnvelope,
     platformAiUsageAllowed: prepared.platformAiUsageAllowed,
   };
@@ -307,12 +306,8 @@ function createInvocationPreparation(ctx: ProcessingContext) {
       return parseHostedWorkspaceReadResponse(await response.json());
     },
     async bindInvocation(facts) {
-      // Provider APIs such as Linq use the invocation-scoped opaque token.
-      // Persist only its digest; the raw capability travels in the launch job.
-      const bytes = crypto.getRandomValues(new Uint8Array(32));
-      const providerEgressToken = `provider-egress-${Array.from(bytes, value => value.toString(16).padStart(2, "0")).join("")}`;
       return { ...facts.token, workspaceVersion: facts.workspaceVersion,
-        processingMode: facts.processingMode ?? facts.token.processingMode, providerEgressToken };
+        processingMode: facts.processingMode ?? facts.token.processingMode };
     },
   });
 
@@ -326,6 +321,6 @@ function requireIdentity(owner: HostedRuntimeOwnerSnapshot) {
 function ownerToken(owner: HostedRuntimeOwnerSnapshot): RunnerWriteFenceToken {
   if (!owner.startedAt || !owner.processingMode) throw new Error("Hosted runtime invocation facts are incomplete.");
   return { ...requireIdentity(owner), kind: "runtime", processingMode: owner.processingMode,
-    providerEgressToken: null, runnerContainerName: owner.runnerContainerName, startedAt: owner.startedAt,
+    runnerContainerName: owner.runnerContainerName, startedAt: owner.startedAt,
     userId: owner.userId, workspaceVersion: owner.workspaceVersion };
 }

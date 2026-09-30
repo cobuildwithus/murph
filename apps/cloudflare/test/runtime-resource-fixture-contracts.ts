@@ -1,4 +1,4 @@
-import type { WorkerRuntimeCompletionReceipt, WorkerProviderEgressCredentialValidationResult, WorkerProviderEgressTokenValidationResult } from "../src/worker-contracts.ts";
+import type { WorkerRuntimeCompletionReceipt } from "../src/worker-contracts.ts";
 
 import type { HostedBrowserVaultReplicaOrphanCandidate } from "../src/browser-vault-store.ts";
 
@@ -95,15 +95,7 @@ export interface ResourceTestBackend {
     generation: string;
     userId: string;
   }): Promise<boolean>;
-  validateRuntimeProviderEgressToken?(input: {
-    providerEgressToken: string;
-    userId: string;
-  }): Promise<WorkerProviderEgressTokenValidationResult>;
-  validateRuntimeProviderEgressCredential?(input: {
-    providerKind: string;
-    runnerContainerName: string;
-    userId: string;
-  }): Promise<WorkerProviderEgressCredentialValidationResult>;
+
 }
 
 export interface BoundResourceTestBackend extends ResourceTestBackend {
