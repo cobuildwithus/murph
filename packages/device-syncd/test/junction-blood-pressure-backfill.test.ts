@@ -2081,7 +2081,8 @@ test.each([
   }
 });
 
-test("maximum-cardinality schedule-time history queries 396 keys once and offers one inactive root", () => {
+// Exhaust every root at full source cardinality, including under package fanout.
+test("maximum-cardinality schedule-time history queries 396 keys once and offers one inactive root", { timeout: 120_000 }, () => {
   const resources = ["note", ...SPARSE_DAILY_HISTORY_RESOURCES, "weight"] as const;
   const availability = Object.fromEntries(
     ["blood_pressure", ...resources].map((resource) => [resource, true]),
