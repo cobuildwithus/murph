@@ -4,10 +4,6 @@ Neutral metric identity, normalization, derived MetricPoint contracts, and pure 
 
 Canonical vault records still store evidence. This package owns only read-side metric mechanics.
 
-Modules have no external initialization effects. The package declares
-`sideEffects: false` so bundlers can omit unused catalogs from consumers such as
-mailbox callbacks. Keep initialization local to the exported data and functions.
-
 Sample-series summaries, the wearable metric catalog, and reviewed lab fallback
 ranges are part of this package's root entrypoint. Importers, query, CLI, and Web
 consume them here directly; ingestion and Health Commons packages do not
