@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-30",
+  "order": 100,
+  "item": {
+    "id": "earlier-typing-feedback",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Earlier typing feedback",
+    "summary": "Murph can show typing sooner after receiving your direct message.",
+    "details": "Eligible conversations get typing feedback while Murph prepares the reply, reducing silent waits when processing takes longer to start.",
+    "relevanceTags": ["messaging", "reliability"],
+    "sourcePullRequests": []
+  }
+}

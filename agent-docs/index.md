@@ -3,6 +3,9 @@ in [the import-speed plan](exec-plans/completed/2026-09-24-garmin-import-speed.m
 
 # Murph Agent Docs Index
 
+Admitted direct-message typing hints, cancellation, and provider acceptance
+timing are owned by [Reliability](RELIABILITY.md#runtime-expectations).
+
 Runtime claim eligibility and reuse of transaction-validated routing facts are
 owned by [Hosted Postgres runtime ownership](references/hosted-postgres-runtime.md).
 

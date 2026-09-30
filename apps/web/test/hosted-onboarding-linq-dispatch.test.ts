@@ -5,6 +5,7 @@ import {
 } from "@murphai/runtime-state";
 import { HostedBillingStatus, type HostedLinqDailyState, type Prisma } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import * as runtimeUsageDecision from "@/src/lib/hosted-orchestration/runtime-usage-decision";
 
 import {
   prepareHostedCryptoDomainRootCandidates,
@@ -2060,6 +2061,14 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     { continuation: false, service: "sms" },
     { continuation: false, service: "RCS" },
   ])("admits signed-direct $service without chat HTTP (opening continuation $continuation)", async ({ continuation, service }) => {
+    const append = mocks.appendHostedMailboxEnvelopeTx.getMockImplementation()!;
+    mocks.appendHostedMailboxEnvelopeTx.mockImplementationOnce(async (input) => {
+      const result = await append(input);
+      return { ...result, item: { ...result.item, lane: "conversation", laneSeq: "1" } };
+    });
+    vi.spyOn(runtimeUsageDecision, "resolveHostedRuntimeAiUsageGate").mockResolvedValue({ status: "allowed" });
+    const typing = createDeferred<{ ok: boolean; status: number }>();
+    mocks.startHostedLinqChatTypingIndicator.mockReturnValue(typing.promise);
     const supportedLongText = continuation ? "Yes, ready." : `${"Context ".repeat(290)}Final question?`;
     if (continuation) {
       mocks.hostedOnboardingEnvironment.linqInstantStartPhonePrefixes = ["+1"];
@@ -2126,6 +2135,13 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       ok: true,
       reason: "wake-appended-active-member",
     });
+    // A pending provider acceptance never holds the webhook or its durable wake.
+    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledOnce();
+    expect(mocks.startHostedLinqChatTypingIndicator).toHaveBeenCalledTimes(continuation ? 0 : 1);
+    expect(mocks.maybeHandoffHostedExecutionWebhookWake).toHaveBeenCalledWith(
+      expect.objectContaining({ ingressTypingAcceptedAt: continuation ? undefined : expect.any(Promise) }),
+    );
+    typing.resolve({ ok: true, status: 204 });
     expect(mocks.getHostedLinqChatSummary).not.toHaveBeenCalled();
     expect(mocks.logHostedOnboardingDiagnostic).toHaveBeenCalledWith(
       "hosted-onboarding.webhook.linq.chat-classification",

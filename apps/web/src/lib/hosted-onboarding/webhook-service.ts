@@ -1,4 +1,5 @@
 import { queueHostedLinqHomeContactCardAfterDelivery } from "./linq-contact-card-delivery";
+import { startHostedLinqIngressTypingHint, type HostedLinqIngressTypingHint } from "./linq-ingress-typing";
 import { handleHostedLinqPollWebhook } from "../hosted-polls/linq-webhook";
 import type {
   Prisma,
@@ -993,6 +994,15 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       scheduleAfterResponse: input.scheduleAfterResponse,
     });
 
+    instantStartTypingHint = startHostedLinqIngressTypingHint({
+      currentInboundReply,
+      eventType,
+      existingHint: instantStartTypingHint,
+      webOwnsReply: Boolean(instantFirstTurnGeneration),
+      plan,
+      prisma,
+      signal: input.signal,
+    });
     const confirmationDeadlineMs = createHostedPostCommitDeadline(undefined);
     const wakeHandoffResult = await (async () => {
       try {
@@ -1680,10 +1690,7 @@ function logHostedLinqChatClassification(
 
 const HOSTED_LINQ_INSTANT_START_TYPING_HINT_TIMEOUT_MS = 2_500;
 
-type HostedLinqInstantStartTypingHint = {
-  chatId: string;
-  started: Promise<Date | null>;
-};
+type HostedLinqInstantStartTypingHint = HostedLinqIngressTypingHint;
 
 // Instant start is the sender's first-ever message and the reply waits on a
 // cold runtime boot, so surface typing feedback immediately instead of leaving
@@ -1720,7 +1727,18 @@ function startHostedLinqInstantStartTypingHintBestEffort(input: {
         );
         return null;
       });
-    return { chatId, started };
+    return {
+      chatId,
+      started,
+      cancelPendingStart() {}, // Signup starts immediately; cleanup waits for acceptance.
+      async stop() {
+        await started;
+        return stopHostedLinqChatTypingIndicator({
+          chatId,
+          timeoutMs: HOSTED_LINQ_INSTANT_START_TYPING_HINT_TIMEOUT_MS,
+        });
+      },
+    };
   } catch (error) {
     logHostedOnboardingDiagnostic(
       "hosted-onboarding.webhook.linq.instant-start-typing-hint-failed",
@@ -1743,13 +1761,10 @@ function stopHostedLinqInstantStartTypingHintBestEffort(input: {
   if (!hint) {
     return;
   }
-  const task = () => hint.started
-    .then(() => stopHostedLinqChatTypingIndicator({
-      chatId: hint.chatId,
-      timeoutMs: HOSTED_LINQ_INSTANT_START_TYPING_HINT_TIMEOUT_MS,
-    }))
+  hint.cancelPendingStart();
+  const task = () => hint.stop()
     .then((result) => {
-      if (!result.ok) {
+      if (result && !result.ok) {
         logHostedOnboardingDiagnostic(
           "hosted-onboarding.webhook.linq.instant-start-typing-hint-stop-failed",
           { httpStatus: result.status },
