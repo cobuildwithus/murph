@@ -1,6 +1,7 @@
 ---
 title: 'Vercel initial Web typecheck exhausts Standard build memory'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3828'
 ---
 
 ## Expected Behavior

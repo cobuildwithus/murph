@@ -1,6 +1,7 @@
 ---
 title: 'WebSocket fixture tears down before final diagnostic write settles'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3853'
 ---
 
 ## Expected Behavior

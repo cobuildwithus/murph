@@ -1,6 +1,7 @@
 ---
 title: 'Managed snapshot completion streams the whole object through the Worker and outgrows the runner commit budget'
 severity: 'major'
+issue: 'cobuildwithus/murph#3843'
 ---
 
 ## Expected Behavior

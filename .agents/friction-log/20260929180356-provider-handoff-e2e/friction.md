@@ -1,6 +1,7 @@
 ---
 title: 'Hosted provider E2E fixtures expect retired default models'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3904'
 ---
 
 ## Expected Behavior

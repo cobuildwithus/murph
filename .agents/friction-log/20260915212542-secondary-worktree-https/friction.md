@@ -1,6 +1,7 @@
 ---
 title: 'Secondary worktree HTTPS smoke reaches an older proxy target'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3834'
 ---
 
 ## Expected Behavior

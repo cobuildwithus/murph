@@ -1,6 +1,7 @@
 ---
 title: 'Playwright reduced-motion default uses an unsupported config option'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3859'
 ---
 
 ## Expected Behavior

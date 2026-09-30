@@ -1,6 +1,7 @@
 ---
 title: 'Environment publication test counts work after its wake-classification window'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3826'
 ---
 
 ## Expected Behavior

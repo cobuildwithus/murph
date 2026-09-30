@@ -1,6 +1,7 @@
 ---
 title: 'Playwright smoke server binds 127.0.0.1 so WebAuthn design proofs cannot use the base URL'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3841'
 ---
 
 ## Expected Behavior

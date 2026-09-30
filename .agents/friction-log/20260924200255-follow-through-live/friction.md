@@ -1,6 +1,7 @@
 ---
 title: 'Follow-through live fixture omits the shared exercise guide'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3891'
 ---
 
 ## Expected Behavior

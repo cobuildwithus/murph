@@ -1,6 +1,7 @@
 ---
 title: 'Personal Patterns live timing assertion rejects hyphenated next-day wording'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3877'
 ---
 
 ## Expected Behavior

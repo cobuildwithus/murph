@@ -1,6 +1,7 @@
 ---
 title: 'Junction empty-poll replay test requires a retired audit receipt'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3866'
 ---
 
 ## Expected Behavior

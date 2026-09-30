@@ -1,6 +1,7 @@
 ---
 title: 'Automatic meal closeout fixture mutates state for help calls'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3799'
 ---
 
 ## Expected Behavior

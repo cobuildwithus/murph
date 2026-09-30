@@ -1,6 +1,7 @@
 ---
 title: 'Hosted-local barrier setup requires a runtime allocation before the scenario starts'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3849'
 ---
 
 ## Expected Behavior

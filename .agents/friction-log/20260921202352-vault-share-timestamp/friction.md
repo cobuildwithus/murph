@@ -1,6 +1,7 @@
 ---
 title: 'Vault-share timestamp fixture expires against the real clock'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3868'
 ---
 
 ## Expected Behavior

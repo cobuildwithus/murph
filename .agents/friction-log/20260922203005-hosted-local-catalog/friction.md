@@ -1,6 +1,7 @@
 ---
 title: 'Hosted-local catalog setup requires retired GPT-5.4 smoke templates'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3882'
 ---
 
 ## Expected Behavior

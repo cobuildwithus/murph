@@ -1,6 +1,7 @@
 ---
 title: 'Linq transport test retains retired nutrition-card caption'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3821'
 ---
 
 ## Expected Behavior

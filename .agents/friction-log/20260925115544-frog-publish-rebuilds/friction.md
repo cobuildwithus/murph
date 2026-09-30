@@ -1,6 +1,7 @@
 ---
 title: 'Frog publish rebuilds the repository issue index for every unchanged batch'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3894'
 ---
 
 ## Expected Behavior

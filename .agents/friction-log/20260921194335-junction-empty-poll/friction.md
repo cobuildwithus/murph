@@ -1,6 +1,7 @@
 ---
 title: 'Junction empty-poll replay test still requires retired device audit'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3867'
 ---
 
 ## Expected Behavior

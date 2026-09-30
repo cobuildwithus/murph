@@ -1,6 +1,7 @@
 ---
 title: 'Playwright APT policy check rejects equivalent option casing'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3879'
 ---
 
 ## Expected Behavior

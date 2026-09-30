@@ -1,6 +1,7 @@
 ---
 title: 'Canonical live assistant journeys start the model before checking the built CLI'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3884'
 ---
 
 ## Expected Behavior

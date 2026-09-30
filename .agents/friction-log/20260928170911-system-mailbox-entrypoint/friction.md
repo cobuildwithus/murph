@@ -1,6 +1,7 @@
 ---
 title: 'System-mailbox entrypoint tests fail on a clean base checkout'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3900'
 ---
 
 ## Expected Behavior

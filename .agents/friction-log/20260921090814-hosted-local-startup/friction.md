@@ -1,6 +1,7 @@
 ---
 title: 'Hosted-local startup requires a removed Codex smoke-model template'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3861'
 ---
 
 ## Expected Behavior

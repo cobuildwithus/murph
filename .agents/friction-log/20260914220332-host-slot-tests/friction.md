@@ -1,6 +1,7 @@
 ---
 title: 'Host-slot tests inherit the acceptance runner slot marker'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3825'
 ---
 
 ## Expected Behavior

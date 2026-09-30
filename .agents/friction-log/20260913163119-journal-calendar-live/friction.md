@@ -1,6 +1,7 @@
 ---
 title: 'Journal calendar live proof expects a check-in before the promised delay'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3800'
 ---
 
 ## Expected Behavior

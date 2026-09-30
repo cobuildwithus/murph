@@ -1,6 +1,7 @@
 ---
 title: 'Raw payload logging guard rejects boolean presence checks'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3880'
 ---
 
 ## Expected Behavior

@@ -1,6 +1,7 @@
 ---
 title: 'Latency alert E2E samples fall below the shipped threshold'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3892'
 ---
 
 ## Expected Behavior

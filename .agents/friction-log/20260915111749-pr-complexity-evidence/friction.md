@@ -1,6 +1,7 @@
 ---
 title: 'PR complexity evidence rejects pnpm global flags'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3827'
 ---
 
 ## Expected Behavior

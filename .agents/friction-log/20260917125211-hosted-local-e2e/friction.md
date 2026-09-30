@@ -1,6 +1,7 @@
 ---
 title: 'Hosted-local E2E MinIO cleanup can remove another suite''s containers'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3846'
 ---
 
 ## Expected Behavior

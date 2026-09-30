@@ -1,6 +1,7 @@
 ---
 title: 'Linq transport fixture retains obsolete nutrition caption'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3813'
 ---
 
 ## Expected Behavior

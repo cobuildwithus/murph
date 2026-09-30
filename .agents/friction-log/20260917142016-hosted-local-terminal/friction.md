@@ -1,6 +1,7 @@
 ---
 title: 'Hosted-local terminal errors omit underlying runtime diagnostics'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3848'
 ---
 
 ## Expected Behavior

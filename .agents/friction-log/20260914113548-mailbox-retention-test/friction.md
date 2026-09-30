@@ -1,6 +1,7 @@
 ---
 title: 'Mailbox retention test counts unrelated database pool warnings'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3823'
 ---
 
 ## Expected Behavior

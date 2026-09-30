@@ -1,6 +1,7 @@
 ---
 title: 'Fresh Web typecheck needs an unprepared clinical-records importer entrypoint'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3908'
 ---
 
 ## Expected Behavior

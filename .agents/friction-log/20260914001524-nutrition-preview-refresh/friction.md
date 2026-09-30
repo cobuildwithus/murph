@@ -1,6 +1,7 @@
 ---
 title: 'Nutrition preview refresh left Linq request-body fixture stale'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3814'
 ---
 
 ## Expected Behavior

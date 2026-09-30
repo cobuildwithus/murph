@@ -1,6 +1,7 @@
 ---
 title: 'ReviewGPT rejects regular Chat after Chat/Work controls switch to buttons'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3901'
 ---
 
 ## Expected Behavior

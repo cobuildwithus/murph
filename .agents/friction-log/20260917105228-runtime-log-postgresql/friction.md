@@ -1,6 +1,7 @@
 ---
 title: 'Runtime-log PostgreSQL teardown races pool disconnection'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3845'
 ---
 
 ## Expected Behavior

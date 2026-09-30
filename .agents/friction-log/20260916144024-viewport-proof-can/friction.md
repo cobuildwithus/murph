@@ -1,6 +1,7 @@
 ---
 title: 'Viewport proof can fail during style injection on an unrelated analytics CSP event'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3838'
 ---
 
 ## Expected Behavior

@@ -1,6 +1,7 @@
 ---
 title: 'Foreground acceptance test counts telemetry retries as new events'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3829'
 ---
 
 ## Expected Behavior

@@ -1,6 +1,7 @@
 ---
 title: 'Canonical reminder live fixture omits the hosted automation port'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3903'
 ---
 
 ## Expected Behavior

@@ -1,6 +1,7 @@
 ---
 title: 'Opening identity live proof inherits local delegation policy'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3889'
 ---
 
 ## Expected Behavior

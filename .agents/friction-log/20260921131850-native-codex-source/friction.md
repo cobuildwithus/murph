@@ -1,6 +1,7 @@
 ---
 title: 'Native Codex source build exceeds latency-proof setup deadline'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3864'
 ---
 
 ## Expected Behavior

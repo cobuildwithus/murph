@@ -1,6 +1,7 @@
 ---
 title: 'Goal source hover proof intermittently reads the pre-hover color'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3878'
 ---
 
 ## Expected Behavior

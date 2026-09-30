@@ -1,6 +1,7 @@
 ---
 title: 'Native Codex Cargo test launch times out before voice initialization'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3890'
 ---
 
 ## Expected Behavior

@@ -1,6 +1,7 @@
 ---
 title: 'Vault-share sleep delivery fixture expires against the wall clock'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3872'
 ---
 
 ## Expected Behavior

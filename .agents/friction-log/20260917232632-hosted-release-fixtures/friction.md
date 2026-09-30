@@ -1,6 +1,7 @@
 ---
 title: 'Hosted release fixtures retain retired engagement and idle-timeout contracts'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3850'
 ---
 
 ## Expected Behavior

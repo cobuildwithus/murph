@@ -1,6 +1,7 @@
 ---
 title: 'Native hosted-local migration inspection rejects Miniflare metadata'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3837'
 ---
 
 ## Expected Behavior

@@ -1,6 +1,7 @@
 ---
 title: 'Goal setup live journey rejects valid natural-language variants'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3887'
 ---
 
 ## Expected Behavior

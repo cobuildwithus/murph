@@ -1,6 +1,7 @@
 ---
 title: 'Native iOS production canary rejects a healthy deployment when main advances'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3851'
 ---
 
 ## Expected Behavior

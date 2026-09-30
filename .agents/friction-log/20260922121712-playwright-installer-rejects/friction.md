@@ -1,6 +1,7 @@
 ---
 title: 'Playwright installer rejects loaded APT policy with preserved key casing'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3869'
 ---
 
 ## Expected Behavior

@@ -1,6 +1,7 @@
 ---
 title: 'Review archive omits imported supplement script owners'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3824'
 ---
 
 ## Expected Behavior

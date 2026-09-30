@@ -1,6 +1,7 @@
 ---
 title: 'Vault-share source-recorded sleep fixture expires against the real clock'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3871'
 ---
 
 ## Expected Behavior

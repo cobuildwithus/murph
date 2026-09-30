@@ -1,6 +1,7 @@
 ---
 title: 'Changelog focused-test command runs Vitest from the wrong directory'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3796'
 ---
 
 ## Expected Behavior

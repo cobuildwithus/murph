@@ -1,6 +1,7 @@
 ---
 title: 'Foreground runtime suite misses projection and vault-share effects on unchanged source'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3893'
 ---
 
 ## Expected Behavior

@@ -1,6 +1,7 @@
 ---
 title: 'Vault-share sleep timestamp test expires with its fixed fixture date'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3870'
 ---
 
 ## Expected Behavior

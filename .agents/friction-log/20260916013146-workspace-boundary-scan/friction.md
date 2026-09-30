@@ -1,6 +1,7 @@
 ---
 title: 'Workspace boundary scan races generated-directory replacement during a build'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3836'
 ---
 
 ## Expected Behavior

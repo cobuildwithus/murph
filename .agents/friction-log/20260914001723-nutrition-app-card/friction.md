@@ -1,6 +1,7 @@
 ---
 title: 'Nutrition app-card caption fixture blocks unrelated release package checks'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3815'
 ---
 
 ## Expected Behavior

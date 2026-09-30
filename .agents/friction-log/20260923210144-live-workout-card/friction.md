@@ -1,6 +1,7 @@
 ---
 title: 'Live workout card fixtures omit canonical vault root'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3888'
 ---
 
 ## Expected Behavior

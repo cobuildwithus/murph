@@ -1,6 +1,7 @@
 ---
 title: 'ReviewGPT rejects regular Chat after the home mode toggle changed to buttons'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3897'
 ---
 
 ## Expected Behavior

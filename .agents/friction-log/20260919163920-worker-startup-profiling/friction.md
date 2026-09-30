@@ -1,6 +1,7 @@
 ---
 title: 'Worker startup profiling attempts an unrelated container image build'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3854'
 ---
 
 ## Expected Behavior

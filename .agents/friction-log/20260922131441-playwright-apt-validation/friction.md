@@ -1,6 +1,7 @@
 ---
 title: 'Playwright apt validation rejects a correctly loaded mixed-case timeout'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3874'
 ---
 
 ## Expected Behavior

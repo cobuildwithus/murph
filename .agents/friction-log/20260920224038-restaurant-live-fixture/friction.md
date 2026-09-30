@@ -1,6 +1,7 @@
 ---
 title: 'Restaurant live fixture rejects documented batched reads'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3860'
 ---
 
 ## Expected Behavior

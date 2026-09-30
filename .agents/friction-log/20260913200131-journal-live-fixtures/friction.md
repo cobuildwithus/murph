@@ -1,6 +1,7 @@
 ---
 title: 'Journal live fixtures contradict automation capability and fabricate CLI success'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3811'
 ---
 
 ## Expected Behavior

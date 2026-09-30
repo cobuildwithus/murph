@@ -1,6 +1,7 @@
 ---
 title: 'Video analysis fixtures expire against the real calendar'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3855'
 ---
 
 ## Expected Behavior

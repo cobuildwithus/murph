@@ -1,6 +1,7 @@
 ---
 title: 'Vercel source preview exceeds the repository file-count limit without archive mode'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3812'
 ---
 
 ## Expected Behavior

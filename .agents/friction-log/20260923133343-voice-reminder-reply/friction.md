@@ -1,6 +1,7 @@
 ---
 title: 'Voice reminder reply matcher rejects truthful negation'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3886'
 ---
 
 ## Expected Behavior

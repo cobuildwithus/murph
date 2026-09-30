@@ -1,6 +1,7 @@
 ---
 title: 'Scheduled image reminder gate expects retired image alt caption'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3902'
 ---
 
 ## Expected Behavior

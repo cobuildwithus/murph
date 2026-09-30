@@ -1,6 +1,7 @@
 ---
 title: 'Canary observer fixtures use retired workspace bundle refs'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3822'
 ---
 
 ## Expected Behavior

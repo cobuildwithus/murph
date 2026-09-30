@@ -1,6 +1,7 @@
 ---
 title: 'Static src import in harness-backed assistant tests bypasses vi.doMock and hangs'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3842'
 ---
 
 ## Expected Behavior

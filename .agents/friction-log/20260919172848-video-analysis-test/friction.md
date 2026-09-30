@@ -1,6 +1,7 @@
 ---
 title: 'Video analysis test fixtures expire with the wall clock'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3858'
 ---
 
 ## Expected Behavior

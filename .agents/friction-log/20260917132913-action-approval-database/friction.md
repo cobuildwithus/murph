@@ -1,6 +1,7 @@
 ---
 title: 'Action-approval database tests leak members into migration census proofs'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3847'
 ---
 
 ## Expected Behavior

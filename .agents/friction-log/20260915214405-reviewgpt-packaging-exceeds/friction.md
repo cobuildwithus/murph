@@ -1,6 +1,7 @@
 ---
 title: 'ReviewGPT packaging exceeds the child output buffer with expected exclusions'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3835'
 ---
 
 ## Expected Behavior

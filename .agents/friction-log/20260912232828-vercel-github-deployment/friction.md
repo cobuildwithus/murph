@@ -1,6 +1,7 @@
 ---
 title: 'Vercel GitHub deployment checks retain running after admission completes'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3798'
 ---
 
 ## Expected Behavior
