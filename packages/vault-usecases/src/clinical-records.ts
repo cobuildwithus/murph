@@ -41,6 +41,7 @@ import {
 } from "@murphai/runtime-state/node";
 import * as z from "@murphai/contracts/zod-runtime";
 
+import { clinicalStructuredSources, type ClinicalStructuredSource } from "./clinical-structured-enrichment.ts";
 import { retainUnchangedClinicalParserHolds } from "./clinical-parser-holds.ts";
 
 import { extractClinicalDocumentText } from "./clinical-document-text.js";
@@ -178,6 +179,7 @@ export interface ClinicalFhirRetrievalCheckpointRecord {
 }
 
 export interface ClinicalFhirSnapshotImportResult {
+  structuredEnrichmentSources?: ClinicalStructuredSource[];
   canonical: {
     applied: boolean;
     createdCount: number;
@@ -562,6 +564,7 @@ export async function importClinicalFhirSnapshot(
       skippedExistingCount: canonical.skippedExistingCount,
       supersededCount: canonical.supersededCount,
     },
+    structuredEnrichmentSources: clinicalStructuredSources(plan, new Map(prepared.pages.map((page) => [page.rawPath, page.content]))),
     executableDecisionCount: executableDecisions.length,
     labResultCount: plan.decisions.filter((decision) => decision.action === "upsert" && decision.payload.kind === "test" && decision.payload.testCategory === "laboratory").length - retainedLabCount,
     incompleteRevisionCount: plan.decisions.filter((decision) => decision.action === "review" && decision.disposition === "incomplete").length,

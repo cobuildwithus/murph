@@ -48,7 +48,7 @@ type HostedRuntimeProgressPrismaClient =
   & HostedOperationalAlertPrismaClient;
 
 export interface HostedRuntimeProgressHealthRow {
-  activationCheckpointEvidence: unknown;
+  foregroundCheckpointEvidence: unknown;
   checkpointEvidence: unknown;
   deliveryAcceptedAt: Date | null;
   chronologyInvalid: boolean;
@@ -486,7 +486,7 @@ async function readHostedRuntimeProgressCandidatePage(input: {
     progress_evidence AS (
       SELECT
         workspace_evidence.*,
-        activation_checkpoint.evidence AS activation_checkpoint_evidence,
+        foreground_checkpoint.evidence AS foreground_checkpoint_evidence,
         CASE WHEN delivery.status IN ('accepted', 'delivered', 'sent_no_receipt_expected')
           THEN delivery.accepted_at ELSE NULL END AS delivery_accepted_at,
         jsonb_build_object('assistant', jsonb_build_object(
@@ -522,7 +522,7 @@ async function readHostedRuntimeProgressCandidatePage(input: {
           SELECT candidate.runtime_attempt_id, candidate.phase_breakdown_json
           FROM hosted_ingress_latency_trace AS candidate
           WHERE workspace_evidence.lane = 'system'
-            AND workspace_evidence.head_kind = 'member.activated'
+            AND workspace_evidence.head_kind IN ('member.activated', 'device-sync.wake')
             AND candidate.user_id = workspace_evidence.user_id
             AND candidate.accepted_at >= workspace_evidence.head_created_at
             AND candidate.accepted_at <= ${input.now}
@@ -537,7 +537,7 @@ async function readHostedRuntimeProgressCandidatePage(input: {
           AND owner.attempt_id = foreground.runtime_attempt_id
           AND owner.generation = workspace_evidence.workspace_system_mailbox_progress_generation
           AND owner.generation::text = foreground.phase_breakdown_json -> 'assistant' ->> 'runtimeLeaseGeneration'
-      ) AS activation_checkpoint ON TRUE
+      ) AS foreground_checkpoint ON TRUE
       LEFT JOIN LATERAL (
         SELECT
           MIN(execution_evidence.at) FILTER (
@@ -568,7 +568,7 @@ async function readHostedRuntimeProgressCandidatePage(input: {
     progress_lane AS (
       SELECT
         progress_evidence.user_id,
-        progress_evidence.activation_checkpoint_evidence,
+        progress_evidence.foreground_checkpoint_evidence,
         progress_evidence.delivery_accepted_at,
         progress_evidence.checkpoint_evidence,
         progress_evidence.durable_high_water_seq,
@@ -618,7 +618,7 @@ async function readHostedRuntimeProgressCandidatePage(input: {
       FROM progress_evidence
     )
     SELECT
-      progress_lane.activation_checkpoint_evidence AS "activationCheckpointEvidence",
+      progress_lane.foreground_checkpoint_evidence AS "foregroundCheckpointEvidence",
       progress_lane.checkpoint_evidence AS "checkpointEvidence",
       progress_lane.delivery_accepted_at AS "deliveryAcceptedAt",
       progress_lane.chronology_invalid AS "chronologyInvalid",
@@ -810,7 +810,7 @@ function classifyHostedRuntimeProgressRow(
   if (row.lane === "conversation" && isCompletionAwaitingCheckpoint(row, now)) {
     return "fresh";
   }
-  if (isActivationAwaitingForegroundCheckpoint(row, now)) {
+  if (isSystemWorkAwaitingForegroundCheckpoint(row, now)) {
     return "fresh";
   }
   return now.getTime() - progressOriginAtMs
@@ -819,13 +819,13 @@ function classifyHostedRuntimeProgressRow(
     : "fresh";
 }
 
-function isActivationAwaitingForegroundCheckpoint(
+function isSystemWorkAwaitingForegroundCheckpoint(
   row: HostedRuntimeProgressHealthRow,
   now: Date,
 ): boolean {
   if (
     row.lane !== "system"
-    || row.headKind !== "member.activated"
+    || (row.headKind !== "member.activated" && row.headKind !== "device-sync.wake")
     || row.workspaceSystemImportedSeq === null
     || row.workspaceSystemImportedSeq < row.headLaneSeq
     || row.workspaceSystemImportedSeq > row.durableHighWaterSeq
@@ -833,15 +833,15 @@ function isActivationAwaitingForegroundCheckpoint(
   ) {
     return false;
   }
-  // Activation yields to foreground work and records completion after the
-  // snapshot. Only current-owner evidence selected above may defer its alert.
-  const completedAt = readHostedRuntimeTerminalReplyCommittedAt(row.activationCheckpointEvidence)
-    ?? readHostedRuntimeTerminalNonReplyCommittedAt(row.activationCheckpointEvidence);
+  // Activation and device sync yield to foreground work and publish handling
+  // through checkpoints. Only current-owner evidence may defer their alerts.
+  const completedAt = readHostedRuntimeTerminalReplyCommittedAt(row.foregroundCheckpointEvidence)
+    ?? readHostedRuntimeTerminalNonReplyCommittedAt(row.foregroundCheckpointEvidence);
   return completedAt !== null
     && completedAt.getTime() > row.workspaceCheckpointedAt.getTime()
     && isCompletionAwaitingCheckpoint({
       progressOriginAt: row.progressOriginAt,
-      checkpointEvidence: row.activationCheckpointEvidence,
+      checkpointEvidence: row.foregroundCheckpointEvidence,
       deliveryAcceptedAt: null,
     }, now);
 }

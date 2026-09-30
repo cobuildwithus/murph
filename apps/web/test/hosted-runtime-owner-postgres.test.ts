@@ -155,6 +155,70 @@ describe.skipIf(!enabled)("Postgres runtime ownership", () => {
     });
   });
 
+  it("authorizes both provider identities with one fresh statement and no transaction", async () => {
+    const userId = await member();
+    await claim(userId);
+    const expected = await observer.hostedRuntimeOwner.update({ where: { userId }, data: {
+      generation: 9007199254740993n, workspaceVersion: 9007199254740995n,
+      runnerContainerName: "synthetic-provider-slot", providerEgressTokenHash: "a".repeat(64),
+      platformAiUsageAllowed: true,
+    } });
+    const raw = vi.spyOn(second, "$queryRaw");
+    const transaction = vi.spyOn(second, "$transaction");
+    try {
+      expect(await authorizeHostedRuntimeProvider({ prisma: second, userId,
+        runnerContainerName: null, providerEgressTokenHash: "a".repeat(64), providerKind: "linq",
+      })).toEqual({ cutover: "postgres", owner: expected });
+      expect(raw).toHaveBeenCalledTimes(1);
+      raw.mockClear();
+      expect(await executeHostedRuntimeOwnerCommand({ prisma: second, userId, command: {
+        operation: "authorize_effect", ...identity(expected), runnerContainerName: null, managedAi: true,
+      } })).toMatchObject({ status: "authorized", owner: {
+        generation: expected.generation.toString(), workspaceVersion: expected.workspaceVersion!.toString(),
+      } });
+      expect(raw).toHaveBeenCalledTimes(1);
+      expect(transaction).not.toHaveBeenCalled();
+    } finally {
+      raw.mockRestore();
+      transaction.mockRestore();
+    }
+  });
+
+  it("does not serialize provider reads behind unrelated member and owner locks", async () => {
+    const userId = await member();
+    const runtime = identity((await claim(userId)).owner);
+    await prepareHostedRuntimeLaunch({ prisma: first, identity: runtime,
+      runnerContainerName: "synthetic-provider-slot", workspaceVersion: "0",
+      customInferenceEnvelope: null, platformAiUsageAllowed: true, providerEgressTokenHash: "a".repeat(64) });
+    const locked = deferred();
+    const release = deferred();
+    const holding = first.$transaction(async tx => {
+      await requireHostedRuntimeOwnerTx(tx, runtime);
+      locked.resolve();
+      await release.promise;
+    });
+    await locked.promise;
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const result = await Promise.race([
+        authorizeHostedRuntimeProvider({ prisma: second, userId, runnerContainerName: null,
+          providerEgressTokenHash: "a".repeat(64), providerKind: "linq" }),
+        new Promise<never>((_, reject) => { timeout = setTimeout(() => reject(new Error("Provider authorization waited on an unrelated row lock.")), 1_000); }),
+      ]);
+      expect(result.owner).toMatchObject({ attemptId: runtime.attemptId });
+    } finally {
+      clearTimeout(timeout);
+      release.resolve();
+      await holding;
+    }
+    await retireHostedRuntime({ prisma: first, identity: runtime });
+    expect(await authorizeHostedRuntimeProvider({ prisma: second, userId, runnerContainerName: null,
+      providerEgressTokenHash: "a".repeat(64), providerKind: "linq" })).toMatchObject({ owner: null });
+    await expect(executeHostedRuntimeOwnerCommand({ prisma: second, userId, command: {
+      operation: "authorize_effect", ...runtime, runnerContainerName: null, managedAi: false,
+    } })).rejects.toMatchObject({ code: "HOSTED_RUNTIME_OWNER_STALE" });
+  });
+
   it.each(["cold", "retained", "existing"] as const)("admits a %s runtime without redundant policy or routing reads", async state => {
     const userId = await member();
     if (state === "retained") {
@@ -210,7 +274,7 @@ describe.skipIf(!enabled)("Postgres runtime ownership", () => {
     }
   });
 
-  it("routes and authorizes a provider using only the three required lock queries", async () => {
+  it("routes and authorizes a provider in one statement snapshot", async () => {
     const userId = await member();
     const runtime = identity((await claim(userId)).owner);
     const tokenHash = "c".repeat(64);
@@ -223,7 +287,7 @@ describe.skipIf(!enabled)("Postgres runtime ownership", () => {
         providerEgressTokenHash: tokenHash, providerKind: "linq" },
     }));
     expect(result).toMatchObject({ cutover: "postgres", status: "authorized", owner: { attemptId: runtime.attemptId } });
-    expect(operations.map(operation => operation.key)).toEqual(["$queryRaw", "$queryRaw", "$queryRaw"]);
+    expect(operations.map(operation => operation.key)).toEqual(["$queryRaw"]);
   });
 
   it("drains 200 eligible snapshot/replica candidates within the configured cron hour", async () => {

@@ -5,13 +5,15 @@ import {
   executeClinicalDocumentExtraction,
   type ClinicalDocumentExtractionInput,
 } from "@murphai/assistant-engine/clinical-document-extraction";
-import type { ClinicalDocumentExtractionFamily } from "@murphai/clinical-records";
+import type { ClinicalDocumentExtractionFamily, ClinicalDocumentExtractionOutput } from "@murphai/clinical-records";
 import {
   ASSISTANT_USAGE_SCHEMA,
   createAssistantUsageId,
   parseAssistantUsageRecord,
   resolveAssistantUsageCredentialSource,
 } from "@murphai/hosted-execution/assistant-usage";
+import { HOSTED_ASSISTANT_LUNA_MODEL, HOSTED_ASSISTANT_VENICE_PROVIDER_MODELS } from "@murphai/hosted-execution/assistant-model";
+import { VENICE_CODEX_MODEL_PROVIDER_ID, HOSTED_LOCAL_TEST_VENICE_CODEX_MODEL_PROVIDER_ID } from "@murphai/operator-config/assistant/target-runtime";
 import * as clinicalEnrichmentState from "@murphai/vault-usecases/clinical-enrichment";
 
 import {
@@ -93,7 +95,7 @@ async function extractClinicalEnrichmentPage({ input, work, state, now }: {
   let handedOff = false;
   let stage: AttemptStage = "render";
   try {
-    prepared = await (input.prepareDocument ?? prepareClinicalEnrichmentDocument)({
+    prepared = work.source.resource ? { totalPages: 1, extractedText: work.extractedText, renderedPages: [], scratchRoots: [], async cleanup() {} } : await (input.prepareDocument ?? prepareClinicalEnrichmentDocument)({
       vaultRoot: input.vaultRoot,
       documentPath: work.documentPath,
       mediaType: work.source.mediaType,
@@ -149,7 +151,8 @@ async function extractClinicalEnrichmentFamilies({ input, work, prepared, signal
   onHandoff(): void;
 }) {
   const execute = input.executeExtraction ?? executeClinicalDocumentExtraction;
-  const results = await Promise.allSettled(FAMILIES.map(async (family) => {
+  const assignedFamilies: readonly ClinicalDocumentExtractionFamily[] = work.source.resource ? ["all"] : FAMILIES;
+  const results = await Promise.allSettled(assignedFamilies.map(async (family) => {
     try {
       const execution: ClinicalDocumentExtractionInput = {
         abortSignal: signal,
@@ -162,11 +165,13 @@ async function extractClinicalEnrichmentFamilies({ input, work, prepared, signal
           signal.throwIfAborted();
         },
         codexHome: input.codexHome, env: { ...input.env },
-        model: input.model, modelProvider: input.modelProvider,
+        model: work.source.resource ? clinicalResourceModel(input.modelProvider) : input.model, modelProvider: input.modelProvider,
+        ...(work.source.resource ? { reasoningEffort: "medium" as const } : {}),
         workspaceRoot: input.vaultRoot, source: work.source, documentPath: work.documentPath,
         timeZone: work.timeZone,
         deadlineAt,
         family, extractedText: prepared.extractedText, renderedPages: prepared.renderedPages,
+        textWindow: prepared.textWindow,
         scratchRoots: prepared.scratchRoots,
         onProviderUsage(event) { usages.push({ family, event }); },
       };
@@ -180,11 +185,19 @@ async function extractClinicalEnrichmentFamilies({ input, work, prepared, signal
   const rejected = results.find((result) => result.status === "rejected");
   if (rejected?.status === "rejected") throw rejected.reason;
   signal.throwIfAborted();
+  if (work.source.resource) {
+    const result = results[0];
+    if (result?.status !== "fulfilled") throw new Error("Clinical resource extraction did not settle.");
+    return splitClinicalResourceOutput(result.value);
+  }
   const [labs, measurements, history] = results;
   if (labs?.status !== "fulfilled" || measurements?.status !== "fulfilled" || history?.status !== "fulfilled") {
     throw new Error("Clinical extraction families did not settle.");
   }
-  return { labs: labs.value, measurements: measurements.value, history: history.value };
+  const historyOutput: ClinicalDocumentExtractionOutput = prepared.coverageWarning
+    ? { ...history.value, status: "blocked", reason: [history.value.reason, prepared.coverageWarning].filter(Boolean).join(" ").slice(0, 500) }
+    : history.value;
+  return { labs: labs.value, measurements: measurements.value, history: historyOutput };
 }
 
 async function settleClinicalEnrichmentFailure({ input, work, state, stage, error, now }: {
@@ -258,4 +271,16 @@ async function recordClinicalEnrichmentUsage({ input, attemptId, usages, usageRe
       });
     }
   }
+}
+
+function splitClinicalResourceOutput(output: ClinicalDocumentExtractionOutput) {
+  const byKind = (kinds: readonly string[]): ClinicalDocumentExtractionOutput => ({ status: "complete", records: output.records.filter((record) => kinds.includes(record.payload.kind)) });
+  return { labs: byKind(["test"]), measurements: byKind(["measurement"]),
+    history: { ...output, records: output.records.filter((record) => record.payload.kind === "note" || record.payload.kind === "clinical_assertion") } };
+}
+
+function clinicalResourceModel(provider: string | null | undefined): string {
+  return provider === VENICE_CODEX_MODEL_PROVIDER_ID || provider === HOSTED_LOCAL_TEST_VENICE_CODEX_MODEL_PROVIDER_ID
+    ? HOSTED_ASSISTANT_VENICE_PROVIDER_MODELS[HOSTED_ASSISTANT_LUNA_MODEL]!
+    : HOSTED_ASSISTANT_LUNA_MODEL;
 }

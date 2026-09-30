@@ -1,4 +1,5 @@
-import { createPostgresTestOwner, mockPostgresOwnerCommand, forbiddenLegacyRuntime, settledNativeRuntime } from "./postgres-owner-fixtures.ts";
+import type { TestProviderContext } from "./postgres-owner-fixtures.ts";
+import { nativeProviderTestNamespace, createPostgresTestOwner, forbiddenLegacyRuntime, settledNativeRuntime } from "./postgres-owner-fixtures.ts";
 import { execFile } from "node:child_process";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { createRequire } from "node:module";
@@ -18,15 +19,9 @@ import {
 } from "../src/runner-egress-intercept.ts";
 import { createHostedLiveSessionReference } from "../src/runner-egress-openai-live.ts";
 import { nativeLiveRequest } from "./fixtures/native-live-request.ts";
-import {
-  createHostedProviderEgressCredential,
-} from "../src/hosted-provider-egress-credential.ts";
 import type {
   RunnerOutboundEnvironmentSource,
 } from "../src/runner-outbound.ts";
-import type {
-  WorkerProviderEgressCredentialValidationResult,
-} from "../src/worker-contracts.ts";
 import {
   PINNED_CODEX_OPENAI_EGRESS_INVENTORY,
   type PinnedCodexOpenAiEgressRoute,
@@ -273,11 +268,11 @@ describe("pinned Codex OpenAI egress conformance", () => {
 
   it("keeps every reviewed route aligned with the production Worker decision", async () => {
     const credential = await createTestProviderEgressCredential();
-    const validateRuntimeProviderEgressCredential = vi.fn(
+    const readProviderContext = vi.fn(
       createProviderCredentialValidationResult,
     );
     const env = createOpenAiInterceptEnv({
-      validateRuntimeProviderEgressCredential,
+      readProviderContext,
     });
     const upstreamFetch = vi.fn<typeof fetch>(async (input) => {
       const url = new URL(input instanceof Request ? input.url : String(input));
@@ -299,18 +294,18 @@ describe("pinned Codex OpenAI egress conformance", () => {
     for (const route of PINNED_CODEX_OPENAI_EGRESS_INVENTORY.routes) {
       const imageAccessCallsBefore = imageAccessFetch.mock.calls.length;
       const upstreamCallsBefore = upstreamFetch.mock.calls.length;
-      const validationsBefore = validateRuntimeProviderEgressCredential.mock.calls.length;
+      const validationsBefore = readProviderContext.mock.calls.length;
       const response = await hostedRunnerIntercept(
         await createInventoryRequest(route, credential),
         env,
-        { containerId: "opaque-container-id" },
+        { className: "RunnerContainer", containerId: "opaque-container-id" },
       );
 
       if (route.disposition === "blocked") {
         expect(response.status, `${route.method} ${route.pathname}`).toBe(403);
         expect(upstreamFetch.mock.calls.length, route.feature)
           .toBe(upstreamCallsBefore);
-        expect(validateRuntimeProviderEgressCredential.mock.calls.length, route.feature)
+        expect(readProviderContext.mock.calls.length, route.feature)
           .toBe(validationsBefore);
         continue;
       }
@@ -321,8 +316,8 @@ describe("pinned Codex OpenAI egress conformance", () => {
       );
       expect(upstreamFetch.mock.calls.length, route.feature)
         .toBe(upstreamCallsBefore + 1);
-      expect(validateRuntimeProviderEgressCredential.mock.calls.length, route.feature)
-        .toBe(validationsBefore + (route.disposition === "allowed_scoped_websocket_only" ? 0 : 1));
+      expect(readProviderContext.mock.calls.length, route.feature)
+        .toBe(validationsBefore + 1);
       const forwarded = upstreamFetch.mock.calls.at(-1)?.[0];
       expect(forwarded, route.feature).toBeInstanceOf(Request);
       const forwardedRequest = forwarded as Request;
@@ -334,7 +329,7 @@ describe("pinned Codex OpenAI egress conformance", () => {
 
   it("does not treat the reviewed Responses websocket route as ordinary GET egress", async () => {
     const credential = await createTestProviderEgressCredential();
-    const validateRuntimeProviderEgressCredential = vi.fn(
+    const readProviderContext = vi.fn(
       createProviderCredentialValidationResult,
     );
     const upstreamFetch = vi.fn<typeof fetch>(async () => new Response("unexpected"));
@@ -345,12 +340,12 @@ describe("pinned Codex OpenAI egress conformance", () => {
         headers: { authorization: `Bearer ${credential}` },
         method: "GET",
       }),
-      createOpenAiInterceptEnv({ validateRuntimeProviderEgressCredential }),
-      { containerId: "opaque-container-id" },
+      createOpenAiInterceptEnv({ readProviderContext }),
+      { className: "RunnerContainer", containerId: "opaque-container-id" },
     );
 
     expect(response.status).toBe(403);
-    expect(validateRuntimeProviderEgressCredential).not.toHaveBeenCalled();
+    expect(readProviderContext).not.toHaveBeenCalled();
     expect(upstreamFetch).not.toHaveBeenCalled();
   });
 
@@ -429,7 +424,7 @@ describe("pinned Codex OpenAI egress conformance", () => {
       ]);
       const bridge = await startCodexWorkerBridge({
         env: createOpenAiInterceptEnv({
-          validateRuntimeProviderEgressCredential: async (input) =>
+          readProviderContext: async (input) =>
             createProviderCredentialValidationResult(input),
         }),
       });
@@ -640,20 +635,12 @@ function buildInventoryRequestBody(
 }
 
 async function createTestProviderEgressCredential(): Promise<string> {
-  return await createHostedProviderEgressCredential({
-    providerKind: "openai",
-    runnerContainerName: RUNNER_CONTAINER_NAME,
-    source: {
-      HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET:
-        PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET,
-    },
-    userId: TEST_USER_ID,
-  });
+  return "__cloudflare_injected__";
 }
 
 function createProviderCredentialValidationResult(input: {
   userId: string;
-}): WorkerProviderEgressCredentialValidationResult {
+}): TestProviderContext {
   return {
     attemptId: "attempt_codex_route_conformance",
     leaseGeneration: "7",
@@ -664,21 +651,13 @@ function createProviderCredentialValidationResult(input: {
 }
 
 function createOpenAiInterceptEnv(input: {
-  validateRuntimeProviderEgressCredential: (input: {
+  readProviderContext: (input: {
     providerKind: string;
     runnerContainerName: string;
     userId: string;
-  }) => Promise<WorkerProviderEgressCredentialValidationResult>
-    | WorkerProviderEgressCredentialValidationResult;
+  }) => Promise<TestProviderContext>
+    | TestProviderContext;
 }): RunnerOutboundEnvironmentSource {
-  mockPostgresOwnerCommand(async ({ userId, command }) => {
-    if (command.operation === "reconcile") return { cutover: "postgres", status: "observed", owner: createPostgresTestOwner({
-      userId, attemptId: "attempt_codex_route_conformance", generation: "7", runnerContainerName: RUNNER_CONTAINER_NAME,
-    }) };
-    if (command.operation !== "authorize_provider" || !command.runnerContainerName) throw new Error("Unexpected owner operation.");
-    const result = await input.validateRuntimeProviderEgressCredential({ userId, providerKind: command.providerKind, runnerContainerName: command.runnerContainerName });
-    return { cutover: "postgres", status: result.owns ? "authorized" : "stale", owner: result.owns ? createPostgresTestOwner({ userId, attemptId: result.attemptId, generation: result.leaseGeneration, workspaceVersion: result.workspaceVersion, runnerContainerName: command.runnerContainerName }) : null };
-  });
   return {
     ...createHostedExecutionTestEnv(),
     BUNDLES: {} as RunnerOutboundEnvironmentSource["BUNDLES"],
@@ -686,7 +665,11 @@ function createOpenAiInterceptEnv(input: {
       PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET,
     OPENAI_API_KEY: "openai-worker-secret",
     USER_RUNNER: forbiddenLegacyRuntime,
-    RUNNER_CONTAINER: { getByName: () => settledNativeRuntime },
+    RUNNER_CONTAINER: nativeProviderTestNamespace(async () => {
+      const result = await input.readProviderContext({ userId: TEST_USER_ID, providerKind: "openai", runnerContainerName: RUNNER_CONTAINER_NAME });
+      return result.owns ? createPostgresTestOwner({ userId: TEST_USER_ID, attemptId: result.attemptId,
+        generation: result.leaseGeneration, workspaceVersion: result.workspaceVersion }) : null;
+    }),
   };
 }
 
@@ -747,7 +730,7 @@ async function forwardCodexRequestThroughWorker(
       method: request.method ?? "GET",
     }),
     env,
-    { containerId: "opaque-container-id" },
+    { className: "RunnerContainer", containerId: "opaque-container-id" },
   );
   response.statusCode = intercepted.status;
   intercepted.headers.forEach((value, name) => {

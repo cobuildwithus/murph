@@ -73,8 +73,14 @@ export default {
       method: request.method, headers, body: request.body,
     }), {
       ...env,
-      RUNNER_CONTAINER: { getByName: () => ({ runtimeUsageSettlementAllowsProviders: async () => true }) },
-    }, { containerId: "member_123--v-test" }, async (target, init) => {
+      RUNNER_CONTAINER: {
+        idFromString: (id: string) => id,
+        get: () => ({ readProviderAuthority: async () => authorized ? {
+          ...JSON.parse(env.TEST_OWNER), settlementPending: false, retiring: false,
+        } : null }),
+        getByName: () => ({}),
+      },
+    }, { className: "RunnerContainer", containerId: "member_123--v-test" }, async (target, init) => {
       const upstream = new Request(target, init);
       return networkFetch(new Request(`${url.origin}/upstream`, upstream));
     });

@@ -6,6 +6,7 @@ import {
   clinicalExtractionDateIsSupported,
   clinicalDocumentExtractionOutputSchemaForFamily,
   clinicalDocumentExtractionOutputSchema,
+  CLINICAL_DOCUMENT_EXTRACTION_MAX_RECORDS,
   clinicalRawManifestSchema,
   clinicalRawPathSchema,
   type ClinicalDocumentAttachment,
@@ -20,18 +21,21 @@ import { resolveRuntimePaths, writeJsonFileAtomic } from "@murphai/runtime-state
 
 import { readClinicalStoredDocument } from "./clinical-document-storage.ts";
 import { clinicalEnrichmentLabHoldReason } from "./clinical-enrichment-labs.ts";
+import { attestClinicalStructuredSource, clinicalStructuredSourceSchema, type ClinicalStructuredSource } from "./clinical-structured-enrichment.ts";
 import { readClinicalEnrichmentParentEligibility } from "./clinical-enrichment-parent.ts";
 
 const digestSchema = z.string().regex(/^[a-f0-9]{64}$/u);
 const manifestRefSchema = z.object({ manifestPath: clinicalRawPathSchema, sha256: digestSchema }).strict();
-const sourceSchema = z.object({ rawRef: clinicalRawPathSchema, sha256: digestSchema, mediaType: z.string().min(1).max(255), byteLength: z.number().int().positive().max(20 * 1024 * 1024) }).strict();
+const sourceSchema = z.object({ rawRef: clinicalRawPathSchema, sha256: digestSchema, mediaType: z.string().min(1).max(255), byteLength: z.number().int().positive().max(20 * 1024 * 1024), resource: clinicalStructuredSourceSchema.optional() }).strict();
 const outputsSchema = z.object({ labs: clinicalDocumentExtractionOutputSchema, measurements: clinicalDocumentExtractionOutputSchema, history: clinicalDocumentExtractionOutputSchema }).strict();
 const countsSchema = z.object({ created: z.number().int().nonnegative(), existing: z.number().int().nonnegative(), held: z.number().int().nonnegative(), pages: z.number().int().nonnegative(), documents: z.number().int().nonnegative() }).strict();
 const jobSchema = z.object({
-  schema: z.literal("murph.clinical-enrichment.v1"),
+  schema: z.enum(["murph.clinical-enrichment.v1", "murph.clinical-enrichment.v2", "murph.clinical-enrichment.v3"]),
   jobId: digestSchema,
   root: manifestRefSchema,
   attachmentIndex: z.number().int().nonnegative(),
+  structuredSources: z.array(clinicalStructuredSourceSchema).max(1_000).optional(),
+  resourceIndex: z.number().int().nonnegative().optional(),
   page: z.number().int().positive().max(100_000),
   totalPages: z.number().int().positive().max(100_000).optional(),
   nextAttemptAt: z.iso.datetime().optional(),
@@ -45,9 +49,9 @@ const jobSchema = z.object({
   holdReasons: z.array(z.string().min(1).max(500)).max(20).default([]),
 }).strict();
 type Job = z.infer<typeof jobSchema>;
-export type ClinicalEnrichmentSource = Pick<z.infer<typeof sourceSchema>, "rawRef" | "sha256" | "mediaType"> & { clinicalOccurredAt?: string };
+export type ClinicalEnrichmentSource = Pick<z.infer<typeof sourceSchema>, "rawRef" | "sha256" | "mediaType" | "resource"> & { clinicalOccurredAt?: string; recordedAt?: string };
 export type ClinicalEnrichmentWork =
-  | { status: "extract"; jobId: string; source: ClinicalEnrichmentSource; documentPath: string; page: number; timeZone: string }
+  | { status: "extract"; jobId: string; source: ClinicalEnrichmentSource; documentPath: string; page: number; timeZone: string; extractedText?: string }
   | { status: "deferred"; jobId: string; nextAttemptAt: string }
   | { status: "apply" | "advance"; jobId: string };
 const indexSchema = z.object({ schema: z.literal("murph.clinical-enrichment-index.v1"), pending: z.array(digestSchema).max(128) }).strict();
@@ -80,21 +84,30 @@ async function readManifest(vaultRoot: string, ref: z.infer<typeof manifestRefSc
 }
 async function attestSource(vaultRoot: string, job: Job) {
   const manifest = await readManifest(vaultRoot, job.root);
+  if (job.source?.resource) {
+    const current = job.structuredSources?.[job.resourceIndex ?? 0];
+    if (!current || stable(current) !== stable(job.source.resource)) throw new Error("Clinical resource cursor is stale.");
+    const attested = await attestClinicalStructuredSource({ vaultRoot, manifestPath: job.root.manifestPath, manifest, source: current });
+    if (stable(attested.source) !== stable(job.source)) throw new Error("Clinical resource source binding changed.");
+    return { ...attested, storedSha256: attested.source.sha256 };
+  }
   const attachment = "documentAttachments" in manifest ? manifest.documentAttachments?.[job.attachmentIndex] : undefined;
   if (!job.source || attachment?.status !== "downloaded" || attachment.sha256 !== job.source.sha256 || attachment.byteLength !== job.source.byteLength || attachment.mediaType !== job.source.mediaType || path.posix.join(path.posix.dirname(job.root.manifestPath), attachment.relativePath) !== job.source.rawRef) throw new Error("Clinical enrichment source is no longer attested by its manifest.");
   const parent = await readClinicalEnrichmentParentEligibility({ vaultRoot, manifestPath: job.root.manifestPath, manifest, attachment });
   const stored = await readClinicalStoredDocument({ vaultRoot, source: job.source });
-  return { documentPath: stored.absolutePath, storedSha256: stored.sha256, parent };
+  const { readClinicalAttachmentText } = await import("@murphai/importers/clinical-records");
+  const extractedText = readClinicalAttachmentText(await readFile(stored.absolutePath), job.source.mediaType);
+  return { documentPath: stored.absolutePath, storedSha256: stored.sha256, parent, extractedText };
 }
 
 /** Portable clinical operations only; raw evidence and canonical records keep their existing owners. */
-export async function enqueueClinicalEnrichment(input: { vaultRoot: string; manifestPath: string; manifestSha256: string }): Promise<{ jobId: string }> {
+export async function enqueueClinicalEnrichment(input: { vaultRoot: string; manifestPath: string; manifestSha256: string; structuredSources?: ClinicalStructuredSource[] }): Promise<{ jobId: string }> {
   return locked(input.vaultRoot, async () => {
     const root = manifestRefSchema.parse({ manifestPath: input.manifestPath, sha256: input.manifestSha256 });
     await readManifest(input.vaultRoot, root);
     const jobId = root.sha256;
     const existing = await readOptional(jobPath(input.vaultRoot, jobId));
-    const job = existing ? jobSchema.parse(existing) : jobSchema.parse({ schema: "murph.clinical-enrichment.v1", jobId, root, attachmentIndex: 0, page: 1, status: "pending", counts: { created: 0, existing: 0, held: 0, pages: 0, documents: 0 } });
+    const job = existing ? jobSchema.parse(existing) : jobSchema.parse({ schema: "murph.clinical-enrichment.v3", jobId, root, attachmentIndex: 0, ...(input.structuredSources?.length ? { structuredSources: input.structuredSources, resourceIndex: 0 } : {}), page: 1, status: "pending", counts: { created: 0, existing: 0, held: 0, pages: 0, documents: 0 } });
     if (job.status === "complete" || job.status === "blocked") return { jobId };
     const index = await readIndex(input.vaultRoot);
     if (!index.pending.includes(jobId)) index.pending.push(jobId);
@@ -143,14 +156,23 @@ export async function readNextClinicalEnrichment(input: { vaultRoot: string; now
         const work = await prepareCurrentClinicalDocument(input.vaultRoot, job, attachment);
         if (work) return work;
       }
-      job.status = job.counts.held > 0 ? "blocked" : "complete";
-      if (job.status === "blocked") job.reason = "Some clinical document records require review.";
-      await saveJob(input.vaultRoot, job);
-      // The next pass compacts the index after this terminal receipt commits.
-      return { status: "advance", jobId };
+      return prepareClinicalResourceOrFinish(input.vaultRoot, job, manifest);
     }
     return deferred;
   });
+}
+
+async function prepareClinicalResourceOrFinish(vaultRoot: string, job: Job, manifest: z.infer<typeof clinicalRawManifestSchema>): Promise<ClinicalEnrichmentWork> {
+  const resource = job.structuredSources?.[job.resourceIndex ?? 0];
+  if (resource) {
+    const work = await prepareCurrentClinicalResource(vaultRoot, job, manifest, resource);
+    return work ?? { status: "advance", jobId: job.jobId };
+  }
+  job.status = job.counts.held > 0 ? "blocked" : "complete";
+  if (job.status === "blocked") job.reason = "Some clinical document records require review.";
+  await saveJob(vaultRoot, job);
+  // The next pass compacts the index after this terminal receipt commits.
+  return { status: "advance", jobId: job.jobId };
 }
 
 async function prepareCurrentClinicalDocument(
@@ -162,12 +184,12 @@ async function prepareCurrentClinicalDocument(
   let attested;
   try { attested = await attestSource(vaultRoot, job); }
   catch {
-    holdCurrentDocument(job, "Clinical document or parent evidence failed integrity validation.");
+    holdCurrentSource(job, "Clinical document or parent evidence failed integrity validation.");
     await saveJob(vaultRoot, job);
     return null;
   }
   if (!attested.parent.eligible) {
-    holdCurrentDocument(job, attested.parent.reason ?? "Clinical document parent is not eligible.");
+    holdCurrentSource(job, attested.parent.reason ?? "Clinical document parent is not eligible.");
     await saveJob(vaultRoot, job);
     return null;
   }
@@ -175,6 +197,7 @@ async function prepareCurrentClinicalDocument(
   const proposal = jobSchema.shape.prepared.safeParse(cached);
   if (proposal.success && proposal.data && proposal.data.page === job.page) {
     job.prepared = proposal.data;
+    job.schema = "murph.clinical-enrichment.v3";
     job.totalPages = proposal.data.totalPages;
     job.status = "prepared";
     await saveJob(vaultRoot, job);
@@ -182,7 +205,37 @@ async function prepareCurrentClinicalDocument(
   }
   await saveJob(vaultRoot, job);
   const metadata = vaultMetadataSchema.parse(await readVaultMetadataSource(vaultRoot));
-  return { status: "extract", jobId: job.jobId, source: { rawRef: job.source.rawRef, sha256: attested.storedSha256, mediaType: job.source.mediaType, clinicalOccurredAt: attested.parent.clinicalOccurredAt }, documentPath: attested.documentPath, page: job.page, timeZone: metadata.timezone };
+  return { status: "extract", jobId: job.jobId, source: { rawRef: job.source.rawRef, sha256: attested.storedSha256, mediaType: job.source.mediaType, clinicalOccurredAt: attested.parent.clinicalOccurredAt, recordedAt: attested.parent.retrievedAt }, documentPath: attested.documentPath, page: job.page, timeZone: metadata.timezone };
+}
+
+async function prepareCurrentClinicalResource(vaultRoot: string, job: Job, manifest: z.infer<typeof clinicalRawManifestSchema>, resource: ClinicalStructuredSource): Promise<ClinicalEnrichmentWork | null> {
+  let attested;
+  try { attested = await attestClinicalStructuredSource({ vaultRoot, manifestPath: job.root.manifestPath, manifest, source: resource }); }
+  catch {
+    holdCurrentSource(job, "Clinical structured source could not be attested.", true);
+    await saveJob(vaultRoot, job);
+    return null;
+  }
+  job.source = attested.source;
+  if (!attested.parent.eligible) {
+    holdCurrentSource(job, attested.parent.reason ?? "Clinical source is not eligible.");
+    await saveJob(vaultRoot, job);
+    return null;
+  }
+  const cache = await readOptional(extractionCachePath(vaultRoot, resource.sha256, job.source.mediaType, 1, attested.parent.clinicalOccurredAt));
+  const proposal = jobSchema.shape.prepared.safeParse(cache);
+  if (proposal.success && proposal.data?.page === 1 && proposal.data.totalPages === 1) {
+    job.prepared = proposal.data;
+    job.schema = "murph.clinical-enrichment.v3";
+    job.totalPages = 1;
+    job.status = "prepared";
+    await saveJob(vaultRoot, job);
+    return { status: "apply", jobId: job.jobId };
+  }
+  await saveJob(vaultRoot, job);
+  const metadata = vaultMetadataSchema.parse(await readVaultMetadataSource(vaultRoot));
+  return { status: "extract", jobId: job.jobId, source: { ...job.source, clinicalOccurredAt: attested.parent.clinicalOccurredAt, recordedAt: attested.parent.retrievedAt },
+    documentPath: attested.documentPath, extractedText: attested.extractedText, page: 1, timeZone: metadata.timezone };
 }
 
 export async function persistClinicalEnrichmentProposals(input: { vaultRoot: string; jobId: string; sourceSha256: string; page: number; totalPages: number; outputs: Record<(typeof families)[number], ClinicalDocumentExtractionOutput> }): Promise<void> {
@@ -195,6 +248,16 @@ export async function persistClinicalEnrichmentProposals(input: { vaultRoot: str
     if (!attested.parent.eligible) throw new Error("Clinical document parent is not eligible for proposals.");
     if (input.sourceSha256 !== attested.storedSha256) throw new Error("Clinical enrichment proposal source changed.");
     const outputs = outputsSchema.parse(Object.fromEntries(families.map((family) => [family, clinicalDocumentExtractionOutputSchemaForFamily(family).parse(input.outputs[family])])));
+    for (const output of Object.values(outputs)) {
+      if (output.records.length === CLINICAL_DOCUMENT_EXTRACTION_MAX_RECORDS) {
+        output.status = "blocked";
+        output.reason = "Extraction reached its record limit; additional source facts may remain.";
+      }
+    }
+    // Older strict readers cannot apply typed clinical notes. Preserve legacy
+    // frozen proposals, but mark newly produced checkpoints with their reader floor.
+    job.schema = "murph.clinical-enrichment.v3";
+    if (job.source.resource && (input.page !== 1 || input.totalPages !== 1)) throw new Error("Clinical resource must be a single extraction unit.");
     if (input.page > input.totalPages || families.some((family) => outputs[family].records.some((record) => record.page !== undefined && record.page !== input.page))) throw new Error("Clinical enrichment proposals reference an unprocessed page.");
     if (job.totalPages !== undefined && job.totalPages !== input.totalPages) throw new Error("Clinical enrichment document page count changed.");
     if (Buffer.byteLength(JSON.stringify(outputs), "utf8") > 4 * 1024 * 1024) throw new Error("Clinical enrichment proposals exceed the byte limit.");
@@ -204,7 +267,7 @@ export async function persistClinicalEnrichmentProposals(input: { vaultRoot: str
     job.prepared = { page: input.page, totalPages: input.totalPages, outputs };
     job.status = "prepared";
     await saveJob(input.vaultRoot, job);
-    const cachePath = extractionCachePath(input.vaultRoot, job.source.sha256, job.source.mediaType, input.page, attested.parent.clinicalOccurredAt);
+    const cachePath = extractionCachePath(input.vaultRoot, job.source.resource?.sha256 ?? job.source.sha256, job.source.mediaType, input.page, attested.parent.clinicalOccurredAt);
     await mkdir(path.dirname(cachePath), { recursive: true, mode: 0o700 });
     await writeJsonFileAtomic(cachePath, job.prepared, { mode: 0o600 });
   });
@@ -213,7 +276,7 @@ export async function persistClinicalEnrichmentProposals(input: { vaultRoot: str
 // Version the cache when extraction semantics change. It is private, disposable
 // runtime state; current parent evidence and canonical authority are still checked.
 function extractionCachePath(vaultRoot: string, sha256: string, mediaType: string, page: number, clinicalOccurredAt?: string): string {
-  return path.join(rootPath(vaultRoot), "extraction-v3", hash(JSON.stringify([digestSchema.parse(sha256), mediaType, clinicalOccurredAt ?? null])), `${page}.json`);
+  return path.join(rootPath(vaultRoot), "extraction-v4", hash(JSON.stringify([digestSchema.parse(sha256), mediaType, clinicalOccurredAt ?? null])), `${page}.json`);
 }
 
 function stable(value: unknown): string {
@@ -226,7 +289,7 @@ function factKey(payload: ClinicalDocumentExtractionPayload) {
     case "measurement": return stable([payload.kind, payload.occurredAt, payload.measurements.map((entry) => stable([entry.metric, entry.value, entry.unit, entry.qualifiers])).sort()]);
     case "test": return stable([payload.kind, payload.occurredAt, payload.specimenType, payload.results?.map((entry) => stable([entry.biomarkerSlug ?? entry.slug, entry.analyte, entry.value, entry.textValue, entry.unit, entry.comparator])).sort() ?? payload.testName]);
     case "clinical_assertion": return stable([payload.kind, payload.occurredAt, payload.assertion, payload.domain, payload.polarity, payload.subject, payload.bodySite, payload.code, payload.codeSystem, payload.assertedOn]);
-    case "note": return stable(payload);
+    case "note": return payload.clinicalFact ? stable([payload.kind, payload.clinicalFact]) : stable(payload);
   }
 }
 function object(value: unknown): Record<string, unknown> { return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {}; }
@@ -237,6 +300,7 @@ function overlap(payload: ClinicalDocumentExtractionPayload, entities: Canonical
     return relevant.some((entity) => fields.every((field) => stable(entity.attributes[field]) === stable(payload[field]))) ? "existing" : "new";
   }
   if (payload.kind === "note") {
+    if (payload.clinicalFact) return relevant.some((entity) => stable(entity.attributes.clinicalFact) === stable(payload.clinicalFact)) ? "existing" : "new";
     return relevant.some((entity) => stable([entity.attributes.note, entity.attributes.sections]) === stable([payload.note, payload.sections])) ? "existing" : "new";
   }
   if (payload.kind === "test" && !payload.results) return "new";
@@ -303,16 +367,73 @@ function findExtractedRecord(rows: CanonicalEntity[], externalRef: ExternalRef) 
 
 function clinicalProposalDate(
   record: ClinicalDocumentExtractionOutput["records"][number],
-  parent: { clinicalOccurredAt?: string },
+  parent: { clinicalOccurredAt?: string; parentRevision: string },
   timeZone: string,
 ): ClinicalDocumentExtractionPayload | null {
   const payload = record.payload;
   if (!clinicalExtractionDateIsSupported(record, parent.clinicalOccurredAt, timeZone)) return null;
+  if (payload.kind === "note" && payload.clinicalFact) {
+    return { ...payload, noteType: "clinical_fact", occurredAt: payload.clinicalFact.clinicalDate ?? parent.clinicalOccurredAt ?? parent.parentRevision };
+  }
   if (record.dateBasis === "document") return payload;
   if (record.dateBasis === "source") {
     // Resolve against this attested parent, including when identical document
     // bytes reused a cached extraction made for another parent.
     return parent.clinicalOccurredAt ? { ...payload, occurredAt: parent.clinicalOccurredAt } : null;
+  }
+  return null;
+}
+
+function clinicalSourceCodings(source: NonNullable<Job["source"]>, text: string | undefined): Set<string> | null {
+  if (!source.resource) return null;
+  const codings = new Set<string>();
+  const pending: unknown[] = text ? [JSON.parse(text)] : [];
+  while (pending.length) {
+    const value = pending.pop();
+    if (!value || typeof value !== "object") continue;
+    if ("code" in value && typeof value.code === "string") {
+      const system = "system" in value ? value.system : undefined;
+      codings.add(JSON.stringify([value.code, system]));
+    }
+    for (const child of Object.values(value)) pending.push(child);
+  }
+  return codings;
+}
+
+function clinicalTypedFactEvidenceHold(record: ClinicalDocumentExtractionOutput["records"][number], text: string | undefined): string | null {
+  if (record.payload.kind !== "note" || !record.payload.clinicalFact) return null;
+  if (!record.excerpt || (text !== undefined && (!text.includes(record.excerpt)
+    || (record.dateBasis === "document" && (!record.dateEvidence || !text.includes(record.dateEvidence)))))) {
+    return "Clinical source fact lacks literal source evidence.";
+  }
+  return null;
+}
+
+function clinicalProposalTags(record: ClinicalDocumentExtractionOutput["records"][number]): string[] {
+  const tags = record.dateBasis ? [`clinical-date-${record.dateBasis}`] : [];
+  if (record.payload.kind === "note" && record.payload.clinicalFact) tags.push(`clinical-fact-${record.payload.clinicalFact.category}`);
+  return tags;
+}
+
+function clinicalPageLocator(mediaType: string, page: number): { page?: number } {
+  return ["application/pdf", "image/png", "image/jpeg"].includes(mediaType.split(";", 1)[0]?.trim().toLowerCase() ?? "") ? { page } : {};
+}
+
+function clinicalEvidenceHoldReason(record: ClinicalDocumentExtractionOutput["records"][number], codings: Set<string> | null, text: string | undefined): string | null {
+  const typedHold = clinicalTypedFactEvidenceHold(record, text);
+  if (typedHold) return typedHold;
+  if (codings === null) return null;
+  if ((record.payload.kind === "note" && !record.payload.clinicalFact) || !text || !record.excerpt || !text.includes(record.excerpt)
+    || (record.dateBasis === "document" && (!record.dateEvidence || !text.includes(record.dateEvidence)))) {
+    return "Clinical resource proposal lacks literal source evidence.";
+  }
+  const payload = record.payload;
+  if (payload.kind === "note" && payload.clinicalFact?.codings?.some((coding) => !codings.has(JSON.stringify([coding.code, coding.system])))) {
+    return "Clinical source fact coding does not match source coding.";
+  }
+  if (payload.kind === "clinical_assertion" && (payload.code || payload.codeSystem)
+    && !codings.has(JSON.stringify([payload.code, payload.codeSystem]))) {
+    return "Clinical resource proposal code and system do not match source coding.";
   }
   return null;
 }
@@ -323,6 +444,7 @@ async function planClinicalEnrichmentPage(
   prepared: NonNullable<Job["prepared"]>,
   source: NonNullable<Job["source"]>,
   parent: { parentExternalRef: ExternalRef; parentRevision: string; clinicalOccurredAt?: string; retrievedAt: string },
+  sourceText?: string,
 ) {
   const metadata = vaultMetadataSchema.parse(await readVaultMetadataSource(vaultRoot));
   const dayReads = new Map<string, CanonicalEntity[]>();
@@ -331,6 +453,7 @@ async function planClinicalEnrichmentPage(
   let held = 0;
   const identities = new Set<string>();
   const verifiedIds: string[] = [];
+  const sourceCodings = clinicalSourceCodings(source, sourceText);
   const hold = (reason: string) => {
     held++;
     if (!job.holdReasons.includes(reason)) job.holdReasons = [...job.holdReasons, reason].slice(-20);
@@ -339,13 +462,17 @@ async function planClinicalEnrichmentPage(
     const output = clinicalDocumentExtractionOutputSchemaForFamily(family).parse(prepared.outputs[family]);
     if (output.status === "blocked") hold(`${family}: ${output.reason}`.slice(0, 500));
     for (const record of output.records) {
+      const evidenceHold = clinicalEvidenceHoldReason(record, sourceCodings, sourceText);
+      if (evidenceHold) {
+        hold(evidenceHold); continue;
+      }
       const proposed = record.payload;
       const payload = clinicalProposalDate(record, parent, metadata.timezone);
       if (!payload) { hold("Clinical fact has no supported event date."); continue; }
       const labHold = clinicalEnrichmentLabHoldReason(payload);
       if (labHold) { hold(labHold); continue; }
       // Identity belongs to the frozen proposal, including across a date-policy upgrade.
-      const facet = `document-extraction-${hash(`${source.sha256}\n${family}\n${factKey(proposed)}`)}`;
+      const facet = `document-extraction-${hash(`${source.resource?.sha256 ?? source.sha256}\n${family}\n${factKey(proposed)}`)}`;
       const externalRef = { ...parent.parentExternalRef, facet, version: parent.parentRevision };
       if (identities.has(facet)) { existing++; continue; }
       identities.add(facet);
@@ -362,8 +489,8 @@ async function planClinicalEnrichmentPage(
       if (result === "existing") { existing++; continue; }
       if (result === "held") { hold("Clinical fact overlaps canonical data without a unique equivalent identity."); continue; }
       accepted.push({ day, externalRef, decision: eventImportDecisionSchema.parse({ action: "upsert", sourceParent: parent.parentExternalRef, payload: {
-        ...payload, ...(record.dateBasis ? { tags: [`clinical-date-${record.dateBasis}`] } : {}), source: "import", rawRefs: [source.rawRef],
-        evidence: [{ rawRef: source.rawRef, page: prepared.page, ...((record.dateEvidence ?? record.excerpt) ? { excerpt: [record.dateEvidence, record.excerpt].filter(Boolean).join(" · ").slice(0, 500) } : {}) }],
+        ...payload, tags: clinicalProposalTags(record), source: "import", rawRefs: [source.rawRef],
+        evidence: [{ rawRef: source.rawRef, ...clinicalPageLocator(source.mediaType, prepared.page), ...((record.dateEvidence ?? record.excerpt) ? { excerpt: [record.dateEvidence, record.excerpt].filter(Boolean).join(" · ").slice(0, 500) } : {}) }],
         externalRef,
       } }) });
     }
@@ -396,7 +523,7 @@ export async function applyClinicalEnrichmentProposals(input: { vaultRoot: strin
     if (!attested.parent.eligible) {
       return holdPreparedClinicalDocument(input.vaultRoot, job, attested.parent.reason ?? "Clinical document parent is not eligible.");
     }
-    const { accepted, existing, held, verifiedIds } = await planClinicalEnrichmentPage(input.vaultRoot, job, job.prepared, job.source, attested.parent);
+    const { accepted, existing, held, verifiedIds } = await planClinicalEnrichmentPage(input.vaultRoot, job, job.prepared, job.source, attested.parent, "extractedText" in attested ? attested.extractedText : undefined);
     let canonical;
     try {
       canonical = accepted.length ? await importEventBatch({ vaultRoot: input.vaultRoot, apply: true, decisions: accepted.map((entry) => entry.decision) }) : null;
@@ -412,7 +539,7 @@ export async function applyClinicalEnrichmentProposals(input: { vaultRoot: strin
     job.counts.held += held;
     job.counts.pages++;
     job.lastReadback = { eventIds: verifiedIds, verifiedCount: verifiedIds.length };
-    if (job.page >= job.prepared.totalPages) { job.attachmentIndex++; job.page = 1; job.counts.documents++; delete job.source; delete job.totalPages; }
+    if (job.page >= job.prepared.totalPages) { advanceClinicalSource(job); job.page = 1; job.counts.documents++; delete job.source; delete job.totalPages; }
     else job.page++;
     delete job.prepared;
     job.status = "pending";
@@ -422,7 +549,7 @@ export async function applyClinicalEnrichmentProposals(input: { vaultRoot: strin
 }
 
 async function holdPreparedClinicalDocument(vaultRoot: string, job: Job, reason: string) {
-  holdCurrentDocument(job, reason);
+  holdCurrentSource(job, reason);
   delete job.prepared;
   job.status = "pending";
   job.lastReadback = { eventIds: [], verifiedCount: 0 };
@@ -441,17 +568,17 @@ export async function deferClinicalEnrichment(input: { vaultRoot: string; jobId:
     if (job.status !== "pending") throw new Error("Only unprepared clinical enrichment can defer extraction.");
     job.failures++;
     job.reason = input.reason;
-    if (job.failures >= 3) holdCurrentDocument(job, "Clinical extraction exceeded three provider attempts.");
+    if (job.failures >= 3) holdCurrentSource(job, "Clinical extraction exceeded three provider attempts.");
     else job.nextAttemptAt = input.nextAttemptAt;
     await saveJob(input.vaultRoot, job);
     return { status: job.status, nextAttemptAt: job.nextAttemptAt };
   });
 }
 
-function holdCurrentDocument(job: Job, reason: string) {
+function holdCurrentSource(job: Job, reason: string, structured?: boolean) {
   job.counts.held++;
   if (!job.holdReasons.includes(reason)) job.holdReasons = [...job.holdReasons, reason].slice(-20);
-  job.attachmentIndex++;
+  advanceClinicalSource(job, structured);
   job.page = 1;
   job.failures = 0;
   delete job.source;
@@ -465,7 +592,12 @@ export async function blockClinicalEnrichment(input: { vaultRoot: string; jobId:
     if (job.status === "complete") return;
     if (job.status === "prepared") throw new Error("Accepted clinical enrichment proposals must be applied before blocking.");
     job.reason = input.reason;
-    holdCurrentDocument(job, input.reason);
+    holdCurrentSource(job, input.reason);
     await saveJob(input.vaultRoot, job);
   });
+}
+
+function advanceClinicalSource(job: Job, structured = Boolean(job.source?.resource)): void {
+  if (structured) job.resourceIndex = (job.resourceIndex ?? 0) + 1;
+  else job.attachmentIndex++;
 }

@@ -132,12 +132,12 @@ describe("hosted runtime progress health", () => {
     }
   });
 
-  it("defers imported activation behind a current foreground checkpoint only until its deadline", () => {
+  it.each(["member.activated", "device-sync.wake"])("defers imported %s behind a current foreground checkpoint only until its deadline", (headKind) => {
     const row = progressRow({
       progressOriginAt: "2026-08-10T15:30:00Z", lane: "system", runtimeKey: "runtime_a",
-      headKind: "member.activated", workspaceCheckpointedAt: instant("2026-08-10T15:40:00Z"),
+      headKind, workspaceCheckpointedAt: instant("2026-08-10T15:40:00Z"),
     });
-    row.activationCheckpointEvidence = { assistant: {
+    row.foregroundCheckpointEvidence = { assistant: {
       terminalReplyCommittedAtEpochMs: +now - 4 * 60_000,
       checkpointPublicationExpectedByEpochMs: +now + 60_000,
     } };
@@ -150,18 +150,18 @@ describe("hosted runtime progress health", () => {
       anomalous: true, stalledSystemLaneCount: 1, oldestStalledAgeMs: 31 * 60_000 + 1,
     });
     for (const override of [
-      { headKind: "device-sync.wake" },
+      { headKind: "member.preferences.updated" },
       { workspaceSystemImportedSeq: null },
       { workspaceSystemImportedSeq: 0n },
       { workspaceSystemImportedSeq: 2n },
       { workspaceCheckpointedAt: null },
       { workspaceCheckpointedAt: instant("2026-08-10T15:56:00Z") },
-      { activationCheckpointEvidence: null },
+      { foregroundCheckpointEvidence: null },
       { chronologyInvalid: true },
-      { activationCheckpointEvidence: { assistant: {
+      { foregroundCheckpointEvidence: { assistant: {
         checkpointPublicationExpectedByEpochMs: +now + 60_000,
       } } },
-      { activationCheckpointEvidence: { assistant: {
+      { foregroundCheckpointEvidence: { assistant: {
         terminalReplyCommittedAtEpochMs: +now + 1,
         checkpointPublicationExpectedByEpochMs: +now + 60_000,
       } } },
@@ -1003,7 +1003,7 @@ function progressRow(input: {
   workspaceSystemImportedSeq?: bigint | null;
 }): HostedRuntimeProgressHealthRow {
   return {
-    activationCheckpointEvidence: null,
+    foregroundCheckpointEvidence: null,
     checkpointEvidence: null,
     deliveryAcceptedAt: null,
     chronologyInvalid: input.chronologyInvalid ?? false,

@@ -55,4 +55,35 @@ describe("native invocation receipts", () => {
     expect(recovered.usageSettlementAllowsProviders(next)).toBe(true);
   });
 
+  it("retains provider context across eviction and resets it only for a completed successor", () => {
+    const sql = createTestSqlStorage();
+    const first = { attemptId: "provider-1", generation: "1" };
+    const context = { workspaceVersion: "9007199254740993", customInferenceEnvelope: "synthetic-encrypted-settings", platformAiUsageAllowed: false };
+    const store = new RunnerInvocationReceiptStore(sql);
+    store.register(first, context);
+    const recovered = new RunnerInvocationReceiptStore(sql);
+    expect(recovered.readProviderInvocation()).toEqual({ ...first, context, settlementPending: false });
+    recovered.register(first, { ...context, platformAiUsageAllowed: true });
+    expect(recovered.readProviderInvocation()?.context?.platformAiUsageAllowed).toBe(false);
+    recovered.complete(first, false);
+    expect(recovered.readProviderInvocation()).toBeNull();
+    recovered.register({ attemptId: "provider-2", generation: "2" }, { ...context, workspaceVersion: "4", platformAiUsageAllowed: true });
+    expect(recovered.readProviderInvocation()?.context?.workspaceVersion).toBe("4");
+  });
+
+  it("adds context to an old receipt without restoring a stale generation", () => {
+    const sql = createTestSqlStorage();
+    sql.exec(`CREATE TABLE runner_invocation_receipt (singleton INTEGER PRIMARY KEY, attempt_id TEXT,
+      generation TEXT, state TEXT, immediate_recheck INTEGER NOT NULL DEFAULT 0)`);
+    sql.exec("INSERT INTO runner_invocation_receipt VALUES (1, 'legacy-attempt', '1', 'registered', 0)");
+    const store = new RunnerInvocationReceiptStore(sql);
+    const identity = { attemptId: "legacy-attempt", generation: "1" };
+    expect(store.readProviderInvocation()?.context).toBeNull();
+    const context = { workspaceVersion: "0", customInferenceEnvelope: null, platformAiUsageAllowed: true };
+    store.restoreProviderContext({ ...identity, generation: "2" }, context);
+    expect(store.readProviderInvocation()?.context).toBeNull();
+    store.restoreProviderContext(identity, context);
+    expect(store.readProviderInvocation()?.context).toEqual(context);
+  });
+
 });

@@ -8,7 +8,7 @@ import {
   isStrictIsoDateTime,
   normalizeActivityKindToken,
 } from "@murphai/contracts";
-import { resolveWearableProviderDescriptor } from "@murphai/health-metrics";
+import { resolveWearableProviderDescriptor } from "@murphai/health-metrics/wearable-provider-catalog";
 
 import {
   readNullableStringValue,

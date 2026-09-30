@@ -84,7 +84,7 @@ import type { HostedRuntimeCompletionReceipt } from "./runtime-completion-receip
 import { commandHostedRuntimeOwner } from "./runtime-owner-client.ts";
 import { HOSTED_CONTAINER_RUNTIME_COMPLETION_TIMEOUT_MS } from "./container-runtime-completion.ts";
 
-import { RunnerInvocationReceiptStore, type RunnerInvocationReceipt } from "./runner-invocation-receipt.ts";
+import { RunnerInvocationReceiptStore, type RunnerInvocationReceipt, type RunnerProviderAuthority } from "./runner-invocation-receipt.ts";
 
 const RUNNER_PORT = 8080;
 const RUNNER_PING_ENDPOINT = "container/health";
@@ -333,6 +333,7 @@ export interface HostedExecutionContainerStubLike extends Partial<HostedRunnerSl
   readSupervisedInvocation?(input: { userId: string }): Promise<RunnerInvocationReceipt | null>;
   beginRuntimeUsageSettlement?(input: { userId: string; attemptId: string; generation: string; reportId: string }): Promise<boolean>;
   finishRuntimeUsageSettlement?(input: { userId: string; attemptId: string; generation: string; reportId: string; allowed: boolean }): Promise<void>;
+  readProviderAuthority?(): Promise<RunnerProviderAuthority | null>;
   runtimeUsageSettlementAllowsProviders?(input: { userId: string; attemptId: string; generation: string }): Promise<boolean>;
   onRuntimeCompletionRecorded?(
     input: RunnerContainerRuntimeCompletionRecordedInput,
@@ -660,6 +661,7 @@ export class RunnerContainer extends Container {
   // This discriminator is namespace identity, not a second lifecycle owner.
   protected readonly slotNamespace: "runner" | "standby" | "small" = "runner";
   private slotStore: RunnerSlotBindingStore | null = null;
+  private invocationReceipts: RunnerInvocationReceiptStore | null = null;
   private readonly durableObjectName: string | null;
   private lifecycleLock: Promise<void> = Promise.resolve();
   private lifecycleLockPendingCount = 0;
@@ -1030,7 +1032,9 @@ export class RunnerContainer extends Container {
     const receipts = this.requireInvocationReceiptStore();
     // Reserve durably before launch. Retrying after eviction never reexecutes
     // an ambiguous invocation; reconciliation inspects this exact target.
-    if (receipts.register(identity) === "existing") return { accepted: true };
+    if (receipts.register(identity, { workspaceVersion: request.workspaceVersion,
+      customInferenceEnvelope: authority.owner.customInferenceEnvelope,
+      platformAiUsageAllowed: authority.owner.platformAiUsageAllowed }) === "existing") return { accepted: true };
     const result = this.invoke(payload);
     this.ctx.waitUntil(result.then(async (completed) => {
       if (!receipts.complete(identity, completed.immediateRecheckRequested === true)) return;
@@ -1083,14 +1087,39 @@ export class RunnerContainer extends Container {
     this.requireInvocationReceiptStore().finishUsageSettlement(input, input.reportId, input.allowed);
   }
 
+  // Existing Workers may finish requests across controller deployment.
   async runtimeUsageSettlementAllowsProviders(input: { userId: string; attemptId: string; generation: string }): Promise<boolean> {
     this.authorizeBoundUser(input.userId);
     return this.requireInvocationReceiptStore().usageSettlementAllowsProviders(input);
   }
 
+  async readProviderAuthority(): Promise<RunnerProviderAuthority | null> {
+    const binding = this.readRunnerSlotBindingOptional();
+    if (!binding?.userId || (binding.state !== "bound" && binding.state !== "retiring")) return null;
+    const receipts = this.requireInvocationReceiptStore();
+    let invocation = receipts.readProviderInvocation();
+    if (!invocation) return null;
+    // Rolling deploy: old registered invocations have no native provider context.
+    // Import it once; fresh launches persist it before any container execution.
+    if (!invocation.context) {
+      const { owner } = await commandHostedRuntimeOwner({ source: this.environment,
+        userId: binding.userId, command: { operation: "reconcile" } });
+      if (!owner || owner.attemptId !== invocation.attemptId || owner.generation !== invocation.generation
+        || owner.runnerContainerName !== binding.slotName || owner.workspaceVersion === null
+        || !["starting", "active", "retiring"].includes(owner.phase)) return null;
+      receipts.restoreProviderContext(invocation, { workspaceVersion: owner.workspaceVersion,
+        customInferenceEnvelope: owner.customInferenceEnvelope, platformAiUsageAllowed: owner.platformAiUsageAllowed });
+      invocation = receipts.readProviderInvocation();
+    }
+    const state = this.readRunnerSlotBindingOptional()?.state;
+    if (state !== "bound" && state !== "retiring") return null;
+    return invocation?.context ? { retiring: state === "retiring", userId: binding.userId, attemptId: invocation.attemptId,
+      generation: invocation.generation, ...invocation.context, settlementPending: invocation.settlementPending } : null;
+  }
+
   private requireInvocationReceiptStore(): RunnerInvocationReceiptStore {
     if (!this.ctx.storage.sql) throw new Error("Native invocation receipts require SQLite storage.");
-    return new RunnerInvocationReceiptStore(this.ctx.storage.sql);
+    return this.invocationReceipts ??= new RunnerInvocationReceiptStore(this.ctx.storage.sql);
   }
 
   async invoke(

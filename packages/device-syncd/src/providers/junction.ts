@@ -664,34 +664,32 @@ const JUNCTION_SPARSE_CALENDAR_AGGREGATE_RESOURCE_SET = new Set<string>([
   "mindfulness_minutes",
 ]);
 const TIMESERIES_HOUR_MS = 60 * 60_000;
-// Three single-attempt pages allow ordinary pagination while capping provider
-// wait at 24 seconds, below the hosted job's 45-second outer budget.
+// Three single-attempt pages allow ordinary pagination with a 12-second cap
+// per request. This is an inner bound, not a promise about the outer job budget.
 const JUNCTION_FULL_JOB_TIMESERIES_COLLECTION_WORK_LIMIT = Object.freeze({
   maxAttemptsPerPage: 1,
   maxPages: 3,
-  requestTimeoutMs: 8_000,
+  requestTimeoutMs: 12_000,
 } satisfies JunctionCollectionWorkLimit);
 // Most hosted summary continuation units contain one resource. Match the
-// bounded timeseries contract so a complete three-page unit remains below the
-// 45-second outer maintenance budget and can persist its next cursor.
+// bounded timeseries requests; foreground cancellation still takes precedence.
 const JUNCTION_FULL_JOB_SUMMARY_COLLECTION_WORK_LIMIT = Object.freeze({
   maxAttemptsPerPage: 1,
   maxPages: 3,
-  requestTimeoutMs: 8_000,
+  requestTimeoutMs: 12_000,
 } satisfies JunctionCollectionWorkLimit);
-// Sleep summaries and sleep cycles share canonical stage ownership, so they
-// must be normalized in one import. Keep their combined worst-case provider
-// wait at 30 seconds to leave room for projection/import inside the hosted
-// worker's 45-second outer maintenance budget.
+// Sleep summaries and sleep cycles share canonical stage ownership and must
+// be normalized in one import. Keep a smaller per-request cap for this coupled
+// unit without assuming a fixed outer maintenance budget.
 const JUNCTION_FULL_JOB_COUPLED_SUMMARY_COLLECTION_WORK_LIMIT = Object.freeze({
   maxAttemptsPerPage: 1,
   maxPages: 3,
-  requestTimeoutMs: 5_000,
+  requestTimeoutMs: 7_500,
 } satisfies JunctionCollectionWorkLimit);
 const JUNCTION_FULL_JOB_INVENTORY_COLLECTION_WORK_LIMIT = Object.freeze({
   maxAttemptsPerPage: 1,
   maxPages: 1,
-  requestTimeoutMs: 8_000,
+  requestTimeoutMs: 12_000,
 } satisfies JunctionCollectionWorkLimit);
 const JUNCTION_TEMPORAL_AUTHORITY_LAG_MS = TIMESERIES_CHUNK_MS;
 const JUNCTION_TEMPORAL_AUTHORITY_RESOURCES = new Set([

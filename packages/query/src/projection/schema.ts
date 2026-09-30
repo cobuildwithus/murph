@@ -32,7 +32,8 @@ export const QUERY_PROJECTION_SCHEMA_ID = "murph.query-projection";
 // 32: Share identical metric payloads within each published generation.
 // 33: Retire untouched legacy Junction oxygen analytics from default queries.
 // 34: Share wearable JSON field dictionaries and pin search rowids for rebuild compaction.
-export const QUERY_PROJECTION_SQLITE_VERSION = 34;
+// 35: Index allowlisted clinical-fact fields in private search.
+export const QUERY_PROJECTION_SQLITE_VERSION = 35;
 
 export interface QueryProjectionLocation {
   absolutePath: string;

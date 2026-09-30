@@ -5864,9 +5864,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(request.headers.has("x-hosted-runtime-lease-generation")).toBe(false);
     expect(request.headers.has("x-hosted-runtime-workspace-version")).toBe(false);
     expect(request.headers.get(HOSTED_RUNNER_BOUND_USER_ID_HEADER)).toBe("member_123");
-    expect(request.headers.get(HOSTED_PROVIDER_EGRESS_TOKEN_HEADER)).toBe(
-      "provider-egress-token-123",
-    );
+    expect(request.headers.get(HOSTED_PROVIDER_EGRESS_TOKEN_HEADER)).toBeNull();
   });
 
   it("calls ambient Worker fetch with the global receiver across hosted fetch boundaries", async () => {
@@ -6016,9 +6014,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(forwarded.headers.has("x-hosted-runtime-lease-generation")).toBe(false);
     expect(forwarded.headers.has("x-hosted-runtime-workspace-version")).toBe(false);
     expect(forwarded.headers.get(HOSTED_RUNNER_BOUND_USER_ID_HEADER)).toBe("member_123");
-    expect(forwarded.headers.get(HOSTED_PROVIDER_EGRESS_TOKEN_HEADER)).toBe(
-      "provider-egress-token-456",
-    );
+    expect(forwarded.headers.get(HOSTED_PROVIDER_EGRESS_TOKEN_HEADER)).toBeNull();
     expect(forwarded.headers.has(HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER)).toBe(false);
     expect(forwarded.method).toBe("PUT");
     expect(await forwarded.text()).toBe("b");
@@ -6079,9 +6075,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(request.headers.has("x-hosted-runtime-lease-generation")).toBe(false);
     expect(request.headers.has("x-hosted-runtime-workspace-version")).toBe(false);
     expect(request.headers.get(HOSTED_RUNNER_BOUND_USER_ID_HEADER)).toBe("member_123");
-    expect(request.headers.get(HOSTED_PROVIDER_EGRESS_TOKEN_HEADER)).toBe(
-      "provider-egress-token-local",
-    );
+    expect(request.headers.get(HOSTED_PROVIDER_EGRESS_TOKEN_HEADER)).toBeNull();
   });
 
   it("rejects configured local provider fetches outside the configured base path", async () => {
@@ -6231,9 +6225,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     );
     expect(request.url).toBe("http://172.17.0.1:4012/bot__cloudflare_injected__/sendMessage");
     expect(request.headers.get(HOSTED_RUNNER_BOUND_USER_ID_HEADER)).toBe("member_123");
-    expect(request.headers.get(HOSTED_PROVIDER_EGRESS_TOKEN_HEADER)).toBe(
-      "provider-egress-token-local",
-    );
+    expect(request.headers.get(HOSTED_PROVIDER_EGRESS_TOKEN_HEADER)).toBeNull();
 
     const rejectedFetchMock = vi.fn(async () => new Response(null, { status: 204 }));
     const rejectedFetch = createCloudflareHostedProviderFetch(
@@ -6300,9 +6292,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(request.headers.has("x-hosted-runtime-lease-generation")).toBe(false);
     expect(request.headers.has("x-hosted-runtime-workspace-version")).toBe(false);
     expect(request.headers.get(HOSTED_RUNNER_BOUND_USER_ID_HEADER)).toBe("member_123");
-    expect(request.headers.get(HOSTED_PROVIDER_EGRESS_TOKEN_HEADER)).toBe(
-      "provider-egress-token-linq-local",
-    );
+    expect(request.headers.get(HOSTED_PROVIDER_EGRESS_TOKEN_HEADER)).toBeNull();
   });
 
   it("does not require external provider fetches to carry a runtime write-fence lease", async () => {
@@ -6354,9 +6344,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(request.headers.has("x-hosted-runtime-lease-generation")).toBe(false);
     expect(request.headers.has("x-hosted-runtime-workspace-version")).toBe(false);
     expect(request.headers.get(HOSTED_RUNNER_BOUND_USER_ID_HEADER)).toBe("member_123");
-    expect(request.headers.get(HOSTED_PROVIDER_EGRESS_TOKEN_HEADER)).toBe(
-      "provider-egress-token-platform",
-    );
+    expect(request.headers.get(HOSTED_PROVIDER_EGRESS_TOKEN_HEADER)).toBeNull();
   });
 
   it("keeps public Internet fetches free of runtime authority headers", async () => {

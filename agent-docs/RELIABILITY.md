@@ -407,8 +407,8 @@ to apply after cutover.
 - Update architecture and verification docs in the same change that introduces new runtime entrypoints.
 - Avoid hidden coupling between scripts, docs, and runtime code; document new dependencies in `ARCHITECTURE.md` and `agent-docs/references/testing-ci-map.md`.
 - Codex App Server owns managed OpenAI standalone web search. Its exact
-  `POST /v1/alpha/search` request uses the existing signed provider credential
-  and Worker egress owner; a provider rejection remains the current tool
+  `POST /v1/alpha/search` request uses native container authority
+  and the Worker egress owner; a provider rejection remains the current tool
   failure and must not create a Murph-side retry, fallback search provider,
   queue, or durable search state. Unsupported methods, paths, providers, and
   invalid runtime identity fail closed before Worker-owned credential
@@ -622,7 +622,7 @@ to apply after cutover.
   starving the other. The durable null snapshot remains an explicit `pending`
   shared-read state until the member runtime materializes it.
 - Direct hosted Codex process projection includes the selected core provider
-  and only that provider's signed egress credential. Changing providers
+  and that provider's SDK credential placeholder. Changing providers
   therefore changes the warm-process launch identity; the replacement process
   cannot inherit the prior provider's endpoint or credential.
 - Explicit remote verification is fail-closed. The dispatcher never retries on
@@ -2571,15 +2571,18 @@ to apply after cutover.
   updates cover all three channels and preserve stale-lease rejection. These
   facts never acknowledge mailbox consumption; the checkpoint retains ownership.
   A system head ages from its accepted mailbox creation time.
-  Imported `member.activated` work may defer its alert while the same active
-  default-mode runtime owns both its workspace progress generation and the
+  Imported `member.activated` and `device-sync.wake` work may defer their alerts
+  while the same active default-mode runtime owns both its workspace progress
+  generation and the
   latest foreground trace's attempt/generation. That trace must prove a terminal
-  reply or no-reply after the activation and last workspace checkpoint, with an
+  reply or no-reply after the system head and last workspace checkpoint, with an
   unexpired runtime-owned checkpoint deadline. Read only the newest trace through
   the existing member/acceptance index; never fall back to older evidence when
-  that trace is incomplete. Expiry restores the original activation age. Other
-  system kinds, unimported activation, retired owners, generation mismatches,
-  and already-published completion retain normal stall classification.
+  that trace is incomplete. Expiry restores the original system-head age. This
+  grace respects foreground priority without treating a device import or a
+  future retry wake as completion. Other system kinds, unimported heads, retired
+  owners, generation mismatches, and already-published completion retain normal
+  stall classification.
   Lane high-water reads select only sequence and update time; they never fetch
   inline or externalized mailbox ciphertext.
   Import and unrelated

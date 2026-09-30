@@ -137,6 +137,8 @@ export interface HostedStandbySlotCoordinatorState {
 }
 
 export interface HostedStandbyRunnerContainerNamespaceLike {
+  get?(id: unknown): HostedStandbyRunnerContainerStubLike;
+  idFromString?(id: string): unknown;
   getByName(
     name: string,
     options?: HostedStandbyNamespaceLocationOptions,

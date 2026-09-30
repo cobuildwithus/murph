@@ -1102,3 +1102,5 @@ function isExpectedEpicPatientNotice(issue: object): boolean {
     && /^urn:oid:1\.2\.840\.114350\.1\.13\.\d+\.\d+\.7\.2\.657369$/u.test(coding.system)
     && "code" in coding && (coding.code === "4101" || coding.code === "4119"));
 }
+
+export { selectClinicalFhirResource, clinicalFhirResourceText, clinicalFhirResourceExtractionText, indexClinicalFhirResources } from "./enrichment.ts";

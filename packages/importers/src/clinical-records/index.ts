@@ -371,9 +371,9 @@ export function clinicalPlanToEventImportDecisions(
   return plan.decisions.flatMap((decision): EventImportDecision[] => {
     if (decision.action !== "review") {
       return [eventImportDecisionSchema.parse({ ...decision,
-        ...(decision.action === "retract" && isDocumentSourceRef(decision.externalRef)
+        ...(decision.action === "retract" && isEnrichmentSourceRef(decision.externalRef)
           ? { retractFacetPrefixes: ["document-extraction"] } : {}),
-        ...(decision.action === "upsert" && isDocumentSourceRef(decision.payload.externalRef)
+        ...(decision.action === "upsert" && isEnrichmentSourceRef(decision.payload.externalRef)
           ? { invalidateFacetPrefixes: ["document-extraction"] } : {}),
       })];
     }
@@ -384,14 +384,15 @@ export function clinicalPlanToEventImportDecisions(
         externalRef: decision.externalRef,
         reason: decision.reason,
         evidence: decision.evidence,
-        ...(isDocumentSourceRef(decision.externalRef) ? { retractFacetPrefixes: ["document-extraction"] } : {}),
+        ...(isEnrichmentSourceRef(decision.externalRef) ? { retractFacetPrefixes: ["document-extraction"] } : {}),
       }),
     ];
   });
 }
 
-function isDocumentSourceRef(ref: { resourceType: string } | undefined): boolean {
-  return ref !== undefined && ["document-reference", "diagnostic-report"].includes(ref.resourceType);
+function isEnrichmentSourceRef(ref: { resourceType: string } | undefined): boolean {
+  return ref !== undefined && ["document-reference", "diagnostic-report", "observation",
+    ...[...FHIR_HISTORY_RESOURCE_TYPES].map((type) => fhirResourceTypeToSlug(type))].includes(ref.resourceType);
 }
 
 function buildAllergySnapshotDecision(input: {
@@ -962,7 +963,7 @@ function mapVitalUnitFailure(context: FhirResourceContext<Observation>, quantity
 
 function mapObservationSourceNote(context: FhirResourceContext<Observation>, reason: string): MappedFhirResource {
   const resourceId = readResourceId(context.resource);
-  const note = buildFhirObservationSourceNote(context.resource);
+  const note = buildFhirObservationSourceNote(context.resource, readResourceRevision(context));
   if (!resourceId || !note) return reviewOnly(context, reason);
   return upsertOrReview(context, {
     ...note, kind: "note", source: "import",

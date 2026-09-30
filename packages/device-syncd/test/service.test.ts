@@ -15626,3 +15626,48 @@ test.each([false, true])("device sync credits continuation progress only after o
     assert.equal(jobs.some(job => job.kind === "resource"), commitSucceeds);
   } finally { close(); }
 });
+
+test.each([
+  {
+    label: "valid timeout", code: "JUNCTION_API_REQUEST_TIMEOUT",
+    details: { providerRequestTimeoutMs: 12_000, providerRequestElapsedMs: 12_004,
+      providerRequestAttempt: 1, providerRequestStage: "response_body", providerResponseHeadersPresent: true },
+    expected: { providerRequestTimeoutMs: 12_000, providerRequestElapsedMs: 12_004,
+      providerRequestAttempt: 1, providerRequestStage: "response_body", providerResponseHeadersPresent: true },
+  },
+  {
+    label: "malformed timeout", code: "JUNCTION_API_REQUEST_TIMEOUT",
+    details: { providerRequestTimeoutMs: Infinity, providerRequestElapsedMs: -1,
+      providerRequestAttempt: 101, providerRequestStage: "synthetic-private-stage", providerResponseHeadersPresent: "true" },
+    expected: {},
+  },
+  {
+    label: "unrelated provider failure", code: "WHOOP_TOKEN_REQUEST_FAILED",
+    details: { providerRequestTimeoutMs: 12_000, providerRequestElapsedMs: 12_004,
+      providerRequestAttempt: 1, providerRequestStage: "response_body", providerResponseHeadersPresent: true },
+    expected: {},
+  },
+])("device sync service scopes bounded Junction timeout diagnostics: $label", async ({ code, details, expected }) => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-timeout-diagnostics");
+  const { service, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    config: { vaultRoot, publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite") },
+    providers: [createFakeProvider({ async executeJob() {
+      throw deviceSyncError({ code, message: "Synthetic request timeout", retryable: true,
+        httpStatus: 504, details: { ...details, requestUrl: "https://example.test/private-synthetic-resource" } });
+    } })],
+  });
+  try {
+    const begin = await service.startConnection({ provider: "demo" });
+    await service.handleOAuthCallback({ provider: "demo", state: begin.state, code: "synthetic-timeout" });
+    await service.runWorkerOnce();
+    const diagnostic = service.listJobFailureDiagnostics()[0];
+    assert.ok(diagnostic);
+    assert.equal(diagnostic.code, code);
+    assert.deepEqual(diagnostic.details, { providerHttpStatus: 504, ...expected });
+    assert.equal(JSON.stringify(diagnostic).includes("private-synthetic-resource"), false);
+  } finally {
+    close();
+  }
+});

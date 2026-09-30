@@ -3,7 +3,8 @@ in [the import-speed plan](exec-plans/completed/2026-09-24-garmin-import-speed.m
 
 # Murph Agent Docs Index
 
-Runtime claim eligibility and reuse of transaction-validated routing facts are
+Runtime claim eligibility, native provider authority, usage-settlement ordering, rollout compatibility,
+and reuse of transaction-validated routing facts are
 owned by [Hosted Postgres runtime ownership](references/hosted-postgres-runtime.md).
 
 Late runtime telemetry retirement semantics are owned by
@@ -130,8 +131,9 @@ Checkpointed historical scan progress, including empty-date coverage, is owned
 by `agent-docs/RELIABILITY.md` and `packages/device-syncd/README.md`.
 
 Checkpoint-aware operational stall alerts, including bounded publication time
-for deferred device jobs and checkpoint-confirmed runnable cycling windows,
-are specified in `agent-docs/RELIABILITY.md`.
+for deferred device jobs, checkpoint-confirmed runnable cycling windows, and
+current-owner foreground checkpoint grace for imported activation/device-sync
+mailbox heads, are specified in `agent-docs/RELIABILITY.md`.
 Cycling-window correction and focused proof are recorded in
 [`2026-09-20-device-cycling-alert.md`](exec-plans/completed/2026-09-20-device-cycling-alert.md).
 The original productive-pass and conversation implementation is tracked in
@@ -519,7 +521,7 @@ is recorded in [`2026-09-18-ios-canary-deployment-continuity.md`](exec-plans/com
 | `agent-docs/product-specs/private-group-consultation.md` | Hosted group consultation. | Hosted group consultation | High | 2026-08-28 |
 | `agent-docs/product-specs/consented-group-disclosure.md` | Hosted group disclosure. | Hosted group disclosure | High | 2026-08-26 |
 | `agent-docs/product-specs/hosted-group-join-confirmation.md` | Hosted group membership behavior. | Hosted group membership behavior | High | 2026-07-23 |
-| `agent-docs/product-specs/clinical-records-intake.md` | Bounded clinical import, optional daily checks, provider search, document enrichment reuse, saved results and privacy controls. | Clinical Records intake behavior | High | 2026-09-15 |
+| `agent-docs/product-specs/clinical-records-intake.md` | Bounded clinical import, stable undated-fact replay, optional daily checks, document enrichment, saved results and privacy controls. | Clinical Records intake behavior | High | 2026-09-15 |
 | `agent-docs/references/epic-automatic-distribution.md` | Epic automatic-distribution API matrix, hospital-approved imports, optional persistent credentials and privacy questionnaire guidance. | Epic import registration and rollout | High | 2026-09-15 |
 | `agent-docs/phone-calls/retell-phone-agent.md` | Retell hosted phone agent prompt, authority, transfer, and call-brief handling rules. | Hosted phone-call provider setup | Medium | 2026-06-25 |
 | `agent-docs/phone-calls/retell-analysis-fields.md` | Retell post-call analysis field contract and transcript-retention boundary. | Hosted phone-call provider setup | Medium | 2026-06-25 |
@@ -537,7 +539,8 @@ is recorded in [`2026-09-18-ios-canary-deployment-continuity.md`](exec-plans/com
 | `agent-docs/exec-plans/completed/2026-09-13-source-list-projection-independence.md` | Completed wearable-projection implementation and parent validation evidence; cohort reporting correction, retained global-position diagnosis, and final exact-head completion gates. | Source-health execution plan | Medium | 2026-09-13 |
 | `packages/vault-usecases/bench/README.md` | Synthetic experiment-progress timing through the composed usecase, semantic parity, and baseline comparison limits. | Experiment progress performance | Medium | 2026-09-11 |
 | `agent-docs/references/health-entity-taxonomy-seam.md` | Shared owner seam for health taxonomy metadata. | Health taxonomy seam | Medium | 2026-04-06 |
-| `agent-docs/references/hosted-postgres-runtime.md` | Postgres execution authority, native wake and completion, uploads, bounded cleanup cadence, heartbeat-free snapshot publication with one managed session/receipt read, seven-day encrypted checkpoint recovery history, replacement vault integrity, user deletion, local controls, completed cutover, and retained migration history. | Hosted runtime ownership | High | 2026-09-20 |
+| `agent-docs/references/hosted-postgres-runtime.md` | Postgres admission and canonical mutations, native provider authority and pending usage receipts, native wake and completion, uploads, bounded cleanup cadence, heartbeat-free snapshot publication with one managed session/receipt read, seven-day encrypted checkpoint recovery history, replacement vault integrity, user deletion, local controls, completed cutover, and retained migration history. | Hosted runtime ownership | High | 2026-09-30 |
+| `agent-docs/exec-plans/completed/2026-09-30-native-provider-authority.md` | Callback and credential deletion, native invocation authority, usage-outage regression proof, rollout boundaries, and final ReviewGPT pass. | Historical implementation evidence | Low | 2026-09-30 |
 | `agent-docs/references/hosted-runtime-protocol.md` | Graceful container drain and Codex exit cleanup; system checkpoint cancellation and numeric mailbox Web/Worker timing; Hosted operator provider authentication, mailbox/workspace checkpoints, v2-only live restore, derived artifact availability, inert legacy cache manifests, retained legacy object cleanup and canonical receipt recovery, hot admission and bounded history reads, stale delivery-wake recovery, exact ownership, idle restore publication, and accepted-work monitoring, including independent workspace attempts, shared canonical publication, single-pass device-hint coverage, bounded late system-mailbox import after completion recording with covered-schedule retirement and locked stale-schedule rejection, validated continuation scheduling, provider cadence separated from runtime retry deadlines, independent maintenance, bounded retention failure/blocker retries and stage diagnostics, future retry wakes after cold restore, vault-share deadline revalidation, fenced prior-snapshot reuse, background Browser Vault freshness, retired member shell hints with historical latency reads, deadline-bound operator diagnostic execution and status, exact future-continuation owner release, metadata-only checkpoint timing, committed Browser Vault publication before subsequent ordinary due work with timeout continuation delivery, completion ownership across foreground handoff and reuse, observation-only active-fence liveness without cleanup deferral, and bounded consent-aware group wearable freshness requests with source-specific gaps, independent recent-date recovery, conservative historical absence, and shared-history recovery, honest check times and optional schedule recovery. | Hosted execution architecture and bounded device-sync drain budgets | High | 2026-09-12 |
 | `agent-docs/references/hosted-temporal-orchestration.md` | Hosted Temporal orchestration, compatible controller-first bootstrap, checkpointed device-continuation rechecks, digest-bound production-core release admission, and explicit Web admission status delivery. | Hosted Temporal orchestration target | High | 2026-09-11 |
 | `agent-docs/references/data-model-seams.md` | Current shared-owner notes for high-leverage data-model seams. | Data-model seam guidance | Medium | 2026-04-07 |
@@ -669,6 +672,17 @@ Provider-search delivery is recorded in
 
 The separate registration activation and composed import proof remain active in
 [`2026-09-16-epic-import-live-verification.md`](exec-plans/active/2026-09-16-epic-import-live-verification.md).
+
+Structured clinical source recovery is tracked in
+[`2026-09-29-clinical-structured-enrichment.md`](exec-plans/completed/2026-09-29-clinical-structured-enrichment.md).
+
+Structured clinical facts in normal runtime imports are tracked in
+[the runtime facts plan](exec-plans/completed/2026-09-29-clinical-runtime-facts.md).
+
+Literal evidence selection and focused model proof are tracked in
+[`clinical evidence quotes`](exec-plans/completed/2026-09-29-clinical-evidence-quotes.md).
+Assessment classification and source links through the intake CLI are tracked in
+[`clinical intake classification`](exec-plans/completed/2026-09-29-clinical-intake-classification.md).
 
 Clinical import notice handling, qualitative range preservation, and repeated-item
 reporting are tracked in
@@ -891,3 +905,6 @@ Complete historical clinical hold-shape coverage is recorded in
 [hold histories](exec-plans/completed/2026-09-29-clinical-hold-histories.md).
 
 Clinical raw validation repair plan: [`2026-09-29-frog-3895-clinical-validation.md`](exec-plans/active/2026-09-29-frog-3895-clinical-validation.md).
+
+Mailbox startup dependency reduction and single-query ingress context proof are tracked in
+[mailbox startup simplification](exec-plans/completed/2026-09-30-mailbox-startup-simplification.md).

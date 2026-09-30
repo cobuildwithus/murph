@@ -43,6 +43,7 @@ import {
   serializeCompanionHrvRmssdObservation,
 } from "@murphai/contracts";
 import { test, vi } from "vitest";
+import { DeviceSyncError } from "../src/errors.ts";
 import {
   buildJunctionClientUserId,
   createJunctionDeviceSyncProvider,
@@ -1573,52 +1574,93 @@ test("Junction yieldable summary continuation fails within its inner provider-at
   assert.equal(summaryAttempts, 1);
 });
 
-test("Junction yieldable reconcile times out provider inventory once before the hosted deadline", async () => {
-  vi.useFakeTimers();
-  let inventoryAttempts = 0;
-  let summaryAttempts = 0;
-  try {
-    const provider = createJunctionProvider(async (input, init) => {
-      const url = readUrl(input);
-      if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
-        inventoryAttempts += 1;
-        return new Promise<Response>((_resolve, reject) => {
-          const signal = init?.signal;
-          if (!signal) {
-            reject(new Error("Expected the bounded inventory request to carry an abort signal."));
-            return;
-          }
-          const rejectAborted = () => reject(signal.reason);
-          if (signal.aborted) {
-            rejectAborted();
-            return;
-          }
-          signal.addEventListener("abort", rejectAborted, { once: true });
-        });
-      }
-      if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/activity/")) {
-        summaryAttempts += 1;
-        return createJsonResponse({ data: [] });
-      }
-      throw new Error(`Unexpected request: ${url}`);
+for (const { label, path, summaryResources, timeseries, oldBudget, budget } of [
+  { label: "inventory", path: "/v2/user/providers/", summaryResources: ["activity"], timeseries: false, oldBudget: 8_000, budget: 12_000 },
+  { label: "summary", path: "/v2/summary/activity/", summaryResources: ["activity"], timeseries: false, oldBudget: 8_000, budget: 12_000 },
+  { label: "coupled sleep", path: "/v2/summary/sleep/", summaryResources: ["sleep", "sleep_cycle"], timeseries: false, oldBudget: 5_000, budget: 7_500 },
+  { label: "coupled sleep cycle", path: "/v2/summary/sleep_cycle/", summaryResources: ["sleep", "sleep_cycle"], timeseries: false, oldBudget: 5_000, budget: 7_500 },
+  { label: "timeseries", path: "/v2/timeseries/", summaryResources: [], timeseries: true, oldBudget: 8_000, budget: 12_000 },
+]) {
+  test.each(["healthy", "between caps", "timeout", "foreground abort"])(`Junction full-job ${label}: %s`, async (outcome) => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date", "performance"] });
+    // Put the native abort timer and the SDK timer on the same synthetic clock.
+    const abortTimeout = vi.spyOn(AbortSignal, "timeout").mockImplementation((ms) => {
+      const controller = new AbortController();
+      setTimeout(() => controller.abort(new DOMException("Synthetic deadline", "TimeoutError")), ms);
+      return controller.signal;
     });
-    const execution = executeJunctionJob(
-      provider,
-      createJunctionJobContext({ shouldYield: () => false }),
-      createJob("reconcile", {
+    const parent = new AbortController();
+    const foregroundReason = new Error("synthetic foreground yield");
+    const delay = outcome === "healthy" ? 10 : outcome === "timeout" ? budget + 1 : oldBudget + 500;
+    let attempts = 0;
+    try {
+      const provider = createJunctionProvider(async (input, init) => {
+        const pathname = new URL(readUrl(input)).pathname;
+        if (pathname.startsWith(path)) {
+          attempts += 1;
+          const signal = init?.signal;
+          assert.ok(signal);
+          await new Promise<void>((resolve, reject) => {
+            const abort = () => { clearTimeout(timer); reject(signal.reason); };
+            const timer = setTimeout(() => {
+              signal.removeEventListener("abort", abort);
+              resolve();
+            }, delay);
+            signal.addEventListener("abort", abort, { once: true });
+            if (signal.aborted) abort();
+          });
+        }
+        if (pathname.startsWith("/v2/user/providers/")) {
+          return createJsonResponse({ providers: [{
+            id: "synthetic-provider", name: "Garmin", slug: "garmin", status: "connected",
+            resource_availability: { activity: true, sleep: true, sleep_cycle: true, heartrate: true },
+          }] });
+        }
+        if (pathname.startsWith("/v2/summary/")) {
+          return createJsonResponse({ [pathname.split("/")[3]!]: [] });
+        }
+        if (pathname.startsWith("/v2/timeseries/")) return createJsonResponse({ groups: {} });
+        throw new Error("Unexpected synthetic Junction request");
+      }, { summaryResources, timeseriesResources: timeseries ? ["heartrate"] : [] });
+      const execution = executeJunctionJob(provider, createJunctionJobContext({
+        shouldYield: () => false,
+        signal: parent.signal,
+      }), createJob("reconcile", {
+        windowStart: "2026-04-02T00:00:00.000Z",
         windowEnd: "2026-04-03T00:00:00.000Z",
-        windowStart: "2026-03-27T00:00:00.000Z",
-      }),
-    );
-
-    await vi.advanceTimersByTimeAsync(8_000);
-    await assert.rejects(execution, { code: "JUNCTION_API_REQUEST_TIMEOUT", retryable: true });
-    assert.equal(inventoryAttempts, 1);
-    assert.equal(summaryAttempts, 0);
-  } finally {
-    vi.useRealTimers();
-  }
-});
+        ...(timeseries ? {
+          timeseriesCursor: "2026-04-02T00:00:00.000Z",
+          timeseriesResourceCursor: "heartrate",
+        } : {}),
+      }));
+      const checked = outcome === "timeout"
+        ? assert.rejects(execution, (error) => {
+          assert.ok(error instanceof DeviceSyncError);
+          assert.equal(error.code, "JUNCTION_API_REQUEST_TIMEOUT");
+          assert.equal(error.retryable, true);
+          assert.equal(error.details?.providerRequestTimeoutMs, budget);
+          assert.equal(error.details?.providerRequestElapsedMs, budget);
+          assert.equal(error.details?.providerRequestAttempt, 1);
+          assert.equal(error.details?.providerRequestStage, "awaiting_headers");
+          assert.equal(error.details?.providerResponseHeadersPresent, false);
+          return true;
+        })
+        : outcome === "foreground abort"
+          ? assert.rejects(execution, (error) => error === foregroundReason)
+          : assert.doesNotReject(execution);
+      if (outcome === "foreground abort") {
+        setTimeout(() => parent.abort(foregroundReason), 25);
+      }
+      await vi.advanceTimersByTimeAsync(outcome === "foreground abort" ? 25 : delay);
+      await checked;
+      assert.equal(attempts, 1, "The full-job request must not immediately retry");
+    } finally {
+      abortTimeout.mockRestore();
+      vi.clearAllTimers();
+      vi.useRealTimers();
+    }
+  });
+}
 
 test("Junction yieldable reconcile bounds maximum provider projection to fixed source reads", async () => {
   const providers = Array.from({ length: JUNCTION_MAX_USER_PROVIDERS + 1 }, (_, index) => ({

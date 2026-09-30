@@ -1,6 +1,6 @@
 import { Buffer } from "node:buffer";
-import { readHostedProviderEgressCredentialSigningSecret, verifyHostedProviderEgressCredential } from "./hosted-provider-egress-credential.ts";
-import { commandHostedRuntimeOwner } from "./runtime-owner-client.ts";
+import { readHostedProviderEncryptionSecret } from "./hosted-inference-target-envelope.ts";
+import { readNativeRuntimeProviderAuthority, type RuntimeProviderCaller } from "./runtime-provider-authorization.ts";
 import type { RunnerOutboundEnvironmentSource } from "./runner-outbound/shared.ts";
 
 export const HOSTED_OPENAI_LIVE_PATH = "/v1/live/sessions";
@@ -68,22 +68,17 @@ export async function openHostedLiveSessionReference(
 /** An already-created resource remains attachable while its exact owner retires,
  * so native cancellation can join and close it after allowance revocation. */
 export async function authorizeHostedLiveAttachment(input: {
-  credential: string; reference: string; source: RunnerOutboundEnvironmentSource;
+  caller: RuntimeProviderCaller | undefined; reference: string; source: RunnerOutboundEnvironmentSource;
 }): Promise<{ sessionId: string; owner: HostedLiveResourceOwner } | null> {
-  const credential = await verifyHostedProviderEgressCredential({ credential: input.credential, source: input.source });
-  if (!credential.ok || credential.claims.providerKind !== "openai") return null;
-  const { claims } = credential;
-  const result = await commandHostedRuntimeOwner({ source: input.source, userId: claims.userId, command: { operation: "reconcile" } });
-  const current = result.owner;
-  if (result.cutover !== "postgres" || !current?.attemptId || current.phase === "idle"
-    || current.runnerContainerName !== claims.runnerContainerName) return null;
-  const owner = { userId: claims.userId, attemptId: current.attemptId, leaseGeneration: current.generation };
+  const current = await readNativeRuntimeProviderAuthority(input.source, input.caller);
+  if (!current) return null;
+  const owner = { userId: current.userId, attemptId: current.attemptId, leaseGeneration: current.generation };
   const sessionId = await openHostedLiveSessionReference(input.reference, owner, input.source);
   return sessionId ? { sessionId, owner } : null;
 }
 
 async function signingKey(source: Readonly<Record<string, unknown>>): Promise<CryptoKey> {
-  return crypto.subtle.importKey("raw", new TextEncoder().encode(readHostedProviderEgressCredentialSigningSecret(source)),
+  return crypto.subtle.importKey("raw", new TextEncoder().encode(readHostedProviderEncryptionSecret(source)),
     { name: "HMAC", hash: "SHA-256" }, false, ["sign", "verify"]);
 }
 function signedBytes(payload: string, owner: HostedLiveResourceOwner): Uint8Array<ArrayBuffer> {

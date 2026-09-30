@@ -141,3 +141,35 @@ it("keeps genuinely missing evidence invalid after obtaining the canonical lock"
   await expect(prepareClinicalEnrichmentDocument({ vaultRoot: path.dirname(documentPath), documentPath, mediaType: "text/plain", page: 1 }))
     .rejects.toMatchObject({ code: "CLINICAL_ENRICHMENT_DOCUMENT_INVALID" });
 });
+
+
+it("reads RTF clinical text without executing fields or embedded objects", async () => {
+  const documentPath = await source(String.raw`{\rtf1\ansi\ansicpg1252{\fonttbl{\f0 Hidden font;}}{\*\generator Hidden generator;}\f0 Source exam: normal.\par Caf\'e9. \uc1\u945?{\field{\*\fldinst INCLUDETEXT forbidden}{\fldrslt visible result}}}`);
+  const prepared = await prepareClinicalEnrichmentDocument({ vaultRoot: path.dirname(documentPath), documentPath, mediaType: "application/rtf", page: 1 });
+  expect(prepared.extractedText).toBe("Source exam: normal.\nCafé. αvisible result");
+  expect(commands.run).not.toHaveBeenCalled();
+});
+
+it("continues long text in bounded overlapping windows including its final fact", async () => {
+  const text = "Synthetic source text. ".repeat(2000) + "Final finding: explicitly absent.";
+  const documentPath = await source(text);
+  let combined = "";
+  let totalPages = 1;
+  for (let page = 1; page <= totalPages; page++) {
+    const prepared = await prepareClinicalEnrichmentDocument({ vaultRoot: path.dirname(documentPath), documentPath, mediaType: "text/plain", page });
+    totalPages = prepared.totalPages;
+    expect(prepared.extractedText!.length).toBeLessThanOrEqual(12_000);
+    combined += page === 1 ? prepared.extractedText : prepared.extractedText!.slice(1000);
+  }
+  expect(totalPages).toBeGreaterThan(1);
+  expect(combined).toBe(text);
+  await expect(prepareClinicalEnrichmentDocument({ vaultRoot: path.dirname(documentPath), documentPath, mediaType: "text/plain", page: totalPages + 1 }))
+    .rejects.toMatchObject({ code: "CLINICAL_ENRICHMENT_DOCUMENT_PAGE_INVALID" });
+});
+
+it("does not report full text coverage when embedded media remains unreviewed", async () => {
+  const documentPath = await source(String.raw`{\rtf1 Source finding.{\pict 00ff}}`);
+  const prepared = await prepareClinicalEnrichmentDocument({ vaultRoot: path.dirname(documentPath), documentPath, mediaType: "application/rtf", page: 1 });
+  expect(prepared.extractedText).toBe("Source finding.");
+  expect(prepared.coverageWarning).toMatch(/not been visually reviewed/u);
+});

@@ -32,7 +32,10 @@ Runtime log and redacted-status validation is owned by
 Workspace checkpoints and runner/Web status compose that same validator;
 receipt-specific reserved keys remain with checkpoint parsing. Shared scalar
 checks stay in `src/parsers/assertions.ts`, while `src/observability.ts` owns
-producer sanitization.
+producer sanitization, exposed through `@murphai/hosted-execution/observability`.
+Mailbox-only fetch/item consumers use `@murphai/hosted-execution/parsers/mailbox`
+to avoid loading device-sync and other control parsers. The existing parser
+barrel retains the same exports.
 Use `@murphai/hosted-execution/assistant-usage` for the hosted assistant usage
 record contract, parser, id helper, and credential-source helper.
 The v2 turn profile may include `knowledgeCounts` on the `vault-cli knowledge`

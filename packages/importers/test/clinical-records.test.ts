@@ -108,10 +108,9 @@ describe("buildClinicalImportPlanFromSnapshot", () => {
   });
 
   it.each([
-    { effectiveDateTime: undefined },
     { effectiveDateTime: "invalid" },
     { modifierExtension: [{ url: "https://example.test/unknown-modifier", valueBoolean: true }] },
-  ])("keeps undated or semantically uncertain observations held %#", async (override) => {
+  ])("keeps invalid dates or semantically uncertain observations held %#", async (override) => {
     const vaultRoot = await writeClinicalFixture({ resourceFiles: [{ resourceType: "Observation", relativePath: "Observation/page-1.json", count: 1 }],
       pages: { "Observation/page-1.json": [{ resourceType: "Observation", id: "uncertain-assessment", status: "final",
         effectiveDateTime: "2026-07-01T12:05:00.000Z", code: { text: "Example assessment" }, valueInteger: 3, ...override }] } });
@@ -4741,7 +4740,7 @@ describe("buildClinicalImportPlanFromSnapshot", () => {
       externalRef,
       reason: "unsupported modifier semantics",
       evidence,
-      ...(["DocumentReference", "DiagnosticReport"].includes(resourceType) ? { retractFacetPrefixes: ["document-extraction"] } : {}),
+      retractFacetPrefixes: ["document-extraction"],
     }]);
   });
 

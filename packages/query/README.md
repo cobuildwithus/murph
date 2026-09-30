@@ -41,6 +41,11 @@ Ordinary oxygen readings and v2 temporal features are unchanged. Restored older
 query stores rebuild once under this policy; the complete query database remains
 part of workspace restore.
 
+Version 35 adds allowlisted typed clinical-fact terms to private search. The
+index includes source labels, values, status, coding and qualifiers without
+recursing into raw attributes. Safe shared search still excludes structured
+payloads. This projection remains rebuildable from canonical notes.
+
 Version 34 shares ordered JSON field-name dictionaries across wearable summary
 rows in `query_wearable_summary_shapes`. Tagged object/array values preserve all
 summary facts and internal composition evidence; public summary JSON is unchanged.

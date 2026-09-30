@@ -1,3 +1,4 @@
+import type { RuntimeProviderCaller } from "./runtime-provider-authorization.ts";
 import { createRuntimeReplicaWriteBucket } from "./runtime-replica-upload.ts";
 import { presignManagedSnapshot, completeManagedSnapshotForSession, ManagedSnapshotCompletionRejectedError } from "./managed-snapshot-control.ts";
 import { commandHostedRuntimeSnapshot, recordHostedRuntimeOrphan, HostedRuntimeResourceRejectedError } from "./runtime-resource-client.ts";
@@ -156,6 +157,7 @@ export async function handleRunnerOutboundRequest(
   request: Request,
   env: RunnerOutboundEnvironmentSource,
   userId: string,
+  caller?: RuntimeProviderCaller,
 ): Promise<Response> {
   try {
     const url = new URL(request.url);
@@ -174,6 +176,7 @@ export async function handleRunnerOutboundRequest(
 
     if (url.hostname === CLOUDFLARE_HOSTED_RUNTIME_HOSTS.webControlPlane) {
       return handleRunnerWebControlRequest({
+        caller,
         env,
         environment,
         request,

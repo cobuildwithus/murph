@@ -93,7 +93,7 @@ describe.skipIf(!runPostgresProof)(
       }
     }, 60_000);
 
-    it("bounds activation deferral to imported work and the current owner's latest completed foreground input", async () => {
+    it.each(["member.activated", "device-sync.wake"])("bounds %s deferral to imported work and the current owner's latest completed foreground input", async (kind) => {
       const prisma = createPrismaClient({ databaseUrl, poolMax: 1 });
       const userId = `progress-activation-proof-${randomUUID()}`;
       const acceptedAt = new Date("2026-08-10T15:00:00Z");
@@ -110,7 +110,7 @@ describe.skipIf(!runPostgresProof)(
       };
       try {
         await prisma.hostedMember.create({ data: member(userId, HostedBillingStatus.active) });
-        await seedProgressLane({ createdAt: acceptedAt, kind: "member.activated", lane: "system", tx: prisma, userId });
+        await seedProgressLane({ createdAt: acceptedAt, kind, lane: "system", tx: prisma, userId });
         await seedProgressLane({ createdAt: foregroundAt, lane: "conversation", tx: prisma, userId });
         await prisma.hostedWorkspace.create({ data: {
           userId, checkpointedAt, systemMailboxProgressGeneration: 2n,

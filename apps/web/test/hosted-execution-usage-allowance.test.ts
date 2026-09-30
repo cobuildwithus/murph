@@ -27,7 +27,7 @@ vi.mock("@/src/lib/hosted-onboarding/family-plan", () => {
   throw new Error("Allowance reads must not load the Family mutation workflow.");
 });
 
-vi.mock("@/src/lib/hosted-execution/usage-credits", () => ({
+vi.mock("@/src/lib/hosted-execution/usage-credit-usage-settlement", () => ({
   settleHostedUsageCreditForUsageTx:
     usageCreditMocks.settleHostedUsageCreditForUsageTx,
 }));

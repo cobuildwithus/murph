@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  clinicalFhirResourceText, clinicalFhirResourceExtractionText, selectClinicalFhirResource,
   CLINICAL_DOCUMENT_EXTRACTION_MAX_RECORDS,
   clinicalDocumentExtractionOutputJsonSchema,
   clinicalDocumentExtractionOutputSchema,
@@ -40,6 +41,13 @@ const complete = (payload: unknown) => ({
 });
 
 describe("clinical document extraction proposals", () => {
+  it("requires typed content in fresh history while retaining frozen legacy notes", () => {
+    expect(clinicalDocumentExtractionOutputSchemaForFamily("history").safeParse(complete(note)).success).toBe(true);
+    expect(() => parseClinicalDocumentExtractionOutput("history", complete(note))).toThrow();
+    const payload = { ...note, clinicalFact: { category: "medication-order", label: "Historical order",
+      subject: "member", clinicalDate: null, statement: "The provider recorded an instruction not to take the named medication.", status: "do-not-take" } };
+    expect(parseClinicalDocumentExtractionOutput("history", { ...complete(payload), records: [{ payload, dateBasis: "unknown", excerpt: payload.note }] }).records).toHaveLength(1);
+  });
   it("admits only the assigned family's clinical record kinds", () => {
     const cases = [
       ["labs", lab],
@@ -59,6 +67,8 @@ describe("clinical document extraction proposals", () => {
         }
       }
     }
+    expect(clinicalDocumentExtractionOutputSchemaForFamily("all").safeParse(complete(note)).success).toBe(false);
+    expect(clinicalDocumentExtractionOutputSchemaForFamily("all").safeParse(complete(measurement)).success).toBe(true);
     expect(clinicalDocumentExtractionOutputSchema.safeParse(complete({
       kind: "medication_intake", occurredAt, title: "Prescription", medicationName: "Example", dose: 1, unit: "tablet",
     })).success).toBe(false);
@@ -179,4 +189,19 @@ describe("clinical document extraction proposals", () => {
       ...wire, status: "blocked",
     })).toThrow();
   });
+});
+
+it("selects one resource, rejects duplicate identity and excludes patient routing and revision metadata", () => {
+  const resource = { id: "selected", resourceType: "Observation", meta: { lastUpdated: "2026-07-01T12:00:00Z" },
+    identifier: [{ value: "synthetic-routing-id" }], subject: { reference: "https://ehr.example.test/fhir/Patient/synthetic-private-id" },
+    code: { text: "Narrative vital" }, valueString: "Resting pulse 73 bpm." };
+  const page = JSON.stringify({ resourceType: "Bundle", entry: [{ resource }, { resource: { ...resource, id: "other" } }] });
+  expect(selectClinicalFhirResource(page, "Observation", "selected")).toEqual(resource);
+  expect(() => selectClinicalFhirResource(JSON.stringify([resource, resource]), "Observation", "selected")).toThrow("not unique");
+  expect(() => selectClinicalFhirResource(page, "Observation", "missing")).toThrow("not unique");
+  expect(clinicalFhirResourceText(resource)).toBe(clinicalFhirResourceText(Object.fromEntries(Object.entries(resource).reverse())));
+  const text = clinicalFhirResourceExtractionText(resource);
+  expect(text).toContain("Resting pulse 73 bpm.");
+  expect(text).not.toMatch(/synthetic-private-id|synthetic-routing-id|lastUpdated|2026-07-01|selected/u);
+  expect(text).toContain("Patient/redacted");
 });
