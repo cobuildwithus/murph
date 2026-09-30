@@ -582,11 +582,12 @@ test.skipIf(!memoryFailureCompatibilityBase)("actual older memory-code reader ma
 test("validation selection admits only exact schema-owned fields and one standard issue", () => {
   const scopes = [
     ["automation list", ["limit", "status"]],
+    ["event list", ["kind", "from", "to", "tag", "experiment", "limit", "arguments"]],
     ["event payload-schema", ["kind", "for"]],
     ["knowledge show", ["slug"]],
     ["measurement entry list", ["metric", "from", "to", "limit"]],
     ["food search-labels", ["query", "limit"]],
-    ["knowledge upsert", ["body", "slug", "title", "pageType", "status", "clearLibraryLinks", "relatedSlug", "librarySlug", "sourcePath"]],
+    ["knowledge upsert", ["body", "slug", "title", "pageType", "status", "clearLibraryLinks", "relatedSlug", "librarySlug", "sourcePath", "arguments"]],
     ["knowledge append-section", ["slug", "heading", "body", "title", "position", "sourcePath"]],
   ] as const;
   for (const [command, fields] of scopes) for (const field of fields) {
@@ -616,29 +617,32 @@ test("validation selection admits only exact schema-owned fields and one standar
   assert.equal(reads, 0);
 });
 
-test("validation reads a fixed prefix of own data without getters, prototypes, causes or proxy escapes", () => {
+for (const [command, field] of [
+  ["food search-labels", "query"], ["event list", "limit"],
+  ["event list", "arguments"], ["knowledge upsert", "arguments"],
+] as const) test(`${command}/${field} validation reads a fixed prefix without getters, prototypes, causes or proxy escapes`, () => {
   let reads = 0;
   const getter = { get() { reads += 1; throw Error("PRIVATE_SENTINEL"); } };
-  const good = { path: "query", code: "invalid_type", missing: true };
+  const good = { path: field, code: "invalid_type", missing: true };
   const huge: unknown[] = new Array(1_000_000);
   Object.defineProperty(huge, "0", getter);
   Object.defineProperty(huge, Symbol.iterator, getter);
   Object.defineProperty(huge, String(CLI_TIMING_MAX_VALIDATION_ISSUES), getter);
-  assert.deepEqual(cliTimingValidationFailure("food search-labels", "VALIDATION_ERROR", { publicIssues: huge }, "publicIssues"), {});
+  assert.deepEqual(cliTimingValidationFailure(command, "VALIDATION_ERROR", { publicIssues: huge }, "publicIssues"), {});
   huge[CLI_TIMING_MAX_VALIDATION_ISSUES - 1] = good;
-  assert.deepEqual(cliTimingValidationFailure("food search-labels", "VALIDATION_ERROR", { publicIssues: huge }, "publicIssues"),
-    { validation: { field: "query", code: "invalid_type", missing: true } });
+  assert.deepEqual(cliTimingValidationFailure(command, "VALIDATION_ERROR", { publicIssues: huge }, "publicIssues"),
+    { validation: { field, code: "invalid_type", missing: true } });
   const hostile = Object.defineProperty({}, "publicIssues", getter);
   const proxy = new Proxy({}, { getOwnPropertyDescriptor() { throw Error("PRIVATE_SENTINEL"); }, get: getter.get });
   const revoked = Proxy.revocable([], {}); revoked.revoke();
   for (const source of [hostile, proxy, { publicIssues: revoked.proxy }, { publicIssues: [proxy] },
     Object.create({ publicIssues: [good] }), { cause: { publicIssues: [good] } },
     { publicIssues: [Object.create(good)] }, { publicIssues: [Object.assign([], good)] }, { publicIssues: [Object.defineProperty({ ...good }, "path", getter)] }]) {
-    assert.deepEqual(cliTimingValidationFailure("food search-labels", "VALIDATION_ERROR", source, "publicIssues"), {});
+    assert.deepEqual(cliTimingValidationFailure(command, "VALIDATION_ERROR", source, "publicIssues"), {});
   }
   for (const key of ["message", "expected", "received", "value", "argument", "cause"]) Object.defineProperty(good, key, getter);
-  assert.deepEqual(cliTimingValidationFailure("food search-labels", "VALIDATION_ERROR", { publicIssues: [good] }, "publicIssues"),
-    { validation: { field: "query", code: "invalid_type", missing: true } });
+  assert.deepEqual(cliTimingValidationFailure(command, "VALIDATION_ERROR", { publicIssues: [good] }, "publicIssues"),
+    { validation: { field, code: "invalid_type", missing: true } });
   assert.equal(reads, 0);
 });
 
@@ -707,10 +711,21 @@ const measurementValidationCases = [
   ["measurement entry list", "limit", "too_big", false],
 ] as const;
 
+const eventInvocationValidationCases = [
+  ["event list", "kind", "invalid_value", false],
+  ["event list", "from", "invalid_format", false],
+  ["event list", "to", "custom", false],
+  ["event list", "tag", "too_small", false],
+  ["event list", "experiment", "invalid_format", false],
+  ["event list", "limit", "too_big", false],
+  ["event list", "arguments", "custom", false],
+  ["knowledge upsert", "arguments", "custom", false],
+] as const;
+
 test("allowlisted commands preserve original errors and round-trip only finite validation detail", async () => {
   for (const [command, field, code, missing] of [
     ["automation list", "limit", "too_big", false], ["automation list", "status", "invalid_value", false],
-    ...readValidationCases, ...measurementValidationCases,
+    ...readValidationCases, ...measurementValidationCases, ...eventInvocationValidationCases,
   ] as const) for (const property of ["publicIssues", "fieldErrors"] as const) {
     const validation = { field, code, missing };
     const original = Object.assign(new Error("PRIVATE_SENTINEL"), {
@@ -766,6 +781,8 @@ test("command validation omits other fields, commands and malformed evidence on 
     ["event payload-schema", "for", ["slug", "body", "sourcePath"]],
     ...measurementValidationCases.map(([command, field]) =>
       [command, field, ["value", "unit", "slug", "body", "sourcePath"]] as const),
+    ...eventInvocationValidationCases.map(([command, field]) =>
+      [command, field, ["value", "unit", "cursor", "text"]] as const),
   ] as const) {
     const good = { path: field, code: "invalid_value", missing: false };
     const invalid = [
@@ -779,7 +796,7 @@ test("command validation omits other fields, commands and malformed evidence on 
         : [{ ...issue, value: "PRIVATE_SENTINEL", message: "PRIVATE_SENTINEL" }];
       assert.deepEqual(cliTimingValidationFailure(command, "VALIDATION_ERROR", { [property]: detail }, property), {});
     }
-    for (const other of ["other", "automation show", "automation set-status", "event list", "knowledge list",
+    for (const other of ["other", "automation show", "automation set-status", "event show", "knowledge list",
       "measurement list", "measurement add", `${command} PRIVATE_SENTINEL`, command.toUpperCase()]) {
       assert.deepEqual(cliTimingValidationFailure(other, "VALIDATION_ERROR", { publicIssues: [good] }, "publicIssues"), {});
     }
@@ -823,6 +840,7 @@ test.skipIf(!automationValidationCompatibilityBase)("actual older automation rea
 for (const [reader, base, cases] of [
   ["read-validation", process.env.MURPH_CLI_READ_VALIDATION_COMPAT_BASE, readValidationCases],
   ["measurement-validation", process.env.MURPH_CLI_MEASUREMENT_VALIDATION_COMPAT_BASE, measurementValidationCases],
+  ["event-invocation-validation", process.env.MURPH_CLI_EVENT_INVOCATION_VALIDATION_COMPAT_BASE, eventInvocationValidationCases],
 ] as const) test.skipIf(!base)(`actual older ${reader} consumer drops detail but preserves the envelope and counts`, async () => {
   assert.match(base ?? "", /^[a-f0-9]{40}$/u);
   const source = execFileSync("git", ["show", `${base}:packages/runtime-state/src/cli-timing.ts`],

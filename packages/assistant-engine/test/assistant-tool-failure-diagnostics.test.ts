@@ -489,6 +489,14 @@ describe('bounded CLI validation completion metadata', () => {
     ['food search-labels', 'query', 'invalid_type', true],
     ['knowledge upsert', 'body', 'invalid_type', true],
     ['knowledge upsert', 'slug', 'invalid_format', false],
+    ['knowledge upsert', 'arguments', 'custom', false],
+    ['event list', 'kind', 'invalid_value', false],
+    ['event list', 'from', 'invalid_format', false],
+    ['event list', 'to', 'custom', false],
+    ['event list', 'tag', 'too_small', false],
+    ['event list', 'experiment', 'invalid_format', false],
+    ['event list', 'limit', 'too_big', false],
+    ['event list', 'arguments', 'custom', false],
     ['knowledge append-section', 'heading', 'invalid_type', true],
   ] as const)('selects one finite %s %s issue from the existing error envelope', (command, field, code, missing) => {
     const error = { ...envelope('VALIDATION_ERROR'), fieldErrors: [
@@ -544,13 +552,19 @@ describe('bounded CLI validation completion metadata', () => {
     expect(JSON.stringify(baseline)).not.toContain(sentinel)
   })
 
-  it('round-trips automation detail and absence through the existing issue sanitizer and parser', async () => {
-    const issues = [undefined, { path: 'limit', code: 'too_big', missing: false },
-      { path: 'status', code: 'invalid_value', missing: false }].map((detail) => {
+  it.each([
+    ['automation list', [{ path: 'limit', code: 'too_big', missing: false }, { path: 'status', code: 'invalid_value', missing: false }]],
+    ['event list', [{ path: 'limit', code: 'too_big', missing: false }, { path: 'arguments', code: 'custom', missing: false }]],
+    ['knowledge upsert', [{ path: 'body', code: 'too_small', missing: false }, { path: 'arguments', code: 'custom', missing: false }]],
+  ] as const)('round-trips %s detail and absence through the existing issue sanitizer and parser', async (command, details) => {
+    const issues = [undefined, ...details].map((detail) => {
       const issue = commandIssue(JSON.stringify({ ...envelope('VALIDATION_ERROR', 'validation'),
         fieldErrors: detail ? [{ ...detail, message: sentinel, value: sentinel }] : [] }),
-      'vault-cli automation list --format json')
-      if (!issue) throw new Error('Expected synthetic automation validation diagnostic')
+      `vault-cli ${command} --format json`)
+      if (!issue) throw new Error('Expected synthetic command validation diagnostic')
+      expect(issue.details?.vaultCliValidationField).toBe(detail?.path)
+      expect(issue.details?.vaultCliValidationCode).toBe(detail?.code)
+      expect(issue.details?.vaultCliValidationMissing).toBe(detail?.missing)
       return issue
     })
     writes.write.mockResolvedValue(undefined)
