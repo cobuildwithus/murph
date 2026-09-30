@@ -4741,7 +4741,7 @@ describe("buildClinicalImportPlanFromSnapshot", () => {
       externalRef,
       reason: "unsupported modifier semantics",
       evidence,
-      ...(["DocumentReference", "DiagnosticReport"].includes(resourceType) ? { retractFacetPrefixes: ["document-extraction"] } : {}),
+      retractFacetPrefixes: ["document-extraction"],
     }]);
   });
 

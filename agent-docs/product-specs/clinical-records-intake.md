@@ -53,6 +53,21 @@ and conflicting revisions retain the existing revision checks.
 Linked Binary acquisition and document enrichment have separate owners from
 these deterministic retained-snapshot mappings.
 
+### Structured recovery from retained records
+
+After deterministic import, eligible retained FHIR source notes can receive a
+bounded background Luna extraction. The original raw resource and source note
+remain in the vault. The same document-enrichment workflow validates proposed
+labs, measurements and history, writes accepted facts with source evidence,
+and resumes frozen results without asking the model again. A corrected or
+withdrawn source retires its older extracted facts.
+
+Already structured records need no model call. Records held for unsafe status,
+modifiers, ambiguity or missing import prerequisites stay held. Extraction may
+recover some facts while leaving others unresolved; it does not establish
+complete chart coverage. Existing imports are not silently rewritten: new
+retrieval batches admit their eligible records through the ordinary import path.
+
 ## Member flow
 
 1. The assistant or signed-in dashboard creates a 15-minute, single-use,

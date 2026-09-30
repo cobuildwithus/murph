@@ -61,6 +61,15 @@ When you need to read from the vault, use this chooser:
 - `vault-cli wearables day` or `wearables ... list` for semantic wearable summaries
 - family `manifest` commands for immutable import provenance
 
+Use `intake import answers.json --assessment-type clinical-observation` to
+preserve structured questionnaire answers or dated provider history without
+turning them into current diagnoses or medication use. Add
+`--questionnaire-slug <slug>` when the questionnaire is known and repeat
+`--related-id <canonical-id>` to link source records. `intake show <id>` returns
+the original structured responses; `search query "<question or finding>"`
+and `timeline` help retrieve them later. These options classify the supplied
+JSON; they do not extract facts, validate medical claims, or deduplicate imports.
+
 Use `memory show <id> --record-only` when verifying an exact known memory
 record. It returns that record and its metadata without the whole document;
 `memory show --compact` still returns all saved facts for context and conflict

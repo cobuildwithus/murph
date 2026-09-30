@@ -671,6 +671,13 @@ Provider-search delivery is recorded in
 The separate registration activation and composed import proof remain active in
 [`2026-09-16-epic-import-live-verification.md`](exec-plans/active/2026-09-16-epic-import-live-verification.md).
 
+Structured clinical source recovery is tracked in
+[`2026-09-29-clinical-structured-enrichment.md`](exec-plans/completed/2026-09-29-clinical-structured-enrichment.md).
+Literal evidence selection and focused model proof are tracked in
+[`clinical evidence quotes`](exec-plans/completed/2026-09-29-clinical-evidence-quotes.md).
+Assessment classification and source links through the intake CLI are tracked in
+[`clinical intake classification`](exec-plans/completed/2026-09-29-clinical-intake-classification.md).
+
 Clinical import notice handling, qualitative range preservation, and repeated-item
 reporting are tracked in
 [`2026-09-25-clinical-import-coverage.md`](exec-plans/active/2026-09-25-clinical-import-coverage.md).

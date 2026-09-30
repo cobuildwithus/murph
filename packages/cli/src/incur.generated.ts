@@ -170,7 +170,7 @@ declare module 'incur' {
       'immunization scaffold': { args: {}; options: { requestId?: string } }
       'immunization show': { args: { id: string }; options: { requestId?: string } }
       'init': { args: {}; options: { requestId?: string; timezone?: string } }
-      'intake import': { args: { file: string }; options: { requestId?: string; title?: string; occurredAt?: string | string; importedAt?: string; source?: "import" | "manual" | "derived" } }
+      'intake import': { args: { file: string }; options: { requestId?: string; title?: string; occurredAt?: string | string; importedAt?: string; source?: "import" | "manual" | "derived"; assessmentType?: string; questionnaireSlug?: string; relatedId?: string[] } }
       'intake list': { args: {}; options: { requestId?: string; from?: string; to?: string; limit: number } }
       'intake manifest': { args: { id: string }; options: { requestId?: string } }
       'intake project': { args: { id: string }; options: { requestId?: string } }
