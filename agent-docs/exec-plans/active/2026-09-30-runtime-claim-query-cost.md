@@ -39,4 +39,5 @@ Web-only implementation changes preserve command request/response shapes and dat
 - Focused route/release/direct-wake/access tests: 46 passed. Web typecheck passed. Complexity guard passed, maximum 14 with no hotspots above 20.
 - Product UX: Ready at the changed admission boundary; no claim of measured wall-clock or delivered-message improvement.
 - Changelog: not applicable; internal query-budget reduction with unchanged product behavior and no measured member-visible latency claim.
-- Requested Opus final optimization/deletion review is running; ReviewGPT, CI and production rollout remain pending.
+- Opus 5.5 full candidate review: PASS, no correctness regressions. Accepted explicit AND composition and removed duplicated operation counts from the runtime reference; deferred an optional type split that adds no current behavior. Its suggested existing-owner consent coverage already exists in the sponsorship regression.
+- Final combined focused suite: 117 passed; Web typecheck and complexity guard passed after the review edits. Opus focused confirmation is pending; ReviewGPT, CI and production rollout remain pending.

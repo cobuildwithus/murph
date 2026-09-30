@@ -266,7 +266,7 @@ export async function hasActiveHostedThreadContainerAccessWithParticipants(input
  * Set-based projection of the pure access branch for queries that must select
  * access-holding members in the database (pagination, counts, sweeps). It
  * intentionally cannot recurse into thread-container participant rosters; use
- * `readActiveHostedMemberAccess` for user-visible async gates.
+ * `activeHostedMemberAccessWithParticipantsWhere` for single-member gates.
  */
 export function activeHostedMemberAccessWhere(): Prisma.HostedMemberWhereInput {
   const personAccess: Prisma.HostedMemberWhereInput["OR"] = [

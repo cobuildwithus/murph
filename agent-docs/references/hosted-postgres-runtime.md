@@ -49,12 +49,10 @@ retired legacy alarm and run-until-idle HTTP controls are unavailable.
 
 Runtime admission keeps the member lock before one composed eligibility read
 (suspension, explicit consent withdrawal, and canonical direct or sponsored
-access; retention still skips only the access requirement). In the Postgres
-phase a default fresh or retained-shell claim uses five explicit database
-operations, and an existing-owner claim uses four, excluding transaction
-begin/commit and callback authentication. Claim returns its locked routing
-result; target selection and launch preparation also reuse the Postgres gate
-proved by their ownership transaction instead of rereading it after commit.
+access; retention still skips only the access requirement). Claim returns its
+locked routing result; target selection and launch preparation also reuse the
+Postgres gate proved by their ownership transaction instead of rereading it
+after commit.
 
 Best-effort Web direct wakes send no admission snapshot. The Worker claims
 through Web's canonical Postgres command after receiving the request, just as

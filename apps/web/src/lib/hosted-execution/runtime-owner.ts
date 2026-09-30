@@ -292,10 +292,12 @@ async function runtimeAdmissionAllowedTx(
   const member = await tx.hostedMember.findUnique({
     select: { id: true },
     where: {
-      suspendedAt: null,
-      ...hostedHealthDataConsentNotRevokedWhere(),
-      ...(processingMode === "inbox_media_retention" ? {} : activeHostedMemberAccessWithParticipantsWhere()),
       id: userId,
+      suspendedAt: null,
+      AND: [
+        hostedHealthDataConsentNotRevokedWhere(),
+        ...(processingMode === "inbox_media_retention" ? [] : [activeHostedMemberAccessWithParticipantsWhere()]),
+      ],
     },
   });
   return member !== null;
