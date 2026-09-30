@@ -103,6 +103,7 @@
     "indent-string": "^5.0.0",
     "ink": "^6.8.0",
     "is-in-ci": "^2.0.0",
+    "mpg123-decoder": "1.0.3",
     "openai": "6.45.0",
     "patch-console": "^2.0.0",
     "react": "^19.2.6",

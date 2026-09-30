@@ -721,6 +721,9 @@ importers:
       is-in-ci:
         specifier: ^2.0.0
         version: 2.0.0
+      mpg123-decoder:
+        specifier: 1.0.3
+        version: 1.0.3
       openai:
         specifier: 6.45.0
         version: 6.45.0(ws@8.21.0(bufferutil@4.1.0)(utf-8-validate@6.0.6))(zod@4.4.3)
