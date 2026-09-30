@@ -83,6 +83,37 @@ function captureForPrompt(promptSignature: string, turnIndex = 0): CaptureIdenti
 }
 
 describe("ReviewGPT detached capture identity", () => {
+  it.each([
+    ["11111111-1111-4111-8111-111111111111", true],
+    ["22222222-2222-4222-8222-222222222222", false],
+  ])("matches canonical message UUIDs across DOM attributes: %s", async (liveUuid, matches) => {
+    const reviewGpt = await loadReviewGptThreadSnapshotModule();
+    const promptSignature = "synthetic guarded review request";
+    const capture = captureForPrompt(promptSignature);
+    capture.committedUserTurn.turnId =
+      "data-message-id:11111111-1111-4111-8111-111111111111";
+    const snapshot: ThreadSnapshot = {
+      assistantSnapshots: [],
+      userSnapshots: [
+        {
+          signature: promptSignature,
+          turnId: `data-chatgpt-search-message-ids:${liveUuid}`,
+          turnIndex: 0,
+        },
+      ],
+    };
+
+    if (matches) {
+      expect(reviewGpt.scopeThreadSnapshotToCaptureIdentity(snapshot, capture).userSnapshots).toEqual(
+        snapshot.userSnapshots,
+      );
+    } else {
+      expect(() => reviewGpt.scopeThreadSnapshotToCaptureIdentity(snapshot, capture)).toThrow(
+        "Captured committed user-turn identity resolved to 0 turns",
+      );
+    }
+  });
+
   it("rebinds a user turn after its provisional DOM identity becomes canonical and reindexed", async () => {
     const reviewGpt = await loadReviewGptThreadSnapshotModule();
     const promptSignature = "synthetic guarded review request";
