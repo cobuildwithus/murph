@@ -69,7 +69,7 @@ import {
   classifyHostedGroupUsageCapacity,
 } from "../hosted-groups/group-usage-capacity";
 import { renderUserFacingMessage } from "../hosted-messages/user-facing-messages";
-import { settleHostedUsageCreditForUsageTx } from "./usage-credits";
+import { settleHostedUsageCreditForUsageTx } from "./usage-credit-usage-settlement";
 import {
   HOSTED_LIVE_PRICING_SOURCE,
   HOSTED_LIVE_PRICING_VERSION,

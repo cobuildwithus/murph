@@ -90,12 +90,15 @@ vi.mock("@/src/lib/hosted-mailbox/store", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/src/lib/hosted-mailbox/store")>()),
   fetchHostedMailboxItemsAfterLaneCursors: mocks.fetchHostedMailboxItemsAfterLaneCursors,
   fetchHostedMailboxPayload: mocks.fetchHostedMailboxPayload,
-  fetchHostedRuntimeMailboxProjection: mocks.fetchHostedRuntimeMailboxProjection,
   readHostedMailboxConsumedSeqByLane: mocks.readHostedMailboxConsumedSeqByLane,
   readHostedMailboxItemByDedupeKey: mocks.readHostedMailboxItemByDedupeKey,
   readHostedMailboxMaxSeqByLane: mocks.readHostedMailboxMaxSeqByLane,
-  tryMarkHostedMailboxConversationAiUsageDenied:
-    mocks.tryMarkHostedMailboxConversationAiUsageDenied,
+}));
+
+vi.mock("@/src/lib/hosted-mailbox/projection", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/src/lib/hosted-mailbox/projection")>(),
+  fetchHostedRuntimeMailboxProjection: mocks.fetchHostedRuntimeMailboxProjection,
+  tryMarkHostedMailboxConversationAiUsageDenied: mocks.tryMarkHostedMailboxConversationAiUsageDenied,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
@@ -697,7 +700,7 @@ describe("hosted runtime internal web routes", () => {
       });
       if (scenario === "denied") mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValueOnce({ status: "denied" });
       if (scenario === "inactive") mocks.hostedRuntimeMailboxMemberFindUnique.mockResolvedValueOnce(null);
-      if (scenario === "no-workspace") mocks.hostedWorkspaceFindUnique.mockResolvedValueOnce(null);
+      if (scenario === "no-workspace") mocks.readHostedRuntimeIngressCryptoContextForWorker.mockRejectedValueOnce(new Error("Unavailable"));
       if (scenario === "crypto-failure") mocks.readHostedRuntimeIngressCryptoContextForWorker.mockRejectedValueOnce(new Error("Unavailable"));
       const response = await mailboxFetchRoute.POST(jsonRequest("/api/internal/hosted-mailbox/fetch", {
         requestId: "synthetic-request", limitPerLane: 10,
@@ -707,10 +710,9 @@ describe("hosted runtime internal web routes", () => {
       }));
       const payload = await response.json();
       expect(response.status).toBe(scenario === "inactive" ? 403 : 200);
-      const shouldReadWorkspace = ["fresh", "no-workspace", "crypto-failure"].includes(scenario);
-      expect(mocks.hostedWorkspaceFindUnique).toHaveBeenCalledTimes(shouldReadWorkspace ? 1 : 0);
+      expect(mocks.hostedWorkspaceFindUnique).not.toHaveBeenCalled();
       expect(mocks.readHostedRuntimeIngressCryptoContextForWorker).toHaveBeenCalledTimes(
-        scenario === "fresh" || scenario === "crypto-failure" ? 1 : 0);
+        ["fresh", "no-workspace", "crypto-failure"].includes(scenario) ? 1 : 0);
       if (scenario === "fresh") {
         expect(payload.ingressCryptoContext).toMatchObject({ userId: "member_routes_1", envelopes: { ingress: {} } });
         expect(payload.ingressCryptoContext.fetchedAt).toEqual(expect.any(String));
