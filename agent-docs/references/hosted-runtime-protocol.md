@@ -798,6 +798,17 @@ letting that runner consume the row. The converged token- and deferred-capable
 runner bundle, including first-materialization mode acknowledgment, is therefore
 the hard rollback floor before Web promotion.
 
+The existing `murph.hosted-vault-share-delivery-deferred.v1` warning retains
+its route-level reason. A `replacement_no_active_share` warning may additionally
+include the first settled store `replacementDeferralReason`: `inactive_access`,
+`source_workspace_changed`, or `conditional_update_not_applied`. The last value
+does not distinguish a revoked grant from a first-materialization race already
+completed by another writer. The store invokes its optional observer only after
+the transaction settles and isolates observer exceptions. The route emits at
+most its existing single warning, with no identities, payloads, versions, error
+objects, new queries, or response changes. Group the fixed reason fields in
+natural production failures; a quiet window does not prove delivery recovery.
+
 The rollout is consumer-first and reader-before-backfill. First deploy the
 runtime/Worker parser, bounded first-materialization owner, retry consumer,
 generation-token client, and mode acknowledgment check, then prove immediate

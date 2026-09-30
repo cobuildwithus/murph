@@ -300,6 +300,11 @@ function parseHostedVaultShareDeliveryContinuation(value: unknown): string | nul
   return value;
 }
 
+export type HostedVaultShareReplacementDeferralReason =
+  | "inactive_access"
+  | "source_workspace_changed"
+  | "conditional_update_not_applied";
+
 /**
  * Replaces the encrypted snapshot on the exact active share generation. Encryption uses
  * the destination member's runtime-ingress root, and the row id is part of authenticated
@@ -312,6 +317,7 @@ function parseHostedVaultShareDeliveryContinuation(value: unknown): string | nul
 export async function replaceHostedVaultShareProjectionSnapshot(input: {
   memberTimeZone?: string;
   deadlineAtEpochMs?: number;
+  onDeferral?: (reason: HostedVaultShareReplacementDeferralReason) => void;
   prisma?: PrismaClient;
   projectionMode?: HostedVaultShareProjectionMode;
   records: readonly HostedVaultShareDeliveryRecord[];
@@ -333,7 +339,8 @@ export async function replaceHostedVaultShareProjectionSnapshot(input: {
   const transactionOptions = resolveHostedVaultShareProjectionTransactionOptions(
     input.deadlineAtEpochMs,
   );
-  return prisma.$transaction(async (tx) => {
+  let deferralReason: HostedVaultShareReplacementDeferralReason | undefined;
+  const outcome: "replaced" | "no-active-share" = await prisma.$transaction(async (tx) => {
     // Admission can wait or retry after the options were computed. Keep the
     // caller's absolute deadline and cancellation authoritative inside the callback.
     assertHostedVaultShareDeliveryActive(input);
@@ -341,6 +348,7 @@ export async function replaceHostedVaultShareProjectionSnapshot(input: {
       [input.share.grantorMemberId, input.share.destinationMemberId],
       tx,
     )) {
+      deferralReason = "inactive_access";
       return "no-active-share";
     }
 
@@ -350,6 +358,7 @@ export async function replaceHostedVaultShareProjectionSnapshot(input: {
       sourceWorkspaceVersion: input.sourceWorkspaceVersion,
       tx,
     })) {
+      deferralReason = "source_workspace_changed";
       return "no-active-share";
     }
     assertHostedVaultShareDeliveryActive(input);
@@ -370,8 +379,20 @@ export async function replaceHostedVaultShareProjectionSnapshot(input: {
         status: "granted",
       },
     });
-    return replaced.count === 1 ? "replaced" : "no-active-share";
+    if (replaced.count === 1) {
+      return "replaced";
+    }
+    deferralReason = "conditional_update_not_applied";
+    return "no-active-share";
   }, transactionOptions);
+  if (outcome === "no-active-share" && deferralReason !== undefined) {
+    try {
+      input.onDeferral?.(deferralReason);
+    } catch {
+      // Observe only after settlement; telemetry cannot change the outcome.
+    }
+  }
+  return outcome;
 }
 
 function assertHostedVaultShareDeliveryActive(input: {
