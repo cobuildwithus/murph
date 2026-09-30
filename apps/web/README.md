@@ -1969,6 +1969,12 @@ without silently changing capacity. Use the pressure, acquisition, and callback
 measurements to re-baseline representative ingress, runtime-log, device-sync,
 signup, and Stripe workloads before choosing an explicit per-instance value.
 
+The generated Prisma client uses the supported `small` query compiler to reduce
+fresh-instance loading and first-query initialization. This is a build choice,
+not a database migration; query contracts, pool ownership, retries and transaction
+limits remain the same. Compare both cold and warm queries when changing it.
+Local startup measurements do not establish an end-to-end production deadline.
+
 Destructive contract cleanup belongs under
 `apps/web/prisma/contract-migrations` and runs through the
 `Hosted Web Contract Migrations` GitHub workflow after Vercel reports a
