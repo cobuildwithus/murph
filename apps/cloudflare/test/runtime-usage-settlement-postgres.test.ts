@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { HostedRuntimeOwnerSnapshot } from "@murphai/hosted-execution/runtime-owner";
-import { handleHostedRunnerOpenAiOutbound, handleHostedRunnerLinqOutbound, HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL } from "../src/runner-egress-intercept.ts";
+import { hostedRunnerIntercept, handleHostedRunnerOpenAiOutbound, handleHostedRunnerLinqOutbound, HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL } from "../src/runner-egress-intercept.ts";
 import { handleRunnerOutboundRequest } from "../src/runner-outbound.ts";
 import { commandHostedRuntimeOwner } from "../src/runtime-owner-client.ts";
 import { fetchHostedExecutionWebControlPlaneResponse } from "../src/web-control-plane.ts";
@@ -107,7 +107,7 @@ describe("Provider identity and usage settlement with native receipts", () => {
 
   it.each([{}, { usage: null }, { usage: "invalid" }])("rejects malformed usage envelopes before settlement admission", async body => {
     const h = harness();
-    expect((await handleRunnerOutboundRequest(h.request(body), h.env, h.userId)).status).toBe(400);
+    expect((await handleRunnerOutboundRequest(h.request(body), h.env, h.userId, caller)).status).toBe(400);
     expect(h.container.beginRuntimeUsageSettlement).not.toHaveBeenCalled();
     expect(fetchHostedExecutionWebControlPlaneResponse).not.toHaveBeenCalled();
   });
@@ -122,10 +122,45 @@ describe("Provider identity and usage settlement with native receipts", () => {
       if (input.command.operation === "revoke_ai_usage") throw new Error("synthetic Web outage");
       return { cutover: "postgres", status: "authorized", owner: h.owner };
     });
-    await expect(handleRunnerOutboundRequest(h.request(), h.env, h.userId)).rejects.toThrow("synthetic Web outage");
+    await expect(handleRunnerOutboundRequest(h.request(), h.env, h.userId, caller)).rejects.toThrow("synthetic Web outage");
     const provider = await readNativeRuntimeProviderAuthority(h.env, caller);
     expect(provider).toMatchObject({ settlementPending: true });
     expect(h.receipt().usageSettlementAllowsProviders(h.identity)).toBe(false);
+  });
+
+  it("delivers an already-produced transcript but durably blocks the next billable call when all Web calls fail", async () => {
+    const h = harness();
+    const run = vi.fn(async () => ({ text: "Synthetic transcript", duration: 1 }));
+    const env = { ...h.env, AI: { run } };
+    vi.mocked(commandHostedRuntimeOwner).mockRejectedValue(new Error("synthetic owner endpoint unavailable"));
+    vi.mocked(fetchHostedExecutionWebControlPlaneResponse).mockImplementation(async () => {
+      expect(h.container.beginRuntimeUsageSettlement).toHaveBeenCalledOnce();
+      // Reconstruct from SQLite, as after controller eviction.
+      expect(h.receipt().readProviderInvocation()).toMatchObject({ settlementPending: true });
+      throw new Error("synthetic settlement endpoint unavailable");
+    });
+    const transcribe = () => hostedRunnerIntercept(new Request("http://murph-transcribe.worker/v1/transcribe", {
+      method: "POST", body: new Uint8Array([1, 2, 3]),
+    }), env, caller);
+    const first = await transcribe();
+    expect(first.status).toBe(200);
+    expect(await first.json()).toMatchObject({ text: "Synthetic transcript" });
+    expect(h.receipt().readProviderInvocation()).toMatchObject({ settlementPending: true });
+    expect((await transcribe()).status).toBe(503);
+    expect(run).toHaveBeenCalledOnce();
+    expect(fetchHostedExecutionWebControlPlaneResponse).toHaveBeenCalledOnce();
+    expect(vi.mocked(commandHostedRuntimeOwner).mock.calls.map(([input]) => input.command.operation))
+      .toEqual(["revoke_ai_usage"]);
+  });
+
+  it("rejects mismatched native usage identity before any Web request", async () => {
+    const h = harness();
+    const request = h.request();
+    request.headers.set("x-hosted-runtime-attempt-id", "replaced-attempt");
+    await expect(handleRunnerOutboundRequest(request, h.env, h.userId, caller))
+      .rejects.toThrow("Native usage settlement receipt was rejected");
+    expect(fetchHostedExecutionWebControlPlaneResponse).not.toHaveBeenCalled();
+    expect(commandHostedRuntimeOwner).not.toHaveBeenCalled();
   });
 
   it("clears its pending receipt only after explicit successful settlement", async () => {
@@ -134,10 +169,10 @@ describe("Provider identity and usage settlement with native receipts", () => {
       expect(h.receipt().usageSettlementAllowsProviders(h.identity)).toBe(false);
       return Response.json({ platformAiUsageAllowedAfter: true, recorded: true, usageId: "synthetic-report" });
     });
-    expect((await handleRunnerOutboundRequest(h.request(), h.env, h.userId)).status).toBe(200);
+    expect((await handleRunnerOutboundRequest(h.request(), h.env, h.userId, caller)).status).toBe(200);
     expect(h.receipt().usageSettlementAllowsProviders(h.identity)).toBe(true);
     expect(fetchHostedExecutionWebControlPlaneResponse).toHaveBeenCalledTimes(1);
     const commands = vi.mocked(commandHostedRuntimeOwner).mock.calls.map(([input]) => input.command.operation);
-    expect(commands).toEqual(["authorize_effect"]);
+    expect(commands).toEqual([]);
   });
 });

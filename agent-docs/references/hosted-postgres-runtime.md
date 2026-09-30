@@ -173,7 +173,10 @@ Provider effects use Cloudflare's platform-supplied container ID and class to
 resolve the exact native controller. Its immutable member binding and registered
 invocation receipt provide attempt/generation, admitted inference configuration,
 and initial spending allowance. Pending or denied usage settlements remain a
-native negative latch. The Worker retains operation policy and real provider
+native negative latch. Usage settlement resolves the same physical caller and
+persists its exact native pending receipt before the first Web request. The signed
+usage callback checks canonical ownership and updates the ledger; a failed Web
+request cannot leave further managed spending authorized. The Worker retains operation policy and real provider
 secrets; no request header, bearer token, or sentinel grants provider authority.
 There is one controller RPC and no Web/Postgres authorization callback on this
 ordinary path. Completion and native retirement revoke new provider calls;

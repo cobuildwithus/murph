@@ -7717,6 +7717,8 @@ function createInterceptEnv(input: {
       input.OPENAI_AUTHORIZATION_ALERT_MONITOR,
     RUNNER_CONTAINER: {
       get: () => ({
+        beginRuntimeUsageSettlement: async () => true,
+        finishRuntimeUsageSettlement: async () => {},
         readProviderAuthority: async () => {
           const state = interceptControl.get(env)!;
           const userId = "member_123";

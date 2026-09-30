@@ -6,7 +6,7 @@ export interface RuntimeProviderCaller {
 }
 
 /** These coordinates come from ContainerProxy props, never request headers. */
-export async function readNativeRuntimeProviderAuthority(
+export function readNativeRuntimeProviderContainer(
   env: RunnerOutboundEnvironmentSource, caller: RuntimeProviderCaller | undefined,
 ) {
   if (!caller?.containerId) return null;
@@ -15,6 +15,11 @@ export async function readNativeRuntimeProviderAuthority(
     : caller.className === "StandbyRunnerContainer" ? env.STANDBY_RUNNER_CONTAINER
     : caller.className === "SmallRunnerContainer" ? env.SMALL_RUNNER_CONTAINER : null;
   if (!namespace?.idFromString || !namespace.get) return null;
-  const container = namespace.get(namespace.idFromString(caller.containerId));
-  return await container.readProviderAuthority?.() ?? null;
+  return namespace.get(namespace.idFromString(caller.containerId));
+}
+
+export async function readNativeRuntimeProviderAuthority(
+  env: RunnerOutboundEnvironmentSource, caller: RuntimeProviderCaller | undefined,
+) {
+  return await readNativeRuntimeProviderContainer(env, caller)?.readProviderAuthority?.() ?? null;
 }

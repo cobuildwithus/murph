@@ -76,3 +76,19 @@ that requires bearer credentials needs new invocations to drain or retire first.
 
 Production end-to-end timing remains unmeasured for this candidate; removing the
 callback does not prove every alert falls below three seconds.
+
+## Review remediation
+
+Round 3 on the merged candidate identified a real billing gap: usage admission
+read Web before creating the native pending marker, so failure at that first
+read let subsequent direct-metered calls continue. Accepted. Resolve settlement
+through the existing authenticated physical caller, create the existing native
+receipt first, and let the signed usage callback own canonical authorization.
+Delete the extra Web admission read; add no state, retries, or durable owner.
+
+Composed transcription proof makes all Web endpoints unavailable: the first
+transcript still returns, pending evidence survives receipt reconstruction, and
+the next billable call is blocked. Explicit-success clearing and mismatched
+identity rejection also pass. All 597 affected provider, internal callback,
+hosted-local wrapper, and settlement tests pass. The separate CI alert fixture
+now asserts only the remaining image-access call; all 17 workerd tests pass.

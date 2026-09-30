@@ -1,5 +1,5 @@
 import { parseHostedRuntimeUsageRecordResponse } from "@murphai/hosted-execution/parsers";
-import { readNativeRuntimeProviderAuthority } from "./runtime-provider-authorization.ts";
+import { readNativeRuntimeProviderAuthority, type RuntimeProviderCaller } from "./runtime-provider-authorization.ts";
 import { Buffer } from "node:buffer";
 import { waitUntil } from "cloudflare:workers";
 
@@ -299,6 +299,7 @@ type HostedProviderEgressValidationMode = "deploy_smoke_live_model_turn" | "nati
 type HostedProviderEgressRejectReason = "bound_container_inactive" | "usage_settlement_pending";
 
 interface HostedProviderEgressAuthorization {
+  caller?: RuntimeProviderCaller;
   authorized: boolean;
   customInferenceEnvelope?: string | null;
   durationMs: number;
@@ -463,6 +464,7 @@ export async function handleHostedRunnerInternalOutbound(
       createHostedRunnerInternalRequest(request),
       env,
       userId,
+      ctx,
     );
     await emitHostedRunnerInternalOutboundResponseCompleted({
       diagnosticDetails,
@@ -1032,6 +1034,7 @@ function recordHostedTranscribeUsage(input: {
       occurredAt: input.occurredAt,
     });
     await recordHostedDirectRuntimeUsage({
+      caller: input.authorization.caller,
       env: input.env,
       record,
       writeFence,
@@ -1051,6 +1054,7 @@ function recordHostedTranscribeUsage(input: {
 }
 
 async function recordHostedDirectRuntimeUsage(input: {
+  caller?: RuntimeProviderCaller;
   env: RunnerOutboundEnvironmentSource;
   record: AssistantUsageRecord;
   writeFence: HostedProviderEgressWriteFenceMetadata;
@@ -1060,7 +1064,7 @@ async function recordHostedDirectRuntimeUsage(input: {
   writeRunnerRuntimeWriteFenceHeaders(headers, { attemptId: input.writeFence.attemptId, leaseGeneration: input.writeFence.leaseGeneration, workspaceVersion: input.writeFence.workspaceVersion });
   const response = await handleRunnerOutboundRequest(new Request(`${CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.webControlPlane}${HOSTED_RUNNER_WEB_CONTROL_ROUTES.usageRecording.path}`, {
     method: "POST", headers, body: JSON.stringify({ usage: input.record }),
-  }), input.env, input.writeFence.userId);
+  }), input.env, input.writeFence.userId, input.caller);
   if (!response.ok) throw new Error(`Runtime usage recording returned HTTP ${response.status}.`);
   return parseHostedRuntimeUsageRecordResponse(await response.json());
 }
@@ -1802,6 +1806,7 @@ function recordHostedElevenLabsTtsUsage(input: {
       occurredAt: input.occurredAt,
     });
     await recordHostedDirectRuntimeUsage({
+      caller: input.authorization.caller,
       env: input.env,
       record,
       writeFence,
@@ -1838,6 +1843,7 @@ function recordHostedElevenLabsMusicUsage(input: {
       providerRequestId: input.providerRequestId,
     });
     await recordHostedDirectRuntimeUsage({
+      caller: input.authorization.caller,
       env: input.env,
       record,
       writeFence,
@@ -2003,6 +2009,7 @@ function recordHostedGeminiVideoAnalysisUsage(input: {
       usage: readHostedGeminiVideoAnalysisUsageMetadata(input.responseBody),
     });
     const result = await recordHostedDirectRuntimeUsage({
+      caller: input.authorization.caller,
       env: input.env,
       record,
       writeFence,
@@ -2172,6 +2179,7 @@ function recordHostedXaiSearchUsage(input: {
       usage: input.usage,
     });
     await recordHostedDirectRuntimeUsage({
+      caller: input.authorization.caller,
       env: input.env,
       record,
       writeFence,
@@ -2883,6 +2891,7 @@ async function authorizeHostedProviderEgress(input: {
   const settlementPending = owner?.settlementPending
     && (HOSTED_PLATFORM_METERED_PROVIDER_KINDS.has(input.providerKind) || input.providerKind === "workers_ai_transcribe");
   return {
+    caller: input.ctx,
     authorized: Boolean(owner) && !owner?.retiring && !settlementPending,
     durationMs: Date.now() - startedAt, mode: "native_container",
     providerEgressTokenPresent: false, runtimeAuthorityHeadersPresent: false,

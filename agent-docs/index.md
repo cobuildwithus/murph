@@ -3,7 +3,7 @@ in [the import-speed plan](exec-plans/completed/2026-09-24-garmin-import-speed.m
 
 # Murph Agent Docs Index
 
-Runtime claim eligibility, native provider authority, rollout compatibility,
+Runtime claim eligibility, native provider authority, usage-settlement ordering, rollout compatibility,
 and reuse of transaction-validated routing facts are
 owned by [Hosted Postgres runtime ownership](references/hosted-postgres-runtime.md).
 
