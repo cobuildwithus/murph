@@ -1039,6 +1039,15 @@ PostgreSQL proofs compare decisions and SQL counts with the former query strateg
 including direct, sponsored, and group access; query count alone is not evidence
 of production CPU or latency improvement.
 
+Mailbox fetch imports its bounded projection reader and mailbox parsers directly.
+The append/decrypt store and broad parser barrel re-export the same implementations
+for existing consumers, but are not startup dependencies of this route. Logging
+uses the public observability entrypoint; provider identity uses the wearable
+provider catalog without loading metric definitions. Optional ingress context
+checks workspace existence in the same bounded envelope query, then verifies the
+signed envelope outside the mailbox transaction. Callback authentication, nonce
+admission, and runtime lock ordering remain unchanged.
+
 Mailbox fetch diagnostics reuse the request-local Prisma timing collector to
 record operation, pool-checkout, and physical pg query start offsets on one
 monotonic clock. Query duration includes network, server execution, and response

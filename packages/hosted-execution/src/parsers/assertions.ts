@@ -171,3 +171,13 @@ export function requireNonNegativeBigIntString(value: unknown, label: string): s
 
   return text;
 }
+
+export function requirePositiveInteger(value: unknown, label: string): number {
+  const parsed = requireNonNegativeInteger(value, label);
+
+  if (parsed === 0) {
+    throw new TypeError(`${label} must be a positive integer.`);
+  }
+
+  return parsed;
+}

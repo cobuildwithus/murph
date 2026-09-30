@@ -899,3 +899,6 @@ Complete historical clinical hold-shape coverage is recorded in
 [hold histories](exec-plans/completed/2026-09-29-clinical-hold-histories.md).
 
 Clinical raw validation repair plan: [`2026-09-29-frog-3895-clinical-validation.md`](exec-plans/active/2026-09-29-frog-3895-clinical-validation.md).
+
+Mailbox startup dependency reduction and single-query ingress context proof are tracked in
+[mailbox startup simplification](exec-plans/completed/2026-09-30-mailbox-startup-simplification.md).
