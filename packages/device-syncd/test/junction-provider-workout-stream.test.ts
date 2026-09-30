@@ -854,7 +854,7 @@ test("Junction production timeseries resources and direct provider bound match d
     assert.match(documentation, /7 wide and 41 one-day/u);
     assert.match(documentation, /three\s+sequential\s+pages/u);
     assert.match(documentation, /one attempt/u);
-    assert.match(documentation, /24 seconds/u);
+    assert.match(documentation, /36 seconds/u);
     assert.match(documentation, /one resource/u);
     assert.match(documentation, /one closed UTC day/u);
   }
