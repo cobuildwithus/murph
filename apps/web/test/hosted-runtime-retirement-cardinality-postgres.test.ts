@@ -16,6 +16,7 @@ if (enabled) {
 }
 
 it.skipIf(!enabled)("retires the maximum census with fixed database work and no external calls", async () => {
+  const queries = vi.spyOn(pg.Client.prototype, "query");
   const prisma = createPrismaClient({ databaseUrl, poolMax: 2 });
   const size = 100_000;
   const digest = (value: string) => createHash("sha256").update(value).digest("hex");
@@ -40,7 +41,7 @@ it.skipIf(!enabled)("retires the maximum census with fixed database work and no 
       namespaceProbeId: identity.compatibility.namespaceProbeId,
       inventoryHash, inventoryCount: size, inventorySealedAt: new Date(), creationClosedAt: new Date(),
     } });
-    const queries = vi.spyOn(pg.Client.prototype, "query");
+    queries.mockClear();
     const fetch = vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("Retirement must not call a provider."));
     try {
       const result = await executeHostedRuntimeMigrationCommand({ prisma, command: {
@@ -61,7 +62,6 @@ it.skipIf(!enabled)("retires the maximum census with fixed database work and no 
       expect(census[0]).not.toContain('"last_hash"');
       expect(fetch).not.toHaveBeenCalled();
     } finally {
-      queries.mockRestore();
       fetch.mockRestore();
     }
   } finally {
@@ -70,6 +70,7 @@ it.skipIf(!enabled)("retires the maximum census with fixed database work and no 
       await prisma.hostedRuntimeCutover.update({ where: { id: "runtime" }, data: originalGate });
     }
     await prisma.$disconnect();
+    queries.mockRestore();
   }
 }, 30_000);
 
