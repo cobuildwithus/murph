@@ -28,3 +28,11 @@ This blocks authenticated provider OAuth tests even though the isolated Web and 
 A composed reproduction confirmed that missing Caddy lets direct Web and Worker health pass while the advertised HTTPS proxy still returns 502 from a stale upstream. Automatic proxy startup now rejects missing Caddy or the repository Caddyfile when the canonical HTTPS origin is advertised. Explicit proxy skipping and ordinary direct HTTP behavior are preserved.
 
 The historical report does not establish whether Caddy was available on that session's PATH. This repair addresses the verified missing-required-proxy variant; it does not claim the original stale-proxy cause or authorize taking over another session's proxy.
+
+## Occupied-listener resolution
+
+A composed regression also confirms that direct health can win before the new
+proxy reports its bind failure. Required canonical HTTPS startup now checks the
+existing TCP port admission owner before launching Caddy and rejects an occupied
+listener with an explicit handoff message. Cleanup remains limited to the new
+stack's own children. Explicit proxy skipping and direct HTTP are preserved.

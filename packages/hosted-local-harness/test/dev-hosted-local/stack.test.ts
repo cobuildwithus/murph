@@ -655,6 +655,34 @@ describe("hosted local dev stack", () => {
     }
   });
 
+  it("rejects another session's HTTPS listener before direct health can declare readiness", async () => {
+    execFileSync.mockReturnValueOnce(Buffer.alloc(0));
+    const environmentModule = await import("../../src/dev-hosted-local/environment.ts");
+    const runtimeModule = await import("../../src/dev-hosted-local/runtime.ts");
+    vi.mocked(environmentModule.buildHostedLocalDevOverrides).mockReturnValueOnce({
+      HOSTED_WEB_BASE_URL: "https://local.withmurph.ai:3443",
+    });
+    vi.mocked(runtimeModule.assertPortAvailable).mockImplementation(async (_host, port, message) => {
+      if (port === 3443) throw new Error(message);
+    });
+    try {
+      const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
+      const startup = startHostedLocalDevStack({ env: process.env }).then(async (stack) => {
+        await stack.ready;
+        await stack.stop();
+      });
+      await expect(startup).rejects.toThrow("Canonical local HTTPS is already owned by another listener");
+      expect(runtimeModule.assertPortAvailable).toHaveBeenCalledWith(
+        "127.0.0.1", 3443, expect.stringContaining("explicit handoff"),
+      );
+      expect(waitForHealthyHttpEndpoint).not.toHaveBeenCalled();
+      expect(spawnChildProcess.mock.calls.some(([name]) => name === "tls-proxy")).toBe(false);
+      expect(terminateChildProcessAndWait).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.mocked(runtimeModule.assertPortAvailable).mockImplementation(async () => {});
+    }
+  });
+
   it("preserves explicit proxy skipping with an advertised HTTPS origin", async () => {
     const environmentModule = await import("../../src/dev-hosted-local/environment.ts");
     vi.mocked(environmentModule.buildHostedLocalDevOverrides).mockReturnValueOnce({
@@ -665,6 +693,8 @@ describe("hosted local dev stack", () => {
     await stack.ready;
     expect(stack.webBaseUrl).toBe("https://local.withmurph.ai:3443");
     expect(execFileSync).not.toHaveBeenCalled();
+    const runtimeModule = await import("../../src/dev-hosted-local/runtime.ts");
+    expect(vi.mocked(runtimeModule.assertPortAvailable).mock.calls.some(([, port]) => port === 3443)).toBe(false);
     await stack.stop();
   });
 
@@ -740,6 +770,9 @@ describe("hosted local dev stack", () => {
 
     expect(stack.webBaseUrl).toBe("https://local.withmurph.ai:3443");
     expect(execFileSync).toHaveBeenCalledWith("which", ["caddy"], { stdio: "ignore" });
+    expect(runtimeModule.assertPortAvailable).toHaveBeenCalledWith(
+      "127.0.0.1", 3443, expect.stringContaining("explicit handoff"),
+    );
     expect(spawnChildProcess).toHaveBeenCalledWith(
       "tls-proxy", "caddy", expect.arrayContaining(["run", "--config"]),
       expect.objectContaining({ HOSTED_WEB_BASE_URL: "https://local.withmurph.ai:3443" }),
