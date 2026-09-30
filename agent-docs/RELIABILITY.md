@@ -2497,13 +2497,7 @@ to apply after cutover.
   a foreground telemetry wait. Telegram keeps turn-owned start. Failed
   starts and stopped, aborted, expired or failed provider handles supply no new
   evidence. Linq's existing provider cooldown is unchanged. Signup's
-  early Web typing hint is also retained. Fresh admitted direct Linq messages
-  may start the same best-effort Web hint while runtime wake proceeds, after
-  current access, consent, and read-only usage checks. The exact inbound chat
-  and fresh conversation checkpoint are required; replays, groups, reactions,
-  Web-owned replies, and denied or late admission do not start it. Wake failure
-  cancels pending admission or clears an issued hint. Only provider acceptance
-  supplies the existing ingress timestamp, so neither produces a missing-typing
+  early Web typing hint is also retained, so neither produces a missing-typing
   false positive. Provider-accepted Web instant replies carry their existing
   delivery identity into the post-response trace writer, including completed
   webhook replays. The ordinary accepted-delivery link resolves that exact

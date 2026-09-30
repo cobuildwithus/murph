@@ -136,7 +136,7 @@ describe("runtime ownership response", () => {
     expect(edges.backend).not.toHaveBeenCalled();
   });
 
-  it.each(["legacy", "draining"])("uses the locked authorization result for %s routing", async (cutover) => {
+  it.each(["legacy", "draining"])("uses the authorization snapshot for %s routing", async (cutover) => {
     edges.authenticate.mockResolvedValueOnce({ userId: identity.userId, payload: {
       operation: "authorize_provider", runnerContainerName: null,
       providerEgressTokenHash: "c".repeat(64), providerKind: "linq",

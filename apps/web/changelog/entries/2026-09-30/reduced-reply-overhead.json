@@ -1,0 +1,19 @@
+{
+  "publishedOn": "2026-09-30",
+  "order": 200,
+  "item": {
+    "id": "reduced-reply-overhead",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Less overhead before replies",
+    "summary": "Murph performs fewer internal checks before provider activity, reducing overhead before typing and replies.",
+    "details": "These checks can now finish without waiting behind unrelated database updates. Current runtime ownership and usage limits remain enforced.",
+    "relevanceTags": [
+      "performance",
+      "messaging"
+    ],
+    "sourcePullRequests": [
+      3929
+    ]
+  }
+}

@@ -171,9 +171,11 @@ their retained owner rows exist only for cleanup.
 
 Provider effects still authenticate their exact runtime identity or credential,
 apply provider operation policy, and enforce managed spending limits. The same
-Web authorization response selects Postgres or explicitly legacy routing from its
-already-locked cutover gate; no separate routing query or backend-discovery request
-precedes provider authorization. Draining, stale, or failed
+Web authorization response selects routing and authorizes against one current
+statement snapshot of the cutover gate, member existence, and runtime owner.
+Provider-token and exact-runtime checks do not start a transaction, acquire row
+locks, or make a separate routing query. The callback remains necessary to reject
+retired or replaced credentials; native container identity alone is not authority. Draining, stale, or failed
 Postgres authorization never falls back to legacy. No positive-allowance cache
 or standalone UserRunner callback preflight is added. Deploy Web's combined
 backend-selection/authorization response before its Worker consumer: older Web
@@ -207,11 +209,14 @@ above the supported plaintext maximum. Partial recovery does not claim the
 missing canonical files were restored.
 Deploy the Web recovery reader before enabling protected recovery workflow modes.
 
-Owner locks return the current row, and callback/provider admission reads member
-existence from the member lock itself. These paths use three ordered lock queries
-in the completed Postgres phase, without separate owner/member rereads. Returned
-generations and workspace versions retain native bigint precision. Deleted
-members remain unauthorized even when cleanup retains their owner row.
+Canonical publication locks return the current row and read member existence
+from the member lock itself. These mutations retain three ordered lock queries.
+External-effect preflights use a single committed-state snapshot instead: their
+former locks ended before provider I/O and could not make the external effect
+atomic with revocation. An already admitted in-flight effect may finish; a read
+after committed retirement or deletion is denied. Generations and workspace
+versions retain native bigint precision. Deleted members remain unauthorized
+even when cleanup retains their owner row.
 
 The native usage-settlement receipt is a negative latch: pending or denied
 settlement blocks managed provider access. Only an explicit allowance response
