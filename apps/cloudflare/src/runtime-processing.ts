@@ -216,16 +216,17 @@ async function wakeExistingRuntime(ctx: ProcessingContext, owner: HostedRuntimeO
 }
 
 async function startClaimedRuntime(ctx: ProcessingContext, initialOwner: HostedRuntimeOwnerSnapshot): Promise<HostedRuntimeEnsureProcessingResponse | null> {
+  const claim = { owner: initialOwner };
   let start;
-  try { start = await prepareClaimedRuntime(ctx, initialOwner); }
+  try { start = await prepareClaimedRuntime(ctx, claim); }
   catch (error) {
     if (ctx.mode !== "system_mailbox") throw error;
-    // Before launch, proof-based retirement is safe even when target selection
-    // or readiness has an unknown outcome. A stale/null snapshot cannot release
-    // a subsequently selected target; the next reconciliation retires it exactly.
-    return deferBackgroundRuntime(ctx, initialOwner);
+    start = "defer" as const;
   }
-  if (!start || "kind" in start) return start;
+  // Keep retirement outside preparation recovery: an uncertain stop stays pinned.
+  if (start === "defer") return deferBackgroundRuntime(ctx, claim.owner);
+  if (start === "retire") return retireRuntime(ctx, claim.owner);
+  if ("kind" in start) return start;
   const { owner, binding, container, ready, prepared } = start;
   const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(prepared.token.providerEgressToken!)));
   const launch = {
@@ -246,16 +247,15 @@ async function startClaimedRuntime(ctx: ProcessingContext, initialOwner: HostedR
   return acceptedProcessing(ctx, owner, "started");
 }
 
-async function prepareClaimedRuntime(ctx: ProcessingContext, initialOwner: HostedRuntimeOwnerSnapshot) {
+async function prepareClaimedRuntime(ctx: ProcessingContext, claim: { owner: HostedRuntimeOwnerSnapshot }) {
   ctx.diagnostics.stage = "fresh_start";
-  observeRuntimeProcessingFence(ctx.diagnostics, { ...requireIdentity(initialOwner), processingMode: ctx.mode });
+  observeRuntimeProcessingFence(ctx.diagnostics, { ...requireIdentity(claim.owner), processingMode: ctx.mode });
   // Foreground keeps its parallel workspace read. Background does no workspace
   // preparation until it has obtained warm capacity.
   const prepare = ctx.mode === "system_mailbox" ? null
     : createInvocationPreparation(ctx).prepareForFreshStart({ commandBudget: ctx.budget, input: ctx.input });
-  const target = await bindRuntimeTarget(ctx, initialOwner);
-  if (!target) return null;
-  if ("kind" in target) return target;
+  const target = await bindRuntimeTarget(ctx, claim);
+  if (target === "defer" || target === "retire") return target;
   const { owner, binding } = target;
   if (binding.state !== "bound" || binding.userId !== ctx.input.userId || binding.claimId !== owner.allocationId
     || binding.slotName !== owner.runnerContainerName) throw new Error("Hosted runtime target binding mismatch.");
@@ -266,9 +266,9 @@ async function prepareClaimedRuntime(ctx: ProcessingContext, initialOwner: Hoste
   if (ctx.mode === "system_mailbox") {
     // No member workspace I/O until the warm probe succeeds. Keep command
     // budget for exact retirement if preparation fails or times out.
-    if (!container.ensureWarmForBackgroundProcessing) return deferBackgroundRuntime(ctx, owner);
+    if (!container.ensureWarmForBackgroundProcessing) return "defer" as const;
     const ready = await ctx.step("background_readiness", () => container.ensureWarmForBackgroundProcessing!(readinessInput), 3_000);
-    if (ready.kind !== "ready") return deferBackgroundRuntime(ctx, owner);
+    if (ready.kind !== "ready") return "defer" as const;
     const prepareBackground = createInvocationPreparation(ctx).prepareForFreshStart({ commandBudget: ctx.budget, input: ctx.input });
     const prepared = await ctx.step("prepare_invocation", () => prepareBackground(ownerToken(owner), binding),
       Math.max(1, ctx.budget.deadlineAtMs - Date.now() - 3_000));
@@ -282,22 +282,24 @@ async function prepareClaimedRuntime(ctx: ProcessingContext, initialOwner: Hoste
   return { owner, binding, container, ready, prepared };
 }
 
-async function bindRuntimeTarget(ctx: ProcessingContext, owner: HostedRuntimeOwnerSnapshot): Promise<{ owner: HostedRuntimeOwnerSnapshot; binding: HostedStandbySlotBinding } | HostedRuntimeEnsureProcessingResponse | null> {
+async function bindRuntimeTarget(ctx: ProcessingContext, claim: { owner: HostedRuntimeOwnerSnapshot }): Promise<{ owner: HostedRuntimeOwnerSnapshot; binding: HostedStandbySlotBinding } | "defer" | "retire"> {
+  const { owner } = claim;
   const releaseId = resolveHostedRunnerReleaseId(ctx.source);
   if (owner.runnerContainerName) {
     const target = owner.runnerContainerName;
     const slot = requireHostedRunnerSlotLifecycle(ctx.namespace.getByName(target));
     const binding = await ctx.step("resolve_retained_target", () => slot.resolveRetainedStandbySlot({ currentReleaseId: releaseId,
       region: HOSTED_RUNNER_REGION, slotName: target, userId: ctx.input.userId }));
-    if (binding.state !== "bound") { await retireRuntime(ctx, owner); return null; }
+    if (binding.state !== "bound") return "retire";
     return { owner, binding };
   }
   if (!isHostedStandbyClaimId(owner.allocationId)) throw new Error("Hosted allocation identity is invalid.");
   const allocationId = owner.allocationId;
   const candidate = await allocateRuntimeTarget(ctx, allocationId, releaseId);
-  if (!candidate) return deferBackgroundRuntime(ctx, owner);
+  if (!candidate) return "defer";
   const selected = await ctx.command({ operation: "select_target", ...requireIdentity(owner), runnerContainerName: candidate });
   if (!selected.owner?.runnerContainerName) throw new Error("Hosted runtime target selection lost ownership.");
+  claim.owner = selected.owner;
   const target = selected.owner.runnerContainerName;
   const targetIdentity = readHostedRunnerTargetIdentity(target);
   if (!targetIdentity || targetIdentity.releaseId !== releaseId) throw new Error("Hosted runtime target release mismatch.");
