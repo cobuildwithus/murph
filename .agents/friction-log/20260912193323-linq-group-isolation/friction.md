@@ -1,6 +1,7 @@
 ---
 title: 'Linq group-isolation E2E retains retired audience-classification expectations'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3792'
 ---
 
 ## Expected Behavior

@@ -1,6 +1,7 @@
 ---
 title: 'Foreground recovery proof rejects advanced mailbox frontiers and settled owners'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3777'
 ---
 
 ## Expected Behavior

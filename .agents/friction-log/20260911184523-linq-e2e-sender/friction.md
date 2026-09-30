@@ -1,6 +1,7 @@
 ---
 title: 'Linq E2E sender ignores retryable route preparation'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3782'
 ---
 
 ## Expected Behavior

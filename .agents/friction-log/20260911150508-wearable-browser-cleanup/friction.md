@@ -1,6 +1,7 @@
 ---
 title: 'Wearable browser cleanup erases authorization failure context'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3775'
 ---
 
 ## Expected Behavior

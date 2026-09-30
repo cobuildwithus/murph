@@ -1,6 +1,7 @@
 ---
 title: 'Linq inventory concurrency proof exhausts retries and misses commit conflicts'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3776'
 ---
 
 ## Expected Behavior

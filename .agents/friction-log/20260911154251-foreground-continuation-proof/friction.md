@@ -1,6 +1,7 @@
 ---
 title: 'Foreground continuation proof rejects advanced mailbox frontiers'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3778'
 ---
 
 ## Expected Behavior

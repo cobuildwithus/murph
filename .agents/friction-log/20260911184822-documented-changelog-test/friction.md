@@ -1,6 +1,7 @@
 ---
 title: 'Documented changelog test command misses repository-root discovery and generated input'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3783'
 ---
 
 ## Expected Behavior

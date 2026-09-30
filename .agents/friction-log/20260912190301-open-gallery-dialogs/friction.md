@@ -1,6 +1,7 @@
 ---
 title: 'Open gallery dialogs obscure unrelated screenshot studies'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3791'
 ---
 
 ## Expected Behavior

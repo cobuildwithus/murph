@@ -1,6 +1,7 @@
 ---
 title: 'Research scout live fixture hides replies when command logs are absent'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3785'
 ---
 
 ## Expected Behavior

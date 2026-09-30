@@ -1299,6 +1299,14 @@
     {
       "issue": "cobuildwithus/murph#3456",
       "path": ".agents/friction-log/20260910003445-public-auth-smoke/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3768",
+      "path": ".agents/friction-log/20260911125157-public-main-merges/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3784",
+      "path": ".agents/friction-log/20260911194130-hosted-release-proof/friction.md"
     }
   ],
   "version": 1

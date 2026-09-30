@@ -1,6 +1,7 @@
 ---
 title: 'Standby claim late-settlement test races wall clock against timeout clock'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3770'
 ---
 
 ## Expected Behavior

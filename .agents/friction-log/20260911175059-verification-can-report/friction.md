@@ -1,6 +1,7 @@
 ---
 title: 'Verification can report success while skipping required proof'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3781'
 ---
 
 ## Expected Behavior
