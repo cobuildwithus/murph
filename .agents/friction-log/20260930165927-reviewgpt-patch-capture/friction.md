@@ -1,6 +1,7 @@
 ---
 title: 'ReviewGPT patch capture omits downloadable artifact controls'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3937'
 ---
 
 ## Expected Behavior

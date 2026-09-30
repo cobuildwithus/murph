@@ -1,6 +1,7 @@
 ---
 title: 'Junction admission test rejects unrelated digits inside an opaque source hash'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3934'
 ---
 
 ## Expected Behavior
