@@ -8,7 +8,7 @@ import {
 import { PitchDeck } from "./pitch-deck";
 
 const PITCH_OPEN_GRAPH_IMAGE = {
-  alt: "Murph, the AI referee for health challenges.",
+  alt: "Murph, your personal AI health team.",
   height: 630,
   type: "image/png",
   url: "/pitch/opengraph-image",
@@ -18,7 +18,7 @@ const PITCH_OPEN_GRAPH_IMAGE = {
 export const metadata: Metadata = createMurphPageMetadata({
   title: "Murph · Pitch",
   description:
-    "Murph turns group chats into health challenges. The AI referee for step bets, sleep experiments, and friend challenges across iMessage, WhatsApp, and Telegram.",
+    "Murph is your personal AI health team. It learns from your wearables, bloodwork, and health history, texts you first, and runs health challenges in your group chats.",
   openGraph: { images: [PITCH_OPEN_GRAPH_IMAGE] },
   twitter: { images: [PITCH_OPEN_GRAPH_IMAGE] },
   robots: MURPH_NOINDEX_PAGE_ROBOTS,

@@ -4,24 +4,8 @@ import type { ReactNode } from "react";
 
 /* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
    Pitch deck mocks — the illustrative visuals dropped into slides:
-   chat threads, stat cards, diagrams, and the positioning chart.
+   chat threads, diagrams, and the positioning chart.
    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
-
-/* ━━━━━━━━━━━━━━━━━━━━━━━━━ FLOW CONNECTOR ━━━━━━━━━━━━━━━━━━━━━━ */
-
-// Stage joiner for the product flow: points right between columns on
-// wide screens, down between stacked cards on narrow ones.
-export function FlowConnector() {
-  return (
-    <div
-      aria-hidden="true"
-      className="flex items-center justify-center text-lg text-[#7a8c6e]"
-    >
-      <span className="lg:hidden">&darr;</span>
-      <span className="hidden lg:inline">&rarr;</span>
-    </div>
-  );
-}
 
 /* ━━━━━━━━━━━━━━━━━━━━━━━━━ CHAT MOCK ━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
 
@@ -45,17 +29,18 @@ const SENT_FILLS: Record<SentBubble, string> = {
 
 export function ChatMock({
   title,
-  members,
   messages,
   sentBubble = "dark",
+  ...header
 }: {
   title: string;
-  members: number;
   messages: readonly ChatMessage[];
   // Fill treatment for the sender's bubbles — see SentBubble.
   sentBubble?: SentBubble;
-}) {
+} & ({ members: number } | { subtitle: string })) {
   const sentFill = SENT_FILLS[sentBubble];
+  const headerDetail =
+    "subtitle" in header ? header.subtitle : `${header.members} members`;
   return (
     <div
       className="rounded-[22px] border border-[#c4a882]/30 p-4"
@@ -71,7 +56,7 @@ export function ChatMock({
             {title}
           </p>
           <p className="mt-0.5 font-mono text-[9px] uppercase tracking-[0.1em] text-[#736a58]">
-            {members} members
+            {headerDetail}
           </p>
         </div>
       </div>
@@ -178,192 +163,39 @@ function ChatBubble({
   );
 }
 
-/* ━━━━━━━━━━━━━━━━━━━━━━━━━ STAT CARD ━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
-
-export function StatCard({
-  value,
-  label,
-  source,
-}: {
-  value: string;
-  label: string;
-  source?: string;
-}) {
-  return (
-    <div className="rounded-xl border border-[#c4a882]/25 bg-[#fffcf6]/90 p-5">
-      <p className="font-serif text-[2.4rem] font-semibold leading-none tracking-[-0.03em] text-[#2d3436]">
-        {value}
-      </p>
-      <p className="mt-2.5 text-[13px] leading-[1.5] text-[#635a48]">{label}</p>
-      {source ? (
-        <p className="mt-2 font-mono text-[9px] uppercase tracking-[0.1em] text-[#736a58]/70">
-          Source: {source}
-        </p>
-      ) : null}
-    </div>
-  );
-}
-
-/* ━━━━━━━━━━━━━━━━━━━━━━━━━ PIVOT CARD ━━━━━━━━━━━━━━━━━━━━━━━━━━ */
-
-export function PivotCard({
-  label,
-  title,
-  items,
-  highlight,
-}: {
-  label: string;
-  title: string;
-  items: readonly string[];
-  highlight?: boolean;
-}) {
-  return (
-    <div
-      className={`rounded-xl border p-6 ${
-        highlight
-          ? "border-[#5a6e32]/35 bg-[#5a6e32]/[0.07]"
-          : "border-[#c4a882]/25 bg-[#fffcf6]/90"
-      }`}
-    >
-      <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-[#736a58]">
-        {label}
-      </p>
-      <p
-        className={`mt-1.5 font-serif text-xl font-semibold ${
-          highlight ? "text-[#5a6e32]" : "text-[#2d3436]"
-        }`}
-      >
-        {title}
-      </p>
-      <ul className="mt-3 flex flex-col gap-1.5">
-        {items.map((item) => (
-          <li
-            key={item}
-            className="flex gap-2.5 text-[14px] leading-[1.5] text-[#635a48]"
-          >
-            <span className="mt-0.5 text-[#5a6e32]">&middot;</span>
-            <span>{item}</span>
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
-}
-
-/* ━━━━━━━━━━━━━━━━━━━━━━━━━ MURPH LOOP ━━━━━━━━━━━━━━━━━━━━━━━━━━ */
-
-// Slide 08: the product loop. Every source feeds a private health
-// vault you can chat with, which powers habit coordination, which
-// teaches Murph what works — for you and for people like you.
-const MURPH_LOOP = [
-  {
-    title: "Connect every source",
-    detail: "Wearables · labs · meals · symptoms · manual check-ins",
-  },
-  {
-    title: "Build your health vault",
-    detail: "Baselines · protocols · outcomes · confounders · history",
-  },
-  {
-    title: "Chat with Murph anywhere",
-    detail: "iMessage · WhatsApp · Telegram · email",
-  },
-  {
-    title: "Coordinate healthy habits",
-    detail: "Challenges · reminders · leaderboards · results",
-  },
-  {
-    title: "Learn what works",
-    detail: "For you, your friends, and people like you",
-  },
-] as const;
-
-export function MurphLoop() {
-  return (
-    <div className="rounded-xl border border-[#c4a882]/30 bg-[#fffcf6]/90 p-5">
-      <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-[#5a6e32]">
-        The Murph loop
-      </p>
-      <div className="mt-4 flex flex-col">
-        {MURPH_LOOP.map((stage, index) => {
-          const last = index === MURPH_LOOP.length - 1;
-          return (
-            <div key={stage.title}>
-              <div
-                className={`rounded-lg border px-3.5 py-2.5 ${
-                  last
-                    ? "border-[#5a6e32]/40 bg-[#5a6e32]/[0.08]"
-                    : "border-[#c4a882]/30 bg-[#f3ead9]/45"
-                }`}
-              >
-                <p className="text-[13px] font-semibold text-[#2d3436]">
-                  {stage.title}
-                </p>
-                <p className="mt-0.5 text-[11px] leading-[1.45] text-[#736a58]">
-                  {stage.detail}
-                </p>
-              </div>
-              {last ? null : (
-                <span
-                  aria-hidden="true"
-                  className="block py-1 text-center text-xs text-[#5a6e32]/55"
-                >
-                  &darr;
-                </span>
-              )}
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
 /* ━━━━━━━━━━━━━━━━━━━━━━━━━ POSITIONING CHART ━━━━━━━━━━━━━━━━━━━ */
 
-// Vertical axis: depth of persistent health context. Horizontal axis:
-// individual habits vs. a social health layer. Murph sits alone in
-// the top-right quadrant.
+// Vertical axis: how much long-term health context a product keeps.
+// Horizontal axis: individual use vs. getting people to act together.
+// One point per category named on the competition slide; Murph sits
+// alone in the top-right.
 const POSITIONING_POINTS = [
-  { left: 25, name: "ChatGPT / Claude", top: 30 },
-  { left: 34, name: "Bevel", top: 47 },
-  { left: 27, name: "Oura / Whoop", top: 61 },
-  { left: 25, name: "Apple Health / Garmin / Fitbit", top: 78 },
-  { left: 71, name: "Strava / Stridekick", top: 73 },
+  { left: 22, name: "ChatGPT / Claude", top: 24 },
+  { left: 30, name: "Function", top: 48 },
+  { left: 31, name: "Oura / Whoop / Apple Watch", top: 74 },
+  { left: 72, name: "Strava", top: 72 },
 ] as const;
 
 export function PositioningChart() {
   return (
-    <div className="flex items-stretch gap-2.5">
+    <div className="flex items-stretch gap-4">
       {/* Vertical-axis name */}
       <div className="flex items-center justify-center">
-        <span className="rotate-180 whitespace-nowrap font-mono text-[9px] uppercase tracking-[0.14em] text-[#5a6e32] [writing-mode:vertical-rl]">
-          Persistent health context
+        <span className="rotate-180 whitespace-nowrap font-mono text-[10px] uppercase tracking-[0.14em] text-[#736a58] [writing-mode:vertical-rl]">
+          Long-term health context &rarr;
         </span>
       </div>
       <div className="min-w-0 flex-1">
-        <div className="relative aspect-[16/12] w-full overflow-hidden rounded-xl border border-[#c4a882]/30 bg-[#fffcf6]/90">
-          {/* Axes */}
-          <div className="absolute inset-y-0 left-1/2 w-px bg-[#c4a882]/30" />
-          <div className="absolute inset-x-0 top-1/2 h-px bg-[#c4a882]/30" />
-
-          {/* Vertical-axis poles */}
-          <span className="absolute left-3 top-3 whitespace-nowrap font-mono text-[9px] uppercase tracking-[0.1em] text-[#736a58]">
-            Long-term health memory
-          </span>
-          <span className="absolute bottom-3 left-3 whitespace-nowrap font-mono text-[9px] uppercase tracking-[0.1em] text-[#736a58]">
-            Raw metrics
-          </span>
-
+        <div className="relative aspect-square w-full border-b border-l border-[#c4a882]/60">
           {/* Competitor points */}
           {POSITIONING_POINTS.map((point) => (
             <div
               key={point.name}
-              className="absolute flex -translate-x-1/2 -translate-y-1/2 flex-col items-center gap-1"
+              className="absolute flex -translate-x-1/2 -translate-y-1/2 flex-col items-center gap-1.5"
               style={{ left: `${point.left}%`, top: `${point.top}%` }}
             >
-              <span className="size-2.5 rounded-full bg-[#d4c4a8]" />
-              <span className="whitespace-nowrap text-[11px] font-medium text-[#736a58]">
+              <span className="size-2.5 rounded-full bg-[#c4a882]" />
+              <span className="whitespace-nowrap text-[13px] text-[#736a58]">
                 {point.name}
               </span>
             </div>
@@ -371,26 +203,20 @@ export function PositioningChart() {
 
           {/* Murph */}
           <div
-            className="absolute flex -translate-x-1/2 -translate-y-1/2 flex-col items-center gap-1.5"
-            style={{ left: "80%", top: "17%" }}
+            className="absolute flex -translate-x-1/2 -translate-y-1/2 flex-col items-center gap-2"
+            style={{ left: "78%", top: "20%" }}
           >
-            <span className="flex size-4 items-center justify-center rounded-full bg-[#5a6e32] ring-4 ring-[#5a6e32]/15">
-              <span className="size-1.5 rounded-full bg-[#fffcf6]" />
+            <span className="flex size-5 items-center justify-center rounded-full bg-[#5a6e32] ring-[6px] ring-[#5a6e32]/15">
+              <span className="size-2 rounded-full bg-[#fffcf6]" />
             </span>
-            <span className="whitespace-nowrap font-serif text-sm font-semibold text-[#5a6e32]">
+            <span className="whitespace-nowrap font-serif text-[1.35rem] font-semibold text-[#5a6e32]">
               Murph
             </span>
           </div>
         </div>
-
-        {/* Horizontal-axis poles */}
-        <div className="mt-2 flex w-full justify-between font-mono text-[9px] uppercase tracking-[0.1em] text-[#736a58]">
-          <span>Individual</span>
-          <span>Social health layer</span>
-        </div>
         {/* Horizontal-axis name */}
-        <p className="mt-1 text-center font-mono text-[9px] uppercase tracking-[0.14em] text-[#5a6e32]">
-          Habit coordination
+        <p className="mt-3 text-right font-mono text-[10px] uppercase tracking-[0.14em] text-[#736a58]">
+          Gets people to act together &rarr;
         </p>
       </div>
     </div>
