@@ -1884,6 +1884,9 @@ export interface ImportersRuntime {
     filePath: string
     vaultRoot: string
     title?: string
+    assessmentType?: string
+    questionnaireSlug?: string
+    relatedIds?: string[]
     occurredAt?: string
     importedAt?: string
     source?: string

@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { InboxShowResult } from '@murphai/operator-config/inbox-cli-contracts'
@@ -23,7 +24,7 @@ const runtimeMocks = vi.hoisted(() => ({
   uploadLinqAttachment: vi.fn(),
 }))
 
-const mp3Bytes = new Uint8Array([0xff, 0xfb, 0x90, 0x64])
+const mp3Bytes = new Uint8Array(readFileSync(new URL('../../../fixtures/generated-audio/speech.mp3', import.meta.url)))
 
 const NUTRITION_CARD: AssistantResponseCard = {
   kind: 'daily_nutrition',

@@ -981,9 +981,26 @@ export async function readHostedRuntimeIngressCryptoContextForWorker(input: {
   prisma?: HostedCryptoClient;
   userId: string;
 }) {
-  const ingress = await readActiveHostedDomainRootEnvelopeRecordOrThrow({
+  const prisma = input.prisma ?? getPrisma();
+  const rows = await prisma.$queryRaw<HostedUserCryptoEnvelopeRow[]>`
+    SELECT
+      id,
+      user_id AS "userId",
+      domain::text AS domain,
+      root_key_id AS "rootKeyId",
+      status::text AS status,
+      signed_envelope_json AS "signedEnvelopeJson",
+      updated_at AS "updatedAt"
+    FROM hosted_user_crypto_envelope
+    WHERE user_id = ${input.userId}
+      AND domain = 'ingress'::hosted_crypto_domain
+      AND status = 'active'::hosted_crypto_envelope_status
+      AND EXISTS (SELECT 1 FROM hosted_workspace WHERE user_id = ${input.userId})
+    ORDER BY created_at DESC
+    LIMIT 1
+  `;
+  const ingress = await verifyHostedDomainRootEnvelopeRecord(rows[0] ?? null, {
     domain: "ingress",
-    prisma: input.prisma ?? getPrisma(),
     userId: input.userId,
   });
   return {
@@ -1489,6 +1506,13 @@ async function readActiveHostedDomainRootEnvelopeRecordOrThrow(input: {
     tx: prisma,
     userId: input.userId,
   });
+  return verifyHostedDomainRootEnvelopeRecord(row, input);
+}
+
+async function verifyHostedDomainRootEnvelopeRecord(
+  row: HostedUserCryptoEnvelopeRow | null,
+  input: { domain: HostedCryptoDomain; userId: string },
+): Promise<VerifiedHostedDomainRootEnvelopeRecord> {
   if (!row) {
     throw new HostedDomainRootEnvelopeUnavailableError({
       domain: input.domain,

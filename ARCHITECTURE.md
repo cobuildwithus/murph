@@ -1039,6 +1039,15 @@ PostgreSQL proofs compare decisions and SQL counts with the former query strateg
 including direct, sponsored, and group access; query count alone is not evidence
 of production CPU or latency improvement.
 
+Mailbox fetch imports its bounded projection reader and mailbox parsers directly.
+The append/decrypt store and broad parser barrel re-export the same implementations
+for existing consumers, but are not startup dependencies of this route. Logging
+uses the public observability entrypoint; provider identity uses the wearable
+provider catalog without loading metric definitions. Optional ingress context
+checks workspace existence in the same bounded envelope query, then verifies the
+signed envelope outside the mailbox transaction. Callback authentication, nonce
+admission, and runtime lock ordering remain unchanged.
+
 Mailbox fetch diagnostics reuse the request-local Prisma timing collector to
 record operation, pool-checkout, and physical pg query start offsets on one
 monotonic clock. Query duration includes network, server execution, and response
@@ -1177,7 +1186,8 @@ binding and a new generation, with eight authorizations per source and twenty
 sources per member. The detailed limits, official API registrations and launch
 requirements are owned by `agent-docs/product-specs/clinical-records-intake.md`.
 
-Each imported page batch containing downloaded documents admits a vault-owned
+Each imported page batch containing downloaded documents or eligible retained
+FHIR source notes admits a vault-owned
 enrichment job and local `clinical-records.enrichment-requested` mailbox pointer
 before advancing the retrieval checkpoint. The job scans only its own immutable
 manifest, never predecessor batches. Its pending pointer supplies the next wake
@@ -1198,6 +1208,24 @@ but cannot defer pending canonical receipts or durable effects.
 Checkpoint-only return paths keep extraction paused for the durable successor.
 If this invocation instead accepts another foreground pass after checkpointing,
 it resumes its paused extractor unless shutdown or owner handoff has started.
+
+Retained structured records use the same job after its attachments. The importer
+selects only source notes it successfully mapped; deterministic results and
+safety holds never enter this model lane. The host reattests the immutable page,
+patient binding, unique resource identity and live facet-free parent revision.
+One GPT-5.6 Luna turn at medium reasoning extracts all families for one resource,
+with shell and dynamic tools disabled and the existing 120-second deadline.
+The provider receives selected clinical text, excluding identifier fields,
+patient routing references and revision metadata. Literal evidence and date
+provenance are required before canonical apply; unsupported dates stay held
+without a correction call. Clinical assertion code/system pairs must exactly
+match a source coding. Whole-page hashes attest storage while resource
+hashes isolate caching and derived fact identity across records on the same page.
+
+Structured jobs use `murph.clinical-enrichment.v2`; attachment-only jobs retain
+v1. New readers accept both. Older runtimes cannot consume v2 checkpoints, so
+new jobs must stay with upgraded exclusive workspace owners and rollback must
+retain a v2-capable reader. No database or raw-manifest migration is required.
 
 Before freezing proposals, extraction uses the shared date consistency check
 with the vault timezone. An affected family gets one read-only, date-only

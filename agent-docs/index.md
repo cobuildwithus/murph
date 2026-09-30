@@ -131,8 +131,9 @@ Checkpointed historical scan progress, including empty-date coverage, is owned
 by `agent-docs/RELIABILITY.md` and `packages/device-syncd/README.md`.
 
 Checkpoint-aware operational stall alerts, including bounded publication time
-for deferred device jobs and checkpoint-confirmed runnable cycling windows,
-are specified in `agent-docs/RELIABILITY.md`.
+for deferred device jobs, checkpoint-confirmed runnable cycling windows, and
+current-owner foreground checkpoint grace for imported activation/device-sync
+mailbox heads, are specified in `agent-docs/RELIABILITY.md`.
 Cycling-window correction and focused proof are recorded in
 [`2026-09-20-device-cycling-alert.md`](exec-plans/completed/2026-09-20-device-cycling-alert.md).
 The original productive-pass and conversation implementation is tracked in
@@ -671,6 +672,13 @@ Provider-search delivery is recorded in
 The separate registration activation and composed import proof remain active in
 [`2026-09-16-epic-import-live-verification.md`](exec-plans/active/2026-09-16-epic-import-live-verification.md).
 
+Structured clinical source recovery is tracked in
+[`2026-09-29-clinical-structured-enrichment.md`](exec-plans/completed/2026-09-29-clinical-structured-enrichment.md).
+Literal evidence selection and focused model proof are tracked in
+[`clinical evidence quotes`](exec-plans/completed/2026-09-29-clinical-evidence-quotes.md).
+Assessment classification and source links through the intake CLI are tracked in
+[`clinical intake classification`](exec-plans/completed/2026-09-29-clinical-intake-classification.md).
+
 Clinical import notice handling, qualitative range preservation, and repeated-item
 reporting are tracked in
 [`2026-09-25-clinical-import-coverage.md`](exec-plans/active/2026-09-25-clinical-import-coverage.md).
@@ -892,3 +900,6 @@ Complete historical clinical hold-shape coverage is recorded in
 [hold histories](exec-plans/completed/2026-09-29-clinical-hold-histories.md).
 
 Clinical raw validation repair plan: [`2026-09-29-frog-3895-clinical-validation.md`](exec-plans/active/2026-09-29-frog-3895-clinical-validation.md).
+
+Mailbox startup dependency reduction and single-query ingress context proof are tracked in
+[mailbox startup simplification](exec-plans/completed/2026-09-30-mailbox-startup-simplification.md).

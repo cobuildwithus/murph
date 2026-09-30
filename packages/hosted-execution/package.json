@@ -197,6 +197,14 @@
     "./conversation-polls": {
       "types": "./dist/conversation-polls.d.ts",
       "default": "./dist/conversation-polls.js"
+    },
+    "./parsers/mailbox": {
+      "types": "./dist/parsers/mailbox.d.ts",
+      "default": "./dist/parsers/mailbox.js"
+    },
+    "./observability": {
+      "types": "./dist/observability.d.ts",
+      "default": "./dist/observability.js"
     }
   },
   "files": [

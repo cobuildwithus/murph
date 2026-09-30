@@ -51,6 +51,25 @@ beforeEach(async () => { vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cl
 afterEach(async () => { vi.useRealTimers(); await rm(vaultRoot, { force: true, recursive: true }); });
 
 describe("hosted clinical records maintenance", () => {
+  it("durably admits retained structured records for enrichment before finishing retrieval", async () => {
+    await initializeVault({ vaultRoot, timezone: "UTC" });
+    const retained = { resourceType: "Observation", id: "narrative-vital", status: "final",
+      subject: { reference: "Patient/patient-1" }, meta: { lastUpdated: RUN.fetchedAt },
+      effectiveDateTime: "2020-03-12T12:00:00Z", code: { text: "Narrative vital" }, valueString: "Resting heart rate 73 bpm." };
+    const importSnapshot = vi.fn(importClinicalFhirSnapshot);
+    const result = await run(createPort({ fetchPage: async () => ({ status: "page", body: bundle([retained, lab("structured")]), nextCursor: null }) }), importSnapshot);
+    expect(result).toMatchObject({ status: "completed", counts: { createdCount: 2 } });
+    const imported = await importSnapshot.mock.results[0]!.value;
+    expect(imported.structuredEnrichmentSources).toHaveLength(1);
+    expect((await readHostedSystemMailboxState(vaultRoot)).pending).toEqual([expect.objectContaining({
+      routeAction: "apply-clinical-enrichment", wake: expect.objectContaining({ jobId: imported.manifestSha256 }),
+    })]);
+    expect(await readNextClinicalEnrichment({ vaultRoot })).toMatchObject({
+      status: "extract", source: { resource: { resourceId: "narrative-vital" } },
+    });
+    expect(await checkpoint()).toBeNull();
+  });
+
   it.each(["qualitative-range", "source-note", "component-range", "prior-result", "prior-component", "prior-source-note"])("completes a real refresh past a historical %s hold and advances both pages", async (shape) => {
     await initializeVault({ vaultRoot, timezone: "UTC" });
     const heldResource = { resourceType: "Observation", id: "historical-hold", status: "final", subject: { reference: "Patient/patient-1" },

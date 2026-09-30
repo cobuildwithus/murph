@@ -312,6 +312,7 @@ export interface SendLinqVoiceMemoResult {
   providerThreadId: string | null
   target: string
   voiceMemoAttachmentId: string | null
+  voiceMemoDurationMs: number | null
   voiceMemoUrl: string | null
 }
 
@@ -2594,6 +2595,19 @@ function parseLinqVoiceMemoResponse(input: {
   const voiceMemoRecord = readRecord(input.response.voice_memo)
   const nestedVoiceMemo = readRecord(voiceMemoRecord?.voice_memo)
   const chatRecord = readRecord(voiceMemoRecord?.chat)
+  const rawDuration = nestedVoiceMemo?.duration_ms
+  const voiceMemoDurationMs = typeof rawDuration === 'number'
+    && Number.isFinite(rawDuration) && rawDuration >= 0
+    ? rawDuration
+    : null
+  if (voiceMemoDurationMs === 0) {
+    // The send is already accepted. Throwing here could duplicate the memo.
+    console.warn('Linq accepted a voice memo with zero duration.', {
+      provider: 'linq',
+      operation: 'send_voice_memo',
+      durationMs: 0,
+    })
+  }
   return {
     providerMessageId: normalizeNullableString(readStringField(voiceMemoRecord, 'id')),
     providerThreadId:
@@ -2602,6 +2616,7 @@ function parseLinqVoiceMemoResponse(input: {
     voiceMemoAttachmentId:
       normalizeNullableString(readStringField(nestedVoiceMemo, 'id')) ??
       input.attachmentId,
+    voiceMemoDurationMs,
     voiceMemoUrl: normalizeNullableString(readStringField(nestedVoiceMemo, 'url')),
   }
 }

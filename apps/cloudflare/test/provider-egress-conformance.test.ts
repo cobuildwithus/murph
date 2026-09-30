@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import type { TestProviderContext } from "./postgres-owner-fixtures.ts";
 import { createPostgresTestOwner, forbiddenLegacyRuntime, nativeProviderTestNamespace } from "./postgres-owner-fixtures.ts";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -88,7 +89,7 @@ const NUTRITION_CARD = {
   },
 } as const;
 
-const ELEVENLABS_MP3_BYTES = new Uint8Array([0xff, 0xfb, 0x90, 0x64]);
+const ELEVENLABS_MP3_BYTES = new Uint8Array(readFileSync(new URL("../../../fixtures/generated-audio/speech.mp3", import.meta.url)));
 const TELEGRAM_FILE_BYTES = new Uint8Array([1, 2, 3]);
 
 type ForwardedRequest = {
