@@ -38,6 +38,46 @@ afterEach(() => {
 });
 
 describe("hosted device webhook Queue enqueue", () => {
+  const preparedWebhook = {
+    acceptanceMode: "level_dirty_hint" as const,
+    eventType: "demo.updated", externalAccountId: "opaque-account", jobs: [], provider: "junction",
+    receivedAt: "2026-08-14T00:00:00.000Z", schema: DEVICE_SYNC_PREPARED_WEBHOOK_SCHEMA, traceId: "1".repeat(64),
+  };
+
+  it("replays the same encrypted transport once after a lost acceptance response", async () => {
+    const accepted = new Set<string>();
+    const bodies: string[] = [];
+    const fetchImpl = vi.fn<typeof fetch>().mockImplementation(async (_url, init) => {
+      const body = String(init?.body);
+      bodies.push(body);
+      const envelope = JSON.parse(body) as { transportId: string };
+      accepted.add(envelope.transportId);
+      if (bodies.length === 1) throw new TypeError("fetch failed");
+      return Response.json({ accepted: true, transportId: envelope.transportId });
+    });
+    mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue(createCloudflareHostedControlClient({
+      baseUrl: "https://runner.example.test", fetchImpl, getBearerToken: async () => "synthetic-oidc-token",
+    }));
+    await expect(enqueueHostedDeviceWebhook({ preparedWebhook })).resolves.toMatchObject({ accepted: true });
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(bodies[1]).toBe(bodies[0]);
+    expect(accepted.size).toBe(1);
+  });
+
+  it.each([
+    [new TypeError("fetch failed"), 2],
+    [new TypeError("Invalid response shape"), 1],
+    [new DOMException("Timed out", "TimeoutError"), 1],
+    [new DOMException("Canceled", "AbortError"), 1],
+  ])("bounds transport attempts and leaves other failures to the provider retry: %s", async (cause, attempts) => {
+    const enqueueDeviceWebhook = vi.fn().mockRejectedValue(cause);
+    mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({ enqueueDeviceWebhook });
+    await expect(enqueueHostedDeviceWebhook({ preparedWebhook })).rejects.toMatchObject({
+      code: "DEVICE_WEBHOOK_QUEUE_ENQUEUE_FAILED", httpStatus: 503, retryable: true,
+    });
+    expect(enqueueDeviceWebhook).toHaveBeenCalledTimes(attempts);
+  });
+
   it.each([
     "enqueue_failed",
     "invalid_request",

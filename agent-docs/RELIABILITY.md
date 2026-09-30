@@ -2152,7 +2152,14 @@ to apply after cutover.
   caller-supplied ciphertext, new key owner or cross-request cache is added.
 - Queue-enabled provider webhooks verify once, freeze a versioned prepared
   event, and encrypt before any Postgres read. Raw provider signature headers
-  and payload bytes do not enter Queue state. The prepared event enters one
+  and payload bytes do not enter Queue state. Web retries enqueue once
+  only when fetch reports a network failure before returning
+  a response. The retry reuses the exact encrypted envelope and transport id;
+  canonical prepared-event deduplication covers a lost acceptance response.
+  Each attempt retains the configured control timeout, with at most two calls.
+  HTTP rejections, invalid responses, cancellation and timeout are not retried
+  here. Exhaustion still returns retryable 503 without synchronous fallback.
+  The prepared event enters the existing
   Cloudflare Queue consumer configured for batches of 100, five-second
   collection, concurrency one, ten retries, and an encrypted DLQ. The consumer
   decrypts outside Postgres and partitions Web callbacks by exact UTF-8 size at

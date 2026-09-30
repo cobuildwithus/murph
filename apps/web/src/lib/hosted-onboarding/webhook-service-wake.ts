@@ -3,6 +3,7 @@ import {
   type HostedIngressLatencySource,
   type HostedRuntimeLatencyPhaseBreakdown,
 } from "@murphai/hosted-execution/runtime-control";
+import { Prisma } from "@prisma/client";
 import type {
   HostedDirectRuntimeWakeTiming,
 } from "../hosted-execution/direct-runtime-wake";
@@ -198,6 +199,7 @@ async function recordHostedDirectEnsureWakeTimingBestEffort(timingRecord: {
   } catch (error) {
     console.warn("Hosted direct ensure wake timing record failed.", {
       errorName: deriveHostedOnboardingTimingErrorName(error),
+      ...(error instanceof Prisma.PrismaClientKnownRequestError ? { prismaCode: error.code } : {}),
       source: timingRecord.source,
     });
   }
