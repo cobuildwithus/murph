@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 
 import { afterEach, expect, test, vi } from 'vitest'
 
@@ -16,6 +17,9 @@ import {
 } from '../src/elevenlabs-runtime.ts'
 import { VaultCliError } from '../src/vault-cli-errors.ts'
 
+const speechAudio = new Uint8Array(readFileSync(new URL('../../../fixtures/generated-audio/speech.mp3', import.meta.url)))
+const musicAudio = new Uint8Array(readFileSync(new URL('../../../fixtures/generated-audio/music.mp3', import.meta.url)))
+
 afterEach(() => {
   vi.restoreAllMocks()
   vi.useRealTimers()
@@ -23,7 +27,7 @@ afterEach(() => {
 
 test.each(['eleven_multilingual_v2', 'eleven_v3', 'eleven_v4'])(
   'elevenlabs runtime sends %s to its supported speech endpoint and returns MP3 bytes', async (modelId) => {
-  const audioBytes = new Uint8Array([1, 2, 3])
+  const audioBytes = speechAudio
   const fetchImplementation = vi.fn(async (url: string, init) => {
     assert.equal(
       url,
@@ -66,7 +70,7 @@ test.each(['eleven_multilingual_v2', 'eleven_v3', 'eleven_v4'])(
 })
 
 test('elevenlabs runtime uses the SDK music operation with the exact request shape', async () => {
-  const audioBytes = new Uint8Array([9, 8, 7])
+  const audioBytes = musicAudio
   const fetchImplementation = vi.fn(async (url: string, init) => {
     assert.equal(
       url,
@@ -104,12 +108,19 @@ test('elevenlabs runtime uses the SDK music operation with the exact request sha
   expect(fetchImplementation).toHaveBeenCalledOnce()
 })
 
-test('elevenlabs runtime leaves audio byte validation to callers', async () => {
+test.each([
+  ['empty', new Uint8Array()],
+  ['ID3 metadata only', speechAudio.subarray(0, 45)],
+  ['ID3 and Xing metadata only', speechAudio.subarray(0, 462)],
+  ['incomplete first frame', speechAudio.subarray(0, 100)],
+  ['MP3 header only', new Uint8Array([0xff, 0xfb, 0x90, 0x64])],
+  ['non-audio response', new TextEncoder().encode('{"error":"synthetic failure"}')],
+] as const)('elevenlabs runtime rejects %s audio without transport retries', async (_label, bytes) => {
   await expect(
     generateElevenLabsSpeech({
       apiKey: 'elevenlabs-key',
       fetchImplementation: async () =>
-        new Response(new Uint8Array(), {
+        new Response(bytes, {
           headers: {
             'content-type': 'audio/mpeg',
           },
@@ -119,10 +130,9 @@ test('elevenlabs runtime leaves audio byte validation to callers', async () => {
       text: 'Short memo.',
       voiceId: 'voice_123',
     }),
-  ).resolves.toEqual({
-    bytes: new Uint8Array(),
-    contentType: 'audio/mpeg',
-    filenameExtension: 'mp3',
+  ).rejects.toMatchObject({
+    code: 'ELEVENLABS_INVALID_AUDIO',
+    context: { failureStage: 'response_body', retryable: false },
   })
 })
 

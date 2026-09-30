@@ -1,0 +1,17 @@
+{
+  "publishedOn": "2026-09-30",
+  "order": 100,
+  "item": {
+    "id": "voice-memo-audio-validation",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Checks before sending generated audio",
+    "summary": "Murph checks that generated voice memos and songs contain decodable audio before uploading them.",
+    "details": "Empty files and incomplete audio headers are caught before sending. Playback still depends on your messaging app receiving the audio correctly.",
+    "relevanceTags": [
+      "voice-memos",
+      "reliability"
+    ],
+    "sourcePullRequests": []
+  }
+}
