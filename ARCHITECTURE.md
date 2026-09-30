@@ -1039,6 +1039,19 @@ PostgreSQL proofs compare decisions and SQL counts with the former query strateg
 including direct, sponsored, and group access; query count alone is not evidence
 of production CPU or latency improvement.
 
+Mailbox fetch diagnostics reuse the request-local Prisma timing collector to
+record operation, pool-checkout, and physical pg query start offsets on one
+monotonic clock. Query duration includes network, server execution, and response
+decoding after checkout; it is not server-only SQL time. The physical-client hook
+covers pooled queries and transaction statements once, and queued checkout
+callbacks restore the requesting async context before dispatch. Existing
+first/slow/failed request records expose only the first 24 timings per category,
+counts, and query failure flags, never SQL, parameters, results, or error text.
+These categories can overlap; they must not be summed as sequential phases.
+Vercel's native infrastructure waterfall is configured separately through project
+tracing for the production `/api/internal/hosted-mailbox/fetch` path. No tracing
+SDK or new telemetry destination is required.
+
 ### Canonical Automation Support Lifecycles
 
 Early onboarding stall recovery is a canonical one-shot enrolled by existing

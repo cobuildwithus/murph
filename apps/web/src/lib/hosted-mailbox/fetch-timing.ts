@@ -1,6 +1,6 @@
 import { HOSTED_EXECUTION_TIMESTAMP_HEADER } from "@murphai/hosted-execution/contracts";
 import { buildHostedWebhookDbTimingLogDetails } from "../hosted-onboarding/webhook-db-timing";
-import { runWithPrismaOperationTimings, type PrismaOperationTiming, type PrismaPoolAcquisitionTiming } from "../prisma-operation-timing";
+import { runWithPrismaOperationTimings, type PrismaOperationTiming, type PrismaPoolAcquisitionTiming, type PrismaQueryTiming } from "../prisma-operation-timing";
 
 type MailboxFetchPhase =
   | "authentication" | "parse" | "transaction_acquire" | "authority"
@@ -27,6 +27,7 @@ export async function runWithHostedMailboxFetchTiming<T>(
   const phases: Partial<Record<MailboxFetchPhase, number>> = {};
   const operations: PrismaOperationTiming[] = [];
   const poolAcquisitions: PrismaPoolAcquisitionTiming[] = [];
+  const queries: PrismaQueryTiming[] = [];
   let phase: MailboxFetchPhase = "authentication";
   let phaseStartedAt = startedAt;
   let signedAt: string | null = null;
@@ -52,7 +53,7 @@ export async function runWithHostedMailboxFetchTiming<T>(
           signedRequestToHandlerMs = handlerStartedAtMs - parsed;
         }
       },
-    }), poolAcquisitions);
+    }), poolAcquisitions, queries);
     completed = true;
     return result;
   } catch (error) {
@@ -88,6 +89,13 @@ export async function runWithHostedMailboxFetchTiming<T>(
           lastPhase: phase,
           failedPhase,
           phaseMs: Object.fromEntries(Object.entries(phases).map(([key, ms]) => [key, Math.round(ms)])),
+          // All offsets share the database collector's monotonic origin.
+          dbOperationStartMs: operations.slice(0, 24).map(sample => sample.startMs === undefined ? null : Math.round(sample.startMs)),
+          dbQueryCount: queries.length,
+          dbQueryStartMs: queries.slice(0, 24).map(sample => Math.round(sample.startMs)),
+          dbQueryMs: queries.slice(0, 24).map(sample => Math.round(sample.ms)),
+          dbQueryFailed: queries.slice(0, 24).map(sample => sample.failed),
+          poolAcquireStartMs: poolAcquisitions.slice(0, 24).map(sample => sample.startMs === undefined ? null : Math.round(sample.startMs)),
           poolAcquisitionCount: poolAcquisitions.length,
           poolAcquireMs: poolAcquisitions.slice(0, 24).map(sample => Math.round(sample.ms)),
           poolBeforeAcquire: poolAcquisitions.slice(0, 24).map(({ idleConnections, totalConnections, waitingRequests }) =>
