@@ -56,9 +56,24 @@ protocol acknowledgement, not proof the wearer felt a vibration.
   other session. Delivery requires the app open and band connected when due.
 - Changelog content generation and all ten archive rendering tests pass.
 
+## Provider input evidence
+
+A complete first-request capture through the real Codex App Server with a
+credential-free scripted Responses endpoint compares identical synthetic
+individual/group fixtures. Base is an exact device description/schema ablation
+against b902cfc42fa6e103c06fac99cd82f6fdd8b3a292; prompt builders are unchanged.
+Only `prompt_cache_key` is excluded from decoded provider-visible JSON.
+
+- Individual: 152930 → 154492 UTF-8 bytes (+1562, +1.02%). Instructions are
+  unchanged at 87324 bytes; authored tool inventory is 60276 → 61412 bytes.
+- Group: 136030 → 136030 bytes. Instructions are 63574 bytes and tool inventory
+  42446 bytes at both revisions; the production planning owner disables device
+  tools for groups.
+- Exact target-model tokenizer is unavailable. No token estimate is reported.
+
 ## Remaining
 
 Complete parent candidate review, scoped commits, draft PR evidence, routed final
 ReviewGPT and exact-head CI. Full target-tokenizer input counts are unavailable;
-complete provider-request byte captures are being recorded with that limitation.
+complete provider-request byte captures are recorded above with that limitation.
 Physical-device validation and deployment are separate, unperformed steps.
