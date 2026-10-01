@@ -1729,6 +1729,43 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     },
   );
 
+  it("applies pending preferences before handing an older browser refresh to its owner", async () => {
+    const now = "2026-04-27T00:00:00.000Z";
+    const parentRoot = await mkdtemp(path.join(tmpdir(), "hosted-refresh-preferences-"));
+    const vaultRoot = path.join(parentRoot, "vault");
+    try {
+      await initializeVault({ createdAt: now, vaultRoot });
+      const systemMailbox = await loadHostedSystemMailboxRealImplementation();
+      const refresh = { ...createBrowserVaultRefreshSystemMailboxItem(), mailboxLaneSeq: "1" };
+      const preferences = { ...createMemberPreferencesSystemMailboxItem(), mailboxLaneSeq: "2" };
+      await updateHostedSystemMailboxState(vaultRoot, () => ({ pending: [refresh, preferences] }));
+      mocks.resolveHostedSystemMailboxNextWakeCandidate.mockImplementation(
+        systemMailbox.resolveHostedSystemMailboxNextWakeCandidate,
+      );
+      mocks.prepareHostedSystemMailboxItemForCheckpoint.mockImplementation(
+        systemMailbox.prepareHostedSystemMailboxItemForCheckpoint,
+      );
+      mocks.recordHostedSystemMailboxItemAfterCheckpoint.mockImplementation(
+        systemMailbox.recordHostedSystemMailboxItemAfterCheckpoint,
+      );
+      const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+        assistantInputIds: [], conversationImportedCount: 0, importedCount: 0,
+        now: () => now, vaultRoot, operatorHomeRoot: path.join(parentRoot, "home"),
+        workspace: createDueAssistantWorkspace({
+          nextWakeAt: now, nextWakeReason: "mailbox",
+          nextDefaultProcessingWakeAt: now, nextDefaultProcessingWakeReason: "assistant",
+          systemMailboxProgressGeneration: "0",
+        }),
+      }));
+      expect(result.progressed).toBe(true);
+      expect(result.nextWakeReason).toBe("mailbox");
+      expect((await readHostedSystemMailboxState(vaultRoot)).pending).toEqual([expect.objectContaining(refresh)]);
+      expect(mocks.runHostedAssistantAutomationLane).not.toHaveBeenCalled();
+    } finally {
+      await rm(parentRoot, { force: true, recursive: true });
+    }
+  });
+
   it("drains approved continuations while independent device work remains eligible", async () => {
     const now = "2026-04-27T00:00:00.000Z";
     vi.useFakeTimers();

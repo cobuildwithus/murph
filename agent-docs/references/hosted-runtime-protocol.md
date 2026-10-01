@@ -1058,6 +1058,13 @@ completed-work recording or a current device mailbox retry; unrelated checkpoint
 publication preserves unconsumed device wakes and durable continuations.
 
 Both assistant and model-free wake deadlines remain independently available.
+Before a default pass hands a model-free frontier back to its execution owner,
+it drains the existing bounded member-preferences preplanning stage. A later
+independent settings update can itself project a due default wake; handing off
+before that stage would repeatedly select default mode without advancing either
+item. Applying settings does not acknowledge the earlier refresh or advance its
+handled-through prefix. A disproved default projection is still checkpointed at
+the final handoff so the next invocation can select the model-free owner.
 Workspace metadata publication is serialized against the latest accepted version
 and preserves locally staged canonical receipts. The publication owner starts
 with the accepted restored workspace and its sanitized receipt references before
