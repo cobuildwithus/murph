@@ -5,7 +5,7 @@ const statuses = ["success", "pending", "running", "retrying", "failed", "error"
 
 // Introspection is diagnostic only: Garmin's completed history pull is not
 // evidence that data was delivered, much less imported into the vault.
-export async function readLiveGarminProviderDiagnostics(input: {
+export async function readLiveGarminProviderDiagnosticsForLog(input: {
   client: Pick<JunctionClient, "introspectResources" | "introspectHistoricalPull">;
   userId: string;
   signal: AbortSignal;

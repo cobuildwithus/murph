@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { readLiveGarminProviderDiagnostics, summarizeLiveGarminProviderDiagnostics } from "./helpers/hosted-local-garmin-diagnostics.js";
+import { readLiveGarminProviderDiagnosticsForLog, summarizeLiveGarminProviderDiagnostics } from "./helpers/hosted-local-garmin-diagnostics.js";
 
 const window = { from: "2026-08-01", to: "2026-08-14" };
 const userId = "synthetic-provider-user";
@@ -61,7 +61,7 @@ describe("live Garmin provider diagnostics", () => {
         sourceProviderSlug: "garmin", notPulledResources: ["activity"], pulledResources: [],
       }] }),
     };
-    const result = JSON.parse(await readLiveGarminProviderDiagnostics({
+    const result = JSON.parse(await readLiveGarminProviderDiagnosticsForLog({
       client, userId, window, signal: new AbortController().signal,
     }));
     expect(result.resourcesQuery).toBe("rejected");
@@ -82,7 +82,7 @@ describe("live Garmin provider diagnostics", () => {
       });
       throw new Error("unreachable");
     });
-    const result = JSON.parse(await readLiveGarminProviderDiagnostics({
+    const result = JSON.parse(await readLiveGarminProviderDiagnosticsForLog({
       client: { introspectResources: query, introspectHistoricalPull: query },
       userId, window, signal: new AbortController().signal,
     }));

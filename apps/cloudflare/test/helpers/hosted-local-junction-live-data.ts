@@ -19,7 +19,7 @@ import {
 } from "@murphai/runtime-state";
 
 import type { HostedLocalFullStackScenario } from "./hosted-local-full-stack-scenario.js";
-import { readLiveGarminProviderDiagnostics } from "./hosted-local-garmin-diagnostics.js";
+import { readLiveGarminProviderDiagnosticsForLog } from "./hosted-local-garmin-diagnostics.js";
 
 type GarminCanaryScenario = {
   harness: Pick<HostedLocalFullStackScenario["harness"], "requestJson">;
@@ -165,7 +165,7 @@ export async function waitForLiveGarminCanonicalData(input: {
     if (!signal.aborted) throw new Error("MURPH_E2E_GARMIN_DATA_PROOF_FAILED");
   }
   if (providerUserId && !input.signal.aborted) {
-    console.info(`MURPH_E2E_GARMIN_PROVIDER_DIAGNOSTICS=${await readLiveGarminProviderDiagnostics({
+    console.info(`MURPH_E2E_GARMIN_PROVIDER_DIAGNOSTICS=${await readLiveGarminProviderDiagnosticsForLog({
       client: input.client, userId: providerUserId, signal: input.signal, window,
     })}`);
   }
