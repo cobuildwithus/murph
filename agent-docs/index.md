@@ -199,6 +199,9 @@ Container CPU profiling implementation and synthetic verification are recorded i
 Mailbox startup profiling and process/module age diagnostics are recorded in
 [`2026-09-30-mailbox-prehandler-latency.md`](exec-plans/completed/2026-09-30-mailbox-prehandler-latency.md).
 
+Mailbox schema-initialization removal and emitted-build proof are recorded in
+[`2026-09-30-mailbox-plan-schema-startup.md`](exec-plans/completed/2026-09-30-mailbox-plan-schema-startup.md).
+
 Experiment closeout query-cost proof is recorded in
 [`2026-09-21-experiment-closeout-query-cost.md`](exec-plans/completed/2026-09-21-experiment-closeout-query-cost.md).
 
