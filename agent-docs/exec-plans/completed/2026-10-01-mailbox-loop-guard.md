@@ -1,6 +1,6 @@
-# Prevent no-progress browser refresh wake loops
+# Correct the browser refresh and settings mailbox deadlock
 
-Status: active
+Status: completed
 Created: 2026-10-01
 Updated: 2026-10-01
 
@@ -32,8 +32,10 @@ Reuse existing mailbox and checkpoint state. No production row edits. Preserve r
 - `pnpm --filter @murphai/assistant-runtime typecheck` passed after final test edits.
 - `pnpm complexity:diff` passed; changed owner complexity decreased from 118 to 115. No new abstraction, persisted state, or dependency.
 - Parent review: preserved foreground selection and delivery deferral, bounded preferences processing, explicit projection correction, and existing system-only refresh ownership. Product UX Patch: Ready for the existing settings/refresh journey; no presentation or prompt changes.
-- Pending: exact-head CI and ReviewGPT, deployment, production progress/rate verification. The broader scheduler guard is separately owned in the private orchestration companion checkout.
+- ReviewGPT round 1 passed at `ef166c61655e` with no qualifying findings. This closure changes explanatory evidence only; the reviewed runtime and tests are unchanged.
+- Public implementation is complete. Exact-head CI, merge, deployment, and the requested eight-hour production observation remain release steps; they are not claimed complete by this plan closure. The broader scheduler guard is separately owned in the private orchestration companion checkout.
 
 ## Changelog
 
 Internal runtime scheduling and resource protection; no new member-facing feature.
+Completed: 2026-10-01
