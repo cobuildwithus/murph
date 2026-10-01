@@ -496,7 +496,6 @@ describe("hosted-local Junction wearable browser authorization", () => {
     });
     const parentExitListenersBefore = process.listenerCount("exit");
 
-    kernelLifecycleMocks.ensureProfile.mockResolvedValueOnce(undefined);
     kernelLifecycleMocks.createAutomationBrowser.mockResolvedValueOnce({
       cdpWsUrl: "wss://cdp.example.test/session/capability-secret",
       sessionId: "kernel-session-1",
@@ -524,13 +523,9 @@ describe("hosted-local Junction wearable browser authorization", () => {
 
     await closeHostedLocalJunctionBrowserSessionForTest(session, config);
 
-    expect(kernelLifecycleMocks.ensureProfile).toHaveBeenCalledWith(
-      "murph-junction-garmin-canary",
-    );
+    expect(kernelLifecycleMocks.ensureProfile).not.toHaveBeenCalled();
     expect(kernelLifecycleMocks.createAutomationBrowser).toHaveBeenCalledWith({
       headless: false,
-      profileName: "murph-junction-garmin-canary",
-      saveChanges: true,
       timeoutSeconds: canonicalData ? 1350 : 90,
     });
     expect(kernelLifecycleMocks.connectOverCDP).toHaveBeenCalledWith(
@@ -569,7 +564,6 @@ describe("hosted-local Junction wearable browser authorization", () => {
       ReturnType<typeof openHostedLocalJunctionBrowserSessionForTest>
     > | null = null;
 
-    kernelLifecycleMocks.ensureProfile.mockResolvedValueOnce(undefined);
     kernelLifecycleMocks.createAutomationBrowser.mockResolvedValueOnce({
       cdpWsUrl: "wss://cdp.example.test/session/capability-secret",
       sessionId: "kernel-session-real-child",
@@ -669,7 +663,6 @@ describe("hosted-local Junction wearable browser authorization", () => {
     });
     const parentExitListenersBefore = process.listenerCount("exit");
 
-    kernelLifecycleMocks.ensureProfile.mockResolvedValueOnce(undefined);
     kernelLifecycleMocks.createAutomationBrowser.mockResolvedValueOnce({
       cdpWsUrl: "wss://cdp.example.test/session/capability-secret",
       sessionId: "kernel-session-2",

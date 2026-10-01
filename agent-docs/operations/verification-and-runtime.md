@@ -454,11 +454,10 @@ them. The credential-free setup must also install and smoke-check a
 checksum-pinned Kernel CLI plus checksum-pinned `websocat`, which the CLI uses
 for a reverse SSH tunnel from the Kernel browser VM to hosted-local Web. The
 unattended proof uses a headed remote stealth browser with telemetry disabled
-and a dedicated persistent Garmin canary profile. Automation browser creation
-sets `start_url: "about:blank"` to discard restored tabs while preserving saved
-login state: old tabs can point at retired hosted-local servers, and CDP
-attachment waits for every existing target to initialize. A failed attachment
-also runs a constant-return probe through Kernel's server-side transport and
+and a fresh browser without a persisted profile. Automation browser creation
+sets `start_url: "about:blank"` and neither loads nor saves provider login state,
+so a previous account cannot override the credentials configured for this run.
+A failed attachment also runs a constant-return probe through Kernel's server-side transport and
 reports only responsive/unavailable before the existing owned cleanup.
 Tunnel readiness navigates that remote browser page to the existing same-origin
 `/api/internal/health` endpoint and requires HTTP 200 at that exact URL within the
@@ -516,8 +515,8 @@ provider, account, URL, or environment content. Focused progress/privacy proof:
 --no-coverage test/wearable-progress.test.ts` plus the existing Web wearable
 browser suite, whose pending-cleanup case requires progress before browser exit.
 
-The profile can reuse a still-valid Garmin session, while an expired session
-falls back to the dedicated login. See
+Each run authenticates with the configured provider credentials. A challenge or
+MFA prompt still fails closed under the existing automation policy. See
 Kernel's [SSH tunnel](https://www.kernel.sh/docs/browsers/ssh),
 [CDP](https://www.kernel.sh/docs/browsers/cdp), and
 [stealth](https://www.kernel.sh/docs/browsers/bot-detection/stealth) contracts.
