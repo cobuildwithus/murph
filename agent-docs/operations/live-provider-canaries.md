@@ -81,6 +81,11 @@ age of an executed run; this system adds no product-state receipt database.
   provider webhook delivery. The proof uses positive steps from the fourteen
   completed UTC days ending two days before the run; today's activity alone
   does not satisfy this stable-value comparison.
+  Failure-only diagnostics classify the already-fetched historical request
+  range relative to that oracle window and whether the provider reports any
+  days with data. Range overlap describes a request, not delivered coverage;
+  reported data cannot certify canonical ingestion. Output contains only closed
+  categories, never raw dates, counts, errors, account IDs, or health values.
 
 
 ## Garmin execution boundary

@@ -75,8 +75,23 @@ export function summarizeLiveGarminProviderDiagnostics(input: {
       latestData: classifyLatestData(available?.newest_data ?? available?.newestData, input.window),
       history: statuses.find((candidate) => candidate === status)
         ?? (history?.notPulledResources.includes(resource) ? "not_pulled" : "unknown"),
+      historyRequestedWindow: classifyHistoryWindow(pulled?.rangeStart, pulled?.rangeEnd, input.window),
+      historyReportedData: typeof pulled?.daysWithData !== "number"
+        || !Number.isSafeInteger(pulled.daysWithData) || pulled.daysWithData < 0
+        ? "unknown" : pulled.daysWithData === 0 ? "empty" : "present",
     };
   });
+}
+
+function classifyHistoryWindow(start: string | null | undefined, end: string | null | undefined, window: { from: string; to: string }) {
+  if (start == null || end == null) return "unknown";
+  const from = Date.parse(start);
+  const to = Date.parse(end);
+  if (!Number.isFinite(from) || !Number.isFinite(to) || from > to) return "invalid";
+  if (to < Date.parse(`${window.from}T00:00:00.000Z`)) return "before_window";
+  if (from > Date.parse(`${window.to}T23:59:59.999Z`)) return "after_window";
+  // Overlap describes the requested range, never actual delivery or coverage.
+  return "overlaps_window";
 }
 
 function classifySummary(result: PromiseSettledResult<unknown> | undefined) {
