@@ -143,7 +143,7 @@ test("timeout leaves private provider execution alone and never reports success"
   const options = harness({ "cobuildwithus/murph-cloud/actions/runs/42": { ...run, status: "in_progress", conclusion: null } });
   let instant = now;
   await assert.rejects(runWearableCanary(env, { ...options, now: () => instant, sleepImpl: async () => {
-    instant += 54 * 60_000;
+    instant += 74 * 60_000;
   } }), /timed out/u);
   assert.equal(options.calls.filter(({ method }) => method === "POST").length, 1);
   assert.ok(options.calls.every(({ endpoint }) => !/cancel|rerun/u.test(endpoint)));

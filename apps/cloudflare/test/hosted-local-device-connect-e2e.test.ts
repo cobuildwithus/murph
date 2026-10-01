@@ -124,6 +124,7 @@ describe("hosted local device connect e2e", () => {
       "MURPH_E2E_JUNCTION_WEARABLE_SOURCES",
       "MURPH_E2E_JUNCTION_WEARABLE_DATA",
       "MURPH_E2E_JUNCTION_WEARABLE_DATA_RECEIPT",
+      "MURPH_E2E_GARMIN_DATA_TIMEOUT_MS",
       "MURPH_E2E_KERNEL_CLI_PATH",
       "MURPH_E2E_GARMIN_EMAIL",
       "MURPH_E2E_GARMIN_PASSWORD",
@@ -404,7 +405,8 @@ describe("hosted local device connect e2e", () => {
         source: "garmin",
       });
     },
-    1_320_000,
+    Math.max(1_320_000, (liveJunctionWearableConfig?.timeoutMs ?? 0)
+      + (liveJunctionWearableConfig?.dataTimeoutMs ?? 0) + 180_000),
   );
 
   it.runIf(liveJunctionWearableConfig?.sources.includes("oura") ?? false)(
@@ -449,6 +451,7 @@ interface LiveJunctionWearableConfig {
   browserTransport: "kernel" | "local";
   canonicalData: boolean;
   canonicalDataReceiptPath: string | null;
+  dataTimeoutMs: number;
   clientUserIdSecret: string;
   headless: boolean;
   kernelApiKey: string | null;
@@ -533,11 +536,17 @@ function readLiveJunctionWearableConfig(
     providers[source] = readLiveProviderCredentials(env, source, headless);
   }
 
+  const timeoutMs = readLiveTimeoutMs(env.MURPH_E2E_WEARABLE_TIMEOUT_MS);
+  const dataTimeoutMs = Number(env.MURPH_E2E_GARMIN_DATA_TIMEOUT_MS?.trim() || timeoutMs);
+  if (!Number.isInteger(dataTimeoutMs) || dataTimeoutMs < 30_000 || dataTimeoutMs > 1_800_000) {
+    throw new Error("MURPH_E2E_GARMIN_DATA_TIMEOUT_MS must be an integer from 30000 to 1800000.");
+  }
   return {
     apiKey,
     browserTransport,
     canonicalData,
     canonicalDataReceiptPath,
+    dataTimeoutMs,
     clientUserIdSecret: requireLiveEnvironmentValue(
       env,
       "JUNCTION_CLIENT_USER_ID_SECRET",
@@ -552,7 +561,7 @@ function readLiveJunctionWearableConfig(
     providers,
     region,
     sources,
-    timeoutMs: readLiveTimeoutMs(env.MURPH_E2E_WEARABLE_TIMEOUT_MS),
+    timeoutMs,
   };
 }
 
@@ -740,7 +749,7 @@ async function runLiveJunctionWearableProof(
           notBefore: connectedNotBefore,
           scenario: requireScenario(),
           signal,
-          timeoutMs: config.timeoutMs,
+          timeoutMs: config.dataTimeoutMs,
         });
         console.info("MURPH_E2E_GARMIN_CANONICAL_DATA_MATCHED=1");
       },
@@ -872,7 +881,7 @@ async function runJunctionWearableBrowser(input: {
       encoding: "utf8",
       env: buildJunctionWearableBrowserEnvironment(input),
       maxBuffer: 1_000_000,
-      timeout: input.config.timeoutMs * (input.onConnected ? 2 : 1) + 90_000,
+      timeout: input.config.timeoutMs + (input.onConnected ? input.config.dataTimeoutMs : 0) + 90_000,
     },
   );
   browserRun.child.stdin?.on("error", () => {
@@ -939,7 +948,10 @@ function buildJunctionWearableBrowserEnvironment(input: {
       ? { KERNEL_API_KEY: input.config.kernelApiKey }
       : {}),
     MURPH_E2E_CONNECT_URL: input.startUrl,
-    ...(input.config.canonicalData ? { MURPH_E2E_JUNCTION_WEARABLE_DATA: "1" } : {}),
+    ...(input.config.canonicalData ? {
+      MURPH_E2E_JUNCTION_WEARABLE_DATA: "1",
+      MURPH_E2E_GARMIN_DATA_TIMEOUT_MS: String(input.config.dataTimeoutMs),
+    } : {}),
     MURPH_E2E_HOSTED_SESSION_COOKIE: input.hostedSessionCookie,
     ...(input.config.kernelCliPath
       ? { MURPH_E2E_KERNEL_CLI_PATH: input.config.kernelCliPath }
@@ -1022,6 +1034,12 @@ function createWorkflowShapedGarminEnvironment(
 }
 
 describe("live Junction wearable configuration boundary", () => {
+  it.each(["29999", "1800001", "NaN", "1200000.5"])("rejects an invalid data deadline: %s", (deadline) => {
+    expect(() => readLiveJunctionWearableConfig(createWorkflowShapedGarminEnvironment({
+      MURPH_E2E_GARMIN_DATA_TIMEOUT_MS: deadline,
+    }))).toThrow("MURPH_E2E_GARMIN_DATA_TIMEOUT_MS");
+  });
+
   it("requires the real private Temporal worker before admitting canonical data proof", () => {
     const environment = createWorkflowShapedGarminEnvironment({ MURPH_E2E_JUNCTION_WEARABLE_DATA: "1" });
     expect(() => readLiveJunctionWearableConfig(environment)).toThrow("real private worker package");
@@ -1034,8 +1052,11 @@ describe("live Junction wearable configuration boundary", () => {
     const config = readLiveJunctionWearableConfig({
       ...managedEnvironment,
       MURPH_E2E_JUNCTION_WEARABLE_DATA_RECEIPT: "/tmp/canonical-data-receipt.json",
+      MURPH_E2E_GARMIN_DATA_TIMEOUT_MS: "1200000",
     });
     expect(config?.canonicalData).toBe(true);
+    expect(config?.timeoutMs).toBe(420_000);
+    expect(config?.dataTimeoutMs).toBe(1_200_000);
     if (!config) throw new Error("Expected canonical data configuration.");
     const browserEnvironment = buildJunctionWearableBrowserEnvironment({
       config,
@@ -1046,6 +1067,8 @@ describe("live Junction wearable configuration boundary", () => {
       webBaseUrl: "http://localhost:43123",
     });
     expect(browserEnvironment.MURPH_E2E_JUNCTION_WEARABLE_DATA).toBe("1");
+    expect(browserEnvironment.MURPH_E2E_GARMIN_DATA_TIMEOUT_MS).toBe("1200000");
+    expect(browserEnvironment.MURPH_E2E_PROVIDER_TIMEOUT_MS).toBe("420000");
     expect(browserEnvironment.MURPH_E2E_JUNCTION_WEARABLE_DATA_RECEIPT).toBeUndefined();
   });
 

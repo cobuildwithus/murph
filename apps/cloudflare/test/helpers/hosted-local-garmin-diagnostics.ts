@@ -6,16 +6,30 @@ const statuses = ["success", "pending", "running", "retrying", "failed", "error"
 // Introspection is diagnostic only: Garmin's completed history pull is not
 // evidence that data was delivered, much less imported into the vault.
 export async function readLiveGarminProviderDiagnosticsForLog(input: {
-  client: Pick<JunctionClient, "introspectResources" | "introspectHistoricalPull">;
+  client: Pick<JunctionClient, "introspectResources" | "introspectHistoricalPull" | "listSummary">;
   userId: string;
   signal: AbortSignal;
   window: { from: string; to: string };
 }): Promise<string> {
   const signal = AbortSignal.any([input.signal, AbortSignal.timeout(10_000)]);
   const query = { signal, sourceProviderSlug: "garmin", userId: input.userId, userLimit: 1 };
-  const [availability, history] = await Promise.allSettled([
+  const now = Date.now();
+  const [availability, history, ...summaries] = await Promise.allSettled([
     input.client.introspectResources(query),
     input.client.introspectHistoricalPull(query),
+    // Garmin's default historical range is 90 days. Include open days here:
+    // these reads diagnose availability only and can never pass the oracle.
+    ...resources.map((resource) => input.client.listSummary({
+      collectionWorkLimit: { maxAttemptsPerPage: 1, maxPages: 3, requestTimeoutMs: 8_000 },
+      maxRecords: 500,
+      requireStructurallyCompleteCollection: true,
+      resource,
+      signal,
+      sourceProviderSlug: "garmin",
+      userId: input.userId,
+      windowStart: new Date(now - 90 * 86_400_000).toISOString(),
+      windowEnd: new Date(now).toISOString(),
+    })),
   ]);
   return JSON.stringify({
     resourcesQuery: availability.status,
@@ -25,7 +39,10 @@ export async function readLiveGarminProviderDiagnosticsForLog(input: {
       history: history.status === "fulfilled" ? history.value : null,
       userId: input.userId,
       window: input.window,
-    }),
+    }).map((resource, index) => ({
+      ...resource,
+      historyRangeData: classifySummary(summaries[index]),
+    })),
   });
 }
 
@@ -51,11 +68,24 @@ export function summarizeLiveGarminProviderDiagnostics(input: {
     const status = pulled?.status;
     return {
       resource,
+      inventory: !Array.isArray(data) ? "invalid_response"
+        : !user ? "user_missing"
+          : !provider ? "provider_missing"
+            : !available ? "resource_missing" : "present",
       latestData: classifyLatestData(available?.newest_data ?? available?.newestData, input.window),
       history: statuses.find((candidate) => candidate === status)
         ?? (history?.notPulledResources.includes(resource) ? "not_pulled" : "unknown"),
     };
   });
+}
+
+function classifySummary(result: PromiseSettledResult<unknown> | undefined) {
+  if (result?.status !== "fulfilled" || !Array.isArray(result.value)) return "unavailable";
+  if (result.value.length === 0) return "empty";
+  return result.value.some((value) => {
+    const source = record(record(value)?.source);
+    return (source?.provider ?? source?.slug) === "garmin";
+  }) ? "present" : "provider_mismatch";
 }
 
 function classifyLatestData(value: unknown, window: { from: string; to: string }) {

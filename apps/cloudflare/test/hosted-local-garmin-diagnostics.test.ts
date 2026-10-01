@@ -6,7 +6,7 @@ const window = { from: "2026-08-01", to: "2026-08-14" };
 const userId = "synthetic-provider-user";
 
 describe("live Garmin provider diagnostics", () => {
-  afterEach(() => vi.restoreAllMocks());
+  afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers(); });
 
   it("reports only closed resource, window, and history categories for the requested identity", () => {
     const summary = summarizeLiveGarminProviderDiagnostics({
@@ -29,9 +29,9 @@ describe("live Garmin provider diagnostics", () => {
       }] },
     });
     expect(summary).toEqual([
-      { resource: "activity", latestData: "before_window", history: "success" },
-      { resource: "sleep", latestData: "in_window", history: "unknown" },
-      { resource: "workouts", latestData: "after_window", history: "not_pulled" },
+      { resource: "activity", inventory: "present", latestData: "before_window", history: "success" },
+      { resource: "sleep", inventory: "present", latestData: "in_window", history: "unknown" },
+      { resource: "workouts", inventory: "present", latestData: "after_window", history: "not_pulled" },
     ]);
     expect(JSON.stringify(summary)).not.toMatch(/private|2026|45|synthetic|unrelated/u);
   });
@@ -48,7 +48,7 @@ describe("live Garmin provider diagnostics", () => {
     } } }] }]) {
       expect(summarizeLiveGarminProviderDiagnostics({
         availability, history: { matchedUser: false, sources: [] }, userId, window,
-      })).toEqual(["activity", "sleep", "workouts"].map((resource) => ({
+      })).toMatchObject(["activity", "sleep", "workouts"].map((resource) => ({
         resource, latestData: "unknown", history: "unknown",
       })));
     }
@@ -56,6 +56,7 @@ describe("live Garmin provider diagnostics", () => {
 
   it("keeps either API failure private while preserving the other diagnostic", async () => {
     const client = {
+      listSummary: vi.fn().mockResolvedValue([]),
       introspectResources: vi.fn().mockRejectedValue(new Error("private API body")),
       introspectHistoricalPull: vi.fn().mockResolvedValue({ matchedUser: true, sources: [{
         sourceProviderSlug: "garmin", notPulledResources: ["activity"], pulledResources: [],
@@ -66,11 +67,55 @@ describe("live Garmin provider diagnostics", () => {
     }));
     expect(result.resourcesQuery).toBe("rejected");
     expect(result.historyQuery).toBe("fulfilled");
-    expect(result.resources[0]).toEqual({ resource: "activity", latestData: "unknown", history: "not_pulled" });
+    expect(result.resources[0]).toEqual({ resource: "activity", inventory: "invalid_response", latestData: "unknown", history: "not_pulled", historyRangeData: "empty" });
     expect(client.introspectResources).toHaveBeenCalledWith({
       userId, userLimit: 1, sourceProviderSlug: "garmin", signal: expect.any(AbortSignal),
     });
     expect(JSON.stringify(result)).not.toMatch(/private|synthetic/u);
+  });
+
+  it("distinguishes absent inventory owners from a resource without a timestamp", () => {
+    const cases = [
+      [null, "invalid_response"],
+      [{ data: [] }, "user_missing"],
+      [{ data: [{ userId, provider: {} }] }, "provider_missing"],
+      [{ data: [{ userId, provider: { garmin: {} } }] }, "resource_missing"],
+      [{ data: [{ userId, provider: { garmin: { activity: {} } } }] }, "present"],
+    ] as const;
+    for (const [availability, inventory] of cases) {
+      expect(summarizeLiveGarminProviderDiagnostics({ availability, history: null, userId, window })[0])
+        .toMatchObject({ inventory, latestData: "unknown" });
+    }
+  });
+
+  it("probes all three resource types across history without exposing records or changing the proof", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-08-16T12:00:00Z"));
+    const listSummary = vi.fn()
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ source: { provider: "garmin" }, privateValue: "private-health" }])
+      .mockResolvedValueOnce([{ source: { provider: "oura" }, privateValue: "private-health" }]);
+    const serialized = await readLiveGarminProviderDiagnosticsForLog({
+      client: {
+        listSummary,
+        introspectResources: vi.fn().mockResolvedValue({ data: [] }),
+        introspectHistoricalPull: vi.fn().mockResolvedValue({ matchedUser: false, sources: [] }),
+      },
+      userId, window, signal: new AbortController().signal,
+    });
+    expect(JSON.parse(serialized).resources.map((row: { historyRangeData: string }) => row.historyRangeData))
+      .toEqual(["empty", "present", "provider_mismatch"]);
+    for (const [index, resource] of ["activity", "sleep", "workouts"].entries()) {
+      expect(listSummary).toHaveBeenNthCalledWith(index + 1, {
+        collectionWorkLimit: { maxAttemptsPerPage: 1, maxPages: 3, requestTimeoutMs: 8_000 },
+        maxRecords: 500,
+        requireStructurallyCompleteCollection: true,
+        resource, userId, sourceProviderSlug: "garmin", signal: expect.any(AbortSignal),
+        windowStart: "2026-05-18T12:00:00.000Z",
+        windowEnd: "2026-08-16T12:00:00.000Z",
+      });
+    }
+    expect(serialized).not.toMatch(/private|2026|synthetic|oura/u);
   });
 
   it("bounds stalled introspection within the browser cleanup grace period", async () => {
@@ -83,10 +128,12 @@ describe("live Garmin provider diagnostics", () => {
       throw new Error("unreachable");
     });
     const result = JSON.parse(await readLiveGarminProviderDiagnosticsForLog({
-      client: { introspectResources: query, introspectHistoricalPull: query },
+      client: { introspectResources: query, introspectHistoricalPull: query, listSummary: query },
       userId, window, signal: new AbortController().signal,
     }));
     expect(deadline).toHaveBeenCalledWith(10_000);
+    expect(query).toHaveBeenCalledTimes(5);
+    expect(result.resources.every((row: { historyRangeData: string }) => row.historyRangeData === "unavailable")).toBe(true);
     expect(result.resourcesQuery).toBe("rejected");
     expect(result.historyQuery).toBe("rejected");
     expect(JSON.stringify(result)).not.toContain("private");
