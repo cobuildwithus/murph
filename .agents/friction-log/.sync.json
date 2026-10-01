@@ -1763,6 +1763,10 @@
     {
       "issue": "cobuildwithus/murph#3912",
       "path": ".agents/friction-log/20260929210114-fresh-web-typecheck/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3934",
+      "path": ".agents/friction-log/20260929221054-junction-admission-test/friction.md"
     }
   ],
   "version": 1
