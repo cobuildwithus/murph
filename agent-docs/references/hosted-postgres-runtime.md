@@ -45,6 +45,18 @@ controls resolve the target from that owner. Test nudges use ordinary
 `ensure-processing` admission and wait for acceptance before polling status;
 retired legacy alarm and run-until-idle HTTP controls are unavailable.
 
+## Request consolidation
+
+Snapshot creation and media PUT, registration, and deletion use the existing
+resource command's locked ownership check without a preceding `authorize_effect`
+HTTP call. Snapshot creation returns no data key before admission, media uploads
+admit before sending bytes, and registration/retirement remain transactional.
+Media registration and deletion do not unwrap a crypto context. Media reads,
+artifacts, and private-media capability publication keep their separate authority
+checks: those paths can expose data or a capability without a resource mutation.
+Existing Web resource commands already enforce this boundary, so Worker rollout
+requires no new protocol or coordinated Web deployment.
+
 ## Claim, launch, completion, and recovery
 
 Runtime admission keeps the member lock before one composed eligibility read
