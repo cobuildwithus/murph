@@ -2,6 +2,8 @@ import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
+import { createGitHubAppTokenSupplier } from "./native-android-hosted-e2e-native.mjs";
+
 import { assertSafeId, assertSha, isRecord, sleep } from "./native-ios-hosted-e2e-support.mjs";
 
 const PUBLIC_REPOSITORY = "cobuildwithus/murph";
@@ -60,31 +62,35 @@ export async function runWearableCanary(env = process.env, {
   fetchImpl = fetch,
   now = Date.now,
   sleepImpl = sleep,
+  tokenSupplier: suppliedTokenSupplier,
 } = {}) {
-  const { publicSha, requestId, privateToken, publicToken } = readCanaryRequest(env);
-  const request = (repository, endpoint, token, body) => requestGithub({
-    body, endpoint, fetchImpl, repository, token,
+  const { privateTokenSupplier, publicSha, requestId, publicToken } = readCanaryRequest(env, {
+    now, tokenSupplier: suppliedTokenSupplier,
   });
-  const readMain = async (repository, token) => {
-    const ref = await request(repository, "git/ref/heads/main", token);
+  const request = (repository, endpoint, body) => requestGithub({
+    body, endpoint, fetchImpl, repository,
+    tokenSupplier: () => repository === PRIVATE_REPOSITORY ? privateTokenSupplier() : publicToken,
+  });
+  const readMain = async (repository) => {
+    const ref = await request(repository, "git/ref/heads/main");
     if (!isRecord(ref?.object) || ref.object.type !== "commit") {
       throw new Error("Wearable canary main revision is unavailable.");
     }
     assertSha(ref.object.sha, "canary main revision");
     return ref.object.sha;
   };
-  if (await readMain(PUBLIC_REPOSITORY, publicToken) !== publicSha) {
+  if (await readMain(PUBLIC_REPOSITORY) !== publicSha) {
     throw new Error("Wearable canary public main changed before dispatch.");
   }
-  const privateSha = await readMain(PRIVATE_REPOSITORY, privateToken);
-  const workflow = await request(PRIVATE_REPOSITORY, `actions/workflows/${WORKFLOW}`, privateToken);
+  const privateSha = await readMain(PRIVATE_REPOSITORY);
+  const workflow = await request(PRIVATE_REPOSITORY, `actions/workflows/${WORKFLOW}`);
   if (!isRecord(workflow) || !Number.isSafeInteger(workflow.id) || workflow.id < 1
     || workflow.path !== WORKFLOW_PATH || workflow.name !== WORKFLOW_NAME || workflow.state !== "active") {
     throw new Error("Wearable canary private workflow is unavailable or invalid.");
   }
   const digest = wearableCanaryProofDigest({ privateSha, publicSha, requestId });
   const dispatchedAt = now();
-  const receipt = await request(PRIVATE_REPOSITORY, `actions/workflows/${WORKFLOW}/dispatches`, privateToken, {
+  const receipt = await request(PRIVATE_REPOSITORY, `actions/workflows/${WORKFLOW}/dispatches`, {
     inputs: { contract_version: "1", public_sha: publicSha, request_id: requestId },
     ref: "main",
     return_run_details: true,
@@ -95,16 +101,16 @@ export async function runWearableCanary(env = process.env, {
   }
   while (now() < dispatchedAt + TIMEOUT_MS) {
     const run = inspectWearableCanaryRun(
-      await request(PRIVATE_REPOSITORY, `actions/runs/${runId}`, privateToken),
+      await request(PRIVATE_REPOSITORY, `actions/runs/${runId}`),
       { privateSha, runId, workflowId: workflow.id },
     );
     if (run.complete) {
       if (!run.success) throw new Error("Wearable canary private journey did not succeed.");
       const proof = inspectWearableCanaryProof(
-        await request(PRIVATE_REPOSITORY, `actions/runs/${runId}/jobs?filter=latest&per_page=100&page=1`, privateToken),
+        await request(PRIVATE_REPOSITORY, `actions/runs/${runId}/jobs?filter=latest&per_page=100&page=1`),
         { digest, dispatchedAt, now: now(), privateSha, runId },
       );
-      if (await readMain(PRIVATE_REPOSITORY, privateToken) !== privateSha) {
+      if (await readMain(PRIVATE_REPOSITORY) !== privateSha) {
         throw new Error("Wearable canary private main changed during execution.");
       }
       return { ...proof, privateSha, publicSha };
@@ -114,7 +120,7 @@ export async function runWearableCanary(env = process.env, {
   throw new Error("Wearable canary proof timed out; private execution was not cancelled.");
 }
 
-function readCanaryRequest(env) {
+function readCanaryRequest(env, { now, tokenSupplier }) {
   const publicSha = env.GITHUB_SHA;
   const requestId = `wearable-${env.GITHUB_RUN_ID}-${env.GITHUB_RUN_ATTEMPT}`;
   assertSha(publicSha, "public canary revision");
@@ -125,9 +131,13 @@ function readCanaryRequest(env) {
     || !/^\d+$/u.test(env.GITHUB_RUN_ID ?? "") || !/^[1-9]\d*$/u.test(env.GITHUB_RUN_ATTEMPT ?? "")) {
     throw new Error("Wearable canary requires an exact protected-main controller.");
   }
-  const privateToken = requiredToken(env.WEARABLE_CANARY_PRIVATE_GITHUB_TOKEN);
+  const appId = requiredToken(env.WEARABLE_CANARY_GITHUB_APP_ID);
+  const privateKey = requiredToken(env.WEARABLE_CANARY_GITHUB_APP_PRIVATE_KEY);
   const publicToken = requiredToken(env.GITHUB_TOKEN);
-  return { publicSha, requestId, privateToken, publicToken };
+  const privateTokenSupplier = tokenSupplier ?? createGitHubAppTokenSupplier({
+    appId, privateKey, repository: PRIVATE_REPOSITORY, now,
+  });
+  return { privateTokenSupplier, publicSha, requestId, publicToken };
 }
 
 function requiredToken(value) {
@@ -137,8 +147,9 @@ function requiredToken(value) {
   return value;
 }
 
-async function requestGithub({ body, endpoint, fetchImpl, repository, token }) {
+async function requestGithub({ body, endpoint, fetchImpl, repository, tokenSupplier }) {
   try {
+    const token = await tokenSupplier();
     const response = await fetchImpl(`https://api.github.com/repos/${repository}/${endpoint}`, {
       body: body === undefined ? undefined : JSON.stringify(body),
       headers: {
