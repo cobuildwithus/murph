@@ -138,7 +138,9 @@ export async function waitForLiveGarminCanonicalData(input: {
           signal,
           sourceProviderSlug: "garmin",
           userId: providerUserId,
-          windowEnd: window.to,
+          // JunctionClient converts date strings to ISO instants. Preserve
+          // the inclusive final calendar day instead of ending at its midnight.
+          windowEnd: `${window.to}T23:59:59.999Z`,
           windowStart: window.from,
         });
         signal.throwIfAborted();
