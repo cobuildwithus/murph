@@ -43,7 +43,7 @@ export async function commandHostedRuntimeMedia(input: {
     callbackSigning: env.webCallbackSigning, boundUserId: input.userId,
     method: "POST", path: HOSTED_RUNTIME_MEDIA_PATH, body: JSON.stringify(input.command), timeoutMs: env.webControlTimeoutMs,
   });
-  if (!response.ok) throw new Error(`Hosted runtime media command returned HTTP ${response.status}.`);
+  if (!response.ok) await throwRuntimeResourceRejection(response, env.webControlTimeoutMs, "media");
   const result = parseHostedRuntimeMediaResponse(JSON.parse(await readHostedWebControlPlaneResponseText({
     response, description: "Hosted runtime media", maxBytes: 16 * 1024, signal: null, timeoutMs: env.webControlTimeoutMs,
   })));
@@ -85,7 +85,7 @@ export async function commandHostedRuntimeReplicaPut(input: {
 async function throwRuntimeResourceRejection(
   response: Response,
   timeoutMs: number,
-  operation: "snapshot" | "replica PUT",
+  operation: "snapshot" | "replica PUT" | "media",
 ): Promise<never> {
   let code: unknown;
   if (response.status === 409) {
