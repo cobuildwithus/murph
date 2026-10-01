@@ -196,6 +196,9 @@ its checkpoint/restore proof is recorded in
 Container CPU profiling implementation and synthetic verification are recorded in
 [`2026-09-21-container-cpu-profiling.md`](exec-plans/completed/2026-09-21-container-cpu-profiling.md).
 
+Mailbox startup profiling and process/module age diagnostics are recorded in
+[`2026-09-30-mailbox-prehandler-latency.md`](exec-plans/completed/2026-09-30-mailbox-prehandler-latency.md).
+
 Experiment closeout query-cost proof is recorded in
 [`2026-09-21-experiment-closeout-query-cost.md`](exec-plans/completed/2026-09-21-experiment-closeout-query-cost.md).
 
