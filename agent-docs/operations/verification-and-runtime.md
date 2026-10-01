@@ -751,6 +751,20 @@ alternate workflow ref could request.
 When Crabbox runs, record the command, result, executor, and timing summary
 without recording host, account, or local-path identifiers.
 
+### Refreshing stale dependency build-cache metadata
+
+A restored pnpm installation can retain an old `ignoredBuilds` list even after
+`allowBuilds` explicitly denies those scripts. Confirm a clean frozen install
+is warning-free before treating an ignored-script warning as stale metadata;
+do not enable dependency scripts merely to silence it.
+
+For a one-time cache refresh, set the non-secret Vercel project variable
+`VERCEL_FORCE_NO_BUILD_CACHE=1` for production before the next authorized
+`main` commit. That commit must still use Git integration and pass ordinary
+production admission. Inspect its install logs and cache-upload result, then
+remove the temporary variable to restore normal caching. Verify the next cached
+build stays warning-free. See [Vercel's build-cache guidance](https://vercel.com/docs/deployments/troubleshoot-a-build#managing-build-cache).
+
 ## Verification Matrix
 
 The delivery-path rule above governs this matrix. For PR-bound work, each row
