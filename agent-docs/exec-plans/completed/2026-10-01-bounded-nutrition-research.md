@@ -1,6 +1,6 @@
 # Bound factual research and improve food search
 
-Status: active
+Status: completed
 Created: 2026-10-01
 Updated: 2026-10-01
 
@@ -43,4 +43,9 @@ No-hit queries add approximately 15 ms for additional typo recovery (54.861→69
 
 ## Product UX and remaining gates
 
-Patch; Ready for the verified nutrition journeys. Lower member effort, clear uncertainty, no unsolicited writes, preserved exact-safety requirements. Parent review owns prompt composition and SQL boundaries. Parent candidate review is complete; finish the ordinary merge commit, exact-head PR CI and eligible final ReviewGPT. Close this plan after those gates resolve. No deployment is included.
+Patch; Ready for the verified nutrition journeys. Lower member effort, clear uncertainty, no unsolicited writes, preserved exact-safety requirements. Parent review owns prompt composition and SQL boundaries. Parent candidate and final reviews are complete. Final ReviewGPT returned PASS for 2215a6a96f08ca10ddd6b8d2a1c4bf016f416b35 with verified exact-turn capture on the Hercules lane, selected GPT-6 Pro, attached guarded snapshot and more than nine minutes of response wait; no findings require disposition. The reviewer checked all 13 diff/head blobs and the nutrition/SQL invariants, while explicitly limiting independent runtime proof. Existing required checks are green; the final documentation-only commit retains exact-head CI before the user-authorized merge. The user also authorized post-merge stale-worktree cleanup, preserving dirty, active, and unresolved work. No separate deployment action is included.
+
+## Completion
+
+Implementation, focused local proof, Opus consultation and final review are complete. The final commit only archives this evidence; no production behavior changes after the reviewed head. Merge waits for final-head CI. A task-scoped 14% free-space guard setting was explicitly authorized while retaining the 20 GiB floor and identity hooks; no global guard setting changed.
+Completed: 2026-10-01
