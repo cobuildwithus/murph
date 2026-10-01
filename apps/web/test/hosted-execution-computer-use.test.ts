@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { runInNewContext } from "node:vm";
 import { Prisma } from "@prisma/client";
 
 import type {
@@ -930,6 +931,48 @@ describe("ComputerUseService", () => {
     expect(kernel.executePlaywrightCalls).toBe(0);
     expect(kernel.deletedSessionIds).toEqual([]);
     expect(store.handoff).toBeNull();
+  });
+
+  it("allows slow navigation and its page read to finish within the Kernel execution budget", async () => {
+    vi.useFakeTimers();
+    try {
+      const now = new Date("2026-06-17T12:00:00.000Z");
+      const kernel = createFakeKernel();
+      const page = {
+        goto: vi.fn(async () => { await new Promise((resolve) => setTimeout(resolve, 14_900)); }),
+        url: () => "https://portal.example.test/",
+        title: async () => "Portal",
+        locator: () => ({ innerText: async () => {
+          await new Promise((resolve) => setTimeout(resolve, 4_900));
+          return "Ready";
+        } }),
+      };
+      kernel.executePlaywright = async ({ code, timeoutMs }) => {
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        try {
+          const result: unknown = await Promise.race([
+            runInNewContext(`(async () => { ${code} })()`, { page }),
+            new Promise((_, reject) => {
+              timer = setTimeout(() => reject(new Error("Kernel execution timed out")), timeoutMs);
+            }),
+          ]);
+          return { result };
+        } finally { clearTimeout(timer); }
+      };
+      const store = new FakeComputerUseStore({ run: createRunRecord({
+        kernelLiveViewUrlEncrypted: null, kernelSessionId: null, status: "completed",
+      }) });
+      const service = new ComputerUseService({ kernel, now: () => now, store });
+      const result = expect(service.startRun({
+        memberId: "member_123", startUrl: "https://portal.example.test/",
+      })).resolves.toMatchObject({ status: "running", reused: false });
+      await Promise.all([result, vi.advanceTimersByTimeAsync(20_000)]);
+      expect(page.goto).toHaveBeenCalledWith("https://portal.example.test/", {
+        waitUntil: "domcontentloaded", timeout: 15_000,
+      });
+      expect(store.run?.lastTitle).toBe("Portal");
+      expect(kernel.deletedSessionIds).toEqual([]);
+    } finally { vi.useRealTimers(); }
   });
 
   it("passes arbitrary start URLs to Kernel navigation", async () => {

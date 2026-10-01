@@ -9,7 +9,7 @@ fi
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
-required_node="$(sed -nE 's/^[[:space:]]*"node":[[:space:]]*">=([^"]+)".*/\1/p' package.json | head -n 1)"
+required_node="$(sed -nE 's/^[[:space:]]*"node":[[:space:]]*"\^([0-9]+\.[0-9]+\.[0-9]+)".*/\1/p' package.json | head -n 1)"
 pnpm_version="$(sed -nE 's/^[[:space:]]*"packageManager":[[:space:]]*"pnpm@([^+\"]+).*/\1/p' package.json | head -n 1)"
 
 if [ -z "$required_node" ] || [ -z "$pnpm_version" ]; then
@@ -102,11 +102,11 @@ print_detected_os() {
 print_install_plan() {
   ui_section 'Install plan'
   printf 'OS: macos\n'
-  printf 'Node requirement: >= %s\n' "$required_node"
+  printf 'Node requirement: ^%s\n' "$required_node"
   printf 'pnpm: %s via corepack\n' "$pnpm_version"
   printf '%s\n' 'Workspace flow: bootstrap tools -> install deps -> build workspace -> launch onboarding'
   printf '%s\n' 'Bootstrap scope:'
-  printf '  - Homebrew, Node >= %s, and pnpm@%s via corepack\n' "$required_node" "$pnpm_version"
+  printf '  - Homebrew, Node ^%s, and pnpm@%s via corepack\n' "$required_node" "$pnpm_version"
   printf '%s\n' '  - workspace dependencies and build output'
   printf '%s\n' '  - ffmpeg, whisper.cpp, and a local Whisper model'
   printf '%s\n' '  - vault bootstrap, default config, user-level murph/vault-cli shims, onboarding channel selection, wearables, and assistant automation/chat handoff'
@@ -142,7 +142,7 @@ print_dry_run_plan() {
   ui_warn 'Dry run requested. This wrapper will not modify the machine or workspace.'
   printf '%s\n' 'Planned wrapper steps:'
   printf '%s\n' '1. Ensure Homebrew is available.'
-  printf '2. Ensure Node >= %s is available.\n' "$required_node"
+  printf '2. Ensure Node ^%s is available.\n' "$required_node"
   printf '3. Activate pnpm@%s through corepack.\n' "$pnpm_version"
   printf '%s\n' '4. Install workspace dependencies with `corepack pnpm install --frozen-lockfile`.'
   printf '%s\n' '5. Build the workspace with `corepack pnpm build`.'
@@ -215,6 +215,7 @@ const required = (process.env.REQUIRED_NODE_VERSION ?? '')
   .split('.')
   .map((value) => Number.parseInt(value, 10))
 const current = process.versions.node.split('.').map((value) => Number.parseInt(value, 10))
+if (current[0] !== required[0]) process.exit(1)
 for (let index = 0; index < required.length; index += 1) {
   const left = current[index] ?? 0
   const right = required[index] ?? 0
@@ -237,9 +238,10 @@ ensure_node() {
   fi
 
   ensure_brew_shellenv
-  ui_info 'Installing node@22 so the repo can build Murph...'
-  brew install node@22
-  export PATH="$(brew --prefix node@22)/bin:$PATH"
+  local node_formula="node@${required_node%%.*}"
+  ui_info "Installing ${node_formula} so the repo can build Murph..."
+  brew install "$node_formula"
+  export PATH="$(brew --prefix "$node_formula")/bin:$PATH"
   ui_success "Node.js v$(active_node_version) installed"
   ui_info "Active Node.js: $(command -v node)"
 }

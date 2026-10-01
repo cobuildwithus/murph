@@ -90,6 +90,28 @@ workspace-runtime pass, and checkpoints through the web-owned workspace CAS. It 
 opaque encrypted runtime blobs and explicit execution-time callback data, but it is not the
 canonical owner of hosted product facts.
 
+## Browser and SMS failure diagnostics
+
+The existing `assistant.computer_tool_failed` runtime-log event retains
+`computerOperationElapsedMs` for the whole failed operation. Evaluation failures
+also retain `kernelExecutionTimeoutMs` (the rounded budget sent to Kernel) and
+`kernelExecutionElapsedMs` (the provider-call duration). SDK failures can retain
+a numeric `providerHttpStatus` from 400 through 599. Failure categories are
+closed values: `strict_mode_violation`, `timeout`, `browser_closed`,
+`navigation_network_error`, `javascript_error`, or `unclassified`.
+These hints do not prove whether a browser action took effect and never change
+retry or unknown-outcome handling. The event omits provider prose, scripts,
+URLs, and page contents; its existing private subject binding is unchanged.
+
+Twilio failures use the existing private route-error cause. Alongside operation,
+HTTP status, numeric provider code, and exact allowlisted parameter labels, it
+records whether the bounded response was parsed, missing, oversized, invalid
+JSON, an invalid shape, or unreadable. For code 60200, parameter recognition is
+explicitly recognized, unrecognized, or missing. Unknown labels and values are
+never retained. These additive diagnostics describe new failures only; they
+cannot reconstruct previously discarded historical details. Verify using
+natural traffic after the managed production deployment reaches its domains.
+
 ## Reconciliation-facts failure observability
 
 The success record's diagnostic `status` is `blocked` when access is blocked,
