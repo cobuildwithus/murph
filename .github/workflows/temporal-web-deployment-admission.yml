@@ -23,7 +23,7 @@ jobs:
     name: Temporal Web production admission
     environment: temporal-compatibility
     runs-on: ubuntu-24.04
-    # 15 minutes for setup, then the controller's 58-minute token budget, with
+    # 15 minutes for setup and the public Web build, then the controller's 58-minute token budget, with
     # two minutes left for runner cleanup and status publication.
     timeout-minutes: 75
     permissions:
@@ -56,6 +56,57 @@ jobs:
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
           node-version-file: .nvmrc
+
+      - name: Setup pnpm for public integration Web build
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
+        with:
+          run_install: false
+
+      - name: Cache public integration dependencies
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      # Only public source and synthetic build configuration enter this artifact.
+      # Build before minting the private token, so paid integration never waits
+      # for compilation and no private assets or credentials reach the archive.
+      - name: Build public hosted integration Web dist
+        id: public-web-build
+        continue-on-error: true
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/murph_test
+          HOSTED_CONTACT_PRIVACY_KEYS: v1:BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc
+          HOSTED_DEVICE_ROUTING_INDEX_KEY: 0101010101010101010101010101010101010101010101010101010101010101
+          HOSTED_EMAIL_DOMAIN: mail.example.test
+          HOSTED_EMAIL_FROM_ADDRESS: assistant@mail.example.test
+          HOSTED_EMAIL_LOCAL_PART: assistant
+          HOSTED_EMAIL_SIGNING_SECRET: hosted-local-email-signing-key
+          HOSTED_MAILBOX_FINGERPRINT_KEY: BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc
+          MURPH_E2E_DEBUG_ASSISTANT_PROVIDER_STUB: "1"
+          MURPH_E2E_STREAM_DEV_LOGS: "1"
+          NEXT_DIST_DIR_MODE: smoke
+          NEXT_DIST_DIR_SUFFIX: murph-cloud-integration
+          NEXT_PUBLIC_PRIVY_APP_ID: cm_app_smoke_placeholder1
+          PRIVY_VERIFICATION_KEY: ci-hosted-web-verification-key
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm --dir packages/hosted-execution build
+          pnpm --dir apps/web build
+          node scripts/hosted-integration-web-artifact.mjs
+
+      - name: Publish public hosted integration Web dist
+        if: steps.public-web-build.outcome == 'success'
+        continue-on-error: true
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: hosted-integration-web-v1-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            hosted-web-next-dist.tar.zst
+            hosted-web-build.json
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
 
       - name: Execute exact production wire projection
         run: >-
