@@ -72,15 +72,16 @@ age of an executed run; this system adds no product-state receipt database.
   empty canonical steps view. The browser stays connected while the ordinary
   callback-owned Temporal/runtime pipeline imports data. Provider day/value/unit
   and Garmin activity-summary provenance must match canonical query output.
-  A successful empty provider response is accepted for the new canary account
-  as `no_provider_data`; canonical ingestion is explicitly untested in that
-  outcome. Nonempty responses still require a real match, and provider,
-  authentication, malformed-data, cancellation, and cleanup failures remain
-  failures. The test invents no samples and forces no ensure-processing call.
-  Only after the data outcome, UI disconnect, and final owned cleanup does the
-  suite write its version-2 private receipt (`matched` or `no_provider_data`).
-  Only `matched` proves pull and canonical ingestion. Neither outcome claims
-  provider webhook-delivery proof.
+  Empty provider reads are retried within the existing bounded deadline so the
+  initial provider pull can finish. Missing real data fails; a connection-only
+  or empty-data result cannot pass the canary. The test invents no samples and
+  forces no ensure-processing call. Only after a canonical match, UI disconnect,
+  and final owned cleanup does the suite write its version-2 private receipt
+  with `dataOutcome: matched`. This proves pull and canonical ingestion, not
+  provider webhook delivery. The proof uses positive steps from the fourteen
+  completed UTC days ending two days before the run; today's activity alone
+  does not satisfy this stable-value comparison.
+
 
 ## Garmin execution boundary
 
