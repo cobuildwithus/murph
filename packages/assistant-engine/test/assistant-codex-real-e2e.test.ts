@@ -42548,7 +42548,8 @@ describeRealCodex('wearable haptic reminder journey', () => {
       process.stdout.write('[wearable-haptic-live] ' + JSON.stringify({ scenario: 'whoop-due', reply: fired.finalMessage, calls: calls.slice(before) }) + '\n')
       expect(calls.slice(before).filter(call => call.action === 'haptic' && call.operation !== 'status')).toEqual([{ action: 'haptic', wearable: 'whoop', operation: 'buzz' }])
       expect(saves).toHaveLength(1)
-      expect(fired.finalMessage).not.toMatch(/acknowledged|your WHOOP (?:buzzed|vibrated)|has vibrated/iu)
+      expect(fired.finalMessage).toMatch(/queued|pending/iu)
+      expect(fired.finalMessage).not.toMatch(/(?:was|is|has been) acknowledged|your WHOOP (?:buzzed|vibrated)|has vibrated/iu)
     } finally {
       await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
     }
