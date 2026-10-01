@@ -94,6 +94,15 @@ export async function assertEmptyGarminCanaryWorkspace(input: {
   throw new Error("MURPH_E2E_GARMIN_REQUIRES_EMPTY_CANONICAL_WORKSPACE");
 }
 
+// Only closed diagnostic codes may leave the real-data proof process.
+export function formatLiveGarminDataFailure(error: unknown): string {
+  const message = error instanceof Error ? error.message : "";
+  return [
+    "MURPH_E2E_GARMIN_CANONICAL_DATA_MISSING",
+    "MURPH_E2E_GARMIN_RECENT_PROVIDER_DATA_MISSING",
+  ].includes(message) ? message : "MURPH_E2E_GARMIN_DATA_PROOF_FAILED";
+}
+
 export async function waitForLiveGarminCanonicalData(input: {
   client: Pick<JunctionClient, "resolveUser" | "listSummary">;
   clientUserId: string;

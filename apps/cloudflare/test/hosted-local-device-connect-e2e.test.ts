@@ -46,6 +46,7 @@ import {
 
 import {
   assertEmptyGarminCanaryWorkspace,
+  formatLiveGarminDataFailure,
   waitForLiveGarminCanonicalData,
 } from "./helpers/hosted-local-junction-live-data.js";
 
@@ -741,6 +742,7 @@ async function runLiveJunctionWearableProof(
           signal,
           timeoutMs: config.timeoutMs,
         });
+        console.info("MURPH_E2E_GARMIN_CANONICAL_DATA_MATCHED=1");
       },
     } : {}),
     hostedSessionCookie,
@@ -885,7 +887,10 @@ async function runJunctionWearableBrowser(input: {
       lastWearableStage = forwardWearableStage(line) ?? lastWearableStage;
       if (line !== "MURPH_E2E_GARMIN_CONNECTED=1" || !input.onConnected || dataProof) continue;
       dataProof = input.onConnected(dataAbort.signal).catch((error: unknown) => {
-        dataFailure = error;
+        dataFailure = new Error(formatLiveGarminDataFailure(error));
+        // Disconnect runs even after a failed proof; report its safe cause now
+        // so a subsequent browser/cleanup failure cannot hide it.
+        console.error(formatLiveGarminDataFailure(error));
       }).finally(() => {
         // Complete the normal browser Disconnect even after a failed data proof.
         if (browserRun.child.exitCode === null && !browserRun.child.stdin?.destroyed) {
