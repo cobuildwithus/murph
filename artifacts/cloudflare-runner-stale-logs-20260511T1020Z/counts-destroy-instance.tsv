@@ -1,6 +1,0 @@
-timeframe	message	events
-2026-05-11T09:45:00Z..2026-05-11T10:15:00Z	Hosted execution container destroy requested.	97
-2026-05-11T09:45:00Z..2026-05-11T10:15:00Z	Hosted execution container failed.	47
-2026-05-11T09:45:00Z..2026-05-11T10:15:00Z	Error proxying request to container <CONTAINER_ID>: Error: workspace invocation container destroyed	47
-2026-05-11T09:45:00Z..2026-05-11T10:15:00Z	Hosted execution container destroy confirmed stopped.	15
-2026-05-11T09:45:00Z..2026-05-11T10:15:00Z	Hosted execution container lifecycle hook reported an error. Hosted execution runtime failed. Detail: The RPC call destroy() was called	3

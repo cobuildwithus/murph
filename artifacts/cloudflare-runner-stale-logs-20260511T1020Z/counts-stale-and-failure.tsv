@@ -1,6 +1,0 @@
-timeframe	message	events
-2026-05-11T09:45:00Z..2026-05-11T10:15:00Z	Hosted runner workspace invocation completed.	225
-2026-05-11T09:45:00Z..2026-05-11T10:15:00Z	Hosted runner scheduled idle-shutdown checkpoint.	88
-2026-05-11T09:45:00Z..2026-05-11T10:15:00Z	Hosted runner workspace invocation failed.	69
-2026-05-11T09:45:00Z..2026-05-11T10:15:00Z	Hosted workspace invocation lease expired; clearing stale in-flight state.	46
-2026-05-11T09:45:00Z..2026-05-11T10:15:00Z	Hosted runner cleared stale local invocation so pending nudge can drain.	45
