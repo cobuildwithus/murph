@@ -43,6 +43,28 @@ The isolated database does not store the raw hosted member id and has no
 cross-database foreign key. Attempt ids and other existing redacted operational
 correlation fields retain their current contract and limits.
 
+### Computer evaluation failure categories
+
+`assistant.computer_tool_failed` retains its existing best-effort scheduling and
+`HOSTED_COMPUTER_EVAL_FAILED` error identity. Its existing
+`computerFailureCategory` first preserves `strict_mode_violation`, `timeout`,
+and `browser_closed`, in that order. Otherwise `runtime-log.ts` recognizes
+`navigation_network_error` from explicit Chromium network-error, interrupted
+Playwright navigation, or fetch-failure headers, then `javascript_error` from
+known JavaScript error-name headers. These are diagnostic signatures, not proof
+of a production cause or instructions to change retries or timeout budgets.
+
+Only the already-extracted `kernelError` and `kernelStderr` supply new category
+evidence, capped at 4,000 characters each; stdout, result/page content and
+mentions inside call logs do not. No diagnostic text or new identifier is logged.
+For evaluation failures, group by category (missing means `unknown`) and the
+existing `kernelErrorPresent`/`kernelStderrPresent` booleans: an unknown category
+with either flag true is unclassified; with both false, no supported error
+diagnostic was extracted. `kernelStdoutPresent` alone is not error evidence.
+Historical missing categories cannot be retrospectively classified. The existing
+shallow scalar parser used on append and read accepts both new category values;
+no schema, reader, retention or event-count change is required.
+
 ### Device import connection ownership
 
 `device-sync.pass_finished.deviceSyncConnectionKey` is a SHA-256 hex digest of

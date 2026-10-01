@@ -256,6 +256,24 @@ function readHostedComputerToolFailureCategory(
     return { computerFailureCategory: "browser_closed" };
   }
 
+  // Only provider error channels supply new evidence, never stdout or page text.
+  // Match diagnostic headers, not mentions in echoed source, DOM or call logs.
+  const diagnostics = [details.kernelError, details.kernelStderr]
+    .filter((value): value is string => typeof value === "string")
+    .map((value) => value.slice(0, 4_000).trimStart().replace(/^Error(?::[ \t]*|\n)/u, ""));
+  if (diagnostics.some((value) =>
+    /^(?:page\.(?:goto|reload|goBack|goForward|waitForNavigation):[ \t]*)?net::ERR_[A-Z0-9_]+\b/u.test(value)
+    || /^page\.(?:goto|reload|goBack|goForward|waitForNavigation): Navigation\b[^\n]*\binterrupted by another navigation\b/u.test(value)
+    || /^TypeError(?::[ \t]*|\n)(?:Failed to fetch|fetch failed)(?:\n|$)/u.test(value)
+  )) {
+    return { computerFailureCategory: "navigation_network_error" };
+  }
+  if (diagnostics.some((value) =>
+    /^(?:(?:page|frame|locator|jsHandle)\.evaluate(?:Handle)?:[ \t]*)?(?:SyntaxError|ReferenceError|TypeError|RangeError|EvalError|URIError|AggregateError)(?::|\n|$)/u.test(value)
+  )) {
+    return { computerFailureCategory: "javascript_error" };
+  }
+
   return {};
 }
 
