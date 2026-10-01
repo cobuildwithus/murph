@@ -19,3 +19,6 @@ export function isHostedMailboxLane(value: string): value is HostedMailboxLane {
   return HOSTED_MAILBOX_LANES.includes(value as HostedMailboxLane);
 }
 
+// Member-facing name for the internal launch_group_monthly billing SKU.
+// The hosted wire contract retains "Group" for rolling-deploy compatibility.
+export const HOSTED_GROUP_MEMBER_PLAN_DISPLAY_NAME = "Core" as const;

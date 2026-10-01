@@ -73,6 +73,10 @@ mention the deleted generic state.
 
 ## Contract
 
+- modules have no required import-time effects; `sideEffects: false` allows unused
+  contract and parser modules to be removed from consumer bundles. Keep process
+  registration and I/O out of module initialization. Shared display constants
+  belong with dependency-free runtime values, not schema construction.
 - signed callback canonicalization stays timestamped and request-bound across app-local signers and verifiers
 - the shared control/status path layout stays stable between callers and the worker
 - non-direct route-authorized Linq and Telegram conversation wakes may carry an

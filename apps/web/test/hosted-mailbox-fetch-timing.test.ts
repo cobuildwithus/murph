@@ -16,6 +16,7 @@ describe("mailbox fetch timing", () => {
   it("separates transport/startup age, phases, pool acquisition and query time without payloads", async () => {
     const log = vi.spyOn(console, "info").mockImplementation(() => {});
     vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-09-21T12:00:02.000Z"));
+    const uptime = vi.spyOn(process, "uptime").mockReturnValue(42);
     let clock = 0;
     vi.spyOn(performance, "now").mockImplementation(() => clock);
     const response = await runWithHostedMailboxFetchTiming(request(), async timing => {
@@ -35,6 +36,7 @@ describe("mailbox fetch timing", () => {
       clock = 700;
       timing.start("mailbox");
       clock = 705;
+      uptime.mockReturnValue(43);
       return "response";
     });
     expect(response).toBe("response");
@@ -42,6 +44,7 @@ describe("mailbox fetch timing", () => {
     expect(log.mock.calls[0]?.[1]).toMatchObject({
       event: "hosted-mailbox.fetch.timing", completed: true, failedPhase: null,
       signedRequestToHandlerMs: 2000, totalMs: 705,
+      processUptimeMs: 42_000, timingModuleAgeMs: 0,
       phaseMs: { authentication: 430, transaction_acquire: 20, authority: 250, mailbox: 5 },
       poolAcquisitionCount: 1, poolAcquireMs: [400], dbOperationCount: 1, dbTotalMs: 420,
       dbOperationStartMs: [0], poolAcquireStartMs: [10],

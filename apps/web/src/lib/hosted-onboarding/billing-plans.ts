@@ -1,12 +1,10 @@
 import {
+  HOSTED_GROUP_MEMBER_PLAN_DISPLAY_NAME,
   HOSTED_FAMILY_PLAN_CODES,
   HOSTED_PLAN_CODES,
   type HostedFamilyPlanCode,
   type HostedPlanCode,
 } from "@murphai/hosted-execution/runtime-control";
-import {
-  HOSTED_GROUP_MEMBER_PLAN_DISPLAY_NAME,
-} from "@murphai/hosted-execution/plan-usage";
 
 export {
   HOSTED_FAMILY_PLAN_CODES,

@@ -15,9 +15,7 @@ export const HOSTED_PLAN_USAGE_PLAN_NAMES = [
   "Starter",
 ] as const;
 
-// Member-facing name for the internal launch_group_monthly billing SKU.
-// The hosted wire contract retains "Group" for rolling-deploy compatibility.
-export const HOSTED_GROUP_MEMBER_PLAN_DISPLAY_NAME = "Core" as const;
+export { HOSTED_GROUP_MEMBER_PLAN_DISPLAY_NAME } from "./runtime-control-values.ts";
 
 export const HOSTED_PLAN_USAGE_DIRECT_BILLING_PLAN_CODES = [
   "launch_group_monthly",
