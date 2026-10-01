@@ -8,7 +8,7 @@ import { buildMetricProjection, readVault, readVaultRawTolerant } from "@murphai
 import { createBrowserVaultReplica } from "@murphai/query/browser";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { hasCanonicalGarminSteps, readGarminStepExpectations, waitForLiveGarminCanonicalData } from "./helpers/hosted-local-junction-live-data.js";
+import { formatLiveGarminDataFailure, hasCanonicalGarminSteps, readGarminStepExpectations, waitForLiveGarminCanonicalData } from "./helpers/hosted-local-junction-live-data.js";
 
 const window = { from: "2026-08-01", to: "2026-08-14" };
 const activity = {
@@ -151,5 +151,22 @@ describe("live Garmin empty-account boundary", () => {
       return [];
     });
     await expect(waitForLiveGarminCanonicalData(input)).rejects.toThrow("MURPH_E2E_GARMIN_RECENT_PROVIDER_DATA_MISSING");
+  });
+});
+
+
+describe("live Garmin data diagnostics", () => {
+  it("preserves closed failures without exposing provider or vault error content", () => {
+    for (const code of [
+      "MURPH_E2E_GARMIN_CANONICAL_DATA_MISSING",
+      "MURPH_E2E_GARMIN_RECENT_PROVIDER_DATA_MISSING",
+    ]) {
+      expect(formatLiveGarminDataFailure(new Error(code))).toBe(code);
+      expect(formatLiveGarminDataFailure(new Error(`${code}: synthetic private content`)))
+        .toBe("MURPH_E2E_GARMIN_DATA_PROOF_FAILED");
+    }
+    for (const error of [new Error("synthetic private payload"), "private text", null]) {
+      expect(formatLiveGarminDataFailure(error)).toBe("MURPH_E2E_GARMIN_DATA_PROOF_FAILED");
+    }
   });
 });

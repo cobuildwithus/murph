@@ -1744,7 +1744,7 @@ describe("hosted-local Junction wearable browser authorization", () => {
     }).manualAuthorizationAllowed).toBe(false);
   });
 
-  it("waits for the reloaded connect page before disconnecting", async () => {
+  it.each([200, 503])("waits for page load and diagnoses disconnect HTTP %i", async (status) => {
     const events: string[] = [];
     const dialog = {
       getByRole: vi.fn((role: string) => role === "heading"
@@ -1783,13 +1783,30 @@ describe("hosted-local Junction wearable browser authorization", () => {
           events.push("notice");
         }),
       })),
+      waitForResponse: vi.fn(async (accept: (response: {
+        url: () => string;
+        request: () => { method: () => string };
+      }) => boolean) => {
+        const response = (origin: string, pathname: string, method = "POST") => ({
+          url: () => `${origin}${pathname}`,
+          request: () => ({ method: () => method }),
+        });
+        const route = "/api/settings/device-sync/connections/synthetic/disconnect";
+        expect(accept(response("https://app.example.test", route))).toBe(true);
+        expect(accept(response("https://app.example.test", route.replace("/disconnect", "/sources/garmin/disconnect")))).toBe(true);
+        expect(accept(response("https://other.example.test", route))).toBe(false);
+        expect(accept(response("https://app.example.test", route, "GET"))).toBe(false);
+        expect(accept(response("https://app.example.test", "/unrelated/disconnect"))).toBe(false);
+        events.push("response-listener");
+        return { ok: () => status === 200, status: () => status };
+      }),
       waitForLoadState: vi.fn(async (state: string) => {
         expect(state).toBe("load");
         events.push("load");
       }),
     };
 
-    await disconnectHostedLocalJunctionAccountForTest(
+    const cleanup = disconnectHostedLocalJunctionAccountForTest(
       page as never,
       createConfig({
         MURPH_E2E_CONNECT_URL:
@@ -1798,6 +1815,13 @@ describe("hosted-local Junction wearable browser authorization", () => {
       }),
     );
 
+    if (status !== 200) {
+      await expect(cleanup).rejects.toThrow(`MURPH_E2E_JUNCTION_DISCONNECT_HTTP_${status}`);
+      expect(page.getByText).not.toHaveBeenCalled();
+      expect(events).not.toContain("idle");
+      return;
+    }
+    await cleanup;
     expect(page.waitForLoadState).toHaveBeenCalledWith("load", {
       timeout: 30_000,
     });
@@ -1805,6 +1829,7 @@ describe("hosted-local Junction wearable browser authorization", () => {
       "load",
       "trigger",
       "dialog",
+      "response-listener",
       "confirm",
       "notice",
       "idle",
