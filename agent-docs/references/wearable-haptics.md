@@ -49,10 +49,25 @@ five-second lock/operation limits, and contain no external I/O. Each tool reques
 adds one signed callback; it does not wait or repeatedly poll for a receipt.
 Normal conversation turns that do not call this tool add no database requests.
 
+## Test-to-message handoff
+
+The companion uses one Test buzz action. After a correlated protocol receipt it
+can open an in-app Messages composer for the member to review and send. The
+existing bearer-authenticated initial-onboarding GET and POST projections retain
+an optional contactAction after completion, with only href, kind, and label.
+The route comes from that member's assigned contact context; a failed optional
+contact read returns null without blocking onboarding. The native app retains
+it only in the current session and requires a text route for this composer.
+
+An explicit test-and-usefulness request authorizes one immediate buzz. The
+assistant reads existing reminders and suggests a relevant use; that suggestion
+does not authorize creating or changing a reminder. Queued delivery remains
+pending, and the app must stay open for runtime command polling.
+
 ## Current limits
 
 Delivery requires the companion app to stay open at the deadline. There is no
-push wake-up or background-delivery promise. WHOOP 5/MG and Garmin GFDI V2
-FindMyWatch are implemented by the native adapters. Garmin may also sound, and
-CIRQA firmware compatibility needs physical validation. Hardware effects are
+push wake-up or background-delivery promise. The native adapters cover WHOOP 4 and 5/MG framing and Garmin GFDI V0/V1/V2
+FindMyWatch. Older-profile coverage is source- and fixture-based; it does not
+establish compatibility with every device or firmware. Garmin may also sound. Hardware effects are
 not part of this task's tests; the connected WHOOP must not be vibrated.

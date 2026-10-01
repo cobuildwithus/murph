@@ -42465,9 +42465,11 @@ describeRealCodex('real Codex proactive plan follow-through e2e', () => {
 
 
 describeRealCodex('wearable haptic reminder journey', () => {
-  it.each(['whoop-delay', 'garmin-unknown'] as const)('%s uses only the authorized wrist effect', async (scenario) => {
+  it.each(['whoop-delay', 'garmin-unknown', 'whoop-useful'] as const)('%s uses only the authorized wrist effect', async (scenario) => {
     const config = await resolveRealCodexE2eConfig()
     const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-wrist-reminder-'))
+    const binDirectory = path.join(workingDirectory, 'bin')
+    const commandLogPath = path.join(workingDirectory, 'commands.log')
     const calls: AssistantHostedDeviceToolRequest[] = []
     const saves: AssistantHostedAutomationToolRequest[] = []
     const now = new Date()
@@ -42475,6 +42477,25 @@ describeRealCodex('wearable haptic reminder journey', () => {
     const targetAt = new Date(now.getTime() + 600_000).toISOString()
     try {
       await initializeVault({ vaultRoot: workingDirectory })
+      let assistantCliContract: string | null = null
+      if (scenario === 'whoop-useful') {
+        await materializeRealWorkoutVaultCli({ binDirectory, commandLogPath, vaultRoot: workingDirectory })
+        await upsertAutomation({
+          continuityPolicy: 'preserve', createOnly: true,
+          instructions: 'Remind me to take a five-minute afternoon stretch break.',
+          title: 'Afternoon stretch break', slug: 'afternoon-stretch',
+          schedule: { kind: 'dailyLocal', localTime: '15:00' }, status: 'active', vaultRoot: workingDirectory,
+          route: { channel: 'linq', deliveryTarget: 'synthetic-private-chat', threadIsDirect: true,
+            identityId: 'synthetic-identity', participantId: null, threadId: 'synthetic-private-chat' },
+        })
+        assistantCliContract = buildAssistantCliSurfaceContract(
+          await readAssistantCliLlmsFullManifestFromCliEntry({
+            cliEntryPath: fileURLToPath(new URL('../../cli/dist/bin.js', import.meta.url)),
+            workingDirectory: fileURLToPath(new URL('../../../', import.meta.url)),
+          }),
+        )
+      }
+      const remindersBefore = scenario === 'whoop-useful' ? await listAutomations({ vaultRoot: workingDirectory }) : null
       const context: AssistantHostedToolContext = {
         computerToolsAvailable: false, vaultFileSendAvailable: false,
         currentHostedDeliveryContext: () => null, currentHostedMailboxItemIds: () => [],
@@ -42508,9 +42529,11 @@ describeRealCodex('wearable haptic reminder journey', () => {
       const execute = (prompt: string, scheduled: boolean, hostedToolContext = context) => executeRealCodexAppServerTurn({
         approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
         codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
-        codexHome: config.codexHome, env: config.env, model: config.model, modelProvider: config.modelProvider,
+        codexHome: config.codexHome,
+        env: { ...config.env, PATH: `${binDirectory}:${config.env.PATH ?? ''}` },
+        model: config.model, modelProvider: config.modelProvider,
         developerInstructions: buildAssistantSystemPrompt({
-          assistantCliContract: null, assistantKnowledgeToolsAvailable: false, assistantHostedAutomationAvailable: true,
+          assistantCliContract, assistantKnowledgeToolsAvailable: false, assistantHostedAutomationAvailable: true,
           assistantHostedDeviceConnectAvailable: true, assistantHostedDeviceConnectProviders: [],
           channel: 'linq', cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
           conversationScope: 'direct', currentLocalDate: now.toISOString().slice(0, 10),
@@ -42523,8 +42546,25 @@ describeRealCodex('wearable haptic reminder journey', () => {
       })
       const result = await execute(scenario === 'whoop-delay'
         ? `Please buzz my WHOOP once when my ten-minute meditation ends at ${targetAt}. No buzz now. The band is connected in Murph and I will keep the app open until then.`
-        : 'Please buzz my Garmin once now. I know its find-device alert may also sound. Do not retry if the result is unclear.', false)
+        : scenario === 'whoop-useful'
+          ? 'My WHOOP is connected in Murph. Give it one test buzz and tell me when wrist reminders would be useful for me.'
+          : 'Please buzz my Garmin once now. I know its find-device alert may also sound. Do not retry if the result is unclear.', false)
       process.stdout.write('[wearable-haptic-live] ' + JSON.stringify({ scenario, reply: result.finalMessage, calls, saves: saves.length }) + '\n')
+      if (scenario === 'whoop-useful') {
+        expect(calls.filter(call => call.action === 'haptic' && call.operation !== 'status')).toEqual([
+          { action: 'haptic', wearable: 'whoop', operation: 'buzz' },
+        ])
+        expect(saves).toEqual([])
+        const commands = await readFile(commandLogPath, 'utf8')
+        expect(commands).toMatch(/automation(?: list|","list)/u)
+        expect(commands).toMatch(/automation(?: show|","show)/u)
+        expect(await listAutomations({ vaultRoot: workingDirectory })).toEqual(remindersBefore)
+        expect(result.finalMessage).toMatch(/stretch/iu)
+        expect(result.finalMessage).toMatch(/five|5/iu)
+        expect(result.finalMessage).toMatch(/queued|sent|requested/iu)
+        expect(result.finalMessage).not.toMatch(/your WHOOP (?:buzzed|vibrated)|has vibrated|I(?:'ve| have) (?:set|created|scheduled)/iu)
+        return
+      }
       if (scenario === 'garmin-unknown') {
         expect(calls.filter(call => call.action === 'haptic' && call.operation !== 'status')).toEqual([{ action: 'haptic', wearable: 'garmin', operation: 'buzz' }])
         expect(saves).toEqual([])
