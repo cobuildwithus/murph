@@ -1,6 +1,6 @@
 # Reduce authenticated workspace restore cost
 
-Status: active
+Status: completed
 Created: 2026-10-01
 Updated: 2026-10-01
 
@@ -54,3 +54,13 @@ Focused checks, parent review, PR, final ReviewGPT, and exact-head CI are tracke
 - Cloudflare typecheck: passed after generating the existing local Prisma client; no database operation was performed.
 - Complexity diff: passed; maximum complexity remains 16, no function exceeds 20, and no production branches were added.
 - Parent candidate review: checked authentication-before-extraction, old/new reader compatibility, idle-only cost placement, test meaning, privacy, and complete diff. No new Frog entry: the only setup issue reused the known missing generated Prisma client case.
+
+## Delivery and remaining limits
+
+- PR #3945 contains the one-constant production change, stronger content readback, and storage-contract explanation. Claude Opus 5.5 was consulted on compression, streaming, and extraction options; unhelpful experiments were discarded.
+- Final ReviewGPT round 1 passed on `fb5590a0b8f44f4c763e44fb71aae9eade48e7cc`, with zero findings. The captured response and committed-turn identity were verified. The guarded full snapshot, selected Hercules/6Pro lane, completed response after more than ten minutes, exact head, substantive path audit, and reported 17 independent direct-source checks support acceptance. The reviewer did not independently run the repository suites or verify production performance.
+- Parent final review confirms the production delta remains one constant; no restore, cancellation, authentication, digest, state, or API contract changes. Plan closeout changes explanatory documentation only and needs no new substantive review round.
+- Exact-head CI is tracked on the PR; final commit checks must pass before merge readiness. No deployment or merge is part of this PR handoff.
+- Task-owned private extraction and benchmark archives were deleted after measurements. The supplied original archive was preserved. No private content was submitted to either reviewer or included in the PR.
+- Production extraction latency remains unexplained by these local measurements. This bounded improvement reduces measured snapshot size; it does not claim to solve the complete staging interval.
+Completed: 2026-10-01
