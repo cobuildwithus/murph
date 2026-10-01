@@ -1,8 +1,8 @@
 # Fail hosted-local startup on incompatible Temporal contracts
 
-Status: active
+Status: completed
 Created: 2026-09-25
-Updated: 2026-09-25
+Updated: 2026-10-01
 
 ## Goal and invariant
 
@@ -58,15 +58,16 @@ and the consumer's parser verification provide the correct owners to compose.
 - Existing `startHostedLocalDevStack` complexity remains 123; the added helper
   has complexity 5. Broader stack refactoring is unrelated to this fix.
 
-## Remaining work and landing prerequisite
+## Implementation completion and landing evidence
 
-The consumer companion now exposes the existing verifier through its supported
-package command. Actual public preflight to that command passed using the
-current 11-fixture producer corpus with no service credentials or connections.
-The consumer's real-command regression also passes for valid, incompatible,
-and empty corpora. No private implementation or policy is copied here.
+The consumer command is merged on its default branch. The command, parser
+entrypoint, and verifier remain unchanged there. The implementation and focused
+proof are complete; final review and required exact-head CI remain PR gates.
 
-Deliver the consumer command before this harness change. Complete configured
-exact-head reviews and required CI in both repositories, then obtain the
-required cross-repository landing decision. The issue remains open until both
-main branches contain the composed fix. Production deployment is not involved.
+The original accepted review response was recovered without changing its receipt.
+Its historical model-selection evidence could not be verified, so it was not
+counted as a final review pass. The resumed landing request authorizes a fresh
+full-snapshot review after this documentation-only plan closure. Preserve that
+historical attempt separately and retain the new exact candidate's review and CI
+receipts with the PR evidence. No production deployment is involved.
+Completed: 2026-10-01
