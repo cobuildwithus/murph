@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import * as coreRuntime from "@murphai/core";
+import { JunctionClient } from "@murphai/device-syncd/providers/junction-client";
 import { importDeviceProviderSnapshot } from "@murphai/importers";
 import { buildMetricProjection, readVault, readVaultRawTolerant } from "@murphai/query";
 import { createBrowserVaultReplica } from "@murphai/query/browser";
@@ -75,7 +76,7 @@ describe("live Garmin canonical data oracle", () => {
 
 
 describe("live Garmin empty-account boundary", () => {
-  afterEach(() => vi.restoreAllMocks());
+  afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers(); });
   function setup() {
     const requestJson = vi.fn(async (): Promise<string> => { throw new Error("synthetic status failure"); });
     const input: Parameters<typeof waitForLiveGarminCanonicalData>[0] = {
@@ -94,6 +95,28 @@ describe("live Garmin empty-account boundary", () => {
     };
     return { input, requestJson };
   }
+
+  it("requests the entire final closed day through the actual Junction client", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-08-16T12:00:00.000Z"));
+    const { input } = setup();
+    const urls: URL[] = [];
+    const client = new JunctionClient({
+      apiKey: "sk_us_synthetic", environment: "sandbox", region: "us",
+      fetchImpl: async (request) => {
+        urls.push(new URL(request instanceof Request ? request.url : request.toString()));
+        return Response.json({ activity: [] });
+      },
+    });
+    input.client.listSummary = client.listSummary.bind(client);
+    // The deliberate status failure stops after one real provider query.
+    await expect(waitForLiveGarminCanonicalData(input)).rejects.toThrow("MURPH_E2E_GARMIN_DATA_PROOF_FAILED");
+    expect(urls).toHaveLength(1);
+    expect(urls[0]?.pathname).toBe("/v2/summary/activity/synthetic-provider-user");
+    expect(urls[0]?.searchParams.get("provider")).toBe("garmin");
+    expect(urls[0]?.searchParams.get("start_date")).toBe("2026-08-01T00:00:00.000Z");
+    expect(urls[0]?.searchParams.get("end_date")).toBe("2026-08-14T23:59:59.999Z");
+  });
 
   it("fails rather than passing when provider data stays empty until the deadline", async () => {
     const { input, requestJson } = setup();

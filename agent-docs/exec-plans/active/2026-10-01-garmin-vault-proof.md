@@ -22,7 +22,8 @@ Native email canary work continues separately in its existing PRs.
 - [x] Poll through initially empty provider responses and fail at the deadline.
 - [x] Reject empty-data success in the private receipt consumer.
 - [x] Verify the original receipt changes with regression tests, typechecks, required review and exact-head CI.
-- [ ] Verify bounded provider diagnostics for an unsuccessful live data proof.
+- [x] Verify bounded provider diagnostics for an unsuccessful live data proof.
+- [ ] Verify the provider query includes the entire final closed calendar day.
 - [ ] Run the hosted canary and require canonical ingestion plus cleanup.
 
 ## Evidence and risks
@@ -38,6 +39,12 @@ pull status only after the data deadline. Its output uses closed resource,
 window-relative availability, and status categories. A ten-second bound fits
 inside the existing browser cleanup grace period. It cannot certify ingestion,
 change the proof result, or log provider payloads, dates, IDs, or health values.
+
+A client-level regression reproduced the canary's end-date truncation: the
+inclusive final day was transmitted as midnight at the beginning of that day.
+Use an explicit end-of-day instant while preserving the same closed-day window
+and exact canonical-value comparison. The new diagnostic run remains active;
+this request-boundary correction is a separate follow-up.
 
 ## Verification
 
