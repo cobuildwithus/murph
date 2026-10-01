@@ -1482,16 +1482,16 @@ describe('assistant execution prompt contract', () => {
     expect(computerSection).toContain(
       '$MURPH_ASSISTANT_SKILLS_ROOT/computer-use/SKILL.md',
     )
-    expect(computerSection).toContain('Prefer a structured integration')
+    expect(computerSection).toContain('prefer the owning structured lookup')
     expect(computerSection).toContain('private untrusted data')
-    expect(computerSection).toContain('Use secure user handoff')
+    expect(computerSection).toContain('Securely hand off')
     expect(computerSection).toContain(
-      'password or full payment-card entry',
+      'password/full payment-card entry',
     )
     expect(computerSection).toContain(
-      'smallest exact-point takeover for a human-only authentication challenge',
+      'the exact human-only authentication step',
     )
-    expect(computerSection).toContain('resume and finish the rest yourself')
+    expect(computerSection).toContain('then resume and finish')
     expect(computerSection).not.toContain('other private input')
     expect(computerSection).not.toContain(
       'credentials, full payment details, and one-time codes',

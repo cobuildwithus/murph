@@ -4,6 +4,7 @@ import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { createFoodsQueries, createPublicFoodsQueries } from "../src/lib/foods";
+import { createProductLabelsQueries } from "../src/lib/product-labels";
 import { createPublicProductLabelsQueries } from "../src/lib/product-labels";
 import {
   createPublicSupplementsQueries,
@@ -970,8 +971,34 @@ describe.runIf(Boolean(testDatabaseUrl))(
           '{"fixture":true}'::jsonb
         FROM generate_series(1, 10050) AS distractors(seed)
       `);
+      await client.query(`
+        INSERT INTO foods (
+          id, canonical_key, data_origin, data_origin_id,
+          data_origin_priority, name, brand, off_market, search_text, label
+        )
+        SELECT id, id, origin, id, 10, name, brand, false, search_text,
+          '{"fixture":true}'::jsonb
+        FROM (VALUES
+          ('food-red-lentils', 'usda_foundation', 'Red Lentils Cooked', NULL,
+            'Red Lentils Cooked water salt'),
+          ('food-lentils-partial', 'usda_foundation', 'Lentils', NULL,
+            'Lentils green red yellow ingredients'),
+          ('food-branded-lentils', 'usda_branded', 'Lentils', 'Meadow Pantry',
+            'Meadow Pantry Lentils water salt'),
+          ('food-a-other-brand-lentils', 'usda_branded', 'Lentils', 'Other Maker',
+            'Meadow Pantry Lentils water salt'),
+          ('food-long-chickpeas', 'usda_foundation',
+            'Roasted Chickpeas with Herbs and Lemon Ready to Eat Family Size', NULL,
+            'Roasted Chickpeas with Herbs and Lemon Ready to Eat Family Size'),
+          ('food-brand-only-chickpeas', 'usda_branded', 'Lemonade', 'Chickpeas Co',
+            'Chickpeas Co Lemonade')
+        ) AS fixtures(id, origin, name, brand, search_text)
+      `);
       await client.query(
         "CREATE INDEX foods_fixture_search_idx ON foods USING GIN (to_tsvector('simple', search_text))",
+      );
+      await client.query(
+        "CREATE INDEX foods_fixture_search_english_idx ON foods USING GIN (to_tsvector('english', search_text))",
       );
       await client.query(
         "CREATE INDEX foods_fixture_name_trgm_idx ON foods USING GIN (name gin_trgm_ops)",
@@ -1118,6 +1145,35 @@ describe.runIf(Boolean(testDatabaseUrl))(
       },
       20_000,
     );
+
+    it.each([
+      { q: "red lentils", genericOnly: true, expected: "food-red-lentils" },
+      { q: "Meadow Pantry lentils", genericOnly: false, expected: "food-branded-lentils" },
+      { q: "chikpeas", genericOnly: true, expected: "food-long-chickpeas" },
+      { q: "chickpeas", genericOnly: false, expected: "food-long-chickpeas" },
+    ])("ranks the complete food identity for $q", async ({ q, genericOnly, expected }) => {
+      const rows = await foodQueries.searchFoods({
+        q, genericOnly, includeOffMarket: false, limit: 5,
+      });
+      expect(rows[0]?.id).toBe(expected);
+    });
+
+    it("keeps complete stemmed food identities above partial-name matches", async () => {
+      const stemmedFoods = createProductLabelsQueries(queryClient, "foods", {
+        stemmedSearch: true,
+      });
+      const rows = await stemmedFoods.search({
+        q: "red lentil", includeOffMarket: false, limit: 5,
+      });
+      expect(rows[0]?.id).toBe("food-red-lentils");
+    });
+
+    it("does not invent a match for an unrelated food query", async () => {
+      const rows = await foodQueries.searchFoods({
+        q: "quartzsignal", includeOffMarket: false, limit: 5,
+      });
+      expect(rows).toEqual([]);
+    });
 
     it("keeps literal percent product names searchable", async () => {
       const rows = await foodQueries.searchFoods({

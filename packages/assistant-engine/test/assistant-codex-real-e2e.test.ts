@@ -31708,6 +31708,109 @@ async function materializeStaleGoalRecoveryVaultCli(input: {
   await chmod(executablePath, 0o700)
 }
 
+describeRealCodex('real Codex bounded nutrition research e2e', () => {
+  it.each(['correction', 'label-miss', 'unavailable-label', 'exact-allergen', 'public-facts'] as const)(
+    'finishes bounded nutrition research without browser churn: %s',
+    { timeout: 900_000 },
+    async (scenario) => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-bounded-nutrition-e2e-'))
+      const commandLogPath = path.join(workingDirectory, 'commands.jsonl')
+      const browserRequests: string[] = []
+      try {
+        const binDirectory = path.join(workingDirectory, 'bin')
+        const skillsRoot = path.join(workingDirectory, 'skills')
+        await mkdir(binDirectory)
+        await Promise.all([
+          materializeAssistantSkill({ skillsRoot, slug: 'food-journal' }),
+          materializeAssistantSkill({ skillsRoot, slug: 'computer-use' }),
+          writeFile(commandLogPath, '', 'utf8'),
+        ])
+        // Production CLI result shape; logs lookups and rejects writes.
+        await writeFile(path.join(binDirectory, 'vault-cli'), [
+          '#!/usr/bin/env node',
+          "const fs = require('node:fs');",
+          'const args = process.argv.slice(2);',
+          `fs.appendFileSync(${JSON.stringify(commandLogPath)}, JSON.stringify(args) + '\\n');`,
+          "if (args[0] === 'food' && args[1] === 'search-labels') {",
+          "  console.log(JSON.stringify({ count: 0, items: [], query: args[2], source: 'hosted' }));",
+          "} else if (args[0] === 'memory' && args[1] === 'show') {",
+          "  console.log(JSON.stringify({ document: { records: [] }, memory: null }));",
+          "} else { console.error('Unexpected fixture command'); process.exit(64); }",
+        ].join('\n'), { mode: 0o700 })
+        const prompt = {
+          correction: [
+            'Earlier in this conversation you verified these USDA facts:',
+            'cooked rice per 100 g: 130 kcal, 2.7 g protein, 28 g carbs, 0.3 g fat;',
+            'cooked black beans per 100 g: 132 kcal, 8.9 g protein, 23.7 g carbs, 0.5 g fat;',
+            'olive oil per 10 g: 90 kcal and 10 g fat.',
+            'Correction: my bowl had 150 g rice, 100 g beans, and no oil. What are the new totals?',
+            'Just answer; do not save anything.',
+          ].join(' '),
+          'public-facts': 'What time does the New York Botanical Garden normally open? Check its official public information. Just answer; do not buy tickets or book anything.',
+          'label-miss': 'What are the calories and protein per labeled serving of Kikkoman Less Sodium Soy Sauce sold in the US? Just answer; do not log food.',
+          'unavailable-label': 'Estimate the calories for 15 g of Quasar Orchard Golden Relish on my sandwich. A rough estimate is fine. Do not log anything.',
+          'exact-allergen': 'I have a severe sesame allergy. Is Quasar Orchard Golden Relish definitely sesame-free? I need verified label evidence, not an estimate. Do not log anything.',
+        }[scenario]
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions: buildDirectConversationDeveloperInstructions(),
+          fixtureBinDirectory: binDirectory,
+          env: { ...config.env, [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot },
+          hostedToolContext: createRealCodexComputerHostedToolContext(),
+          fetchImpl: async (request) => {
+            browserRequests.push(String(request))
+            throw new Error('Browser unavailable in this synthetic journey')
+          },
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt,
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write',
+          workingDirectory,
+        })
+        const commands = (await readFile(commandLogPath, 'utf8')).trim().split('\n')
+          .filter(Boolean).map((line) => JSON.parse(line) as string[])
+        const searches = result.jsonEvents.flatMap((event) => {
+          const record = readRecord(event)
+          const item = readRecord(readRecord(record?.params)?.item)
+          return record?.method === 'item/completed' && item?.type === 'webSearch' ? [item] : []
+        })
+        process.stdout.write(`[bounded-nutrition-e2e] ${JSON.stringify({ scenario, commands, webCalls: searches.length, browserCalls: browserRequests.length, reply: result.finalMessage })}\n`)
+        expect(commands.filter(args => args[0] === 'meal' || args[0] === 'food' && !args[1]?.startsWith('search-labels'))).toEqual([])
+        const lookups = commands.filter(args => args[0] === 'food')
+        expect(lookups).toHaveLength(scenario === 'correction' || scenario === 'public-facts' ? 0 : 1)
+        expect(result.finalMessage.length).toBeLessThan(1_400)
+        if (scenario === 'exact-allergen') {
+          expect(result.finalMessage).toMatch(/cannot|can't|couldn.t|unable|unverified|not.*(?:confirm|verify)/iu)
+          expect(result.finalMessage).not.toMatch(/^(?:Yes\b|(?:It|This product) is (?:definitely )?(?:safe|sesame.free))/imu)
+        } else {
+          expect(browserRequests).toEqual([])
+          expect(searches.length).toBeLessThanOrEqual(2)
+          if (scenario === 'correction') {
+            expect(searches).toEqual([])
+            expect(result.finalMessage).toMatch(/327/)
+            expect(result.finalMessage).toMatch(/13(?:[.,]0)?\s*g/iu)
+          } else if (scenario === 'public-facts') {
+            expect(searches.length).toBeGreaterThanOrEqual(1)
+            expect(result.finalMessage).toMatch(/\b\d{1,2}(?::\d{2})?\s*(?:a\.?m\.?|p\.?m\.?)/iu)
+          } else {
+            expect(searches.length).toBeGreaterThanOrEqual(1)
+            expect(result.finalMessage).toMatch(/(?:calories|kcal)/iu)
+            if (scenario === 'unavailable-label') expect(result.finalMessage).toMatch(/estimat|rough|about|approximately/iu)
+            else expect(result.finalMessage).toMatch(/serving|tablespoon|15\s*m[lL]/iu)
+          }
+        }
+      } finally {
+        await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+      }
+    },
+  )
+})
+
 describeRealCodex('real Codex restaurant meal nutrition e2e', () => {
   it('resolves an exact menu label before saving a restaurant meal', {
     timeout: 900_000,

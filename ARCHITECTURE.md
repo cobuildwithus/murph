@@ -2597,13 +2597,18 @@ supplements GIN recall with up to 10,000 strict-word-nearest names only when
 the GIN set reaches its cap and may be truncated; an unsaturated set is
 exhaustive and skips that whole-catalog scan. When FTS finds nothing, typo
 recovery instead admits up to 10,000 names by whole-name distance and then
-applies the matching whole-name threshold; eligible names necessarily precede
-ineligible names because ordering and eligibility use the same similarity.
+applies the matching whole-name threshold. Strict-word matches within that
+same admitted set provide additional typo recovery, while whole-name matches
+retain ranking priority; this does not add a second GiST scan or promise
+exhaustive strict-word recall. Whole-name-eligible names precede ineligible
+names because their ordering and threshold use the same similarity.
 Canonical-key deduplication happens only after those bounded admissions.
 The bounded admissions preserve representative choice and canonical diversity
 across the established 5,000-row boundary and ineligible-neighbor fixtures.
 Ranking is deterministic
 within the admitted set rather than exhaustive across the full food catalog.
+Private food ranking favors query terms covered by the name and brand and
+scores that compact identity rather than the extended catalog search text.
 Exact-id and UPC lookups retain their direct indexed paths;
 supplement generic search and the public projection retain their pre-existing
 ranking and candidate contracts. Existing labels databases must receive the

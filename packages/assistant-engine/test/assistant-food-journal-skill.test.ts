@@ -55,9 +55,9 @@ describe('assistant food journal skill', () => {
       'This command shape is the execution contract',
       'help/schema calls, repository searches, or CLI implementation reads',
       'optional enrichment is not a reason to rediscover the schema before saving',
-      'A landing page is not a failed nutrition lookup',
-      'use `computer_act` to follow its relevant menu/nutrition link or search for the exact item',
-      'If the first page already contains the exact item and serving facts, use them without extra navigation',
+      'An official menu or label does not itself require a live browser',
+      'make one targeted web search for the official label/menu',
+      'Use returned official text when product, variant, serving, and requested values are clear',
       'Do not force a nutrition lookup, clarification, or safety preflight just to capture the meal',
       'Never invent an exact label',
     ]) {
@@ -341,7 +341,7 @@ describe('assistant food journal skill', () => {
       'Do not force a nutrition lookup, clarification, or safety\npreflight just to capture the meal.',
     )
     expect(skill).toContain(
-      "If that search has no exact result, read\n`computer-use` and inspect the restaurant's official nutrition or menu source.",
+      "If that search has no exact result, use the bounded\nsource fallback below.",
     )
     expect(skill).toContain(
       'When using that official source, retain its URL in nutrition source detail.',
