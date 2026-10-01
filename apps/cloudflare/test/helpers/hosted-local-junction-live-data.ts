@@ -19,6 +19,7 @@ import {
 } from "@murphai/runtime-state";
 
 import type { HostedLocalFullStackScenario } from "./hosted-local-full-stack-scenario.js";
+import { readLiveGarminProviderDiagnosticsForLog } from "./hosted-local-garmin-diagnostics.js";
 
 type GarminCanaryScenario = {
   harness: Pick<HostedLocalFullStackScenario["harness"], "requestJson">;
@@ -94,15 +95,24 @@ export async function assertEmptyGarminCanaryWorkspace(input: {
   throw new Error("MURPH_E2E_GARMIN_REQUIRES_EMPTY_CANONICAL_WORKSPACE");
 }
 
+// Only closed diagnostic codes may leave the real-data proof process.
+export function formatLiveGarminDataFailure(error: unknown): string {
+  const message = error instanceof Error ? error.message : "";
+  return [
+    "MURPH_E2E_GARMIN_CANONICAL_DATA_MISSING",
+    "MURPH_E2E_GARMIN_RECENT_PROVIDER_DATA_MISSING",
+  ].includes(message) ? message : "MURPH_E2E_GARMIN_DATA_PROOF_FAILED";
+}
+
 export async function waitForLiveGarminCanonicalData(input: {
-  client: Pick<JunctionClient, "resolveUser" | "listSummary">;
+  client: Pick<JunctionClient, "resolveUser" | "listSummary" | "introspectResources" | "introspectHistoricalPull">;
   clientUserId: string;
   memberId: string;
   notBefore: number;
   scenario: GarminCanaryScenario;
   signal: AbortSignal;
   timeoutMs: number;
-}): Promise<"matched" | "no_provider_data"> {
+}): Promise<"matched"> {
   const deadline = Date.now() + input.timeoutMs;
   const signal = AbortSignal.any([input.signal, AbortSignal.timeout(input.timeoutMs)]);
   const closedDay = new Date();
@@ -128,14 +138,14 @@ export async function waitForLiveGarminCanonicalData(input: {
           signal,
           sourceProviderSlug: "garmin",
           userId: providerUserId,
-          windowEnd: window.to,
+          // JunctionClient converts date strings to ISO instants. Preserve
+          // the inclusive final calendar day instead of ending at its midnight.
+          windowEnd: `${window.to}T23:59:59.999Z`,
           windowStart: window.from,
         });
         signal.throwIfAborted();
-        // A successful empty provider response is an explicit limited outcome,
-        // never evidence that canonical ingestion succeeded. Malformed/nonempty
-        // data and provider failures must still fail the proof.
-        if (records.length === 0 && !observedProviderData) return "no_provider_data";
+        // An empty response can precede Junction's initial provider pull.
+        // Keep polling within the same deadline; only a canonical match passes.
         expected = readGarminStepExpectations(records, window);
         observedProviderData ||= records.length > 0;
         nextProviderRead = Date.now() + 15_000;
@@ -155,6 +165,11 @@ export async function waitForLiveGarminCanonicalData(input: {
     // Provider payloads, canonical health values, status logs and crypto errors
     // must never become CI output, including through an exception cause.
     if (!signal.aborted) throw new Error("MURPH_E2E_GARMIN_DATA_PROOF_FAILED");
+  }
+  if (providerUserId && !input.signal.aborted) {
+    console.info(`MURPH_E2E_GARMIN_PROVIDER_DIAGNOSTICS=${await readLiveGarminProviderDiagnosticsForLog({
+      client: input.client, userId: providerUserId, signal: input.signal, window,
+    })}`);
   }
   throw new Error(observedProviderData
     ? "MURPH_E2E_GARMIN_CANONICAL_DATA_MISSING"

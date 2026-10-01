@@ -620,6 +620,8 @@ test("validation selection admits only exact schema-owned fields and one standar
 for (const [command, field] of [
   ["food search-labels", "query"], ["event list", "limit"],
   ["event list", "arguments"], ["knowledge upsert", "arguments"],
+  ["meal add", "nutritionCalories"], ["meal edit", "nutritionSource"],
+  ["meal add", "occurredAt"], ["meal edit", "arguments"],
 ] as const) test(`${command}/${field} validation reads a fixed prefix without getters, prototypes, causes or proxy escapes`, () => {
   let reads = 0;
   const getter = { get() { reads += 1; throw Error("PRIVATE_SENTINEL"); } };
@@ -722,10 +724,23 @@ const eventInvocationValidationCases = [
   ["knowledge upsert", "arguments", "custom", false],
 ] as const;
 
+const mealValidationCases = [
+  ["meal add", "nutritionCalories", "too_small", false],
+  ["meal add", "nutritionSource", "invalid_value", false],
+  ["meal add", "occurredAt", "invalid_format", false],
+  ["meal add", "occurredAt", "custom", false],
+  ["meal add", "arguments", "custom", false],
+  ["meal edit", "nutritionCalories", "too_small", false],
+  ["meal edit", "nutritionSource", "invalid_value", false],
+  ["meal edit", "occurredAt", "invalid_format", false],
+  ["meal edit", "occurredAt", "custom", false],
+  ["meal edit", "arguments", "custom", false],
+] as const;
+
 test("allowlisted commands preserve original errors and round-trip only finite validation detail", async () => {
   for (const [command, field, code, missing] of [
     ["automation list", "limit", "too_big", false], ["automation list", "status", "invalid_value", false],
-    ...readValidationCases, ...measurementValidationCases, ...eventInvocationValidationCases,
+    ...readValidationCases, ...measurementValidationCases, ...eventInvocationValidationCases, ...mealValidationCases,
   ] as const) for (const property of ["publicIssues", "fieldErrors"] as const) {
     const validation = { field, code, missing };
     const original = Object.assign(new Error("PRIVATE_SENTINEL"), {
@@ -783,6 +798,9 @@ test("command validation omits other fields, commands and malformed evidence on 
       [command, field, ["value", "unit", "slug", "body", "sourcePath"]] as const),
     ...eventInvocationValidationCases.map(([command, field]) =>
       [command, field, ["value", "unit", "cursor", "text"]] as const),
+    ...mealValidationCases.map(([command, field]) =>
+      [command, field, ["id", "source", "timeZone", "dayKey", "note", "photo", "audio", "ingredient", "nutrition",
+        "nutritionSourceDetail", "nutrition.totals.calories", "env", "0", "value", "context"]] as const),
   ] as const) {
     const good = { path: field, code: "invalid_value", missing: false };
     const invalid = [
@@ -841,6 +859,7 @@ for (const [reader, base, cases] of [
   ["read-validation", process.env.MURPH_CLI_READ_VALIDATION_COMPAT_BASE, readValidationCases],
   ["measurement-validation", process.env.MURPH_CLI_MEASUREMENT_VALIDATION_COMPAT_BASE, measurementValidationCases],
   ["event-invocation-validation", process.env.MURPH_CLI_EVENT_INVOCATION_VALIDATION_COMPAT_BASE, eventInvocationValidationCases],
+  ["meal-validation", process.env.MURPH_CLI_MEAL_VALIDATION_COMPAT_BASE, mealValidationCases],
 ] as const) test.skipIf(!base)(`actual older ${reader} consumer drops detail but preserves the envelope and counts`, async () => {
   assert.match(base ?? "", /^[a-f0-9]{40}$/u);
   const source = execFileSync("git", ["show", `${base}:packages/runtime-state/src/cli-timing.ts`],

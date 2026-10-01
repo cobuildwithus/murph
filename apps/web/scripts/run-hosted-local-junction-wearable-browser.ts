@@ -1216,7 +1216,19 @@ async function disconnectJunctionAccount(
       name: new RegExp(`^Disconnect (?:${config.label}|account)\\?$`, "i"),
     })
     .waitFor();
-  await dialog.getByRole("button", { name: "Disconnect", exact: true }).click();
+  const [response] = await Promise.all([
+    page.waitForResponse((candidate) => {
+      const url = new URL(candidate.url());
+      return candidate.request().method() === "POST"
+        && url.origin === config.webOrigin
+        && /^\/api\/settings\/device-sync\/connections\/[^/]+(?:\/sources\/[^/]+)?\/disconnect$/u.test(url.pathname);
+    }, { timeout: config.timeoutMs }),
+    dialog.getByRole("button", { name: "Disconnect", exact: true }).click(),
+  ]);
+  if (!response.ok()) {
+    // Never include the response body or connection-specific URL in CI output.
+    throw new Error(`MURPH_E2E_JUNCTION_DISCONNECT_HTTP_${response.status()}`);
+  }
   await page.getByText("Source disconnected", { exact: true }).waitFor({
     timeout: config.timeoutMs,
   });

@@ -183,9 +183,9 @@ describe("hosted headed browser boundary", () => {
     }
   });
 
-  it.runIf(smokeEnabled)(
-    "waits for the reloaded connect page before disconnecting Garmin",
-    async () => {
+  it.runIf(smokeEnabled).each([200, 503])(
+    "waits for page load and diagnoses Garmin disconnect HTTP %i",
+    async (status) => {
       const browser = await chromium.launch({ headless: false });
       let releaseLoad: (() => void) | undefined;
       const loadGate = new Promise<void>((resolve) => {
@@ -193,6 +193,13 @@ describe("hosted headed browser boundary", () => {
       });
       try {
         const page = await browser.newPage();
+        await page.route("https://app.example.test/api/settings/device-sync/connections/synthetic/disconnect", (route) =>
+          route.fulfill({
+            status,
+            contentType: "application/json",
+            body: JSON.stringify({ message: "synthetic private provider detail" }),
+          })
+        );
         await page.route("https://app.example.test/hold-load", async (route) => {
           await loadGate;
           await route.fulfill({ body: "", contentType: "image/png" });
@@ -227,7 +234,9 @@ describe("hosted headed browser boundary", () => {
               "'</div>',",
               "].join('');",
               "document.querySelector('[role=\"dialog\"] button')",
-              ".addEventListener('click', () => {",
+              ".addEventListener('click', async () => {",
+              "const response = await fetch('/api/settings/device-sync/connections/synthetic/disconnect', { method: 'POST' });",
+              "if (!response.ok) return;",
               "document.querySelector('#notice').textContent = 'Source disconnected';",
               "document.querySelector('[data-connection-state]')",
               ".setAttribute('data-connection-state', 'idle');",
@@ -257,6 +266,12 @@ describe("hosted headed browser boundary", () => {
         ))).resolves.toBe(0);
 
         releaseLoad?.();
+        if (status !== 200) {
+          await expect(cleanup).rejects.toEqual(new Error(`MURPH_E2E_JUNCTION_DISCONNECT_HTTP_${status}`));
+          await expect(page.getByText("Source disconnected", { exact: true }).count()).resolves.toBe(0);
+          await expect(page.locator('[data-connection-state="connected"]').count()).resolves.toBe(1);
+          return;
+        }
         await expect(cleanup).resolves.toBeUndefined();
         await expect(page.evaluate(() => Reflect.get(
           window,

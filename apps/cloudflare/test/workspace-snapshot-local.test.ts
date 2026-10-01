@@ -149,7 +149,7 @@ describe("workspace snapshot local restore", () => {
     }
   });
 
-  it("measures closed event archiving at the encrypted snapshot boundary", async () => {
+  it("restores archived closed events with reduced uncompressed snapshot size", async () => {
     const tempRoot = await mkdtemp(path.join(tmpdir(), "workspace-snapshot-event-archive-"));
     const sourceDurableRoot = path.join(tempRoot, "source", "durable");
     const sourceVaultRoot = path.join(sourceDurableRoot, "vault");
@@ -229,7 +229,8 @@ describe("workspace snapshot local restore", () => {
       });
 
       expect(archived.totalPlainBytes).toBeLessThan(baseline.totalPlainBytes);
-      expect(archived.encryptedByteSize).toBeLessThan(baseline.encryptedByteSize);
+      // Per-shard compression reduces extraction bytes, but can prevent zstd
+      // from sharing matches across shards. Encrypted size is not monotonic.
 
       await restoreEncryptedWorkspaceSnapshot({
         dataKey: encodedDataKey,
@@ -243,12 +244,17 @@ describe("workspace snapshot local restore", () => {
           userId: "member_test",
         }),
       });
-      await expect(readEvent({
-        eventId: historicalEvents[0]!.eventId,
-        vaultRoot: path.join(restoredDurableRoot, "vault"),
-      })).resolves.toMatchObject({
-        event: { title: "Historical event 0" },
-      });
+      for (const [index, historicalEvent] of historicalEvents.entries()) {
+        await expect(readEvent({
+          eventId: historicalEvent.eventId,
+          vaultRoot: path.join(restoredDurableRoot, "vault"),
+        })).resolves.toMatchObject({
+          event: {
+            title: `Historical event ${index}`,
+            note: `closed event history ${index} `.repeat(100).trim(),
+          },
+        });
+      }
     } finally {
       dataKey.fill(0);
       await rm(tempRoot, { force: true, recursive: true });
@@ -1580,7 +1586,7 @@ exec "\${MURPH_TEST_REAL_ZSTD:?}" "$@"
         zstdArgumentsMarkerPath,
         "utf8",
       )).trim().split("\n");
-      expect(compressArguments?.split(" ")).toContain("-3");
+      expect(compressArguments?.split(" ")).toContain("-9");
       expect(compressArguments?.split(" ")).not.toContain("-1");
       expect(decompressArguments?.split(" ")).toContain("-d");
     } finally {
