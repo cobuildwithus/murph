@@ -1812,7 +1812,8 @@ test("local Junction workers exclude a disconnected source from production-norma
             return createJsonResponse({
               data: [
                 {
-                  id: "garmin-activity-1",
+                  // Opaque identities may contain digits from a disconnected measurement.
+                  id: "garmin-activity-1234",
                   connectionId: "provider-garmin-1",
                   observedAt: "2026-07-27T12:00:00.000Z",
                   steps: 4321,
@@ -1925,8 +1926,8 @@ test("local Junction workers exclude a disconnected source from production-norma
     assert.equal(await service.runWorkerOnce(), null);
     assert.equal(importerInputs.length, 4);
     const durableInput = JSON.stringify(importerInputs);
-    assert.match(durableInput, /garmin-activity-1|garmin-blood-oxygen-1/u);
-    assert.doesNotMatch(durableInput, /fitbit|provider-fitbit-1|1234|"value":91/u);
+    assert.match(durableInput, /garmin-activity-1234|garmin-blood-oxygen-1/u);
+    assert.doesNotMatch(durableInput, /fitbit|provider-fitbit-1|"steps":1234[,}]|"value":91[,}]/u);
 
     const durableResults = importerResults as Array<{
       authoritativeEventSets?: unknown[];
