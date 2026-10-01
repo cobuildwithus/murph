@@ -59,10 +59,20 @@ The live ownership split is:
   checkpoints as soon as its work settles; it neither creates nor extends that
   quiet window. Claimed detached Asks publish their existing expiry before
   preparation dirties the workspace, protecting preparation and execution until
-  settlement or expiry. Shutdown and owner handoff still abort and requeue the
-  exact child. Other active-child deadlines and save-before-effect ordering
-  still apply. This lets background runs reach ordinary container cleanup,
-  including its 60-second safety recheck, without another runtime idle delay.
+  settlement or expiry. Both detached Ask and clinical enrichment controllers
+  pause before snapshots. Outside the existing exact-Ask barrier, detached Ask
+  resumes only for observed foreground conversation work (including an initial
+  batch) or work admitted through the full mailbox path when no ready durable
+  checkpoint effects remain. A due committed assistant wake permits only
+  checkpoint-safe system import; that import and routine checkpoint/effect
+  follow-up passes do not themselves resume Ask.
+  Detached Ask stays paused through checkpoint-only effect drain and return.
+  Its admission paths remain gated by background abort and owner handoff.
+  Clinical enrichment retains its existing foreground-pass resume boundary.
+  Shutdown and owner handoff still abort and requeue the exact child. Other
+  active-child deadlines and save-before-effect ordering still apply. This lets
+  background runs reach ordinary container cleanup, including its 60-second
+  safety recheck, without another runtime idle delay.
   The exact assistant wake projected directly by the current foreground
   assistant phase may run once before that floor without checkpointing. The
   exact phone-call-result, usage-referral-reward, legacy `aask_done_*`, and
@@ -580,7 +590,9 @@ only for freshness requests. It introduces no Web transport field or history sto
 
 Scheduled missing-sleep replies include available results and the actual shared
 check time in the known schedule timezone. Only a missing current sleep date with
-recent reporting evidence may trigger a thirty-minute delay offer; unknown or
+recent reporting evidence and explicit evidence of usual arrival after the cutoff may
+trigger a thirty-minute delay offer. Recent shared history or completed polling alone
+does not establish late arrival. Unknown or
 long-absent reporters alone do not justify moving the group schedule. Only an authorized affirmative reply changes the
 existing automation through canonical inspect and versioned patch; timezone,
 recurrence, content and destination remain owned by that automation.
@@ -607,7 +619,10 @@ state. It returns only public source labels, coarse connection state, status
 observation times, and the honestly named connection-wide sync-job completion
 time. It excludes connection, account, device, and provider identifiers,
 credentials, provider payloads and errors, raw health values, and private
-diagnostics. A connection sync-job time is not evidence that a health record or
+diagnostics. Connected sources meeting the existing source-stall or recovery-notice
+silence policy are reported as `needs-attention`, without changing stored source
+status or exposing arrival timestamps. A subsequent receipt clears that derived
+attention state. A connection sync-job time is not evidence that a health record or
 challenge metric arrived. Device data is never produced by the grantor runtime
 or stored in the share snapshot column. Duplicate public labels select one
 complete observation from the latest connection `connectedAt` and source
@@ -792,6 +807,17 @@ turns deferred discovery into the same generic retryable failure instead of
 letting that runner consume the row. The converged token- and deferred-capable
 runner bundle, including first-materialization mode acknowledgment, is therefore
 the hard rollback floor before Web promotion.
+
+The existing `murph.hosted-vault-share-delivery-deferred.v1` warning retains
+its route-level reason. A `replacement_no_active_share` warning may additionally
+include the first settled store `replacementDeferralReason`: `inactive_access`,
+`source_workspace_changed`, or `conditional_update_not_applied`. The last value
+does not distinguish a revoked grant from a first-materialization race already
+completed by another writer. The store invokes its optional observer only after
+the transaction settles and isolates observer exceptions. The route emits at
+most its existing single warning, with no identities, payloads, versions, error
+objects, new queries, or response changes. Group the fixed reason fields in
+natural production failures; a quiet window does not prove delivery recovery.
 
 The rollout is consumer-first and reader-before-backfill. First deploy the
 runtime/Worker parser, bounded first-materialization owner, retry consumer,
@@ -3230,7 +3256,14 @@ recorder then publishes cadence, removes the mailbox item, and checkpoints that
 removal in the same runtime admission only for a fresh record whose full
 reconciliation was accepted in that admission, whose normalized retained-job
 set is empty, and whose non-null connection epoch still names the current
-active connection. Yielded wakes are not completion-eligible. Restored records
+active connection. That same conditional mailbox removal also retires pristine,
+already-imported scheduled hints covered by the completed cadence. It reuses
+retained-owner coverage (same connection, member, provider, and connection epoch;
+strictly older cadence and later mailbox sequence) without persisting another
+owner. Webhook and explicit-work barriers remain, and newer requests, manual
+refresh, dirty work, and future or equal cadences are preserved. A changed
+mailbox claim prevents both removals. This does not retire unimported Web rows.
+Yielded wakes are not completion-eligible. Restored records
 return to the full-reconciliation path; epoch-less legacy, replaced, missing,
 or terminal records drain without a cadence write. A cold replacement, whose snapshot
 intentionally excludes the device-sync SQLite store, reconstructs the same
@@ -3906,7 +3939,13 @@ bootstrap state. Pre-v2 full/base, working `{base, delta}`, and layered
 ref decoders remain for stored-object cleanup and historical metadata
 compatibility. Live v2 snapshots are one encrypted zstd-compressed
 tar object uploaded directly from the container to R2 through a short-lived
-presigned `PUT` URL. The Worker handles only JSON start, presign, complete,
+presigned `PUT` URL. Direct conditional and managed multipart PUTs retry HTTP
+429, 500, 502, 503, and 504 once within the original presigned deadline, using
+the existing jitter, identical encrypted bytes and object/session binding.
+Cancellation, expiry, repeated failure, and response-followed-by-412 retain
+fail-closed behavior; successful uploads still require ordinary completion
+verification before checkpoint publication.
+The Worker handles only JSON start, presign, complete,
 abort, and data-key unwrap metadata, stores a short-lived upload session without
 the URL or data key, verifies the object by `HEAD` on completion, and never
 receives the snapshot body. The v2 format is a greenfield zstd hard cut, so
@@ -3920,8 +3959,11 @@ path-scoped working deltas, legacy hot producers, Worker-body snapshot uploads,
 or artifact-sidecar v2 producers. `idle_shutdown` is the only new checkpoint
 snapshot producer. `canonical_runtime_commit` instead uploads exact canonical
 write receipts and publishes a receipt-log head ref through a status-only
-workspace checkpoint that retains the prior snapshot ref. Capacity, log shape,
-and payload lengths are validated before
+workspace checkpoint that retains the prior snapshot ref. Web retains its
+workspace-version CAS and equal-or-plus-one generation invariant; rejected
+transitions add only a fixed regression, skipped-increment, or invalid-initial
+error code to the existing publication-failure event, never generation values
+or checkpoint contents. Capacity, log shape, and payload lengths are validated before
 upload. The complete immutable payload, receipt, and log artifact set then
 uploads in small fixed concurrent waves; every started wave settles before a
 failure returns, and the checkpoint publishes the log ref only after the whole

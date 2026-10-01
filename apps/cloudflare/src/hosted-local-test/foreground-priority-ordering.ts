@@ -12,6 +12,7 @@ import type {
 
 export interface HostedLocalForegroundPriorityOrderingOutboundContext {
   containerId?: string;
+  className?: string;
   waitUntil?: (promise: Promise<unknown>) => void;
 }
 

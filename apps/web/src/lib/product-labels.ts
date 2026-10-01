@@ -2407,13 +2407,22 @@ type FoodStemmedSearchSql = {
   stemmedNameMatchSql: string;
 };
 
-function buildFoodStemmedSearchSql(stemmed: boolean): FoodStemmedSearchSql {
+function buildFoodStemmedSearchSql(
+  stemmed: boolean,
+  privateIdentity: boolean,
+): FoodStemmedSearchSql {
+  const simpleVectorSql = privateIdentity
+    ? "simple_identity"
+    : "to_tsvector('simple', search_text)";
+  const englishVectorSql = privateIdentity
+    ? "english_identity"
+    : "to_tsvector('english', search_text)";
   if (!stemmed) {
     return {
       directMatchSql:
         "to_tsvector('simple', search_text) @@ websearch_to_tsquery('simple', $1)",
       querySelectSql: "",
-      rankSql: "ts_rank_cd(to_tsvector('simple', search_text), query.tsq)",
+      rankSql: `ts_rank_cd(${simpleVectorSql}, query.tsq)`,
       stemmedNameMatchSql: "0",
     };
   }
@@ -2426,8 +2435,8 @@ function buildFoodStemmedSearchSql(stemmed: boolean): FoodStemmedSearchSql {
     querySelectSql: `,
             websearch_to_tsquery('english', $1) AS stemmed_tsq`,
     rankSql: `greatest(
-              ts_rank_cd(to_tsvector('simple', search_text), query.tsq),
-              ts_rank_cd(to_tsvector('english', search_text), query.stemmed_tsq)
+              ts_rank_cd(${simpleVectorSql}, query.tsq),
+              ts_rank_cd(${englishVectorSql}, query.stemmed_tsq)
             )`,
     stemmedNameMatchSql: `CASE
               WHEN to_tsvector('english', name) = to_tsvector('english', query.raw_q) THEN 1
@@ -2762,7 +2771,18 @@ async function searchGenericProductLabels(
   // GIN full-text and GiST nearest-name sets. This retrieval contract trades
   // exhaustive whole-catalog ranking for completion inside the labels database
   // statement timeout; exact IDs and UPCs use separate direct paths.
-  const stemmedSql = buildFoodStemmedSearchSql(input.stemmedSearch);
+  const privateFood = input.projection === "private";
+  const stemmedSql = buildFoodStemmedSearchSql(input.stemmedSearch, privateFood);
+  // Private lookups prioritize complete product identity over partial titles
+  // whose remaining query terms occur only in extended catalog text.
+  const nameMatchSql = privateFood
+    ? `(simple_identity @@ query.tsq${
+        input.stemmedSearch
+          ? " OR english_identity @@ query.stemmed_tsq"
+          : ""
+      })`
+    : "strpos(' ' || lower(query.raw_q) || ' ', ' ' || lower(name) || ' ') > 0";
+  const typoMatchOrderSql = privateFood ? "whole_name_match DESC," : "";
   const excludedDataOriginsSql = productLabelExcludedDataOriginsFilterSql(
     "data_origin",
     input.excludedDataOrigins,
@@ -2800,7 +2820,7 @@ async function searchGenericProductLabels(
             brand,
             upc,
             off_market,
-            search_text,
+            ${privateFood ? "" : "search_text,"}
             data_origin_priority
           FROM ${tableSql}
           WHERE
@@ -2826,7 +2846,7 @@ async function searchGenericProductLabels(
             brand,
             upc,
             off_market,
-            search_text,
+            ${privateFood ? "" : "search_text,"}
             data_origin_priority
           FROM ${tableSql}
           WHERE
@@ -2884,18 +2904,27 @@ async function searchGenericProductLabels(
             brand,
             upc,
             off_market,
-            search_text,
+            ${privateFood ? "" : "search_text,"}
             data_origin_priority
           FROM name_nearest_matches
           WHERE
             ${stemmedSql.directMatchSql}
         )${popularity.directMatchesCteSql},
         fts_matches AS MATERIALIZED (
+          ${privateFood ? `SELECT
+            matches.*,
+            to_tsvector('simple', name || ' ' || coalesce(brand, '')) AS simple_identity${
+              input.stemmedSearch
+                ? ", to_tsvector('english', name || ' ' || coalesce(brand, '')) AS english_identity"
+                : ""
+            }
+          FROM (` : ""}
           SELECT * FROM fts_exact_name_matches
           UNION
           SELECT * FROM fts_index_matches
           UNION
           SELECT * FROM fts_nearest_matches${popularity.directMatchesUnionSql}
+          ${privateFood ? ") matches" : ""}
         ),
         fts_candidates AS MATERIALIZED (
           SELECT
@@ -2908,9 +2937,10 @@ async function searchGenericProductLabels(
             upc,
             off_market AS "offMarket",
             ${stemmedSql.rankSql} AS search_rank,
+            0 AS whole_name_match,
             strict_word_similarity(query.raw_q, name) AS name_similarity,
             CASE
-              WHEN strpos(' ' || lower(query.raw_q) || ' ', ' ' || lower(name) || ' ') > 0 THEN 1
+              WHEN ${nameMatchSql} THEN 1
               ELSE 0
             END AS name_phrase_match,
             CASE
@@ -2955,12 +2985,14 @@ async function searchGenericProductLabels(
               AND ($4::text[] IS NULL OR data_origin = ANY($4::text[]))
               AND ${excludedDataOriginsSql}
             -- Whole-name distance is exactly the ordering behind the trigram
-            -- threshold below, so eligible rows always precede ineligible
+            -- threshold below, so whole-name-eligible rows precede ineligible
             -- rows while the GiST KNN scan remains bounded.
             ORDER BY name <-> $1::text
             LIMIT ${searchMatchLimit}
+            -- Strict-word recovery stays inside the existing whole-name KNN
+            -- bound; existing whole-name matches retain priority when ranking.
           ) nearest_names
-          WHERE name % $1::text
+          WHERE name % $1::text OR name %>> $1::text
         ),
         trigram_candidates AS MATERIALIZED (
           SELECT
@@ -2973,6 +3005,7 @@ async function searchGenericProductLabels(
             upc,
             off_market AS "offMarket",
             0::real AS search_rank,
+            CASE WHEN name % query.raw_q THEN 1 ELSE 0 END AS whole_name_match,
             strict_word_similarity(query.raw_q, name) AS name_similarity,
             CASE
               WHEN strpos(' ' || lower(query.raw_q) || ' ', ' ' || lower(name) || ' ') > 0 THEN 1
@@ -2997,6 +3030,7 @@ async function searchGenericProductLabels(
             row_number() OVER (
               PARTITION BY canonical_key
               ORDER BY
+                ${typoMatchOrderSql}
                 name_phrase_match DESC,
                 name_phrase_length DESC,
                 stemmed_name_match DESC,
@@ -3016,6 +3050,7 @@ async function searchGenericProductLabels(
           ${evidence.selectedComparisonReadyFilterSql}
           ORDER BY
             ${evidence.orderSql}
+            ${typoMatchOrderSql}
             name_phrase_match DESC,
             name_phrase_length DESC,
             stemmed_name_match DESC,
@@ -3035,6 +3070,7 @@ async function searchGenericProductLabels(
             row_number() OVER (
               ORDER BY
                 ${evidence.orderSql}
+                ${typoMatchOrderSql}
                 name_phrase_match DESC,
                 name_phrase_length DESC,
                 stemmed_name_match DESC,

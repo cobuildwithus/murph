@@ -171,9 +171,9 @@ describe("release verification executable lanes", () => {
       expect(packageShards).toEqual([
         "cli",
         "assistant-engine",
-        "platform-a",
+        "assistant-runtime",
         "platform-b",
-        "health-commons",
+        "platform-a",
         "hosted-local-harness",
       ]);
       expect(new Set(packageShards).size).toBe(packageShards.length);
@@ -196,11 +196,12 @@ describe("release verification executable lanes", () => {
       expect(packageDirsByShard).toEqual({
         cli: ["packages/cli"],
         "assistant-engine": ["packages/assistant-engine"],
+        "assistant-runtime": ["packages/assistant-runtime"],
         "platform-a": [
-          "packages/assistant-runtime",
           "packages/cloudflare-hosted-control",
           "packages/exercise-library",
           "packages/gateway-core",
+          "packages/health-commons",
           "packages/health-metrics",
           "packages/hosted-execution",
           "packages/importers",
@@ -222,7 +223,6 @@ describe("release verification executable lanes", () => {
           "packages/runtime-state",
           "packages/vault-usecases",
         ],
-        "health-commons": ["packages/health-commons"],
         "hosted-local-harness": ["packages/hosted-local-harness"],
       });
 

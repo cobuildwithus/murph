@@ -90,14 +90,9 @@ When the user names a restaurant and recognizable menu item, and known context
 does not trigger one of the numeric safety exceptions below, resolve nutrition
 before the meal mutation. Use a normal exact restaurant/menu search rather
 than a generic substitute. Run this database search first even when the user
-supplies an official restaurant URL. If that search has no exact result, read
-`computer-use` and inspect the restaurant's official nutrition or menu source.
-A landing page is not a failed nutrition lookup: if it lacks the item facts,
-use `computer_act` to follow its relevant menu/nutrition link or search for the
-exact item before deciding the official source is unavailable. Keep this
-inspection focused on the requested item and serving; follow the computer
-skill's bounded recovery rules if access fails. If the first page already
-contains the exact item and serving facts, use them without extra navigation.
+supplies an official restaurant URL. If that search has no exact result, use the bounded
+source fallback below. An official menu or label does not itself require a
+live browser.
 When using that official source, retain its URL in nutrition source detail.
 Use `--nutrition-source label` for published official item/serving facts;
 `database` is for facts returned by the food-label database.
@@ -276,12 +271,13 @@ Treat every calorie or macro estimate as two separate questions:
 
 Do not let vision or memory answer both. For every numeric meal estimate—including
 interactive meal logs, user-sent photos, automatic-meal-capture enrichment, and
-scheduled closeouts—resolve nutrient density from the hosted food-label database
-for every identifiable material component. Use the photo, description,
-and conversation to estimate identity, quantity, and preparation; use returned
-label or USDA facts for calories and macros. If another meal skill says to
-estimate visible ingredients or portions, that means estimate those quantities
-and preparation assumptions, not nutrient density from memory.
+scheduled closeouts—reuse already verified label or USDA nutrient density for
+unchanged components; resolve remaining identifiable material components from
+the hosted food-label database. Use the photo, description, and conversation
+to estimate identity, quantity, and preparation; use returned label or USDA
+facts for calories and macros. Quantity corrections and requests for totals
+do not require re-looking up unchanged products. Estimate portions, not fresh
+nutrient densities from memory, before the bounded fallback below.
 
 Before calculating a meal total:
 
@@ -343,12 +339,33 @@ Before calculating a meal total:
   could materially move the total. Avoid fake precision; set confidence from
   the weakest material identity, quantity, or preparation assumption.
 
-Increase the result limit only when the first match is ambiguous or missing a
-likely variant. The database-miss fallback above also applies to packaged and
-manufacturer labels. Only after the applicable official source fails may you
-use a clearly marked memory-based estimate with the assumptions and material
-uncertainty stated. Never invent an exact label or imply that a visual portion
-estimate was database-measured.
+### Bounded source fallback and corrections
+
+- Make one database pass for unresolved components, batched as above. Correct
+  malformed queries once. Increase the limit only for a genuinely ambiguous
+  match; do not repeat equivalent searches after a miss or clearly wrong item.
+- For unresolved branded or menu items, make one targeted web search for the
+  official label/menu (`web.run` when available). Use returned official text
+  when product, variant, serving, and requested values are clear; read the page
+  only to resolve a material gap or conflict. For an unresolved generic food,
+  target an authoritative food-composition source. Read `computer-use` and use
+  its bounded browser recovery only when a material fact requires interaction
+  or visual inspection unavailable through web search/text reading.
+- After this bounded pass fails, give a clearly marked estimate or useful range
+  for routine calories/macros, with the assumptions and material uncertainty.
+  Do not keep researching minor ingredients or ask for brand details that would
+  not meaningfully change the answer. Never invent an exact label or imply that
+  a visual portion estimate was database-measured. New product identity or
+  label evidence can justify another lookup; repetition alone cannot.
+- Preserve exact evidence requirements for allergies, supplement doses,
+  clinical nutrient limits, and explicit exactness requests. If the critical
+  fact remains unknown, state it or ask one necessary question; an estimate is
+  not proof of safety or exactness. Numeric safety exceptions still apply.
+- On a correction, remove excluded components without researching them and
+  rescale unchanged components from established serving facts. If editing a
+  saved meal, read that record once when needed, edit the authorized record,
+  and verify the result. Answer a totals request with the recalculated totals
+  and material uncertainty, not just an ingredient list or a new meal record.
 
 For a fridge or pantry photo, enumerate distinct visible products and resolve
 them in one batch. Summarize only relevant nutrition, ingredient, allergen, and

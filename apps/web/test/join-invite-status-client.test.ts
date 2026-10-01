@@ -152,6 +152,55 @@ describe("invite status client", () => {
       vi.useRealTimers();
     }
   });
+  it("backs off an unchanged visible wait after thirty seconds", async () => {
+    vi.useFakeTimers();
+    mocks.requestHostedOnboardingJson.mockResolvedValue(createStatusPayload());
+    const { cleanup } = await renderClientComponent(createElement(InviteStatusRefreshProbe, {
+      inviteCode: "invite-code", onStatus: vi.fn(), shouldPoll: true,
+    }));
+    try {
+      await act(async () => { await vi.advanceTimersByTimeAsync(300_000); });
+      expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledTimes(20);
+    } finally { await cleanup(); vi.useRealTimers(); }
+  });
+
+  it("pauses hidden polls and refreshes immediately on return without overlap", async () => {
+    vi.useFakeTimers();
+    mocks.requestHostedOnboardingJson.mockResolvedValue(createStatusPayload());
+    const view = await renderClientComponent(createElement(InviteStatusRefreshProbe, {
+      inviteCode: "invite-code", onStatus: vi.fn(), shouldPoll: true,
+    }));
+    const visibility = async (state: DocumentVisibilityState) => {
+      await act(async () => {
+        Object.defineProperty(document, "visibilityState", { configurable: true, value: state });
+        document.dispatchEvent(new view.window.Event("visibilitychange"));
+      });
+    };
+    try {
+      await visibility("hidden");
+      await act(async () => { await vi.advanceTimersByTimeAsync(300_000); });
+      expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledTimes(1);
+      let finish!: (payload: HostedInviteStatusPayload) => void;
+      mocks.requestHostedOnboardingJson.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+      await visibility("visible");
+      expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledTimes(2);
+      await visibility("hidden");
+      await visibility("visible");
+      await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+      expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledTimes(2);
+      await act(async () => { finish(createStatusPayload()); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+      expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledTimes(3);
+      await view.rerender(createElement(InviteStatusRefreshProbe, {
+        inviteCode: "invite-code", onStatus: vi.fn(), shouldPoll: false, disabled: true,
+      }));
+      await visibility("hidden");
+      await visibility("visible");
+      await act(async () => { await vi.advanceTimersByTimeAsync(300_000); });
+      expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledTimes(3);
+    } finally { await view.cleanup(); vi.useRealTimers(); }
+  });
+
 });
 
 function InviteStatusRefreshProbe(input: {

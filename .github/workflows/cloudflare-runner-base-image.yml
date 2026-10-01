@@ -49,4 +49,6 @@ jobs:
         run: echo "${{ github.token }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
 
       - name: Publish runner base image
+        env:
+          CODEX_CARGO_JOBS: "4"
         run: pnpm --dir apps/cloudflare runner:docker:base -- --push

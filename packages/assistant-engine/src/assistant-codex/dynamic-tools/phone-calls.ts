@@ -47,6 +47,7 @@ const phoneCallStopArgumentsSchema = z.object({
 export const MURPH_CREATE_PHONE_CALL_TOOL = {
   namespace: 'murph',
   name: 'create_phone_call',
+  deferLoading: true,
   description: [
     'Before placing a real call, read $MURPH_ASSISTANT_SKILLS_ROOT/phone-calls/SKILL.md.',
     'Use the same explicit-consent or ready-to-act flow in private and hosted group conversations. A group request does not require a special structured preview or a later confirmation solely because it is a group; ask one narrow question only when material terms are still unclear.',

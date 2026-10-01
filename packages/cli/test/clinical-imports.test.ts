@@ -3,11 +3,15 @@ import { mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
+import { createDefaultVaultServices } from "../src/vault-cli-bootstrap.js";
+import { registerSearchCommands } from "../src/commands/search.js";
+import { registerReadCommands } from "../src/commands/read.js";
 import { initializeVault } from "@murphai/core";
 import { Cli } from "incur";
 import { afterEach, test } from "vitest";
 
 import {
+  registerClinicalNoteCommands,
   registerAssertionCommands,
   registerDiagnosticTestCommands,
   registerSocialHistoryCommands,
@@ -30,9 +34,12 @@ function createSliceCli() {
     version: "0.0.0-test",
   });
   cli.use(incurErrorBridge);
+  registerSearchCommands(cli);
+  registerClinicalNoteCommands(cli);
   registerAssertionCommands(cli);
   registerDiagnosticTestCommands(cli);
   registerSocialHistoryCommands(cli);
+  registerReadCommands(cli, createDefaultVaultServices());
 
   return cli;
 }
@@ -378,4 +385,30 @@ test("social-history import-json retries return a schema-valid no-op result", as
   assert.equal(retryImport.ok, true, JSON.stringify(retryImport));
   assert.deepEqual(requireData(retryImport).eventIds, []);
   assert.equal("lookupId" in requireData(retryImport), false);
+});
+
+
+test("clinical-note import and show preserve typed answers and unknown dates across replay", async () => {
+  const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "clinical-note-fact-cli-"));
+  cleanupPaths.push(vaultRoot);
+  await initializeVault({ vaultRoot, createdAt: "2026-05-11T12:00:00.000Z", timezone: "UTC" });
+  const clinicalFact = { category: "observation", subject: "member", label: "Source assessment score",
+    statement: "Source assessment score was 4; its unit and clinical date were not recorded.", clinicalDate: null, value: 4, qualifiers: [{ name: "assessmentDomain", value: "synthetic-domain-token" }] };
+  const inputFile = path.join(vaultRoot, "fact.json");
+  await writeFile(inputFile, JSON.stringify({ source: "import", occurredAt: "2026-05-11T12:00:00.000Z",
+    title: clinicalFact.label, note: clinicalFact.statement, noteType: "clinical_fact", clinicalFact,
+    externalRef: { system: "synthetic-source", resourceType: "source-fact", resourceId: "score-1" },
+  }));
+  const args = ["clinical-note", "import-json", "--input", `@${inputFile}`, "--vault", vaultRoot];
+  const result = requireData(await runSliceCli<ClinicalImportCliResult>(args));
+  assert.equal(result.eventIds.length, 1);
+  const shown = requireData(await runSliceCli(["show", result.eventIds[0]!, "--vault", vaultRoot]));
+  const json = JSON.stringify(shown);
+  assert.ok(json.includes('"clinicalFact"'));
+  assert.ok(json.includes('"clinicalDate":null'));
+  assert.ok(json.includes('"value":4'));
+  const found = requireData(await runSliceCli(["search", "query", "synthetic-domain-token", "--vault", vaultRoot]));
+  assert.ok(JSON.stringify(found).includes(result.eventIds[0]!));
+  const replay = requireData(await runSliceCli<ClinicalImportCliResult>(args));
+  assert.deepEqual(replay.eventIds, []);
 });

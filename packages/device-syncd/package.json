@@ -11,10 +11,11 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "bin": {
-    "murph-device-syncd": "./dist/bin.js"
+    "murph-device-syncd": "./bin.mjs"
   },
   "files": [
     "README.md",
+    "bin.mjs",
     "dist"
   ],
   "exports": {

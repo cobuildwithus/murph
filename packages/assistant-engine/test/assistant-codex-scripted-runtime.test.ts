@@ -3523,7 +3523,7 @@ text(result.output);
     expect(summaries.flatMap(
       (summary) => summary.functionCallOutputs ?? [],
     )).toEqual([
-      `Unknown model \`${model}\` for spawn_agent. Available models: gpt-6-sol, gpt-6-luna, gpt-5.6-sol, gpt-5.6-luna`,
+      `Unknown model \`${model}\` for spawn_agent. Available models: gpt-6.1-sol, gpt-6-sol, gpt-6-luna, gpt-5.6-sol, gpt-5.6-luna`,
     ])
     expect(scenario.stub.requestCountSinceBaseline()).toBe(2)
   })
@@ -8000,6 +8000,10 @@ if (!tool) {
     timeout: TURN_TIMEOUT_MS,
   }, async () => {
     const scenario = await prepareScriptedTurnScenario()
+    const modelCatalogJson = await writeHostedOpenAiMixedModeModelCatalogJson({
+      codexCommand: scenario.turnInput.codexCommand,
+      directory: scenario.turnInput.codexHome,
+    })
     scenario.stub.captureProviderRequestDiagnostics()
     const automationRequests: unknown[] = []
     scenario.stub.queue(
@@ -8065,15 +8069,18 @@ if (!tool) {
         },
         vaultFileSendAvailable: false,
       },
-      model: 'gpt-5.4',
+      env: {
+        ...scenario.turnInput.env,
+        [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: modelCatalogJson,
+      },
       prompt: 'Discover the supported group-avatar path, save the reminder, then reply exactly NATIVE_TOOL_SEARCH_OK.',
     })
 
     const summaries = scenario.stub.requestSummariesSinceBaseline()
     expect(summaries[0]).toMatchObject({
-      model: 'gpt-5.4',
+      model: SCRIPTED_MODEL,
       providerRequestDiagnostics: {
-        includesAllTools: false,
+        includesAllTools: true,
         includesAutomation: false,
         includesGroup: false,
         includesGroupEmail: false,

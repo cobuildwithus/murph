@@ -6,6 +6,11 @@ export function clinicalExtractionDateIsSupported(
   clinicalOccurredAt: string | undefined,
   timeZone: string,
 ): boolean {
+  if (record.payload.kind === "note" && record.payload.clinicalFact) {
+    const date = record.payload.clinicalFact.clinicalDate;
+    return date === null ? record.dateBasis === "unknown"
+      : record.dateBasis === "document" && clinicalDateEvidenceMatches(date, record.dateEvidence, timeZone);
+  }
   return record.dateBasis === "source" ? Boolean(clinicalOccurredAt)
     : record.dateBasis === "document" && clinicalDateEvidenceMatches(record.payload.occurredAt, record.dateEvidence, timeZone);
 }

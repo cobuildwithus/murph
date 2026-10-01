@@ -360,12 +360,23 @@ test.each([
       assert.ok(retryAt >= effectStartedAt + 60_000 && retryAt <= Date.now() + 60_000);
       assert.equal(result.redactedStatus?.hostedMailboxSystemHandledThroughSeq, "0");
       assert.equal(result.status, "scheduled");
+      const cleanupRetryAt = Date.parse((await readHostedProviderCleanupCheckpoint(vaultRoot))?.nextWakeAt ?? "");
+      const futureRetryNow = Math.min(retryAt, Number.isFinite(cleanupRetryAt) ? cleanupRetryAt : retryAt) - 1;
       projectionFailureActive = false;
       vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-environment-future-retry-"));
       roots.push(vaultRoot);
       const effectContextsBeforeFutureRetry = [...effectContexts];
-      runtimeCompletion = runInvocation("system_mailbox");
-      result = await withRealTimeout(runtimeCompletion, 10_000, facts);
+      // This invocation observes future wakes. Hold Date before the first due
+      // wake even when real I/O stalls; due cleanup correctly returns "now".
+      // Keep timers real so runtime liveness and the timeout still run normally.
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(futureRetryNow);
+      try {
+        runtimeCompletion = runInvocation("system_mailbox");
+        result = await withRealTimeout(runtimeCompletion, 10_000, facts);
+      } finally {
+        vi.useRealTimers();
+      }
       const futureRetryState = await readHostedSystemMailboxState(vaultRoot);
       assert.deepEqual(futureRetryState.pending, retained);
       assert.deepEqual(effectContexts, effectContextsBeforeFutureRetry);

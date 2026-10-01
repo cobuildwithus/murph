@@ -1,3 +1,4 @@
+import type { RuntimeProviderCaller } from "./runtime-provider-authorization.ts";
 import { createRuntimeReplicaWriteBucket } from "./runtime-replica-upload.ts";
 import { presignManagedSnapshot, completeManagedSnapshotForSession, ManagedSnapshotCompletionRejectedError } from "./managed-snapshot-control.ts";
 import { commandHostedRuntimeSnapshot, recordHostedRuntimeOrphan, HostedRuntimeResourceRejectedError } from "./runtime-resource-client.ts";
@@ -156,6 +157,7 @@ export async function handleRunnerOutboundRequest(
   request: Request,
   env: RunnerOutboundEnvironmentSource,
   userId: string,
+  caller?: RuntimeProviderCaller,
 ): Promise<Response> {
   try {
     const url = new URL(request.url);
@@ -174,6 +176,7 @@ export async function handleRunnerOutboundRequest(
 
     if (url.hostname === CLOUDFLARE_HOSTED_RUNTIME_HOSTS.webControlPlane) {
       return handleRunnerWebControlRequest({
+        caller,
         env,
         environment,
         request,
@@ -541,11 +544,11 @@ async function handleRunnerMediaRequest(input: {
     });
   };
 
-  const writeAuthority = await readRunnerMediaWriteAuthority({
-    env: input.env,
-    request: input.request,
-    userId: input.userId,
-  });
+  // Reads need a standalone fence; mutation commands admit the same identity
+  // transactionally before publication or resource retirement.
+  const writeAuthority = input.request.method === "GET"
+    ? await readRunnerMediaWriteAuthority(input)
+    : readRunnerRuntimeWriteFenceHeaders(input.request);
   if (!writeAuthority) {
     emitCompleted({
       mediaAuthorized: false,
@@ -554,31 +557,11 @@ async function handleRunnerMediaRequest(input: {
   }
 
   try {
-    const crypto = await resolveRunnerOutboundUserCryptoContext({
-      bucket: input.bucket,
-      domain: "runtime",
-      env: input.env,
-      environment: input.environment,
-      userId: input.userId,
-    });
-    const mediaStore = createHostedMediaStore({
-      bucket: descriptor ? createRuntimeMediaWriteBucket({
-        source: input.env, userId: input.userId, attemptId: writeAuthority.attemptId,
-        generation: writeAuthority.generation, media: { descriptor },
-      }) : input.bucket,
-      key: crypto.rootKey,
-      keyId: crypto.rootKeyId,
-      keysById: crypto.keysById,
-      resolveKeyById: crypto.resolveKeyById,
-      userId: input.userId,
-    });
-
     if (input.request.method === "DELETE") {
       return await handleRunnerMediaDeleteRequest({
         env: input.env,
         emitCompleted,
         mediaId: input.mediaId,
-        mediaStore,
         userId: input.userId,
         writeAuthority,
       });
@@ -588,22 +571,41 @@ async function handleRunnerMediaRequest(input: {
       throw new Error("Hosted media descriptor missing after validation.");
     }
 
-    if (input.request.method === "GET") {
-      return await handleRunnerMediaGetRequest({
-        descriptor,
-        emitCompleted,
-        env: input.env,
-        mediaStore,
-        userId: input.userId,
-      });
-    }
-
     if (input.request.method === "POST") {
       return await handleRunnerMediaRecordRequest({
         descriptor,
         emitCompleted,
         env: input.env,
         writeAuthority,
+        userId: input.userId,
+      });
+    }
+
+    const crypto = await resolveRunnerOutboundUserCryptoContext({
+      bucket: input.bucket,
+      domain: "runtime",
+      env: input.env,
+      environment: input.environment,
+      userId: input.userId,
+    });
+    const mediaStore = createHostedMediaStore({
+      bucket: createRuntimeMediaWriteBucket({
+        source: input.env, userId: input.userId, attemptId: writeAuthority.attemptId,
+        generation: writeAuthority.generation, media: { descriptor },
+      }),
+      key: crypto.rootKey,
+      keyId: crypto.rootKeyId,
+      keysById: crypto.keysById,
+      resolveKeyById: crypto.resolveKeyById,
+      userId: input.userId,
+    });
+
+    if (input.request.method === "GET") {
+      return await handleRunnerMediaGetRequest({
+        descriptor,
+        emitCompleted,
+        env: input.env,
+        mediaStore,
         userId: input.userId,
       });
     }
@@ -618,6 +620,13 @@ async function handleRunnerMediaRequest(input: {
       userId: input.userId,
     });
   } catch (error) {
+    if (error instanceof HostedRuntimeResourceRejectedError) {
+      const response = error.code === "HOSTED_RUNTIME_OWNER_STALE"
+        ? unauthorized()
+        : jsonError("Media mutation was rejected.", 409);
+      emitCompleted({ mediaAuthorized: false, errorCode: error.code }, response.status);
+      return response;
+    }
     emitHostedExecutionStructuredLog({
       component: "runner",
       details: {
@@ -663,7 +672,6 @@ async function handleRunnerMediaDeleteRequest(input: {
   env: RunnerOutboundEnvironmentSource;
   emitCompleted: RunnerMediaRequestCompletedEmitter;
   mediaId: string;
-  mediaStore: RunnerMediaStore;
   userId: string;
   writeAuthority: RunnerRuntimeWriteFenceHeaders;
 }): Promise<Response> {
@@ -1227,6 +1235,8 @@ async function handleRunnerWorkspaceSnapshotStartRequest(input: {
       "write_fence_owner_validation",
       async () => {
         const writeFence = await requireWorkspaceSnapshotWriteFence({
+          // snapshot_create validates this identity in its ownership transaction.
+          deferToResourceCommand: true,
           env: input.env,
           request: input.request,
           userId: input.userId,
@@ -1398,6 +1408,9 @@ async function handleRunnerWorkspaceSnapshotStartRequest(input: {
       snapshotId: crypto.snapshotId,
     }), "created");
   } catch (error) {
+    if (error instanceof HostedRuntimeResourceRejectedError) {
+      return complete(jsonError("Hosted workspace snapshot upload session is stale.", 409), "stale_owner");
+    }
     emitHostedWorkspaceSnapshotStartRouteDiagnostics({
       diagnostics,
       errorCode: deriveHostedExecutionErrorCode(error),

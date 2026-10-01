@@ -293,7 +293,14 @@ interface ConfinedReadOnlyAssistantAskTurn {
   permissionProfile: string
   prompt: string
   runtimeWorkspaceRoots?: readonly string[]
+  disableShell?: boolean
   usageStage: ReadOnlyAssistantAskProviderUsageEvent['stage']
+}
+
+function readOnlyAssistantAskThreadConfig(turn: ConfinedReadOnlyAssistantAskTurn) {
+  return turn.disableShell || turn.usageStage === 'review'
+    ? CONSENTED_READ_ONLY_ASSISTANT_ASK_REVIEW_THREAD_CONFIG
+    : READ_ONLY_ASSISTANT_ASK_THREAD_CONFIG
 }
 
 type ReadOnlyAssistantAskChildInput =
@@ -536,9 +543,7 @@ export async function executeConfinedReadOnlyAssistantAskTurn(
         reasoningEffort: input.reasoningEffort,
         runtimeWorkspaceRoots,
         serviceTier: input.serviceTier,
-        threadConfig: turn.usageStage === 'review'
-          ? CONSENTED_READ_ONLY_ASSISTANT_ASK_REVIEW_THREAD_CONFIG
-          : READ_ONLY_ASSISTANT_ASK_THREAD_CONFIG,
+        threadConfig: readOnlyAssistantAskThreadConfig(turn),
         workingDirectory,
       })
 

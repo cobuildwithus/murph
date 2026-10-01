@@ -4,7 +4,7 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
-required_node="$(sed -nE 's/^[[:space:]]*"node":[[:space:]]*">=([^"]+)".*/\1/p' package.json | head -n 1)"
+required_node="$(sed -nE 's/^[[:space:]]*"node":[[:space:]]*"\^([0-9]+\.[0-9]+\.[0-9]+)".*/\1/p' package.json | head -n 1)"
 pnpm_version="$(sed -nE 's/^[[:space:]]*"packageManager":[[:space:]]*"pnpm@([^+"]+).*/\1/p' package.json | head -n 1)"
 
 if [ -z "$required_node" ] || [ -z "$pnpm_version" ]; then
@@ -131,11 +131,11 @@ print_detected_os() {
 print_linux_install_plan() {
   ui_section 'Install plan'
   printf 'OS: linux\n'
-  printf 'Node requirement: >= %s\n' "$required_node"
+  printf 'Node requirement: ^%s\n' "$required_node"
   printf 'pnpm: %s via corepack\n' "$pnpm_version"
   printf '%s\n' 'Workspace flow: bootstrap tools -> install deps -> build workspace -> launch onboarding'
   printf '%s\n' 'Bootstrap scope:'
-  printf '  - Node >= %s from PATH when available, otherwise an isolated download under ~/.murph/bootstrap\n' "$required_node"
+  printf '  - Node ^%s from PATH when available, otherwise an isolated download under ~/.murph/bootstrap\n' "$required_node"
   printf '  - pnpm@%s via corepack\n' "$pnpm_version"
   printf '%s\n' '  - workspace dependencies and build output'
   printf '%s\n' '  - ffmpeg, whisper.cpp, and a local Whisper model through the Murph Linux toolchain setup'
@@ -187,6 +187,7 @@ const required = (process.env.REQUIRED_NODE_VERSION ?? '')
   .split('.')
   .map((value) => Number.parseInt(value, 10))
 const current = process.versions.node.split('.').map((value) => Number.parseInt(value, 10))
+if (current[0] !== required[0]) process.exit(1)
 for (let index = 0; index < required.length; index += 1) {
   const left = current[index] ?? 0
   const right = required[index] ?? 0
@@ -272,7 +273,7 @@ print_linux_dry_run_plan() {
 
   ui_warn 'Dry run requested. This wrapper will not modify the machine or workspace.'
   printf '%s\n' 'Planned wrapper steps:'
-  printf '1. Reuse Node >= %s from PATH when available, or download Node %s under ~/.murph/bootstrap.\n' "$required_node" "$required_node"
+  printf '1. Reuse Node ^%s from PATH when available, or download Node %s under ~/.murph/bootstrap.\n' "$required_node" "$required_node"
   printf '2. Activate pnpm@%s through corepack.\n' "$pnpm_version"
   printf '%s\n' '3. Install workspace dependencies with `corepack pnpm install --frozen-lockfile`.'
   printf '%s\n' '4. Build the workspace with `corepack pnpm build`.'

@@ -5,7 +5,7 @@ Workspace-private read-helper, filter, derived-retrieval, and export-pack surfac
 Stale projection readers acquire the existing reentrant canonical write lock,
 recheck freshness, and rebuild only when needed. Source capture and publication
 stay inside that boundary. Ordinary fresh indexed reads take no lock (the
-source-health snapshot exception is below). Do not coalesce rebuilds
+focused wearable snapshot exceptions are below). Do not coalesce rebuilds
 with a separate pending promise: a lock owner could join a reader waiting for
 that same lock. The `query-wait` timing span measures acquisition;
 `query-rebuild` measures actual rebuilding.
@@ -41,6 +41,11 @@ Ordinary oxygen readings and v2 temporal features are unchanged. Restored older
 query stores rebuild once under this policy; the complete query database remains
 part of workspace restore.
 
+Version 35 adds allowlisted typed clinical-fact terms to private search. The
+index includes source labels, values, status, coding and qualifiers without
+recursing into raw attributes. Safe shared search still excludes structured
+payloads. This projection remains rebuildable from canonical notes.
+
 Version 34 shares ordered JSON field-name dictionaries across wearable summary
 rows in `query_wearable_summary_shapes`. Tagged object/array values preserve all
 summary facts and internal composition evidence; public summary JSON is unchanged.
@@ -65,6 +70,19 @@ family, and exact canonical ids retain precedence over aliases. Collection
 reads that still need projection freshness should use filtered APIs such as
 `listCanonicalEntities()` rather than materializing the complete vault model.
 
+Event listing uses `listCanonicalEventEntities()` to reuse an already-fresh
+indexed projection without forcing a rebuild. If missing, stale, unsupported or
+wearable-only, it takes the same reentrant canonical write lock, rechecks freshness,
+and reads `readCanonicalEntityFamilySource(vaultRoot, "event")` when still needed.
+The lock covers strict source capture, lifecycle collapse, visibility and selection;
+no cache is published or certified fresh. Kind/date predicates match the existing
+indexed operation, including its date fallback. The result is unlimited and in
+canonical order so the usecase applies tag/experiment filters before its limit.
+Event-source errors remain strict; malformed unrelated families no longer block
+this event-only read. Explicit global readers retain their existing strict errors
+and rebuild policy. No other collection endpoint changes. Manifest/status checks
+still inspect shared freshness, and repeated stale event reads reread the ledger.
+
 Narrow health collection reads should query that projection by family/kind/date
 before decoding records. Exact blood-test and immunization lookups use the
 bounded event-family source reader so a stale projection cannot turn one-record
@@ -81,6 +99,38 @@ companion estimate uses `whoop-ble-overnight-prv-rmssd` with no generic `hrv`
 or biomarker alias, so it cannot silently alias or aggregate with provider HRV.
 
 Root wearable summary APIs should use the runtime projection helpers such as `summarizeWearableLatestRuntime()` and `summarizeWearableActivityRuntime()`. The lower-level read-model helpers in `src/wearables.ts` are package-internal and expect a full raw/debug read model or an intentionally full source model, not the default `readVault()` projection.
+
+### Sleep-list reads
+
+`summarizeWearableSleepRuntime()` (the integrated `query.listWearableSleep`
+service and `wearables sleep list`) uses the existing
+`readFreshWearableSummaryRows()` owner, not full query freshness. It captures
+provider-filtered rows under the same reentrant canonical lock even when fresh,
+then composes the **normal** public wearable bundle with the original filters
+and invokes the unchanged sleep summarizer. Do not pass `sourceHealthOnly`:
+sleep needs public days. Date, range, ordering and limit interpretation remain
+with the existing composition/service owners; the row read only selects
+providers. Prior/next canonical evidence remains available during projection.
+At the service boundary an omitted or empty provider array is unrestricted;
+a nonempty array normalized to no providers selects nothing.
+
+The exact canonical manifest, strict validation, atomic row/dictionary/manifest
+publication and failure behavior described below apply identically to sleep.
+Every canonical manifest change, including corrections, deletions and unrelated
+records, invalidates wearable freshness. Empty selected scopes do not bypass
+strict validation. No schema, state, cache or provider-precedence policy changes.
+Fresh sleep after a full global build reuses its current wearable rows, but
+now pays the existing focused reader's lock and manifest check.
+
+Cold/stale sleep does not build global metrics/targets, entities/search or run
+`VACUUM`, and does not certify global freshness. A later full read still does
+its distinct global work and compaction, reusing current wearable summaries.
+This is avoided work for sleep-only use and deferred global work for mixed use,
+not removal of all rebuild latency. Sleep-pattern and other wearable readers
+are unchanged. See the [sleep-list proof and paired benchmark](../vault-usecases/bench/wearable-sleep.md)
+for full-envelope parity, real CLI/assistant proof, phase counts, base/base noise
+and complete mixed-workflow costs. Parent measurements are required before any
+speedup claim.
 
 ### Source-health reads
 

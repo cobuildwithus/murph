@@ -292,6 +292,79 @@ describe('Codex canonical tool input contract upgrade guard', () => {
     }
   })
 
+  it.skipIf(process.env.MURPH_MEASURE_SECONDARY_TOOLS_INPUT !== '1').each(['direct', 'group'] as const)(
+    'secondary tools: complete first provider input (%s)', { timeout: 180_000 }, async (scope) => {
+      stub ??= await startScriptedResponsesStub()
+      const scenario = await prepareScriptedTurnScenario(stub, temporaryPaths)
+      const direct = scope === 'direct'
+      const tools = resolveMurphDynamicTools({
+        allowFinishWithoutReply: true, automationAvailable: true,
+        personalizationAvailable: true, progressUpdatesAvailable: true,
+        progressUpdateMode: direct ? 'direct' : 'group', messageTargetingAvailable: true,
+        responseCardsAvailable: direct, groupAvailable: true,
+        groupSharedReadAvailable: !direct, groupRoomModelAvailable: !direct,
+        assistantConfigurationAvailable: direct, groupAssistantConfigurationAvailable: !direct,
+        assistantStyleSettingsAvailable: true, deviceAvailable: direct,
+        connectedAppsAvailable: direct, familyPlanAvailable: direct, labsAvailable: direct,
+        planUsageAvailable: direct, subscriptionAvailable: direct,
+        pendingVaultFilesAvailable: direct, vaultFileSendAvailable: direct,
+        clinicalRecordsConnectLinkAvailable: direct, computerToolsAvailable: direct,
+        calendarLinkAvailable: direct, productFeedbackAvailable: true, pollsAvailable: true,
+        imageGenerationAvailable: true, voiceMemoGenerationAvailable: true,
+        physicalNotesAvailable: true, physicalNoteRecoveryAvailable: true,
+        phoneCallsAvailable: true, phoneCallStatusAvailable: true, phoneCallStopAvailable: true,
+        conversationAttachmentsAvailable: true, analyzeVideoAvailable: true, askGrokAvailable: true,
+      })
+      const secondaryNames = new Set([
+        'submit_product_feedback', 'family_plan', 'send_physical_note', 'create_phone_call',
+        'generate_voice_memo', 'generate_song', 'generate_image', 'analyze_video',
+      ])
+      const layers = buildAssistantSystemPromptLayers({
+        assistantCliContract: null, assistantHostedAutomationAvailable: true,
+        assistantHostedGroupToolSurface: direct ? 'none' : 'shared_read',
+        channel: 'linq', cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+        conversationScope: scope, currentLocalDate: '2026-09-28',
+        currentInstant: '2026-09-28T08:00:00.000Z', currentTimeZone: 'UTC',
+        hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic',
+        onboardingGuidance: false, ordinaryInboundTurn: true,
+      })
+      const catalog = await writeHostedOpenAiMixedModeModelCatalogJson({
+        codexCommand: scenario.turnInput.codexCommand, directory: scenario.turnInput.codexHome,
+      })
+      const measurements = []
+      for (const phase of ['base', 'candidate'] as const) {
+        await stopWarmCodexAppServer()
+        stub.markRequestBaseline()
+        stub.captureProviderRequestDiagnostics({ completeInput: true })
+        stub.queue({ text: CONTRACT_CAPTURE_DONE })
+        const result = await executeCodexAppServerTurn({
+          ...scenario.turnInput, model: 'gpt-6-luna', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          dynamicTools: tools.map(tool => secondaryNames.has(tool.name)
+            ? (phase === 'base' ? { ...tool, deferLoading: false } : tool) : tool),
+          developerInstructions: [layers.staticCacheableCorePrompt, layers.stableRouteCapabilityPrompt,
+            layers.threadContextPrompt].join('\n\n'),
+          prompt: [layers.dynamicTurnContextPrompt, 'Help me set a walking goal and plan before lunch.'].join('\n\n'),
+          groupConversation: !direct,
+          env: { ...scenario.turnInput.env, [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: catalog },
+        })
+        assert.equal(result.finalMessage, CONTRACT_CAPTURE_DONE)
+        assert.equal(stub.requestCountSinceBaseline(), 1)
+        const captured = stub.requestSummariesSinceBaseline()[0]?.completeProviderInput
+        assert.ok(captured)
+        const body = readRecord(JSON.parse(captured.json))
+        assert.ok(body)
+        delete body.prompt_cache_key
+        measurements.push({ phase, decodedRequestUtf8Bytes: Buffer.byteLength(JSON.stringify(body)),
+          exclusions: [...new Set([...captured.excludedTransportFields, 'prompt_cache_key'])] })
+      }
+      process.stdout.write('[secondary-tools-input-proof] ' + JSON.stringify({ scope,
+        model: 'gpt-6-luna', measurements, tokens: null,
+        tokenLimitation: 'No exact Luna tokenizer configured; scripted usage is not tokenization.',
+        fixture: 'Synthetic hosted Linq capability inventory; identical instructions and history.',
+      }) + '\n')
+    },
+  )
+
   it.skipIf(process.env.MURPH_MEASURE_GOAL_INPUT !== '1').each(['direct', 'group'] as const)(
     'goal setup: complete first provider input (%s)', { timeout: 180_000 }, async (scope) => {
       stub ??= await startScriptedResponsesStub()

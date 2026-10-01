@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { RunnerContainer } from "../src/runner-container.ts";
+import { RunnerInvocationReceiptStore } from "../src/runner-invocation-receipt.ts";
 import { RunnerSlotBindingStore } from "../src/runner-slot-binding.ts";
 import { commandHostedRuntimeOwner } from "../src/runtime-owner-client.ts";
 import { recordHostedRuntimeOwnerCompletion } from "../src/runtime-owner-completion.ts";
@@ -22,7 +23,7 @@ function harness() {
   const create = () => new RunnerContainer({
     id: { name: target }, storage: { sql }, waitUntil: (promise: Promise<unknown>) => pending.push(promise),
   }, { CF_VERSION_METADATA: { id: "release_1" } });
-  return { create, pending };
+  return { create, pending, sql, binding };
 }
 
 function job(attemptId = "attempt-a", generation = "1"): HostedExecutionWorkspaceInvocationJobInput {
@@ -46,6 +47,50 @@ describe.each([false, true])("native supervised invocation with launch preparati
       failureCount: 0, lastErrorCode: null,
     } });
     vi.mocked(recordHostedRuntimeOwnerCompletion).mockResolvedValue(false);
+  });
+
+  it("reads admitted provider authority after restart without Web and revokes it at native retirement/completion", async () => {
+    const { create, pending, binding } = harness();
+    const container = create();
+    let finish!: (result: { status: "idle" }) => void;
+    vi.spyOn(container, "invoke").mockImplementation(() => new Promise(resolve => { finish = resolve; }));
+    await container.startSupervisedInvocation(payload());
+    vi.mocked(commandHostedRuntimeOwner).mockClear();
+    const recovered = create();
+    expect(await recovered.readProviderAuthority()).toMatchObject({ userId, attemptId: "attempt-a",
+      generation: "1", workspaceVersion: "0", platformAiUsageAllowed: true, retiring: false, settlementPending: false });
+    expect(commandHostedRuntimeOwner).not.toHaveBeenCalled();
+    await recovered.beginRuntimeUsageSettlement({ userId, attemptId: "attempt-a", generation: "1", reportId: "usage-a" });
+    expect(await recovered.readProviderAuthority()).toMatchObject({ settlementPending: true });
+    binding.beginRetirement({ claimId: "standby-claim-11111111-1111-4111-8111-111111111111" });
+    expect(await recovered.readProviderAuthority()).toMatchObject({ retiring: true });
+    finish({ status: "idle" });
+    await Promise.all(pending);
+    expect(await recovered.readProviderAuthority()).toBeNull();
+  });
+
+  it("backfills only an exact predeployment invocation once and persists it through eviction", async () => {
+    const { create, sql } = harness();
+    new RunnerInvocationReceiptStore(sql).register({ attemptId: "attempt-a", generation: "1" });
+    expect(await create().readProviderAuthority()).toMatchObject({ userId, generation: "1" });
+    expect(await create().readProviderAuthority()).toMatchObject({ userId, generation: "1" });
+    expect(commandHostedRuntimeOwner).toHaveBeenCalledTimes(1);
+    expect(commandHostedRuntimeOwner).toHaveBeenCalledWith(expect.objectContaining({ command: { operation: "reconcile" } }));
+  });
+
+  it("does not restore provider authority when retirement finishes during legacy backfill", async () => {
+    const { create, sql, binding } = harness();
+    new RunnerInvocationReceiptStore(sql).register({ attemptId: "attempt-a", generation: "1" });
+    const owner = { userId, attemptId: "attempt-a", generation: "1", workspaceVersion: "0",
+      runnerContainerName: target, phase: "active" as const, processingMode: "default" as const,
+      allocationId: null, customInferenceEnvelope: null, platformAiUsageAllowed: true,
+      startedAt: null, acceptedAt: null, completedAt: null, failureCount: 0, lastErrorCode: null };
+    vi.mocked(commandHostedRuntimeOwner).mockImplementationOnce(async () => {
+      binding.beginRetirement({ claimId: "standby-claim-11111111-1111-4111-8111-111111111111" });
+      binding.finishRetirement();
+      return { cutover: "postgres", status: "observed", owner };
+    });
+    expect(await create().readProviderAuthority()).toBeNull();
   });
 
   it("persists completion before its acknowledgment and does not rerun it after eviction", async () => {

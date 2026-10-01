@@ -93,9 +93,26 @@ jobs:
           git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
           git merge-base --is-ancestor "${DEPLOYED_SHA}" origin/main || { echo "::error::Production canary refuses a revision outside main history."; exit 1; }
 
-      - name: Verify production alias and dispatch non-destructive canary
+      - name: Select verified production deployment
+        id: production
         env:
-          DEPLOYED_SHA: ${{ needs.select-main.outputs.web_sha }}
+          HOSTED_WEB_PRODUCTION_BASE_URL: ${{ vars.HOSTED_WEB_PRODUCTION_BASE_URL }}
+          HOSTED_WEB_VERCEL_PROJECT_ID: ${{ vars.HOSTED_WEB_VERCEL_PROJECT_ID }}
+          HOSTED_WEB_VERCEL_TEAM_ID: ${{ vars.HOSTED_WEB_VERCEL_TEAM_ID }}
+          HOSTED_WEB_VERCEL_TOKEN: ${{ secrets.HOSTED_WEB_VERCEL_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          production_sha="$(pnpm --dir apps/web exec tsx scripts/resolve-vercel-production-alias-sha.ts)"
+          [[ "${production_sha}" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::Production alias did not resolve to an exact SHA."; exit 1; }
+          git merge-base --is-ancestor "${production_sha}" origin/main || { echo "::error::Production deployment is outside protected main history."; exit 1; }
+          verified_sha="$(DEPLOYED_SHA="${production_sha}" pnpm --dir apps/web exec tsx scripts/verify-current-vercel-production-deployment.ts)"
+          [[ "${verified_sha}" == "${production_sha}" ]] || { echo "::error::Exact production verification returned a different revision."; exit 1; }
+          echo "web_sha=${production_sha}" >> "${GITHUB_OUTPUT}"
+
+      - name: Verify current production alias and dispatch non-destructive canary
+        env:
+          DEPLOYED_SHA: ${{ steps.production.outputs.web_sha }}
           HOSTED_WEB_PRODUCTION_BASE_URL: ${{ vars.HOSTED_WEB_PRODUCTION_BASE_URL }}
           HOSTED_WEB_VERCEL_PROJECT_ID: ${{ vars.HOSTED_WEB_VERCEL_PROJECT_ID }}
           HOSTED_WEB_VERCEL_TEAM_ID: ${{ vars.HOSTED_WEB_VERCEL_TEAM_ID }}

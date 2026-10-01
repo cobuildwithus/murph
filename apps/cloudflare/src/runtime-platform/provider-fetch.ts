@@ -310,10 +310,6 @@ export function createCloudflareHostedProviderFetch(
     headers.delete(HOSTED_PROVIDER_EGRESS_TOKEN_HEADER);
     headers.delete(HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER);
     headers.set(HOSTED_RUNNER_BOUND_USER_ID_HEADER, boundUserId);
-    const lease = await options.readCurrentLease?.() ?? null;
-    if (lease?.providerEgressToken) {
-      headers.set(HOSTED_PROVIDER_EGRESS_TOKEN_HEADER, lease.providerEgressToken);
-    }
 
     const providerRequest = new Request(request, { headers });
     try {

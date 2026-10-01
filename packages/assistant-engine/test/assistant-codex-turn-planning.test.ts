@@ -420,11 +420,11 @@ describe('assistant Codex turn planning', () => {
       Object.entries(plans).map(([name, plan]) => [name, digestPlan(plan)]),
     )).toMatchInlineSnapshot(`
       {
-        "direct": "83176011fb04b08e9681640957a46d8cb16f488ae2f8c2360fb23aff406b7927",
-        "group": "762ab748f4e50ef1663e81c104504225897b91d2fcf30f3a86577ed142abe52a",
+        "direct": "576a18a7e24f87ebde7c2e65ae05fc4536be384ec20cd5c26f97c001dda7d41f",
+        "group": "59291f8075dcdacaff23f90a0fb0260d4d1fa3a448aa3ca29c5b14ea757f681d",
         "maintenance": "ac022f98be034bc9bbcfd987fb422a0546cfa1899d4c99b97167d7d22527547e",
         "outputOnly": "a83a04afea06e5290de36b14a0fee5d18970077a8294dde129b2e2dfa99116b4",
-        "scheduledEmail": "4f1ed96d883f3340b876d44e0e0fcbb624be029d792cbd0cc8f59a746655058f",
+        "scheduledEmail": "dc98cfc0eb7555d09e5087f39352ba68475f13cdc714fe7e657f2320d698dce9",
       }
     `)
   })
@@ -4200,6 +4200,7 @@ describe('assistant Codex turn planning', () => {
           progressUpdatesAvailable: false,
           responseCardsAvailable: true,
           voiceMemoGenerationAvailable: plan.voiceMemoDeliveryChannel !== null,
+          voiceMemoModelId: 'eleven_v4',
         }),
         routeFingerprint: route.routeFingerprint ?? route.routeId,
       }),

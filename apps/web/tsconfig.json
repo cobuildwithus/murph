@@ -36,9 +36,6 @@
       "@murphai/clinical-records/retrieval-limits": [
         "../../packages/clinical-records/src/retrieval-limits.ts"
       ],
-      "@murphai/vault-usecases/clinical-records": [
-        "../../packages/vault-usecases/src/clinical-records.ts"
-      ],
       "@murphai/contracts": [
         "../../packages/contracts/src/index.ts"
       ],
@@ -150,6 +147,12 @@
       "@murphai/hosted-execution/parsers": [
         "../../packages/hosted-execution/src/parsers.ts"
       ],
+      "@murphai/hosted-execution/parsers/mailbox": [
+        "../../packages/hosted-execution/src/parsers/mailbox.ts"
+      ],
+      "@murphai/hosted-execution/observability": [
+        "../../packages/hosted-execution/src/observability.ts"
+      ],
       "@murphai/hosted-execution/phone-calls": [
         "../../packages/hosted-execution/src/phone-calls.ts"
       ],
@@ -255,6 +258,9 @@
       "@murphai/health-metrics": [
         "../../packages/health-metrics/src/index.ts"
       ],
+      "@murphai/health-metrics/wearable-provider-catalog": [
+        "../../packages/health-metrics/src/wearable-provider-catalog.ts"
+      ],
       "@murphai/query": [
         "../../packages/query/src/index.ts"
       ],
@@ -284,6 +290,9 @@
       ],
       "@murphai/importers": [
         "../../packages/importers/src/index.ts"
+      ],
+      "@murphai/importers/clinical-records": [
+        "../../packages/importers/src/clinical-records/index.ts"
       ],
       "@murphai/importers/device-providers/provider-descriptors": [
         "../../packages/importers/src/device-providers/provider-descriptors.ts"

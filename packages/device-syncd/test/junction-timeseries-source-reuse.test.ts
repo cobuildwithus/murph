@@ -265,7 +265,7 @@ test("Junction summary continuations preserve imports and progress with one inve
   const baselineImports = [...imported];
   assert.equal(inventoryReads, 4);
   assert.equal(sourceReads, 8);
-  assert.equal(imported.length, 4);
+  assert.equal(imported.length, 3);
   assert.ok(JSON.stringify(imported).includes('"steps":5000'));
   imported.length = 0;
   inventoryReads = 0;

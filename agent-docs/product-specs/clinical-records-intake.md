@@ -53,6 +53,34 @@ and conflicting revisions retain the existing revision checks.
 Linked Binary acquisition and document enrichment have separate owners from
 these deterministic retained-snapshot mappings.
 
+### Structured recovery from retained records
+
+After deterministic import, eligible retained FHIR source notes can receive a
+bounded background Luna extraction. The original raw resource and source note
+remain in the vault. The same document-enrichment workflow validates proposed
+labs, measurements and history, writes accepted facts with source evidence,
+and resumes frozen results without asking the model again. A corrected or
+withdrawn source retires its older extracted facts.
+
+Structured source-fact notes retain category, question or label, value, explicit
+unit, status, subject, coding and qualifiers. These include questionnaire answers,
+scores, exam findings, social and family history, medication orders, procedures,
+immunizations, encounters and care plans. The note's timestamp dates its source
+statement; a null clinical date remains unknown. Missing units are not inferred,
+and historical orders never establish medication use or an active diagnosis.
+`clinical-note import-json` and `show` expose the same canonical fields.
+
+RTF text is eligible for background extraction. Long text continues through
+bounded overlapping windows. Unreviewed embedded images, unsupported formats,
+ambiguous evidence and saturated extraction limits remain explicit coverage
+holds; safely supported sibling facts still import.
+
+Already structured records need no model call. Records held for unsafe status,
+modifiers, ambiguity or missing import prerequisites stay held. Extraction may
+recover some facts while leaving others unresolved; it does not establish
+complete chart coverage. Existing imports are not silently rewritten: new
+retrieval batches admit their eligible records through the ordinary import path.
+
 ## Member flow
 
 1. The assistant or signed-in dashboard creates a 15-minute, single-use,
@@ -309,6 +337,17 @@ Unqualified single laboratory reference ranges are retained when their numeric
 boundaries use units compatible with the result, or when they provide a bounded
 text range. Multiple, qualified, inverted, malformed, or unit-incompatible
 ranges hold the containing observation for review instead of being dropped.
+For a qualitative laboratory result, valid numeric reference bounds and their
+units are preserved as bounded reference text alongside supplied range text;
+no numeric result, result unit, or numeric comparison is inferred.
+Observations without a supported metric mapping are preserved
+as source notes with their original values, codes, and qualifiers. Missing-unit
+vitals can also become source notes, without fabricating a unit or normalized
+measurement. Ambiguous coding, incompatible declared units, unsafe modifiers,
+and malformed dates remain held. An otherwise eligible undated source answer
+can be retained as documentation at its source revision; its clinical date stays
+unknown. JSON object key order does not change
+source-note identity or content on replay.
 Preemption requeues the same run without discarding or replaying completed page
 progress. Web current-run authority is checked immediately before raw evidence
 persistence and immediately before canonical mutation. Final
@@ -318,15 +357,31 @@ The hosted writer emits v3 manifests and derives outgoing pagination edges
 from raw Bundles, preserving root/reachability/cycle/family/base validation.
 
 Completed slices and prior page batches survive an unrelated later byte/page/resource bound. The
-unfinished work remains checkpointed for retry without refunding historical charges. Meaningful
-OperationOutcome warnings/errors mark coverage incomplete; empty uncertain
-searches never establish allergy absence. SMART `.s` grants authorize search.
+unfinished work remains checkpointed for retry without refunding historical charges.
+Unknown or actionable OperationOutcome warnings/errors mark retrieval incomplete.
+Recognized Epic no-results (4101) and patient-access (4119) notices do not fail
+retrieval, but still cannot establish allergy absence. Denied subtype warnings
+remain explicit coverage limits. Web distinguishes portal coverage limits from
+other partial imports and labels skipped decisions as repeated items, because
+those counts may include repeated review holds rather than saved results. SMART `.s` grants authorize search.
 SUBSETTED resources and unorderable same-identity siblings remain raw evidence
 with an explicit incomplete disposition, leaving validated canonical facts
 unchanged. A resource that omits `meta.lastUpdated` takes its batch manifest
 `fetchedAt` as the source revision, so later retrievals supersede earlier ones
 and replays stay idempotent. Comparable clinical holds retain the existing
-revision protection.
+revision protection. A refresh preserves an existing parser hold for an unchanged
+Observation at the same revision only when its exact historical parser reason,
+identity, manifest-bound source bytes and resource contents match. Component
+results use their own historical hold reason. For a retracted prior event, core
+retains its clinical payload rather than a marker reason: the importer establishes
+the prior rejection from newly supported source-note mapping or qualitative
+numeric bounds in that same attested source. Deleted records stay unchanged.
+The canonical
+lock spans the batched ledger lookup and import; matching holds count as review
+items, not imported labs, while unrelated and later-page records continue.
+Provider withdrawals, changed evidence and other revision conflicts retain their
+existing rejection behavior. Promoting a historical hold requires explicit
+canonical correction.
 Web accepts partial received-page counts below served counts, rejects
 excess counts, and records same-generation saved counts after authorization
 ends without restoring access. Permanent outcome conflicts leave the mailbox
@@ -350,12 +405,50 @@ choose canonical identities or source paths. Foreground replies can continue
 during extraction; snapshots, workspace replacement, fence loss and shutdown
 abort and join the exact owned children. Cancellation retains durable work.
 
+Extraction excludes provider branding, stock illustrations, generic education,
+example results and boilerplate advice. A handout topic is not evidence of a
+member diagnosis, procedure or treatment. Explicit member findings, orders and
+counseling remain eligible, including clinical scans on branded pages. Inspected
+education-only sources produce no proposed facts and do not count as incomplete
+clinical coverage. Ordinary imports retain original source bytes; embedded
+decorative assets are not extracted into separate canonical records.
+
+An explicitly authorized `minimizeClinicalDocumentImages` repair may omit exact
+embedded image payload digests already reviewed as nonclinical from eligible,
+linked HTML attachments. It rejects inline FHIR copies, conflicting manifest
+bindings, unknown requested digests, lossy UTF-8, and changed extracted clinical
+text. Other images remain. The immutable manifest and FHIR parent keep original
+identity. A bounded `murph.clinical-document-storage.v1` raw sidecar attests the
+original and stored byte digests/sizes, clinical text digest and omitted image
+digests. Core checks the exact raw preimage and atomically audits/publishes the
+replacement and receipt; source readers share its lock and reject corrupt or
+orphan evidence. Repeating the repair is a no-op.
+
+Fresh extraction binds its model input to the retained bytes. Existing frozen
+proposals, cache identity and canonical source facets retain original identity;
+parent eligibility and clinical text remain attested. Provider retries still
+validate original provider bytes, then reuse verified retained storage. One outer
+canonical write lock spans retained-byte selection through raw-batch publication,
+so a concurrent explicit repair cannot replace the selected preimage in that gap.
+Hosted enrichment preparation takes the same lock for its bounded source-file
+read, then releases it before rendering or provider work. It cannot mistake the
+repair's temporary quarantine interval for permanently missing evidence.
+This is
+an explicit repair API, without automatic classification or cleanup on import.
+Deploy compatible readers everywhere before repairing a hosted vault. Older
+readers fail closed afterward; restoring original evidence is required before
+rolling back below that reader version. Preserve the original source archive
+outside the repair copy.
+
 Validated proposals are frozen in private operational state. A separate bounded
 canonical action derives source identity and raw/page provenance, checks existing
 facts, applies accepted proposals, and reads back the writes before advancing.
 It makes no model call. The host checks the immutable parent status and uses
 the canonical vault timezone for overlap and readback. Derived facts retain
-parent revision authority; later corrections or withdrawals retire older
+parent revision authority. Undated typed notes use the parent clinical timestamp
+or stable source revision as their documentation timestamp while clinicalDate
+stays null. Reimporting an unchanged revision on a later day preserves the same
+canonical note and allows the enrichment queue to continue. Later corrections or withdrawals retire older
 extraction facets, and stale queued proposals become explicit holds. Eligible
 scanned documents retain a neutral canonical source receipt even when text
 parsing cannot recover content. Lab publication requires supported specimen
@@ -373,8 +466,9 @@ that every document or clinical fact was recovered.
 A member has at most twenty sources and one unfinished retrieval per source.
 Completed generations no longer impose a lifetime import limit. Each page batch
 has its existing bounded manifest and raw evidence; prior batches remain
-immutable and available to prove continuation. No raw evidence is pruned, so
-canonical references remain valid. Total retained history grows with completed
+immutable and available to prove continuation. Routine imports do not prune raw
+evidence. Explicit reviewed image omission preserves canonical references and
+clinical text through the storage contract above. Total retained history grows with completed
 checks; this is not a constant-storage design.
 Repeated unchanged facts use existing canonical idempotency; newer comparable
 corrections use existing revision handling. A fresh authorization increments

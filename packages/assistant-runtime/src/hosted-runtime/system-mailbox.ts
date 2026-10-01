@@ -312,13 +312,19 @@ export async function enqueueHostedSystemMailboxItem(input: {
   };
 }
 
+async function resolveAssistantAskCompletionCutoff(
+  cutoff: string | null | undefined | (() => Promise<string | null>),
+): Promise<string | null> {
+  return (typeof cutoff === "function" ? await cutoff() : cutoff) ?? null;
+}
+
 export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
   pendingOnly?: boolean;
   excludedRouteActions?: readonly HostedSystemMailboxRouteAction[];
   allowedMailboxDedupeKeyPrefixes?: readonly string[] | null;
   allowedRouteActions?: readonly HostedSystemMailboxRouteAction[] | null;
   allowedWakeKinds?: readonly HostedExecutionSystemWake["kind"][] | null;
-  assistantAskCompletionOccurredBefore?: string | null;
+  assistantAskCompletionOccurredBefore?: string | null | (() => Promise<string | null>);
   executionContext?: AssistantExecutionContext | null;
   now?: () => string;
   operatorHomeRoot?: string | null;
@@ -335,8 +341,26 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
     input,
     "assistantAskCompletionOccurredBefore",
   );
-  const assistantAskCompletionOccurredBefore =
-    input.assistantAskCompletionOccurredBefore ?? null;
+  const matchesSelection = (item: HostedSystemMailboxPendingItem) =>
+    !input.excludedRouteActions?.includes(item.routeAction)
+    && (input.allowedRouteActions?.includes(item.routeAction)
+      ?? item.routeAction !== "run-assistant-ask")
+    && (input.allowedMailboxDedupeKeyPrefixes == null
+      || input.allowedMailboxDedupeKeyPrefixes.some((prefix) =>
+        item.mailboxDedupeKey.startsWith(prefix)))
+    && (input.allowedWakeKinds == null
+      || input.allowedWakeKinds.includes(item.wake.kind));
+  // A negative snapshot only ends this pass. Later imports remain queued; a
+  // positive snapshot must still be re-read and claimed under the write lock.
+  const snapshot = await readHostedSystemMailboxState(input.vaultRoot);
+  if (!snapshot.pending.some(matchesSelection)) {
+    return null;
+  }
+  // Resolve conversation chronology only for a nonempty selection, and keep
+  // those input-file reads outside the shared write critical section.
+  const assistantAskCompletionOccurredBefore = await resolveAssistantAskCompletionCutoff(
+    input.assistantAskCompletionOccurredBefore,
+  );
   const selection = await updateHostedSystemMailboxState<
     HostedSystemMailboxPreparationSelection | null
   >(
@@ -352,33 +376,14 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
           now: startedAt,
           state,
         });
-      const eligibleItemIds = new Set(admissionState.pending.filter((item) =>
-        !input.excludedRouteActions?.includes(item.routeAction)
-        && (
-          input.allowedRouteActions?.includes(item.routeAction)
-          ?? item.routeAction !== "run-assistant-ask"
-        )
-        && (
-          input.allowedMailboxDedupeKeyPrefixes == null
-          || input.allowedMailboxDedupeKeyPrefixes.some((prefix) =>
-            item.mailboxDedupeKey.startsWith(prefix)
-          )
-        )
-        && (
-          input.allowedWakeKinds == null
-          || input.allowedWakeKinds.includes(item.wake.kind)
-        )
-        && (
-          item.wake.kind !== "assistant.ask.completed"
-          || !hasAssistantAskCompletionCutoff
-          || (
-            assistantAskCompletionOccurredBefore !== null
-            && hostedSystemMailboxTimestampPrecedes(
-              item.occurredAt,
-              assistantAskCompletionOccurredBefore,
-            )
-          )
-        )
+      const candidates = admissionState.pending.filter(matchesSelection);
+      const eligibleItemIds = new Set(candidates.filter((item) =>
+        item.wake.kind !== "assistant.ask.completed"
+        || !hasAssistantAskCompletionCutoff
+        || (assistantAskCompletionOccurredBefore !== null
+          && hostedSystemMailboxTimestampPrecedes(
+            item.occurredAt, assistantAskCompletionOccurredBefore,
+          ))
       ).map((item) => item.itemId));
       if (eligibleItemIds.size === 0) {
         return { result: null, write: false };
@@ -1011,7 +1016,7 @@ export async function recordHostedSystemMailboxItemAfterCheckpoint(input: {
       vaultShareProjectionResult: input.vaultShareProjectionResult,
       vaultRoot: input.vaultRoot,
     });
-    const completionRetentionAt = await finalizeHostedDeviceSyncMailboxAfterCheckpoint({
+    const completion = await finalizeHostedDeviceSyncMailboxAfterCheckpoint({
       acceptedInCurrentAdmission:
         input.deviceSyncCompletionAcceptedInCurrentAdmission === true,
       item: input.item,
@@ -1022,7 +1027,7 @@ export async function recordHostedSystemMailboxItemAfterCheckpoint(input: {
     const { dirtyRemainderDiscovered, retainUntil } = resolveHostedDeviceSyncDirtyRemainderRetention({
       item: input.item,
       nextDirtyWakeAt: recordResult.nextWakeAt,
-      retainUntil: completionRetentionAt,
+      retainUntil: completion.retainUntil,
       stillDirty: recordResult.stillDirty,
     });
     const immediateDirtyContinuationCanProgress = retainUntil !== null
@@ -1039,6 +1044,7 @@ export async function recordHostedSystemMailboxItemAfterCheckpoint(input: {
       });
     } else {
       await removeHostedSystemMailboxPendingItemIfCurrent({
+        completedDeviceSyncWake: completion.completedWake,
         item: input.item,
         vaultRoot: input.vaultRoot,
       });
@@ -1227,11 +1233,14 @@ async function finalizeHostedDeviceSyncMailboxAfterCheckpoint(input: {
   runtime: HostedSystemMailboxRuntime;
   signal?: AbortSignal | null;
   stillDirty: boolean;
-}): Promise<string | null> {
+}): Promise<{
+  retainUntil: string | null;
+  completedWake?: Extract<HostedExecutionSystemWake, { kind: "device-sync.wake" }>;
+}> {
   const retainUntil = resolveHostedDeviceSyncMailboxRetentionAt(input.item);
   const checkpointedWake = resolveHostedDeviceSyncCheckpointedWake(input.item);
   if (!input.acceptedInCurrentAdmission || !checkpointedWake || input.stillDirty) {
-    return retainUntil;
+    return { retainUntil };
   }
 
   const deviceSyncPort = input.runtime.platform.deviceSyncPort;
@@ -1246,7 +1255,9 @@ async function finalizeHostedDeviceSyncMailboxAfterCheckpoint(input: {
     wake: checkpointedWake,
   });
   // Cadence publication never completes the future jobs carried by this owner.
-  return isHostedDeviceSyncCompletionFenceWake(checkpointedWake) ? null : retainUntil;
+  return isHostedDeviceSyncCompletionFenceWake(checkpointedWake)
+    ? { retainUntil: null, completedWake: checkpointedWake }
+    : { retainUntil };
 }
 
 function hostedDeviceSyncRetainedWakeHasCapacity(

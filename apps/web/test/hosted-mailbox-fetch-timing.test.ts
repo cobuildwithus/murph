@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { HOSTED_EXECUTION_TIMESTAMP_HEADER } from "@murphai/hosted-execution/contracts";
 import { runWithHostedMailboxFetchTiming } from "../src/lib/hosted-mailbox/fetch-timing";
-import { recordPrismaOperationTiming, startPrismaPoolAcquisitionTiming } from "../src/lib/prisma-operation-timing";
+import { recordPrismaOperationTiming, startPrismaPoolAcquisitionTiming, startPrismaQueryTiming } from "../src/lib/prisma-operation-timing";
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -16,6 +16,7 @@ describe("mailbox fetch timing", () => {
   it("separates transport/startup age, phases, pool acquisition and query time without payloads", async () => {
     const log = vi.spyOn(console, "info").mockImplementation(() => {});
     vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-09-21T12:00:02.000Z"));
+    const uptime = vi.spyOn(process, "uptime").mockReturnValue(42);
     let clock = 0;
     vi.spyOn(performance, "now").mockImplementation(() => clock);
     const response = await runWithHostedMailboxFetchTiming(request(), async timing => {
@@ -23,7 +24,10 @@ describe("mailbox fetch timing", () => {
       const acquired = startPrismaPoolAcquisitionTiming({ idleConnections: 0, totalConnections: 0, waitingRequests: 0 });
       clock = 410;
       acquired?.();
-      recordPrismaOperationTiming("$queryRaw", 420);
+      const queried = startPrismaQueryTiming();
+      clock = 420;
+      queried?.(false);
+      recordPrismaOperationTiming("$queryRaw", 420, 0);
       clock = 430;
       timing.authenticated();
       timing.start("transaction_acquire");
@@ -32,6 +36,7 @@ describe("mailbox fetch timing", () => {
       clock = 700;
       timing.start("mailbox");
       clock = 705;
+      uptime.mockReturnValue(43);
       return "response";
     });
     expect(response).toBe("response");
@@ -39,8 +44,11 @@ describe("mailbox fetch timing", () => {
     expect(log.mock.calls[0]?.[1]).toMatchObject({
       event: "hosted-mailbox.fetch.timing", completed: true, failedPhase: null,
       signedRequestToHandlerMs: 2000, totalMs: 705,
+      processUptimeMs: 42_000, timingModuleAgeMs: 0,
       phaseMs: { authentication: 430, transaction_acquire: 20, authority: 250, mailbox: 5 },
       poolAcquisitionCount: 1, poolAcquireMs: [400], dbOperationCount: 1, dbTotalMs: 420,
+      dbOperationStartMs: [0], poolAcquireStartMs: [10],
+      dbQueryStartMs: [410], dbQueryMs: [10], dbQueryFailed: [false], dbQueryCount: 1,
     });
     expect(JSON.stringify(log.mock.calls)).not.toContain("private");
   });

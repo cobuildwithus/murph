@@ -1,4 +1,8 @@
 import { COMPANION_HRV_RMSSD_RESOURCE } from "@murphai/contracts";
+import type { JunctionRequestTimeoutDiagnosticDetails } from "./types.ts";
+import { readSafeJunctionRequestTimeoutDiagnostics } from "./junction-request-timeout-diagnostics.ts";
+
+export { readSafeJunctionRequestTimeoutDiagnostics } from "./junction-request-timeout-diagnostics.ts";
 
 export { encodeJunctionReconcileProof, readJunctionReconcileProof } from "./junction-reconcile-proof.ts";
 
@@ -494,7 +498,7 @@ export interface HostedExecutionDeviceSyncRuntimeConnectionSourceUpdate {
   lastDataAt?: string | null;
 }
 
-export interface HostedExecutionDeviceSyncRuntimeFailureDiagnosticDetails {
+export interface HostedExecutionDeviceSyncRuntimeFailureDiagnosticDetails extends JunctionRequestTimeoutDiagnosticDetails {
   failureCauseCode?: string;
   failureCauseName?: string;
   failureErrorCause?: string;
@@ -2329,6 +2333,7 @@ function parseHostedExecutionDeviceSyncRuntimeFailureDiagnostic(
     details: parseHostedExecutionDeviceSyncRuntimeFailureDiagnosticDetails(
       record.details,
       `${label}.details`,
+      code,
     ),
     retryable: requireBoolean(record.retryable, `${label}.retryable`),
   };
@@ -2337,6 +2342,7 @@ function parseHostedExecutionDeviceSyncRuntimeFailureDiagnostic(
 function parseHostedExecutionDeviceSyncRuntimeFailureDiagnosticDetails(
   value: unknown,
   label: string,
+  code: string,
 ): HostedExecutionDeviceSyncRuntimeFailureDiagnosticDetails {
   if (value === undefined || value === null) {
     return {};
@@ -2344,6 +2350,11 @@ function parseHostedExecutionDeviceSyncRuntimeFailureDiagnosticDetails(
 
   const record = requireObject(value, label);
   assertSupportedFields(record, label, [
+    "providerRequestTimeoutMs",
+    "providerRequestElapsedMs",
+    "providerRequestAttempt",
+    "providerRequestStage",
+    "providerResponseHeadersPresent",
     "failureCauseCode",
     "failureCauseName",
     "failureErrorCause",
@@ -2484,7 +2495,7 @@ function parseHostedExecutionDeviceSyncRuntimeFailureDiagnosticDetails(
     }
   }
 
-  return details;
+  return { ...details, ...readSafeJunctionRequestTimeoutDiagnostics(code, record) };
 }
 
 function assertHostedExecutionDeviceSyncRuntimeMutationFences(input: {

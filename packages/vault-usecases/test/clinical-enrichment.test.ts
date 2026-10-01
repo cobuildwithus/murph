@@ -288,7 +288,7 @@ describe("clinical document enrichment durable application", () => {
     await expect(persistClinicalEnrichmentProposals({ ...input, sourceSha256: input.sha256, page: 1, totalPages: 1, outputs: { labs: empty, history: empty, measurements: invalid } })).rejects.toThrow();
     await prepare(input);
     await writeFile(path.join(input.vaultRoot, input.rawRef), "altered");
-    await expect(applyClinicalEnrichmentProposals(input)).rejects.toThrow("size mismatch");
+    await expect(applyClinicalEnrichmentProposals(input)).rejects.toThrow("integrity mismatch");
     expect(await listCanonicalEntities(input.vaultRoot, { family: "event", limit: 10 })).toHaveLength(0);
   });
 

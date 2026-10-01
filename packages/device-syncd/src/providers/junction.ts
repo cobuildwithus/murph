@@ -664,34 +664,32 @@ const JUNCTION_SPARSE_CALENDAR_AGGREGATE_RESOURCE_SET = new Set<string>([
   "mindfulness_minutes",
 ]);
 const TIMESERIES_HOUR_MS = 60 * 60_000;
-// Three single-attempt pages allow ordinary pagination while capping provider
-// wait at 24 seconds, below the hosted job's 45-second outer budget.
+// Three single-attempt pages allow ordinary pagination with a 12-second cap
+// per request. This is an inner bound, not a promise about the outer job budget.
 const JUNCTION_FULL_JOB_TIMESERIES_COLLECTION_WORK_LIMIT = Object.freeze({
   maxAttemptsPerPage: 1,
   maxPages: 3,
-  requestTimeoutMs: 8_000,
+  requestTimeoutMs: 12_000,
 } satisfies JunctionCollectionWorkLimit);
 // Most hosted summary continuation units contain one resource. Match the
-// bounded timeseries contract so a complete three-page unit remains below the
-// 45-second outer maintenance budget and can persist its next cursor.
+// bounded timeseries requests; foreground cancellation still takes precedence.
 const JUNCTION_FULL_JOB_SUMMARY_COLLECTION_WORK_LIMIT = Object.freeze({
   maxAttemptsPerPage: 1,
   maxPages: 3,
-  requestTimeoutMs: 8_000,
+  requestTimeoutMs: 12_000,
 } satisfies JunctionCollectionWorkLimit);
-// Sleep summaries and sleep cycles share canonical stage ownership, so they
-// must be normalized in one import. Keep their combined worst-case provider
-// wait at 30 seconds to leave room for projection/import inside the hosted
-// worker's 45-second outer maintenance budget.
+// Sleep summaries and sleep cycles share canonical stage ownership and must
+// be normalized in one import. Keep a smaller per-request cap for this coupled
+// unit without assuming a fixed outer maintenance budget.
 const JUNCTION_FULL_JOB_COUPLED_SUMMARY_COLLECTION_WORK_LIMIT = Object.freeze({
   maxAttemptsPerPage: 1,
   maxPages: 3,
-  requestTimeoutMs: 5_000,
+  requestTimeoutMs: 7_500,
 } satisfies JunctionCollectionWorkLimit);
 const JUNCTION_FULL_JOB_INVENTORY_COLLECTION_WORK_LIMIT = Object.freeze({
   maxAttemptsPerPage: 1,
   maxPages: 1,
-  requestTimeoutMs: 8_000,
+  requestTimeoutMs: 12_000,
 } satisfies JunctionCollectionWorkLimit);
 const JUNCTION_TEMPORAL_AUTHORITY_LAG_MS = TIMESERIES_CHUNK_MS;
 const JUNCTION_TEMPORAL_AUTHORITY_RESOURCES = new Set([
@@ -1928,7 +1926,7 @@ export function createJunctionDeviceSyncProvider(
     const baseTimeseriesWindowStart = job.kind === "backfill"
       ? maxIsoTimestamp(window.windowStart, subtractDays(window.windowEnd, timeseriesBackfillDays))
       : window.windowStart;
-    if (job.kind !== "backfill" || summaryHasFetchedRecords) {
+    if (summaryHasFetchedRecords) {
       await commitPreparedJunctionCanonicalImport(
         context,
         preparedSummaryImport,
@@ -4457,23 +4455,27 @@ export function createJunctionDeviceSyncProvider(
       }
     }
 
-    const preparedSummaryImport = await prepareJunctionImportSnapshot(
-      input.context,
-      summaries,
-      input.sourceProviders,
-    );
-    await commitPreparedJunctionCanonicalImport(
-      input.context,
-      preparedSummaryImport,
-      {
-        importedAt: input.summaryWindow.windowEnd,
-        windowStart: input.summaryWindow.windowStart,
-        windowEnd: input.summaryWindow.windowEnd,
-        summaries: preparedSummaryImport.snapshots,
-        timeseries: {},
-      },
-      input.context.now,
-    );
+    // Empty summaries have no canonical records or authoritative deletions.
+    // The continuation is admitted afresh; there is no import to authorize here.
+    if (hasJunctionSnapshotRecords(summaries)) {
+      const preparedSummaryImport = await prepareJunctionImportSnapshot(
+        input.context,
+        summaries,
+        input.sourceProviders,
+      );
+      await commitPreparedJunctionCanonicalImport(
+        input.context,
+        preparedSummaryImport,
+        {
+          importedAt: input.summaryWindow.windowEnd,
+          windowStart: input.summaryWindow.windowStart,
+          windowEnd: input.summaryWindow.windowEnd,
+          summaries: preparedSummaryImport.snapshots,
+          timeseries: {},
+        },
+        input.context.now,
+      );
+    }
 
     const nextResource = eligibleUnits[cursorIndex >= 0 ? cursorIndex + 1 : 1]?.[0] ?? null;
     const sourceProviderSlug = normalizeProviderSlug(
@@ -10258,7 +10260,8 @@ function isFullJobTimeseriesContinuation(job: DeviceSyncJobRecord): boolean {
 
 function isJunctionTimeseriesWindowTooLarge(error: unknown): boolean {
   return isDeviceSyncError(error)
-    && error.code === "JUNCTION_API_WINDOW_TOO_LARGE";
+    && (error.code === "JUNCTION_API_WINDOW_TOO_LARGE"
+      || error.code === "JUNCTION_API_RECORD_LIMIT");
 }
 
 function resolveNextFullJobTimeseriesContinuation(input: {

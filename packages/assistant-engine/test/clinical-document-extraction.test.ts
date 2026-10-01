@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 
 import { afterEach, expect, it, vi } from 'vitest'
+import { clinicalFhirResourceText, clinicalFhirResourceExtractionText } from '@murphai/clinical-records'
 import { MURPH_MEMBER_READ_PERMISSION_PROFILE } from '@murphai/hosted-execution/assistant-permissions'
 
 const extractionMocks = vi.hoisted(() => ({
@@ -109,12 +110,18 @@ it('runs one confined member extraction leaf with no effects, delegation or sour
   expect(turn.baseInstructions).toContain('Every proposed record must include dateBasis')
   expect(turn.baseInstructions).toContain('literal supporting date text in dateEvidence')
   expect(turn.baseInstructions).toContain('Never use the current date, retrieval time, filename, or source revision as a clinical date')
-  expect(turn.baseInstructions).toContain('omit the undated fact and return blocked')
+  expect(turn.baseInstructions).toContain('preserve an unsupported clinical date as null with dateBasis unknown')
+  expect(turn.baseInstructions).toContain('Never use source dateBasis for clinicalFact notes')
+  expect(turn.baseInstructions).not.toContain('omit the undated fact and return blocked')
   expect(turn.baseInstructions).toContain('Keep supported records when another record is blocked')
   expect(turn.baseInstructions).toContain('Inspect every supplied rendered page')
   expect(turn.baseInstructions).toContain('unsupported qualifier is clinically material')
   expect(turn.baseInstructions).toContain('heart-rate (including pulse)')
   expect(turn.baseInstructions).toContain('negative medication order is recoverable history')
+  expect(turn.baseInstructions).toContain('generic patient education, example results and boilerplate instructions are not member clinical facts')
+  expect(turn.baseInstructions).toContain('explicitly attributes it to this member')
+  expect(turn.baseInstructions).toContain('actual member scans and reports even when the same page contains branding or education')
+  expect(turn.baseInstructions).toContain('return complete with no records')
   expect(turn.baseInstructions).not.toContain('authorized Murph group')
   expect(turn.prompt).toContain(JSON.stringify(input.extractedText))
   expect(turn.outputSchema).toEqual(expect.any(Object))
@@ -338,4 +345,53 @@ it('does not spend a correction turn on supported source dates or omitted undate
   extractionMocks.executeTurn.mockResolvedValueOnce({ finalMessage: JSON.stringify(output) })
   await expect(executeClinicalDocumentExtraction(input)).resolves.toEqual(output)
   expect(extractionMocks.executeTurn).toHaveBeenCalledTimes(1)
+})
+
+it('binds one structured assignment to its exact resource and combined schema', async () => {
+  const input = await fixture()
+  const resource = { resourceType: 'Observation', id: 'selected', valueString: 'Pulse 73 bpm.' }
+  const text = clinicalFhirResourceText(resource)
+  const bytes = JSON.stringify({ resourceType: 'Bundle', entry: [{ resource }, { resource: { resourceType: 'Observation', id: 'neighbor', valueString: 'DO NOT EXTRACT THIS' } }] })
+  await writeFile(input.documentPath, bytes)
+  input.family = 'all'
+  input.source = { ...input.source, mediaType: 'application/fhir+json', sha256: createHash('sha256').update(bytes).digest('hex'),
+    resource: { resourceType: 'Observation', resourceId: 'selected', sha256: createHash('sha256').update(text).digest('hex') } }
+  input.extractedText = clinicalFhirResourceExtractionText(resource)
+  extractionMocks.executeTurn.mockResolvedValue({ finalMessage: JSON.stringify({ status: 'complete', records: [], reason: null }) })
+  await executeClinicalDocumentExtraction(input)
+  expect(extractionMocks.executeTurn).toHaveBeenCalledOnce()
+  const turn = extractionMocks.executeTurn.mock.calls[0]![0]
+  expect(turn.threadConfig['features.shell_tool']).toBe(false)
+  expect(turn.dynamicTools).toEqual([])
+  expect(turn.baseInstructions).toContain('Do not use tools for this assignment')
+  expect(turn.baseInstructions).toContain('Family all means extract labs, measurements and history together')
+  expect(turn.baseInstructions).toContain('one contiguous substring of the decoded extractedText string')
+  expect(turn.baseInstructions).toContain('do not paraphrase, join separate fields')
+  expect(turn.baseInstructions).toContain('decoding your response reproduces the source substring')
+  expect(turn.baseInstructions).toContain('including the value and unit for a measurement')
+  expect(turn.baseInstructions).toContain('copy code and codeSystem together from the same source Coding object')
+  expect(turn.baseInstructions).toContain('preserve the question and answer meaning')
+  expect(JSON.stringify(turn)).not.toContain('DO NOT EXTRACT THIS')
+  extractionMocks.executeTurn.mockClear()
+  extractionMocks.executeTurn.mockResolvedValue({ finalMessage: JSON.stringify({ status: 'complete', records: [{ ...labRecord, dateBasis: 'unknown' }] }) })
+  expect((await executeClinicalDocumentExtraction(input)).status).toBe('blocked')
+  expect(extractionMocks.executeTurn).toHaveBeenCalledOnce()
+  extractionMocks.executeTurn.mockClear()
+  await expect(executeClinicalDocumentExtraction({ ...input, extractedText: 'Wrong resource' })).rejects.toThrow('assignment integrity')
+  expect(extractionMocks.executeTurn).not.toHaveBeenCalled()
+})
+
+it('corrects only a typed fact date and keeps long-text correction shell-free', async () => {
+  const input = await fixture()
+  const payload = { kind: 'note', occurredAt: '2026-09-01T12:00:00.000Z', title: 'Source finding', note: 'Source finding',
+    clinicalFact: { category: 'report-finding', label: 'Source finding', subject: 'member', clinicalDate: '2020-01-01', statement: 'Source finding' } }
+  extractionMocks.executeTurn
+    .mockResolvedValueOnce({ finalMessage: JSON.stringify({ status: 'complete', records: [{ payload, dateBasis: 'document', dateEvidence: '2026-09-01' }] }) })
+    .mockResolvedValueOnce({ finalMessage: JSON.stringify({ corrections: [{ recordIndex: 0, dateBasis: 'unknown', occurredAt: null, dateEvidence: null }] }) })
+  const output = await executeClinicalDocumentExtraction({ ...input, family: 'history', textWindow: { index: 1, total: 2 } })
+  expect(output.records[0]).toMatchObject({ dateBasis: 'unknown', payload: { ...payload, clinicalFact: { ...payload.clinicalFact, clinicalDate: null } } })
+  expect(extractionMocks.executeTurn).toHaveBeenCalledTimes(2)
+  for (const [turn] of extractionMocks.executeTurn.mock.calls) {
+    expect(turn.threadConfig['features.shell_tool']).toBe(false)
+  }
 })

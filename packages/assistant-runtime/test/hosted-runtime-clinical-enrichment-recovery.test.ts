@@ -33,7 +33,9 @@ it.each([
       { ...date, payload: { kind: "measurement", occurredAt: at, title: "Pulse", note: "Pulse reading.", measurements: [{ metric: "heart-rate", value: 72, unit: "bpm" }] } },
       { ...date, payload: { kind: "measurement", occurredAt: "2026-07-10T12:00:00Z", title: "Unsupported date", note: "Pulse reading.", measurements: [{ metric: "heart-rate", value: 73, unit: "bpm" }] } },
     ] },
-    history: { status: "complete", records: [{ ...date, payload: { kind: "note", occurredAt: at, title: "Routine review", note: "Routine review." } }] },
+    history: { status: "complete", records: [{ ...date, excerpt: "Routine review.", payload: { kind: "note", occurredAt: at, title: "Routine review", note: "Routine review.",
+      clinicalFact: { category: "encounter-history", label: "Routine review", subject: "member", clinicalDate: at, statement: "Routine review." },
+    } }] },
   };
   const state = {
     readNextClinicalEnrichment: vi.fn().mockResolvedValue({ status: "extract", jobId: "a".repeat(64), page: 1, timeZone: "UTC", documentPath,

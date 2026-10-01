@@ -1812,7 +1812,8 @@ test("local Junction workers exclude a disconnected source from production-norma
             return createJsonResponse({
               data: [
                 {
-                  id: "garmin-activity-1",
+                  // Opaque identities may contain digits from a disconnected measurement.
+                  id: "garmin-activity-1234",
                   connectionId: "provider-garmin-1",
                   observedAt: "2026-07-27T12:00:00.000Z",
                   steps: 4321,
@@ -1925,8 +1926,8 @@ test("local Junction workers exclude a disconnected source from production-norma
     assert.equal(await service.runWorkerOnce(), null);
     assert.equal(importerInputs.length, 4);
     const durableInput = JSON.stringify(importerInputs);
-    assert.match(durableInput, /garmin-activity-1|garmin-blood-oxygen-1/u);
-    assert.doesNotMatch(durableInput, /fitbit|provider-fitbit-1|1234|"value":91/u);
+    assert.match(durableInput, /garmin-activity-1234|garmin-blood-oxygen-1/u);
+    assert.doesNotMatch(durableInput, /fitbit|provider-fitbit-1|"steps":1234[,}]|"value":91[,}]/u);
 
     const durableResults = importerResults as Array<{
       authoritativeEventSets?: unknown[];
@@ -15625,4 +15626,49 @@ test.each([false, true])("device sync credits continuation progress only after o
     const jobs = readJobsForAccountForTesting(store, connected.account.id);
     assert.equal(jobs.some(job => job.kind === "resource"), commitSucceeds);
   } finally { close(); }
+});
+
+test.each([
+  {
+    label: "valid timeout", code: "JUNCTION_API_REQUEST_TIMEOUT",
+    details: { providerRequestTimeoutMs: 12_000, providerRequestElapsedMs: 12_004,
+      providerRequestAttempt: 1, providerRequestStage: "response_body", providerResponseHeadersPresent: true },
+    expected: { providerRequestTimeoutMs: 12_000, providerRequestElapsedMs: 12_004,
+      providerRequestAttempt: 1, providerRequestStage: "response_body", providerResponseHeadersPresent: true },
+  },
+  {
+    label: "malformed timeout", code: "JUNCTION_API_REQUEST_TIMEOUT",
+    details: { providerRequestTimeoutMs: Infinity, providerRequestElapsedMs: -1,
+      providerRequestAttempt: 101, providerRequestStage: "synthetic-private-stage", providerResponseHeadersPresent: "true" },
+    expected: {},
+  },
+  {
+    label: "unrelated provider failure", code: "WHOOP_TOKEN_REQUEST_FAILED",
+    details: { providerRequestTimeoutMs: 12_000, providerRequestElapsedMs: 12_004,
+      providerRequestAttempt: 1, providerRequestStage: "response_body", providerResponseHeadersPresent: true },
+    expected: {},
+  },
+])("device sync service scopes bounded Junction timeout diagnostics: $label", async ({ code, details, expected }) => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-timeout-diagnostics");
+  const { service, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    config: { vaultRoot, publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite") },
+    providers: [createFakeProvider({ async executeJob() {
+      throw deviceSyncError({ code, message: "Synthetic request timeout", retryable: true,
+        httpStatus: 504, details: { ...details, requestUrl: "https://example.test/private-synthetic-resource" } });
+    } })],
+  });
+  try {
+    const begin = await service.startConnection({ provider: "demo" });
+    await service.handleOAuthCallback({ provider: "demo", state: begin.state, code: "synthetic-timeout" });
+    await service.runWorkerOnce();
+    const diagnostic = service.listJobFailureDiagnostics()[0];
+    assert.ok(diagnostic);
+    assert.equal(diagnostic.code, code);
+    assert.deepEqual(diagnostic.details, { providerHttpStatus: 504, ...expected });
+    assert.equal(JSON.stringify(diagnostic).includes("private-synthetic-resource"), false);
+  } finally {
+    close();
+  }
 });

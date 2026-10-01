@@ -1,5 +1,9 @@
 import "server-only";
 
+import {
+  evaluatePushPrimarySourceStaleness,
+  isSourceRecoveryNoticeEligible,
+} from "@murphai/device-syncd/source-staleness";
 import { resolveDeviceConnectSourceById } from "@murphai/device-syncd/connect-config";
 import { Prisma, type PrismaClient } from "@prisma/client";
 import {
@@ -456,6 +460,8 @@ interface HostedGroupSharedDeviceConnectionSnapshot {
   provider: string;
   setupPhase: string | null;
   sources: Array<{
+    firstSeenAt: Date;
+    lastDataAt: Date | null;
     sourceProviderSlug: string;
     status: string;
     updatedAt: Date;
@@ -958,6 +964,8 @@ export async function readHostedGroupSharedDataByRuntimeMemberId(input: HostedGr
                   { sourceProviderSlug: "asc" },
                 ],
                 select: {
+                  firstSeenAt: true,
+                  lastDataAt: true,
                   sourceProviderSlug: true,
                   status: true,
                   updatedAt: true,
@@ -1332,8 +1340,9 @@ function buildHostedGroupSharedDeviceSyncSources(
       ? connection.sources.map((source) => ({
           label: formatHostedDeviceSyncSourceLabel(source.sourceProviderSlug),
           status: resolveHostedGroupSharedSourceStatus(
-            source.status,
+            source,
             connectionStatus,
+            now,
           ),
           updatedAt: source.updatedAt,
         }))
@@ -1402,14 +1411,24 @@ function resolveHostedGroupSharedConnectionStatus(
 }
 
 function resolveHostedGroupSharedSourceStatus(
-  sourceStatus: string,
+  source: HostedGroupSharedDeviceConnectionSnapshot["sources"][number],
   connectionStatus: HostedVaultShareDeviceSyncSourceStatus,
+  now: Date,
 ): HostedVaultShareDeviceSyncSourceStatus {
   if (connectionStatus !== "connected") return connectionStatus;
-  if (sourceStatus === "connected") return "connected";
-  if (sourceStatus === "disconnected") return "disconnected";
-  if (sourceStatus === "reauthorization_required") return "needs-reconnect";
-  return "needs-attention";
+  if (source.status === "disconnected") return "disconnected";
+  if (source.status === "reauthorization_required") return "needs-reconnect";
+  if (source.status !== "connected") return "needs-attention";
+  const evidence = {
+    firstSeenAt: source.firstSeenAt.toISOString(),
+    lastDataAt: source.lastDataAt?.toISOString() ?? null,
+    sourceProviderSlug: source.sourceProviderSlug,
+    status: "connected" as const,
+  };
+  const observedAt = now.toISOString();
+  const stalled = evaluatePushPrimarySourceStaleness({ now: observedAt, sources: [evidence] }).length > 0
+    || isSourceRecoveryNoticeEligible({ ...evidence, now: observedAt });
+  return stalled ? "needs-attention" : "connected";
 }
 
 function latestDate(left: Date, right: Date): Date {

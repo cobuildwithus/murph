@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { InboxShowResult } from '@murphai/operator-config/inbox-cli-contracts'
@@ -23,7 +24,7 @@ const runtimeMocks = vi.hoisted(() => ({
   uploadLinqAttachment: vi.fn(),
 }))
 
-const mp3Bytes = new Uint8Array([0xff, 0xfb, 0x90, 0x64])
+const mp3Bytes = new Uint8Array(readFileSync(new URL('../../../fixtures/generated-audio/speech.mp3', import.meta.url)))
 
 const NUTRITION_CARD: AssistantResponseCard = {
   kind: 'daily_nutrition',
@@ -2972,12 +2973,10 @@ describe('assistant channels runtime seam', () => {
       chatId: 'chat_private_image',
       idempotencyKey: null,
       media: [{ attachmentId: 'attachment_private_image' }],
-      message: `Your progress card.\n\n${fallbackDescription}`,
+      message: 'Your progress card.',
       replyToMessageId: null,
     })
-    expect(request?.message.match(
-      /Direction context unavailable · mover sentiment is neutral\./gu,
-    )).toHaveLength(1)
+    expect(request?.message).not.toContain(fallbackDescription)
   })
 
   it.each([
@@ -3055,7 +3054,7 @@ describe('assistant channels runtime seam', () => {
 
     await expect(sendLinqMessage({
       media: [{
-        alt: 'x'.repeat(9_997),
+        alt: 'A private chart description that is not part of the message.',
         contentType: 'image/png',
         filename: 'exact-limit.png',
         kind: 'vault_image',
@@ -3064,7 +3063,7 @@ describe('assistant channels runtime seam', () => {
         sizeBytes: bytes.byteLength,
         source: 'gpt-image-2',
       }],
-      message: 'm',
+      message: 'm'.repeat(10_000),
       target: 'chat_exact_text_limit',
       targetKind: 'thread',
     }, {
@@ -3080,7 +3079,33 @@ describe('assistant channels runtime seam', () => {
       .toHaveLength(10_000)
   })
 
-  it('keeps an image description exactly once when the message already contains it', async () => {
+  it.each(['Here is the diagram.', ''])('sends public images without appending alt text to %j', async (message) => {
+    runtimeMocks.sendLinqChatMessage.mockResolvedValue({
+      message: { id: 'message_public_image' },
+    })
+
+    await sendLinqMessage({
+      media: [{
+        alt: 'A labeled diagram with three connected boxes.',
+        kind: 'image',
+        source: 'test',
+        url: 'https://cdn.example.test/diagram.png',
+      }],
+      message,
+      target: 'chat_public_image',
+    }, {
+      env: { LINQ_API_TOKEN: 'linq-token' },
+    })
+
+    expect(runtimeMocks.sendLinqChatMessage).toHaveBeenCalledTimes(1)
+    expect(runtimeMocks.sendLinqChatMessage.mock.calls[0]?.[0]).toMatchObject({
+      chatId: 'chat_public_image',
+      media: [{ url: 'https://cdn.example.test/diagram.png' }],
+      message,
+    })
+  })
+
+  it('preserves image descriptions explicitly included in the authored message', async () => {
     const alternative = 'Direction context unavailable · mover sentiment is neutral.'
     runtimeMocks.sendLinqChatMessage.mockResolvedValue({
       message: { id: 'message_accessible_image' },

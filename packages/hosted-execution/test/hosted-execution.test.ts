@@ -820,8 +820,10 @@ describe("hosted execution coverage gaps", () => {
       "./hosted-email",
       "./labs",
       "./legacy-dashboard-replica",
+      "./observability",
       "./orchestration-control",
       "./parsers",
+      "./parsers/mailbox",
       "./pending-group-setup",
       "./phone-calls",
       "./physical-notes",
@@ -843,11 +845,6 @@ describe("hosted execution coverage gaps", () => {
       "./workspace-snapshot-store",
       "./workspace-snapshot-v2",
     ]);
-    expect(
-      exportKeys.filter(
-        (key) => key.startsWith("./") && key.slice(2).includes("/"),
-      ),
-    ).toEqual([]);
     expect(exportKeys).not.toContain("./dispatch-ref");
     expect(exportKeys).not.toContain("./client");
     expect(exportKeys).not.toContain("./outbox-payload");
@@ -898,6 +895,7 @@ describe("hosted execution coverage gaps", () => {
       false,
     );
     expect(assistantModelModule.HOSTED_ASSISTANT_PRODUCT_MODELS).toEqual([
+      "gpt-6.1-sol",
       "gpt-6-sol",
       "gpt-6-luna",
       "gpt-5.6-luna",

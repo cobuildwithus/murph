@@ -6,10 +6,12 @@ This document covers the narrow Cloudflare deploy surface for hosted execution.
 - `apps/cloudflare` owns execution coordination, encrypted runtime blobs, the native runner container, and the public/internal execution routes described in [README.md](./README.md).
 - Private `cobuildwithus/murph-cloud` owns production/preview GitHub environments, the protected deployment workflow, and rollback operations. Public Murph retains the source, render helpers, and smoke contracts that workflow consumes, but no deploy workflow or production credentials.
 
-For supported Cloudflare API reads and historical logs, prefer `cf` using the
+Use `cf` by default for direct Cloudflare API operations, starting with
+`cf cli search "<action and resource type>"`; follow the
 [operational CLI guidance](./README.md#cli-access-for-operational-reads).
-Deployment continues through the reviewed, pinned Wrangler helpers below;
-changing diagnostic CLI preference does not migrate the deployment contract.
+The reviewed, pinned Wrangler deployment helpers below are an explicit exception
+until their staged Worker/Containers contract is migrated and tested. A bare
+`cf deploy` or `cf migrate` does not replace the protected deployment workflow.
 
 ## What The Deploy Flow Produces
 
@@ -1985,7 +1987,7 @@ Hosted assistant config:
 - `HOSTED_ASSISTANT_PROVIDER`; keep the fleet default `openai`. A per-member
   Venice selection arrives through the signed workspace projection rather than
   this deploy default.
-- `HOSTED_ASSISTANT_MODEL`; worker deploy preflight requires an explicit allowance-priced direct OpenAI model slug. Supported slugs include `gpt-6-sol`, `gpt-6-luna`, `gpt-6-astra`, `gpt-5.6-sol`, and `gpt-5.6-luna`. GPT-6 Sol is the managed OpenAI default. Production deploys require `HOSTED_ASSISTANT_REASONING_EFFORT=low`.
+- `HOSTED_ASSISTANT_MODEL`; worker deploy preflight requires an explicit allowance-priced direct OpenAI model slug. Supported slugs include `gpt-6.1-sol`, `gpt-6-sol`, `gpt-6-luna`, `gpt-6-astra`, `gpt-5.6-sol`, and `gpt-5.6-luna`. GPT-6.1 Sol is the managed OpenAI default. Production deploys require `HOSTED_ASSISTANT_REASONING_EFFORT=low`.
 - `HOSTED_ASSISTANT_APPROVAL_POLICY`
 - `HOSTED_ASSISTANT_REASONING_EFFORT`
 - `HOSTED_ASSISTANT_SANDBOX`
@@ -2320,7 +2322,7 @@ export HOSTED_R2_PRESIGN_BUCKET_NAME=hosted-execution-bundles-staging
 export HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID=cloudflare-automation:v1
 export HOSTED_CRYPTO_ENV=preview
 export HOSTED_ASSISTANT_PROVIDER=openai
-export HOSTED_ASSISTANT_MODEL=gpt-6-sol
+export HOSTED_ASSISTANT_MODEL=gpt-6.1-sol
 export HOSTED_ASSISTANT_REASONING_EFFORT=low
 
 # Set required secret-valued variables outside this snippet before running:
@@ -2349,11 +2351,11 @@ pnpm --dir apps/cloudflare runner:docker:base
 ```
 
 That image is prepared in the local Docker cache under the stable GHCR tag
-`ghcr.io/cobuildwithus/murph-cloudflare-runner-base:node24.14.1-codex0.156.1-live1`,
+`ghcr.io/cobuildwithus/murph-cloudflare-runner-base:node24.14.1-codex0.159.1-live1`,
 which is also the final app-layer Dockerfile default. Using the pullable GHCR
 name avoids BuildKit treating the prepared base as a Docker Hub `library/*`
 image during local Wrangler container builds.
-The base Dockerfile builds the CLI from the checksum-pinned Codex 0.156.1 source
+The base Dockerfile builds the CLI from the checksum-pinned Codex 0.159.1 source
 with `patches/codex-public-live.patch`. It keeps the same release's bundled
 Code Mode host and sandbox resources. The patch adds public API-key Live
 compatibility, owned-session shutdown, and opt-in app-server input ownership.
@@ -2368,7 +2370,10 @@ that exact binary before its final-image sandbox proof.
 
 To update the patch, retain the pinned release as its base, run the affected
 upstream tests, and run `pnpm --dir apps/cloudflare verify:codex-upstream-source`
-to verify applicability. Update the source revision and archive checksum
+to verify applicability. Codex 0.159.1 supplies the policy-aware websocket transport;
+the patch retains that transport and only adds the public Live wire adapter,
+client-managed input ownership, and owned-session finalization. It does not
+restore a separate model catalog or websocket stack. Update the source revision and archive checksum
 together when upgrading Codex, keep the npm helper version aligned, and rerun
 the exact-image compatibility and sandbox lane. Remove the patch and build
 stage once a verified upstream release provides this behavior. Cold native
@@ -2378,7 +2383,7 @@ rule. The protected deployment workflow must provide that cache before this
 patch is considered operationally ready; its current fresh-runner forced
 build would otherwise recompile Codex for each deployment.
 
-Codex CLI 0.156.1 supplies native Sol, Luna and Astra entries. Its bundled
+Codex CLI 0.159.1 supplies native Sol, Luna and Astra entries. Its bundled
 Sol/Luna entries match the former pinned launch supplement, which is removed
 along with its bundle staging and fingerprint input. The native bundled catalog
 is the sole model-entry source.
@@ -2389,6 +2394,11 @@ The saved `portable-responses-v1` custom-inference verification identity remains
 stable across this CLI upgrade because it describes the verified protocol,
 not the installed binary. Changing that identity requires separate compatibility
 handling for saved connections and mixed Web/Worker versions.
+Codex 0.158 broadens `httpConnectionFailed` to include unexpected HTTP statuses.
+Murph keeps permanent HTTP rejections terminal while preserving recovery for
+transport failures, timeouts, throttling, and server failures. The new
+`flexUnavailable` classification remains terminal; this upgrade does not add a
+higher-priced service-tier fallback.
 This upgrade changes the runner base fingerprint, but no Web/Worker payload or
 workspace snapshot schema. Build the new base and final runner together through
 the existing deploy path; version-fenced containers replace the old runtime.
@@ -2399,18 +2409,19 @@ proof. After deployment, verify `codexVersion` in runner smoke and bounded
 provider-start/resume error aggregates. Production deployment and any rollback
 remain separately authorized operations.
 It contains Node, Python 3 exposed as both `python3` and `python`, pinned `@openai/codex` with its bundled Linux sandbox resources, `jq`, `ripgrep`, `ffmpeg`, and PDF tooling from Poppler plus `file` and `qpdf`, but no app bundle, worker secrets, or local speech models.
-The pinned Sol/Luna launch catalog travels inside the runner bundle, including
-bundle-only CI and hosted-local build contexts, and participates in the runner
-source fingerprint. A catalog edit therefore invalidates a prepared bundle.
-Deploy the model-capable runner and allowance reader before the Web producer
-activates new model preferences/defaults; old consumers reject the new IDs.
+Before activating GPT-6.1 Sol defaults or scheduled replacements, deploy a
+compatibility stage that adds the new ID to Web allowance/model readers and
+runner catalogs while keeping existing producers on GPT-6 Sol. Then activate
+the new defaults and scheduled replacement map. Old readers reject the new ID;
+deploying the full Web or runner change first does not establish this compatibility
+stage. Replace warm native processes through the normal runner image rollout.
 Launch prices per million tokens are Sol $2 input / $10 output and Luna $0.10
 input / $0.50 output, with published cache and service-tier multipliers.
 Saved Terra preferences resolve to Sol; historical GPT-5.6 pricing stays readable.
 A rollback after new preferences are saved requires a reader that still accepts
 those IDs.
 
-The final app-layer image filters `codex debug models --bundled` to GPT-6 Sol/Luna, GPT-5.6 Sol/Luna, and the separately authorized GPT-6 Astra catalog, adds OpenAI flex service-tier support to each, forces mixed `tool_mode: code_mode`, validates the exact catalog with `jq`, and exposes it through `MURPH_HOSTED_CODEX_MODEL_CATALOG_JSON`. Hosted app-server turns can therefore keep the code executor, expose native `tool_search` for deferred dynamic tools, and send OpenAI `service_tier: flex`; individual tool `deferLoading` flags still keep broad schemas out of the initial model-visible surface. The deploy smoke exercises GPT-6 Sol through that same model catalog, and native Codex validation rejects a non-product per-spawn model before provider traffic. Hosted Codex MultiAgent V2 is enabled through the generated `[features.multi_agent_v2]` config table, which also carries Murph's proactive-delegation tool and mode hints: delegate bounded background work that would otherwise block the immediate reply. Hosted launches must not pass a boolean `features.multi_agent_v2` override because that would replace the table and drop those hints. Per-spawn model selection stays disabled unless Web's existing assistant-configuration owner confirms that the current managed runtime is authorized for the full product-model catalog; Cloudflare forwards that one decision, and missing projection or custom inference disables only the optional selector. Deploy the Cloudflare/runtime consumer before the Web producer so mixed versions fail closed without blocking ordinary replies or inherited-model children. The Codex App Server stays warm for the container lifetime; catalog changes take effect through normal container or process replacement, not per-turn restart.
+The final app-layer image filters `codex debug models --bundled` to GPT-6.1 Sol, GPT-6 Sol/Luna, GPT-5.6 Sol/Luna, and the separately authorized GPT-6 Astra catalog, adds OpenAI flex service-tier support to each, forces mixed `tool_mode: code_mode`, validates the exact catalog with `jq`, and exposes it through `MURPH_HOSTED_CODEX_MODEL_CATALOG_JSON`. Hosted app-server turns can therefore keep the code executor, expose native `tool_search` for deferred dynamic tools, and send OpenAI `service_tier: flex`; individual tool `deferLoading` flags still keep broad schemas out of the initial model-visible surface. The deploy smoke validates the GPT-6.1 Sol default configuration and uses GPT-6 Luna for its bounded live turn, and native Codex validation rejects a non-product per-spawn model before provider traffic. Hosted Codex MultiAgent V2 is enabled through the generated `[features.multi_agent_v2]` config table, which also carries Murph's proactive-delegation tool and mode hints: delegate bounded background work that would otherwise block the immediate reply. Hosted launches must not pass a boolean `features.multi_agent_v2` override because that would replace the table and drop those hints. Per-spawn model selection stays disabled unless Web's existing assistant-configuration owner confirms that the current managed runtime is authorized for the full product-model catalog; Cloudflare forwards that one decision, and missing projection or custom inference disables only the optional selector. Deploy the Cloudflare/runtime consumer before the Web producer so mixed versions fail closed without blocking ordinary replies or inherited-model children. The Codex App Server stays warm for the container lifetime; catalog changes take effect through normal container or process replacement, not per-turn restart.
 The runner bundle is root-owned and mode-normalized in an intermediate image
 stage, then copied once into a fresh final base stage. Keep that normalized-copy
 boundary instead of applying a recursive permission change after the final

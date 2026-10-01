@@ -4,6 +4,7 @@ import {
   type HostedWorkspaceInvocationProcessingMode,
 } from "./runtime-control-values.ts";
 export {
+  HOSTED_GROUP_MEMBER_PLAN_DISPLAY_NAME,
   HOSTED_MAILBOX_LANES,
   HOSTED_WORKSPACE_INVOCATION_PROCESSING_MODES,
   isHostedMailboxLane,
@@ -57,7 +58,6 @@ import {
   HOSTED_EXECUTION_RUNTIME_CONTROL_WAKE_KINDS,
 } from "./contracts.ts";
 
-import { HOSTED_VAULT_SHARE_KNOWN_PROJECTION_SCOPES } from "./vault-share.ts";
 import type {
   HostedVaultShareDeliveryRecord,
   HostedVaultShareProjectionKind,
@@ -200,6 +200,7 @@ export type HostedRuntimeControlMailboxKind =
   (typeof HOSTED_RUNTIME_CONTROL_MAILBOX_KINDS)[number];
 
 export const HOSTED_AI_USAGE_ALLOWANCE_PRICED_MODELS = [
+  "gpt-6.1-sol",
   "gpt-6-sol",
   "gpt-6-luna",
   "gpt-6-astra",
@@ -236,6 +237,7 @@ export const HOSTED_AI_USAGE_ALLOWANCE_ELEVENLABS_TTS_PRICED_MODELS = [
   "eleven_turbo_v2",
   "eleven_turbo_v2_5",
   "eleven_v3",
+  "eleven_v4",
 ] as const;
 
 export type HostedAiUsageAllowanceElevenLabsTtsPricedModel =
@@ -2011,10 +2013,9 @@ export const HOSTED_RUNTIME_GROUP_EMAIL_SUBJECT_MAX_LENGTH = 160;
 export const HOSTED_RUNTIME_GROUP_EMAIL_TEXT_MAX_LENGTH = 100_000;
 export const HOSTED_RUNTIME_GROUP_EMAIL_HTML_MAX_LENGTH = 500_000;
 export const HOSTED_RUNTIME_GROUP_EMAIL_PARTICIPANTS_MAX = 100;
-// One canonical key per scope. The email grant itself is carried separately
-// from the data/profile authorization snapshot (99 of the current 100 scopes).
-export const HOSTED_RUNTIME_GROUP_EMAIL_AUTHORIZED_SHARES_PER_PARTICIPANT_MAX =
-  HOSTED_VAULT_SHARE_KNOWN_PROJECTION_SCOPES.length - 1;
+export {
+  HOSTED_RUNTIME_GROUP_EMAIL_AUTHORIZED_SHARES_PER_PARTICIPANT_MAX,
+} from "./vault-share.ts";
 export const HOSTED_RUNTIME_GROUP_EMAIL_AUTHORIZATION_PROOF_HEX_LENGTH = 64;
 const HOSTED_RUNTIME_GROUP_EMAIL_AUTHORIZATION_PROOF_PATTERN = new RegExp(
   `^[0-9a-f]{${HOSTED_RUNTIME_GROUP_EMAIL_AUTHORIZATION_PROOF_HEX_LENGTH}}$`,

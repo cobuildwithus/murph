@@ -2826,7 +2826,7 @@ test("Junction scheduled polling skips profile after the current normalization m
   );
 
   assert.equal(requests.some((url) => new URL(url).pathname.includes("/v2/summary/profile/")), false);
-  assert.equal(importedSnapshots.length, 1);
+  assert.equal(importedSnapshots.length, 0);
   assert.equal(result.metadataPatch, undefined);
 });
 

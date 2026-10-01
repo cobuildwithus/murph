@@ -15,7 +15,7 @@ vi.mock("@murphai/assistant-engine/assistant-channel-adapters", async (importOri
 
 import {
   createHostedAssistantChannelTypingDependencies,
-  startHostedLinqAttachmentTyping,
+  startHostedLinqInputTyping,
 } from "../src/hosted-runtime/channel-activity.ts";
 import type { HostedAssistantLinqDeliveryContext } from "../src/hosted-runtime/linq-delivery-context.ts";
 
@@ -32,7 +32,7 @@ test("one preparation handle hands off its accepted time, refresh budget and can
   const preparation = new AbortController();
   const turn = new AbortController();
   cleanups.push(() => turn.abort());
-  const cancel = startHostedLinqAttachmentTyping({ ...fixture.input, signal: preparation.signal });
+  const cancel = startHostedLinqInputTyping({ ...fixture.input, signal: preparation.signal });
   assert.ok(cancel);
   cleanups.push(cancel);
   await drainMicrotasks();
@@ -41,7 +41,7 @@ test("one preparation handle hands off its accepted time, refresh budget and can
   assert.deepEqual(accepted.assistantInputIds, ["input_handoff"]);
 
   // A duplicate import cannot create or acquire a second loop.
-  assert.equal(startHostedLinqAttachmentTyping(fixture.input), null);
+  assert.equal(startHostedLinqInputTyping(fixture.input), null);
   const handle = await fixture.typing(turn.signal).startLinqTyping?.({ target: fixture.context.target! });
   assert.ok(handle);
   cleanups.push(() => handle.stop({ providerStop: false }));
@@ -65,7 +65,7 @@ test("one preparation handle hands off its accepted time, refresh budget and can
 
 test("delivery releases a taken handle without a late importer cancellation stopping the provider", async () => {
   const fixture = createFixture("delivered");
-  const cancel = startHostedLinqAttachmentTyping(fixture.input);
+  const cancel = startHostedLinqInputTyping(fixture.input);
   assert.ok(cancel);
   cleanups.push(cancel);
   const handle = await fixture.typing().startLinqTyping?.({ target: fixture.context.target! });
@@ -82,7 +82,7 @@ test.each(["cancel", "abort"])("%s before pending acceptance cleans up the late 
   const pending = createDeferred<AssistantChannelActivityHandle>();
   mocks.startLinqTypingIndicator.mockReturnValue(pending.promise);
   const controller = new AbortController();
-  const cancel = startHostedLinqAttachmentTyping({ ...fixture.input, signal: controller.signal });
+  const cancel = startHostedLinqInputTyping({ ...fixture.input, signal: controller.signal });
   assert.ok(cancel);
   cleanups.push(cancel);
   await drainMicrotasks();
@@ -101,7 +101,7 @@ test("a pending handoff leaves acceptance observation to the turn, not the old i
   const fixture = createFixture("pending_handoff");
   const pending = createDeferred<AssistantChannelActivityHandle>();
   mocks.startLinqTypingIndicator.mockReturnValue(pending.promise);
-  const cancel = startHostedLinqAttachmentTyping(fixture.input);
+  const cancel = startHostedLinqInputTyping(fixture.input);
   assert.ok(cancel);
   cleanups.push(cancel);
   const handlePromise = fixture.typing().startLinqTyping?.({ target: fixture.context.target! });
@@ -118,13 +118,13 @@ test.each(["failed", "unconfigured"])("%s start releases the claim without inven
   const fixture = createFixture(`start_${kind}`);
   if (kind === "failed") mocks.startLinqTypingIndicator.mockRejectedValue(new Error("synthetic start failure"));
   else mocks.startLinqTypingIndicator.mockResolvedValue(undefined);
-  const cancel = startHostedLinqAttachmentTyping(fixture.input);
+  const cancel = startHostedLinqInputTyping(fixture.input);
   assert.ok(cancel);
   cleanups.push(cancel);
   await drainMicrotasks();
   assert.equal(fixture.events.some(isAcceptance), false);
   mocks.startLinqTypingIndicator.mockResolvedValue(fixture.handle);
-  const retry = startHostedLinqAttachmentTyping(fixture.input);
+  const retry = startHostedLinqInputTyping(fixture.input);
   assert.ok(retry);
   cleanups.push(retry);
   await drainMicrotasks();
@@ -134,7 +134,7 @@ test.each(["failed", "unconfigured"])("%s start releases the claim without inven
 
 test("handoff still validates the exact context and the same invocation's provider authority", async () => {
   const fixture = createFixture("authority");
-  const cancel = startHostedLinqAttachmentTyping(fixture.input);
+  const cancel = startHostedLinqInputTyping(fixture.input);
   assert.ok(cancel);
   cleanups.push(cancel);
   const typing = fixture.typing();
@@ -164,10 +164,10 @@ test("ineligible, mismatched, aborted and unconfigured preparation never starts 
     { ...fixture.context, threadIsDirect: null },
     { ...fixture.context, routeAuthority: authority },
   ]) {
-    assert.equal(startHostedLinqAttachmentTyping({ ...fixture.input, linqDeliveryContext: context }), null);
+    assert.equal(startHostedLinqInputTyping({ ...fixture.input, linqDeliveryContext: context }), null);
   }
-  assert.equal(startHostedLinqAttachmentTyping({ ...fixture.input, providerFetch: null }), null);
-  assert.equal(startHostedLinqAttachmentTyping({ ...fixture.input, signal: AbortSignal.abort() }), null);
+  assert.equal(startHostedLinqInputTyping({ ...fixture.input, providerFetch: null }), null);
+  assert.equal(startHostedLinqInputTyping({ ...fixture.input, signal: AbortSignal.abort() }), null);
   expect(mocks.startLinqTypingIndicator).not.toHaveBeenCalled();
 });
 
@@ -178,7 +178,7 @@ test("authenticated group preparation uses the existing auto-reply authority rul
     accountLookupKey: "synthetic_account", channel: "linq",
     containerMemberId: "synthetic_member", threadId: fixture.context.target!,
   };
-  const cancel = startHostedLinqAttachmentTyping(fixture.input);
+  const cancel = startHostedLinqInputTyping(fixture.input);
   assert.ok(cancel);
   cleanups.push(cancel);
   await drainMicrotasks();
@@ -190,18 +190,18 @@ test("an active turn suppresses preparation and a full session retains the exist
   const fixture = createFixture("cooldown");
   const active = await fixture.typing().startLinqTyping?.({ target: fixture.context.target! });
   assert.ok(active);
-  assert.equal(startHostedLinqAttachmentTyping(fixture.input), null);
+  assert.equal(startHostedLinqInputTyping(fixture.input), null);
   await active.stop({ providerStop: false });
-  const cancel = startHostedLinqAttachmentTyping(fixture.input);
+  const cancel = startHostedLinqInputTyping(fixture.input);
   assert.ok(cancel);
   cleanups.push(cancel);
   const taken = await fixture.typing().startLinqTyping?.({ target: fixture.context.target! });
   assert.ok(taken);
   vi.setSystemTime(Date.now() + 5 * 60_000);
   await taken.stop({ providerStop: false });
-  assert.equal(startHostedLinqAttachmentTyping(fixture.input), null);
+  assert.equal(startHostedLinqInputTyping(fixture.input), null);
   vi.setSystemTime(Date.now() + 10 * 60_000 + 1);
-  const next = startHostedLinqAttachmentTyping(fixture.input);
+  const next = startHostedLinqInputTyping(fixture.input);
   assert.ok(next);
   cleanups.push(next);
   expect(mocks.startLinqTypingIndicator).toHaveBeenCalledTimes(3);

@@ -69,6 +69,19 @@ source revision authority so a later correction or withdrawal cannot leave
 stale derived facts active or allow an older queued proposal to restore them.
 These contracts do not assert that every fact in a document was recovered.
 
+Retrieval status ignores only recognized Epic patient-access notices and empty
+search notices. These notices still cannot establish whole-chart clinical
+absence; the importer's allergy completeness check remains conservative. Unknown,
+denied-subtype, mixed and malformed warnings continue to mark retrieval partial.
+Qualitative laboratory results with valid numeric reference bounds preserve
+those bounds and their units as reference text, without inventing a numeric
+result or a result unit. Invalid or qualified ranges remain held.
+Unmapped observations with an explicit clinical date are retained as source notes,
+with original codes, values, and qualifiers rather than inferred metrics. A vital
+quantity missing its unit can use this note path; an incompatible declared unit,
+ambiguous coding, unknown modifier, or missing clinical date still remains held.
+These notes preserve source statements and do not establish clinical diagnoses.
+
 ## Raw retrieval contract
 
 Retrieval producers must use `hashClinicalFhirBaseUrl` and

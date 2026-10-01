@@ -1,13 +1,14 @@
 import { HOSTED_RUNTIME_REPLICA_POST_STOP_DRAIN_MS } from "@murphai/hosted-execution/runtime-resources";
 import { randomUUID } from "node:crypto";
 
-import type { HostedRuntimeOwner, Prisma, PrismaClient } from "@prisma/client";
+import { Prisma, type HostedRuntimeOwner, type PrismaClient } from "@prisma/client";
 import type { HostedWorkspaceInvocationProcessingMode } from "@murphai/hosted-execution/runtime-control";
 
-import { readActiveHostedMemberAccess } from "../hosted-onboarding/member-access";
+import { activeHostedMemberAccessWithParticipantsWhere } from "../hosted-onboarding/member-access";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { lockHostedMemberRow } from "../hosted-onboarding/shared";
-import { readHostedHealthDataConsentState } from "../legal/consent";
+import { hostedHealthDataConsentNotRevokedWhere } from "../legal/consent";
+import { resolveHostedRuntimeMemberBackend, type HostedRuntimeBackend } from "@murphai/hosted-execution/runtime-migration";
 import { lockHostedRuntimeMemberCutoverTx } from "./runtime-cutover";
 
 export interface HostedRuntimeIdentity {
@@ -25,20 +26,31 @@ export async function claimHostedRuntime(input: {
   processingMode: HostedWorkspaceInvocationProcessingMode;
   now?: Date;
 }): Promise<
-  | { status: "claimed" | "existing"; owner: HostedRuntimeOwner }
-  | { status: "blocked"; reason: "cutover" | "admission" }
+  | { cutover: "postgres"; status: "claimed" | "existing"; owner: HostedRuntimeOwner }
+  | { cutover: HostedRuntimeBackend; status: "blocked"; reason: "cutover" | "admission" }
 > {
   return input.prisma.$transaction(async (tx) => {
-    if (await lockHostedRuntimeMemberCutoverTx(tx, input.userId) !== "postgres") {
-      return { status: "blocked", reason: "cutover" };
-    }
+    const cutover = await lockHostedRuntimeMemberCutoverTx(tx, input.userId);
+    if (cutover !== "postgres") return { cutover, status: "blocked", reason: "cutover" };
     await lockHostedMemberRow(tx, input.userId);
     if (!await runtimeAdmissionAllowedTx(tx, input.userId, input.processingMode)) {
-      return { status: "blocked", reason: "admission" };
+      return { cutover, status: "blocked", reason: "admission" };
     }
     const existing = await lockHostedRuntimeOwnerRowTx(tx, input.userId);
     if (existing && existing.phase !== "idle") {
-      return { status: "existing", owner: existing };
+      // Launch preparation takes these same locks. Once workspaceVersion is
+      // bound, foreground must wake the admitted child instead of replacing it.
+      // Before that point, revoke launch authority and let the existing exact
+      // retirement protocol stop preparation before admitting a new writer.
+      if (input.processingMode === "default" && existing.processingMode === "system_mailbox"
+        && existing.phase === "starting" && existing.workspaceVersion === null) {
+        const owner = await tx.hostedRuntimeOwner.update({
+          where: { userId: input.userId },
+          data: { phase: "retiring", platformAiUsageAllowed: false },
+        });
+        return { cutover, status: "existing", owner };
+      }
+      return { cutover, status: "existing", owner: existing };
     }
     const now = input.now ?? new Date();
     const attemptId = `rt_${randomUUID()}`;
@@ -62,7 +74,7 @@ export async function claimHostedRuntime(input: {
     const owner = existing
       ? await tx.hostedRuntimeOwner.update({ where: { userId: input.userId }, data })
       : await tx.hostedRuntimeOwner.create({ data: { ...data, userId: input.userId, migrationPhase: "postgres" } });
-    return { status: "claimed", owner };
+    return { cutover, status: "claimed", owner };
   }, OWNER_TRANSACTION_OPTIONS);
 }
 
@@ -287,29 +299,73 @@ async function runtimeAdmissionAllowedTx(
   userId: string,
   processingMode: string | null,
 ): Promise<boolean> {
-  const member = await tx.hostedMember.findUnique({ where: { id: userId }, select: { suspendedAt: true } });
-  if (!member || member.suspendedAt !== null
-    || await readHostedHealthDataConsentState({ prisma: tx, memberId: userId }) === "revoked") {
-    return false;
-  }
-  return processingMode === "inbox_media_retention"
-    || await readActiveHostedMemberAccess({ prisma: tx, memberId: userId });
+  // Keep this statement after the member lock: a waiting claim must observe
+  // consent withdrawal committed by the previous lock holder.
+  const member = await tx.hostedMember.findUnique({
+    select: { id: true },
+    where: {
+      id: userId,
+      suspendedAt: null,
+      AND: [
+        hostedHealthDataConsentNotRevokedWhere(),
+        ...(processingMode === "inbox_media_retention" ? [] : [activeHostedMemberAccessWithParticipantsWhere()]),
+      ],
+    },
+  });
+  return member !== null;
 }
+
+const runtimeOwnerColumns = Prisma.sql`
+  owner.user_id AS "userId", owner.migration_phase AS "migrationPhase",
+  owner.migration_id AS "migrationId", owner.generation, owner.attempt_id AS "attemptId", owner.phase,
+  owner.processing_mode AS "processingMode", owner.allocation_id AS "allocationId",
+  owner.runner_container_name AS "runnerContainerName", owner.workspace_version AS "workspaceVersion",
+  owner.provider_egress_token_hash AS "providerEgressTokenHash",
+  owner.custom_inference_envelope AS "customInferenceEnvelope",
+  owner.platform_ai_usage_allowed AS "platformAiUsageAllowed", owner.started_at AS "startedAt",
+  owner.accepted_at AS "acceptedAt", owner.completed_at AS "completedAt",
+  owner.failure_count AS "failureCount", owner.last_error_code AS "lastErrorCode", owner.updated_at AS "updatedAt"
+`;
 
 export async function lockHostedRuntimeOwnerRowTx(tx: OwnerTransaction, userId: string): Promise<HostedRuntimeOwner | null> {
   const owners = await tx.$queryRaw<HostedRuntimeOwner[]>`
-    SELECT user_id AS "userId", migration_phase AS "migrationPhase",
-      migration_id AS "migrationId", generation, attempt_id AS "attemptId", phase,
-      processing_mode AS "processingMode", allocation_id AS "allocationId",
-      runner_container_name AS "runnerContainerName", workspace_version AS "workspaceVersion",
-      provider_egress_token_hash AS "providerEgressTokenHash",
-      custom_inference_envelope AS "customInferenceEnvelope",
-      platform_ai_usage_allowed AS "platformAiUsageAllowed", started_at AS "startedAt",
-      accepted_at AS "acceptedAt", completed_at AS "completedAt",
-      failure_count AS "failureCount", last_error_code AS "lastErrorCode", updated_at AS "updatedAt"
-    FROM hosted_runtime_owner WHERE user_id = ${userId} FOR UPDATE
+    SELECT ${runtimeOwnerColumns}
+    FROM hosted_runtime_owner AS owner WHERE owner.user_id = ${userId} FOR UPDATE
   `;
   return owners[0] ?? null;
+}
+
+/** External effects cannot hold a database lock through provider I/O. Read their
+ * authority in one statement snapshot; canonical publications still lock it. */
+async function readRuntimeEffectOwner(prisma: PrismaClient, userId: string) {
+  type Snapshot = { cutoverPhase: string; memberExists: boolean }
+    & (HostedRuntimeOwner | { [K in keyof HostedRuntimeOwner]: null });
+  const rows = await prisma.$queryRaw<Snapshot[]>`
+    SELECT gate.phase AS "cutoverPhase",
+      EXISTS (SELECT 1 FROM hosted_member WHERE id = ${userId}) AS "memberExists",
+      ${runtimeOwnerColumns}
+    FROM hosted_runtime_cutover AS gate
+    LEFT JOIN hosted_runtime_owner AS owner ON owner.user_id = ${userId}
+    WHERE gate.id = 'runtime'
+  `;
+  const snapshot = rows[0];
+  if (!snapshot) throw new Error("Hosted runtime cutover state is missing.");
+  const { cutoverPhase, memberExists, ...owner } = snapshot;
+  const cutover = resolveHostedRuntimeMemberBackend(cutoverPhase, owner.migrationPhase);
+  return { cutover, owner: cutover === "postgres" && memberExists && owner.userId !== null
+    && (owner.phase === "starting" || owner.phase === "active") ? owner : null };
+}
+
+export async function authorizeHostedRuntimeEffect(input: {
+  prisma: PrismaClient; userId: string; attemptId: string; generation: string;
+  runnerContainerName: string | null; managedAi: boolean;
+}): Promise<{ cutover: HostedRuntimeBackend; owner: HostedRuntimeOwner | null }> {
+  const { cutover, owner } = await readRuntimeEffectOwner(input.prisma, input.userId);
+  if (cutover === "postgres" && (!owner || owner.attemptId !== input.attemptId
+    || owner.generation.toString() !== input.generation)) throw staleRuntimeError();
+  return { cutover, owner: owner && (input.runnerContainerName === null
+    || owner.runnerContainerName === input.runnerContainerName)
+    && (!input.managedAi || owner.platformAiUsageAllowed) ? owner : null };
 }
 
 function identityWhere(identity: HostedRuntimeIdentity) {
@@ -325,20 +381,13 @@ function staleRuntimeError() {
 
 export async function authorizeHostedRuntimeProvider(input: {
   prisma: PrismaClient; userId: string; runnerContainerName: string | null; providerEgressTokenHash: string | null; providerKind: string;
-}): Promise<HostedRuntimeOwner | null> {
-  return input.prisma.$transaction(async tx => {
-    if (await lockHostedRuntimeMemberCutoverTx(tx, input.userId) !== "postgres") return null;
-    const members = await tx.$queryRaw<Array<{ id: string }>>`
-      SELECT id FROM hosted_member WHERE id = ${input.userId} FOR UPDATE
-    `;
-    const current = await lockHostedRuntimeOwnerRowTx(tx, input.userId);
-    if (!members[0] || !current || !current.attemptId || !current.runnerContainerName || current.workspaceVersion === null
-      || (current.phase !== "starting" && current.phase !== "active")) return null;
-    if (input.runnerContainerName !== null) {
-      if (current.runnerContainerName !== input.runnerContainerName || !["exa", "mapbox", "murph_data_api", "openai", "venice", "workers_ai_transcribe"].includes(input.providerKind)) return null;
-    } else if (!input.providerEgressTokenHash || current.providerEgressTokenHash !== input.providerEgressTokenHash) return null;
-    return current;
-  }, OWNER_TRANSACTION_OPTIONS);
+}): Promise<{ cutover: HostedRuntimeBackend; owner: HostedRuntimeOwner | null }> {
+  const { cutover, owner } = await readRuntimeEffectOwner(input.prisma, input.userId);
+  if (!owner?.attemptId || !owner.runnerContainerName || owner.workspaceVersion === null) return { cutover, owner: null };
+  if (input.runnerContainerName !== null) {
+    if (owner.runnerContainerName !== input.runnerContainerName || !["exa", "mapbox", "murph_data_api", "openai", "venice", "workers_ai_transcribe"].includes(input.providerKind)) return { cutover, owner: null };
+  } else if (!input.providerEgressTokenHash || owner.providerEgressTokenHash !== input.providerEgressTokenHash) return { cutover, owner: null };
+  return { cutover, owner };
 }
 
 /** Trusted native notification after irreversible slot retirement. Exact target

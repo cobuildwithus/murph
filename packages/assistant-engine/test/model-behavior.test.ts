@@ -1482,16 +1482,16 @@ describe('assistant execution prompt contract', () => {
     expect(computerSection).toContain(
       '$MURPH_ASSISTANT_SKILLS_ROOT/computer-use/SKILL.md',
     )
-    expect(computerSection).toContain('Prefer a structured integration')
+    expect(computerSection).toContain('prefer the owning structured lookup')
     expect(computerSection).toContain('private untrusted data')
-    expect(computerSection).toContain('Use secure user handoff')
+    expect(computerSection).toContain('Securely hand off')
     expect(computerSection).toContain(
-      'password or full payment-card entry',
+      'password/full payment-card entry',
     )
     expect(computerSection).toContain(
-      'smallest exact-point takeover for a human-only authentication challenge',
+      'the exact human-only authentication step',
     )
-    expect(computerSection).toContain('resume and finish the rest yourself')
+    expect(computerSection).toContain('then resume and finish')
     expect(computerSection).not.toContain('other private input')
     expect(computerSection).not.toContain(
       'credentials, full payment details, and one-time codes',
@@ -2209,7 +2209,8 @@ describe('assistant system prompt cache stability', () => {
       }),
     )
 
-    expect(layers.staticCacheableCorePrompt.length).toBeLessThanOrEqual(8_415)
+    // Private language selection and canonical memory policy add 1412 characters.
+    expect(layers.staticCacheableCorePrompt.length).toBeLessThanOrEqual(9_827)
     // This layer is resident on every turn for every member. Its ceiling is the
     // prior 66,780-character ratchet plus the reviewed 890-character wearable
     // freshness addition, for cross-route guidance that cannot live in an owning
@@ -2257,7 +2258,11 @@ describe('assistant system prompt cache stability', () => {
     // Shared lasting-correction routing adds 1,022 characters. Complete private
     // and group request measurements plus live task/preference/one-off proof
     // cover this resident rule; retain the existing base margin.
-    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(77_722)
+    // Direct tool-recovery progress guidance adds 659 characters. Complete
+    // native-provider captures measure +660 serialized bytes for direct turns
+    // and no group growth; live Sol success/failure journeys verify behavior.
+    // Preserve the existing 2-character margin.
+    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(78_381)
   })
 
   it('passes the injected CLI contract through byte-for-byte at the stable-route tail', () => {
@@ -2587,7 +2592,7 @@ describe('assistant system prompt cache stability', () => {
       'Current Murph product base URL for user-facing app links: http://localhost:3000',
     )
     expect(promptA.cacheMetadata.staticPromptHash).toBe(
-      'd0ad54bd4a67a3937c845bc04aefb4fd4082d67bdca984ed14010e736abc20bf',
+      '6324f7e80517c979431bbd53f6527197e815f43af6629c0793abff4668fb498b',
     )
     expect(promptA.cacheMetadata.toolSchemaHash).toBe(
       'assistant-tool-schema-common-codex-test',

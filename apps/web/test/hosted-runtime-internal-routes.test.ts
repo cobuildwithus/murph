@@ -9,9 +9,11 @@ import {
   parseHostedWorkspaceReadResponse,
 } from "@murphai/hosted-execution/parsers";
 import { Prisma } from "@prisma/client";
+import { NextResponse } from "next/server";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { readRawBodyBuffer } from "../src/lib/http";
+import { hostedOnboardingError } from "../src/lib/hosted-onboarding/errors";
 import { HOSTED_RUNTIME_LATENCY_TRACE_BODY_LIMIT_BYTES } from "@murphai/hosted-execution/runtime-control";
 
 const FIXED_NOW = "2026-04-26T00:00:00.000Z";
@@ -88,12 +90,15 @@ vi.mock("@/src/lib/hosted-mailbox/store", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/src/lib/hosted-mailbox/store")>()),
   fetchHostedMailboxItemsAfterLaneCursors: mocks.fetchHostedMailboxItemsAfterLaneCursors,
   fetchHostedMailboxPayload: mocks.fetchHostedMailboxPayload,
-  fetchHostedRuntimeMailboxProjection: mocks.fetchHostedRuntimeMailboxProjection,
   readHostedMailboxConsumedSeqByLane: mocks.readHostedMailboxConsumedSeqByLane,
   readHostedMailboxItemByDedupeKey: mocks.readHostedMailboxItemByDedupeKey,
   readHostedMailboxMaxSeqByLane: mocks.readHostedMailboxMaxSeqByLane,
-  tryMarkHostedMailboxConversationAiUsageDenied:
-    mocks.tryMarkHostedMailboxConversationAiUsageDenied,
+}));
+
+vi.mock("@/src/lib/hosted-mailbox/projection", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/src/lib/hosted-mailbox/projection")>(),
+  fetchHostedRuntimeMailboxProjection: mocks.fetchHostedRuntimeMailboxProjection,
+  tryMarkHostedMailboxConversationAiUsageDenied: mocks.tryMarkHostedMailboxConversationAiUsageDenied,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
@@ -695,7 +700,7 @@ describe("hosted runtime internal web routes", () => {
       });
       if (scenario === "denied") mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValueOnce({ status: "denied" });
       if (scenario === "inactive") mocks.hostedRuntimeMailboxMemberFindUnique.mockResolvedValueOnce(null);
-      if (scenario === "no-workspace") mocks.hostedWorkspaceFindUnique.mockResolvedValueOnce(null);
+      if (scenario === "no-workspace") mocks.readHostedRuntimeIngressCryptoContextForWorker.mockRejectedValueOnce(new Error("Unavailable"));
       if (scenario === "crypto-failure") mocks.readHostedRuntimeIngressCryptoContextForWorker.mockRejectedValueOnce(new Error("Unavailable"));
       const response = await mailboxFetchRoute.POST(jsonRequest("/api/internal/hosted-mailbox/fetch", {
         requestId: "synthetic-request", limitPerLane: 10,
@@ -705,10 +710,9 @@ describe("hosted runtime internal web routes", () => {
       }));
       const payload = await response.json();
       expect(response.status).toBe(scenario === "inactive" ? 403 : 200);
-      const shouldReadWorkspace = ["fresh", "no-workspace", "crypto-failure"].includes(scenario);
-      expect(mocks.hostedWorkspaceFindUnique).toHaveBeenCalledTimes(shouldReadWorkspace ? 1 : 0);
+      expect(mocks.hostedWorkspaceFindUnique).not.toHaveBeenCalled();
       expect(mocks.readHostedRuntimeIngressCryptoContextForWorker).toHaveBeenCalledTimes(
-        scenario === "fresh" || scenario === "crypto-failure" ? 1 : 0);
+        ["fresh", "no-workspace", "crypto-failure"].includes(scenario) ? 1 : 0);
       if (scenario === "fresh") {
         expect(payload.ingressCryptoContext).toMatchObject({ userId: "member_routes_1", envelopes: { ingress: {} } });
         expect(payload.ingressCryptoContext.fetchedAt).toEqual(expect.any(String));
@@ -2420,6 +2424,288 @@ describe("hosted runtime internal web routes", () => {
     expect(workspace.hostedAssistantSubagentModelOverridesAllowed).toBe(!["individual Pulse", "Family Pulse"].includes(_name));
   });
 
+  describe("checkpoint failure observations", () => {
+    const path = "/api/internal/hosted-workspace/checkpoint";
+    const failureMessage = "Hosted workspace checkpoint failed.";
+    const failureSchema = "murph.hosted-workspace.checkpoint.failure.v1";
+    const checkpointRequest = (body: Record<string, unknown> = {}, search = "") =>
+      jsonRequest(`${path}${search}`, {
+        attemptId: UNSAFE_SENTINEL,
+        expectedWorkspaceVersion: "4",
+        leaseGeneration: "9",
+        reason: "canonical_runtime_commit",
+        snapshotRef: createBundleRef(UNSAFE_SENTINEL),
+        ...body,
+      }, runtimeWriteFenceHeaders());
+    const diagnostics = () => vi.mocked(console.warn).mock.calls.filter(
+      ([message]) => message === failureMessage,
+    );
+
+    beforeEach(() => {
+      vi.spyOn(console, "warn").mockImplementation(() => undefined);
+      vi.spyOn(console, "error").mockImplementation(() => undefined);
+      mocks.checkpointHostedWorkspace.mockResolvedValue({
+        status: "updated",
+        replacedSnapshotRef: null,
+        workspace: buildWorkspaceRecord(),
+      });
+    });
+
+    it("distinguishes independent schema and publication failures with identical HTTP 400 responses", async () => {
+      const malformed = await workspaceCheckpointRoute.POST(checkpointRequest({
+        reason: UNSAFE_SENTINEL,
+      }));
+      expect(mocks.checkpointHostedWorkspace).not.toHaveBeenCalled();
+      mocks.checkpointHostedWorkspace.mockRejectedValueOnce(new TypeError(UNSAFE_SENTINEL));
+      const publication = await workspaceCheckpointRoute.POST(checkpointRequest());
+
+      expect(malformed.status).toBe(400);
+      expect(publication.status).toBe(malformed.status);
+      expect([...malformed.headers]).toEqual([
+        ["cache-control", "no-store"],
+        ["content-type", "application/json"],
+      ]);
+      expect([...publication.headers]).toEqual([...malformed.headers]);
+      expect(await malformed.clone().json()).toEqual({
+        error: { code: "INVALID_REQUEST", message: "Invalid request." },
+      });
+      expect(await publication.text()).toBe(await malformed.text());
+      expect(mocks.checkpointHostedWorkspace).toHaveBeenCalledOnce();
+      expect(mocks.after).not.toHaveBeenCalled();
+      // A later successful request must not inherit or overwrite either observation.
+      expect((await workspaceCheckpointRoute.POST(checkpointRequest())).status).toBe(200);
+      expect(diagnostics()).toEqual([
+        [failureMessage, { schema: failureSchema, stage: "request_schema", errorClass: "type_error" }],
+        [failureMessage, { schema: failureSchema, stage: "publication", errorClass: "type_error" }],
+      ]);
+    });
+
+    it.each([
+      [4n, "3", 4n, "rejected", "HOSTED_WORKSPACE_PROGRESS_REGRESSED"],
+      [4n, "6", 4n, "rejected", "HOSTED_WORKSPACE_PROGRESS_SKIPPED_INCREMENT"],
+      [null, "2", 4n, "rejected", "HOSTED_WORKSPACE_PROGRESS_INVALID_INITIAL"],
+      [null, "0", 4n, "updated", null],
+      [null, "1", 4n, "updated", null],
+      [4n, "4", 4n, "updated", null],
+      [4n, "5", 4n, "updated", null],
+      [4n, "3", 5n, "conflict", null],
+      [4n, "6", 5n, "conflict", null],
+      [null, "2", 5n, "conflict", null],
+    ] as const)("observes only rejected store transitions: %s -> %s at version %s (%s)", async (
+      currentGeneration, requestedGeneration, currentVersion, outcome, errorCode,
+    ) => {
+      const { checkpointHostedWorkspaceTx } = await vi.importActual<
+        typeof import("@/src/lib/hosted-workspace/store")
+      >("@/src/lib/hosted-workspace/store");
+      const current = {
+        ...buildWorkspaceRecord({ snapshotRef: null }),
+        createdAt: new Date(FIXED_NOW),
+        updatedAt: new Date(FIXED_NOW),
+        systemMailboxProgressGeneration: currentGeneration,
+        version: currentVersion,
+      };
+      const queryRaw = vi.fn(async (_query: Prisma.Sql) => outcome === "updated" ? [{
+        ...current,
+        replacedSnapshotRef: null,
+        systemMailboxProgressGeneration: BigInt(requestedGeneration),
+        version: 5n,
+      }] : []);
+      const findUnique = vi.fn(async () => current);
+      const tx = Object.assign(Object.create(null), {
+        $queryRaw: queryRaw,
+        hostedWorkspace: { findUnique },
+      }) as Parameters<typeof checkpointHostedWorkspaceTx>[0]["tx"];
+      mocks.checkpointHostedWorkspace.mockImplementationOnce((
+        input: Omit<Parameters<typeof checkpointHostedWorkspaceTx>[0], "tx">,
+      ) => checkpointHostedWorkspaceTx({ ...input, tx }));
+
+      const response = await workspaceCheckpointRoute.POST(checkpointRequest({
+        nextDefaultProcessingWakeAt: null,
+        nextDefaultProcessingWakeReason: null,
+        snapshotRef: null,
+        systemMailboxProgressGeneration: requestedGeneration,
+      }));
+      expect(response.status).toBe(outcome === "rejected" ? 400 : 200);
+      expect([...response.headers]).toEqual([
+        ["cache-control", "no-store"],
+        ["content-type", "application/json"],
+      ]);
+      if (outcome === "rejected") {
+        expect(await response.json()).toEqual({
+          error: { code: "INVALID_REQUEST", message: "Invalid request." },
+        });
+        expect(diagnostics()).toEqual([
+          [failureMessage, {
+            schema: failureSchema, stage: "publication", errorClass: "type_error", errorCode,
+          }],
+        ]);
+      } else {
+        expect(parseHostedWorkspaceCheckpointResponse(await response.json())).toMatchObject({
+          checkpointed: outcome === "updated",
+          ...(outcome === "conflict" ? { checkpointConflictReason: "workspace_version" } : {}),
+          workspace: {
+            version: "5",
+            systemMailboxProgressGeneration: outcome === "updated"
+              ? requestedGeneration : currentGeneration?.toString() ?? null,
+          },
+        });
+        expect(diagnostics()).toEqual([]);
+      }
+      expect(queryRaw).toHaveBeenCalledOnce();
+      expect(findUnique).toHaveBeenCalledTimes(outcome === "updated" ? 0 : 1);
+      const sql = queryRaw.mock.calls[0]?.[0].sql;
+      expect(sql).toContain("workspace.version =");
+      expect(sql).toContain("workspace.system_mailbox_progress_generation IS NULL");
+      expect(sql).toContain("IN (0, 1)");
+      expect(sql).toContain("workspace.system_mailbox_progress_generation =");
+      expect(sql).toContain("workspace.system_mailbox_progress_generation + 1 =");
+      expect(mocks.checkpointHostedWorkspace).toHaveBeenCalledOnce();
+      expect(mocks.after).not.toHaveBeenCalled();
+      expect(mocks.signalHostedRuntimeRecheckRuntime).not.toHaveBeenCalled();
+      expect(JSON.stringify(diagnostics())).not.toContain(UNSAFE_SENTINEL);
+    });
+
+    it.each([
+      ["non-object JSON", "request_body", () => new Request(`https://join.example.test${path}`, {
+        method: "POST",
+        body: JSON.stringify([UNSAFE_SENTINEL]),
+      })],
+      ["signed authority/body mismatch", "runtime_authority", () => checkpointRequest({},
+        "?runtimeAuthority=1&runtimeAttempt=attempt_routes_1&runtimeGeneration=9&runtimeWorkspaceVersion=4",
+      )],
+      ["missing workspace invariant", "publication", () => {
+        mocks.checkpointHostedWorkspace.mockResolvedValueOnce({ status: "updated", workspace: null });
+        return checkpointRequest();
+      }],
+      ["response schema after publication", "response", () => {
+        mocks.checkpointHostedWorkspace.mockResolvedValueOnce({
+          status: "updated",
+          workspace: buildWorkspaceRecord({ version: UNSAFE_SENTINEL, nextWakeAt: FIXED_NOW }),
+        });
+        return checkpointRequest();
+      }],
+      ["JSON response construction", "response", () => {
+        mocks.checkpointHostedWorkspace.mockResolvedValueOnce({
+          status: "updated",
+          workspace: buildWorkspaceRecord({ nextWakeAt: FIXED_NOW }),
+        });
+        vi.spyOn(NextResponse, "json").mockImplementationOnce(() => {
+          throw new TypeError(UNSAFE_SENTINEL);
+        });
+        return checkpointRequest();
+      }],
+    ] as const)("observes %s at %s", async (_case, stage, request) => {
+      const response = await workspaceCheckpointRoute.POST(request());
+      expect(response.status).toBe(400);
+      expect(await response.json()).toEqual({
+        error: { code: "INVALID_REQUEST", message: "Invalid request." },
+      });
+      expect(diagnostics()).toEqual([
+        [failureMessage, { schema: failureSchema, stage, errorClass: "type_error" }],
+      ]);
+      expect(mocks.checkpointHostedWorkspace).toHaveBeenCalledTimes(
+        stage === "publication" || stage === "response" ? 1 : 0,
+      );
+      // Response construction still follows post-commit signal scheduling.
+      expect(mocks.after).toHaveBeenCalledTimes(stage === "response" ? 1 : 0);
+      expect(mocks.signalHostedRuntimeRecheckRuntime).not.toHaveBeenCalled();
+    });
+
+    it("observes malformed JSON without changing its INVALID_JSON response", async () => {
+      const response = await workspaceCheckpointRoute.POST(new Request(`https://join.example.test${path}`, {
+        method: "POST",
+        body: `{${UNSAFE_SENTINEL}`,
+      }));
+      expect(response.status).toBe(400);
+      expect(await response.json()).toEqual({ error: { code: "INVALID_JSON", message: "Invalid JSON." } });
+      expect(diagnostics()).toEqual([
+        [failureMessage, { schema: failureSchema, stage: "request_body", errorClass: "error" }],
+      ]);
+      expect(mocks.checkpointHostedWorkspace).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ["type_error", new TypeError(UNSAFE_SENTINEL), 400],
+      ["range_error", new RangeError(UNSAFE_SENTINEL), 400],
+      ["error", new Error(UNSAFE_SENTINEL), 500],
+      ["non_error", { message: UNSAFE_SENTINEL }, 500],
+    ] as const)("logs only the %s error class", async (errorClass, error, status) => {
+      Object.assign(error, {
+        code: UNSAFE_SENTINEL,
+        name: UNSAFE_SENTINEL,
+        stack: UNSAFE_SENTINEL,
+        cause: { [UNSAFE_SENTINEL]: UNSAFE_SENTINEL },
+        [UNSAFE_SENTINEL]: UNSAFE_SENTINEL,
+      });
+      mocks.checkpointHostedWorkspace.mockRejectedValueOnce(error);
+      const response = await workspaceCheckpointRoute.POST(checkpointRequest());
+      expect(response.status).toBe(status);
+      expect(diagnostics()).toEqual([
+        [failureMessage, { schema: failureSchema, stage: "publication", errorClass }],
+      ]);
+      expect(JSON.stringify(diagnostics())).not.toContain(UNSAFE_SENTINEL);
+    });
+
+    it.each(["updated", "conflict"] as const)("keeps %s checkpoint responses quiet", async (status) => {
+      mocks.checkpointHostedWorkspace.mockResolvedValueOnce({
+        status,
+        replacedSnapshotRef: null,
+        workspace: buildWorkspaceRecord({ nextWakeAt: FIXED_NOW }),
+      });
+      const response = await workspaceCheckpointRoute.POST(checkpointRequest());
+      expect(response.status).toBe(200);
+      expect(response.headers.get("cache-control")).toBe("no-store");
+      expect(parseHostedWorkspaceCheckpointResponse(await response.json())).toMatchObject({
+        checkpointed: status === "updated",
+        ...(status === "conflict" ? { checkpointConflictReason: "workspace_version" } : {}),
+        workspace: { version: "4", nextWakeAt: FIXED_NOW },
+      });
+      expect(mocks.after).toHaveBeenCalledTimes(status === "updated" ? 1 : 0);
+      await mocks.after.mock.calls[0]?.[0]();
+      expect(diagnostics()).toEqual([]);
+    });
+
+    it("does not diagnose pre-auth rejection or continue to parsing/publication", async () => {
+      mocks.requireHostedCloudflareCallbackRequest.mockRejectedValueOnce(hostedOnboardingError({
+        code: "HOSTED_CLOUDFLARE_CALLBACK_UNAUTHORIZED",
+        httpStatus: 401,
+        message: "Unauthorized hosted Cloudflare callback.",
+      }));
+      const request = checkpointRequest({ reason: UNSAFE_SENTINEL });
+      const response = await workspaceCheckpointRoute.POST(request);
+      expect(response.status).toBe(401);
+      expect(request.bodyUsed).toBe(false);
+      expect(mocks.checkpointHostedWorkspace).not.toHaveBeenCalled();
+      expect(mocks.after).not.toHaveBeenCalled();
+      expect(diagnostics()).toEqual([]);
+    });
+
+    it.each([
+      undefined,
+      "HOSTED_WORKSPACE_PROGRESS_REGRESSED",
+    ])("preserves the original failure when the diagnostic throws (code: %s)", async (code) => {
+      vi.mocked(console.warn).mockImplementation((message) => {
+        if (message === failureMessage) throw new Error(UNSAFE_SENTINEL);
+      });
+      mocks.checkpointHostedWorkspace.mockRejectedValueOnce(Object.assign(
+        new TypeError(UNSAFE_SENTINEL), code ? { code } : {},
+      ));
+      const response = await workspaceCheckpointRoute.POST(checkpointRequest());
+      expect(response.status).toBe(400);
+      expect(await response.json()).toEqual({
+        error: { code: "INVALID_REQUEST", message: "Invalid request." },
+      });
+      expect(diagnostics()).toEqual([
+        [failureMessage, {
+          schema: failureSchema, stage: "publication", errorClass: "type_error",
+          ...(code ? { errorCode: code } : {}),
+        }],
+      ]);
+      expect(mocks.checkpointHostedWorkspace).toHaveBeenCalledOnce();
+      expect(mocks.after).not.toHaveBeenCalled();
+    });
+  });
+
   it("reads workspace state and checkpoints with the workspace CAS fence", async () => {
     process.env.HOSTED_VENICE_ENABLED = "1";
     mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
@@ -3175,6 +3461,55 @@ describe("hosted runtime internal web routes", () => {
     });
   });
 
+  it("acknowledges stale runtime telemetry without persistence, recovery, or alerts", async () => {
+    mocks.requireHostedCloudflareCallbackRequest.mockRejectedValueOnce(hostedOnboardingError({
+      code: "HOSTED_RUNTIME_OWNER_STALE",
+      httpStatus: 409,
+      message: "Synthetic retired runtime.",
+    }));
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const response = await runtimeLogRoute.POST(jsonRequest(
+        "/api/internal/hosted-runtime/log",
+        { entries: [{ at: FIXED_NOW, component: "runner", eventCode: "runner.accepted_attempt_failed", level: "error", phase: "invoke" }] },
+      ));
+      expect(response.status).toBe(200);
+      expect(parseHostedRuntimeLogResponse(await response.json())).toEqual({ loggedCount: 0 });
+      expect(mocks.recordHostedRuntimeLogs).not.toHaveBeenCalled();
+      expect(mocks.claimHostedAcceptedAttemptFailureRecheck).not.toHaveBeenCalled();
+      expect(mocks.signalHostedRuntimeRecheckRuntime).not.toHaveBeenCalled();
+      expect(mocks.hasHostedPersonalPatternsRunAlert).not.toHaveBeenCalled();
+      expect(mocks.after).not.toHaveBeenCalled();
+      expect(warn).not.toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it.each([
+    ["HOSTED_CLOUDFLARE_CALLBACK_UNAUTHORIZED", 401],
+    ["HOSTED_CLOUDFLARE_CALLBACK_REPLAYED", 401],
+    ["HOSTED_RUNTIME_RESOURCE_RETIRED", 409],
+    ["HOSTED_RUNTIME_OWNER_STALE", 503],
+  ])("preserves runtime log admission failures for %s with status %i", async (code, httpStatus) => {
+    mocks.requireHostedCloudflareCallbackRequest.mockRejectedValueOnce(hostedOnboardingError({
+      code, httpStatus, message: "Synthetic callback rejection.",
+    }));
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const response = await runtimeLogRoute.POST(jsonRequest("/api/internal/hosted-runtime/log", { entries: [] }));
+      expect(response.status).toBe(httpStatus);
+      expect(await response.json()).toMatchObject({ error: { code } });
+      expect(mocks.recordHostedRuntimeLogs).not.toHaveBeenCalled();
+      expect(mocks.claimHostedAcceptedAttemptFailureRecheck).not.toHaveBeenCalled();
+      expect(mocks.after).not.toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+      error.mockRestore();
+    }
+  });
+
   it("writes the maximum runtime log batch with a single database call", async () => {
     // The callback accepts 50 entries and the pool defaults to 15 clients, so
     // one Prisma call per entry would make the pool the request's concurrency
@@ -3201,6 +3536,23 @@ describe("hosted runtime internal web routes", () => {
     });
     expect(mocks.recordHostedRuntimeLogs).toHaveBeenCalledOnce();
     expect(mocks.recordHostedRuntimeLogs.mock.calls[0]?.[0]?.entries).toHaveLength(50);
+  });
+
+  it("does not turn a persistence failure into a discarded telemetry acknowledgement", async () => {
+    mocks.recordHostedRuntimeLogs.mockRejectedValueOnce(hostedOnboardingError({
+      code: "HOSTED_RUNTIME_OWNER_STALE", httpStatus: 409, message: "Synthetic persistence failure.",
+    }));
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const response = await runtimeLogRoute.POST(jsonRequest("/api/internal/hosted-runtime/log", {
+        entries: [{ at: FIXED_NOW, component: "mailbox", eventCode: "mailbox.imported", level: "info", phase: "import" }],
+      }));
+      expect(response.status).toBe(409);
+      expect(await response.json()).toMatchObject({ error: { code: "HOSTED_RUNTIME_OWNER_STALE" } });
+      expect(mocks.recordHostedRuntimeLogs).toHaveBeenCalledOnce();
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it("schedules a Personal Patterns alert after runtime logs persist", async () => {

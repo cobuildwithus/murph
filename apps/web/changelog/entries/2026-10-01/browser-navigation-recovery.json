@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-10-01",
+  "order": 100,
+  "item": {
+    "id": "browser-navigation-recovery",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "More reliable browser opening",
+    "summary": "Murph gives a slow-loading page time to finish opening and return its contents.",
+    "details": "Opening a page now leaves time to read it after navigation. Websites can still time out or return errors.",
+    "relevanceTags": ["computer-use", "reliability"],
+    "sourcePullRequests": [3941]
+  }
+}

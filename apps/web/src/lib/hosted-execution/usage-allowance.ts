@@ -69,7 +69,7 @@ import {
   classifyHostedGroupUsageCapacity,
 } from "../hosted-groups/group-usage-capacity";
 import { renderUserFacingMessage } from "../hosted-messages/user-facing-messages";
-import { settleHostedUsageCreditForUsageTx } from "./usage-credits";
+import { settleHostedUsageCreditForUsageTx } from "./usage-credit-usage-settlement";
 import {
   HOSTED_LIVE_PRICING_SOURCE,
   HOSTED_LIVE_PRICING_VERSION,
@@ -519,10 +519,10 @@ const HOSTED_AI_USAGE_ALLOWANCE_AUDIO_USD_MICROS_PER_MINUTE = 510n;
 const MS_PER_PRICING_MINUTE = 60_000n;
 
 // ElevenLabs TTS is character-priced rather than token-priced.
-// Rates are the public ElevenAPI pay-as-you-go rates for Text to Speech:
-// Flash/Turbo: $0.05 per 1K characters; Multilingual v2/v3: $0.10 per 1K.
+// Preserve the existing legacy-model accounting rates from June 18.
+// Eleven v4 uses its September 28 regular public API rate, without promotions.
 const HOSTED_AI_USAGE_ALLOWANCE_ELEVENLABS_TTS_PRICING_VERSION =
-  "elevenlabs-tts-pricing-2026-06-18";
+  "elevenlabs-tts-pricing-2026-09-28";
 const HOSTED_AI_USAGE_ALLOWANCE_ELEVENLABS_TTS_PRICING_SOURCE =
   "https://elevenlabs.io/pricing/api";
 const CHARACTERS_PER_TTS_PRICING_UNIT = 1_000n;
@@ -533,6 +533,8 @@ const HOSTED_AI_USAGE_ALLOWANCE_ELEVENLABS_TTS_MODEL_PRICES = {
   eleven_turbo_v2: 50_000n,
   eleven_turbo_v2_5: 50_000n,
   eleven_v3: 100_000n,
+  // Regular v4 rate; exclude the launch discount that expires October 12.
+  eleven_v4: 80_000n,
 } as const satisfies Record<HostedAiUsageAllowanceElevenLabsTtsPricedModel, bigint>;
 
 // ElevenLabs Music is priced by generated duration.
@@ -624,6 +626,12 @@ const HOSTED_AI_USAGE_ALLOWANCE_OPENAI_MODEL_PRICES: Record<
   HostedAiUsageAllowancePricedModel,
   HostedAiUsageAllowanceModelPrice
 > = {
+  "gpt-6.1-sol": {
+    cachedInputUsdMicrosPerMillionTokens: 100_000n,
+    cacheWriteUsdMicrosPerMillionTokens: 2_500_000n,
+    inputUsdMicrosPerMillionTokens: 2_000_000n,
+    outputUsdMicrosPerMillionTokens: 10_000_000n,
+  },
   "gpt-6-sol": {
     cachedInputUsdMicrosPerMillionTokens: 200_000n,
     cacheWriteUsdMicrosPerMillionTokens: 2_500_000n,
@@ -725,6 +733,20 @@ const HOSTED_AI_USAGE_ALLOWANCE_GPT_6_SOL_LUNA_TOKEN_PRICING_BASES = {
 } as const;
 
 const HOSTED_AI_USAGE_ALLOWANCE_MODEL_TOKEN_PRICING_BASES = {
+  "gpt-6.1-sol": {
+    standard: {
+      ...HOSTED_AI_USAGE_ALLOWANCE_GPT_6_SOL_LUNA_TOKEN_PRICING_BASES.standard,
+      pricingVersion: "openai-api-pricing-2026-09-29-gpt-6.1-sol-standard",
+    },
+    "openai-flex": {
+      ...HOSTED_AI_USAGE_ALLOWANCE_GPT_6_SOL_LUNA_TOKEN_PRICING_BASES["openai-flex"],
+      pricingVersion: "openai-api-pricing-2026-09-29-gpt-6.1-sol-openai-flex",
+    },
+    "openai-priority": {
+      ...HOSTED_AI_USAGE_ALLOWANCE_GPT_6_SOL_LUNA_TOKEN_PRICING_BASES["openai-priority"],
+      pricingVersion: "openai-api-pricing-2026-09-29-gpt-6.1-sol-openai-priority",
+    },
+  },
   "gpt-6-sol": HOSTED_AI_USAGE_ALLOWANCE_GPT_6_SOL_LUNA_TOKEN_PRICING_BASES,
   "gpt-6-luna": HOSTED_AI_USAGE_ALLOWANCE_GPT_6_SOL_LUNA_TOKEN_PRICING_BASES,
   "gpt-6-astra": {
@@ -3801,7 +3823,7 @@ function resolveHostedAiUsageAllowanceModelPrices(input: {
   const cumulativeCodexUsage = input.record.usageExtractionSourcePath
     ?.endsWith("tokenUsage.total.delta") === true;
   // Exact individual requests above 272K pay long-context rates in every bucket.
-  if (input.model.startsWith("gpt-6-") && !cumulativeCodexUsage
+  if ((input.model.startsWith("gpt-6-") || input.model === "gpt-6.1-sol") && !cumulativeCodexUsage
       && normalizeTokenCount(input.record.inputTokens) > 272_000n) {
     return {
       cachedInputUsdMicrosPerMillionTokens: prices.cachedInputUsdMicrosPerMillionTokens * 2n,

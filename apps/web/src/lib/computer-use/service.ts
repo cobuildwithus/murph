@@ -42,6 +42,7 @@ const COMPUTER_CLEANUP_BATCH_SIZE = 25;
 const COMPUTER_NAVIGATION_TIMEOUT_MS = 15_000;
 const COMPUTER_OBSERVE_TEXT_LIMIT = 12_000;
 const COMPUTER_OBSERVE_TIMEOUT_MS = 15_000;
+const COMPUTER_OBSERVE_TEXT_TIMEOUT_MS = 5_000;
 const COMPUTER_ACT_RESULT_MARGIN_MS = 3_000;
 const COMPUTER_OS_CONTROL_PREFLIGHT_TIMEOUT_MS = 5_000;
 type EnvSource = Readonly<Record<string, string | undefined>>;
@@ -2271,7 +2272,7 @@ export class ComputerUseService {
         "const title = await page.title().catch(() => null);",
         "const url = page.url();",
         "let visibleText = '';",
-        "try { visibleText = await page.locator('body').innerText({ timeout: 5000 }); } catch {}",
+        `try { visibleText = await page.locator('body').innerText({ timeout: ${COMPUTER_OBSERVE_TEXT_TIMEOUT_MS} }); } catch {}`,
         `if (visibleText.length > ${COMPUTER_OBSERVE_TEXT_LIMIT}) visibleText = visibleText.slice(0, ${COMPUTER_OBSERVE_TEXT_LIMIT});`,
         "return { title, url, visibleText };",
       ].join("\n"),
@@ -2297,7 +2298,8 @@ export class ComputerUseService {
         url: input.url,
       }),
       sessionId: input.sessionId,
-      timeoutMs: input.timeoutMs,
+      // Navigation is followed by a page read before the result can return.
+      timeoutMs: input.timeoutMs + COMPUTER_OBSERVE_TEXT_TIMEOUT_MS + COMPUTER_ACT_RESULT_MARGIN_MS,
     });
 
     return readBrowserStateResult(response.result);
@@ -4050,7 +4052,7 @@ function buildComputerNavigationCode(input: {
     "const finalUrl = page.url();",
     "const title = await page.title().catch(() => null);",
     "let visibleText = '';",
-    "try { visibleText = await page.locator('body').innerText({ timeout: 5000 }); } catch {}",
+    `try { visibleText = await page.locator('body').innerText({ timeout: ${COMPUTER_OBSERVE_TEXT_TIMEOUT_MS} }); } catch {}`,
     `if (visibleText.length > ${COMPUTER_OBSERVE_TEXT_LIMIT}) visibleText = visibleText.slice(0, ${COMPUTER_OBSERVE_TEXT_LIMIT});`,
     "return { url: finalUrl, title, visibleText };",
   ].join("\n");

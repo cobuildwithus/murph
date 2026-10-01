@@ -111,6 +111,7 @@ import {
 } from './dynamic-tools/connected-apps.js'
 import {
   MURPH_GENERATE_VOICE_MEMO_TOOL,
+  MURPH_EXPRESSIVE_VOICE_MEMO_TOOL,
 } from './dynamic-tools/generate-voice-memo.js'
 import {
   MURPH_CREATE_PHONE_CALL_TOOL,
@@ -357,6 +358,7 @@ export const MURPH_GROUP_CHALLENGE_RESPONSE_CARD_TOOL = {
 export const MURPH_GENERATE_IMAGE_TOOL = {
   namespace: 'murph',
   name: 'generate_image',
+  deferLoading: true,
   description:
     `Generate one GPT Image 2 image when requested, a known preference supports visual help, or a skill/product flow explicitly marks images welcome and privacy-safe. Use ordered vault refs and explain their roles; include ${MURPH_CHARACTER_SHEET_REFERENCE_IMAGE_REF}, Murph's canonical character sheet, when Murph appears. Vault outputs persist under raw/captures/**. Hosted accepted-message turns start generation in the background and finish through trusted private media. Exact scheduled automation occurrences remain synchronous and attach private media to the same final response; that image consumes one of the same ${ASSISTANT_AUTHORED_RESPONSE_MEDIA_MAX_ITEMS} final-response media slots, so leave a slot before calling. Local runs stay synchronous with the same slot rule and save under CODEX_HOME/generated_images. Requested graphs, charts, and trend lines: render them with this tool when no chart or card tool fits; put the chart type, labeled axes, and the plotted values in the prompt. Treat those values as plotting data, not visible labels. Explicitly ask the renderer to omit numeric labels on individual points and bars unless the user requests them. Use sparse, rounded axis ticks and a compact legend; keep annotations rare and round any displayed values to useful precision. Default chart prompts to Murph's warm lab-notebook style: cream paper (#f5f0e8), slate text (#2d3436), solid sage data lines (#7a8c6e), dashed sand reference lines (#d4c4a8). Use only these colors for chart marks: sage and slate for separate data series, distinguished by markers. Use Fraunces-style serif titles and numbers, DM Sans body text, and DM Mono labels; keep charts flat and legible without gradients or decorative shadows.`,
   inputSchema: {
@@ -415,6 +417,7 @@ export const MURPH_GENERATE_IMAGE_TOOL = {
 export const MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL = {
   namespace: 'murph',
   name: 'submit_product_feedback',
+  deferLoading: true,
   description:
     `Submit one structured Murph product-feedback candidate for the current accepted request. Provide the feedback kind, one concise product-only summary, and optional related changelog item ids. When feedback describes a failure or workflow issue, put the general feedback first and append a privacy-safe reproduction recipe in the same summary field. Ordinary feedback is best-effort after the reply. Explicit verified-private human support uses kind "frustration", empty changelog ids, and a concise de-identified explanation beginning exactly "Support escalation:"; that mode waits for the durable callback. The result reports an input-schema rejection, accepted, already accepted, unavailable, or callback failure. An input-schema rejection includes value-free validation issues. Accepted, already accepted, unavailable, and callback-failure results are terminal.`,
   inputSchema: {
@@ -455,6 +458,7 @@ export const MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL = {
 export const MURPH_FAMILY_PLAN_TOOL = {
   namespace: 'murph',
   name: 'family_plan',
+  deferLoading: true,
   description:
     'Read Family status, start checkout, or invite. Allow `read_status` for an explicit Family request or trusted private low-usage Family context. Checkout and invite actions require the current member\'s explicit request. Treat results as exact; never claim activation, invitation, payment, or usage completion.',
   inputSchema: {
@@ -1801,6 +1805,7 @@ export const MURPH_DYNAMIC_TOOLS = [
 
 export type MurphDynamicTool =
   | (typeof MURPH_DYNAMIC_TOOLS)[number]
+  | typeof MURPH_EXPRESSIVE_VOICE_MEMO_TOOL
   | typeof MURPH_GROUP_DATA_EAGER_TOOL
   | typeof MURPH_ATTACH_FOLLOW_UP_TOOL
   | typeof MURPH_MEMBER_MEMORY_TOOL
@@ -1848,6 +1853,7 @@ export interface MurphDynamicToolAvailability {
   phoneCallStatusAvailable?: boolean | null
   phoneCallStopAvailable?: boolean | null
   voiceMemoGenerationAvailable?: boolean | null
+  voiceMemoModelId?: string | null
   pendingVaultFilesAvailable?: boolean | null
   vaultFileSendAvailable?: boolean | null
   conversationAttachmentsAvailable?: boolean | null
@@ -1933,6 +1939,12 @@ export function resolveMurphDynamicTools(
   const tools: MurphDynamicTool[] = MURPH_DYNAMIC_TOOLS.filter((tool) =>
     (TOOL_AVAILABILITY.get(tool) ?? ALWAYS_AVAILABLE)(availability),
   )
+  if (availability.voiceMemoModelId === 'eleven_v4') {
+    const voiceToolIndex = tools.indexOf(MURPH_GENERATE_VOICE_MEMO_TOOL)
+    if (voiceToolIndex >= 0) {
+      tools[voiceToolIndex] = MURPH_EXPRESSIVE_VOICE_MEMO_TOOL
+    }
+  }
   if (availability.automationAvailable !== true && availability.followUpAttachmentAvailable === true) {
     tools.push(MURPH_ATTACH_FOLLOW_UP_TOOL)
   }

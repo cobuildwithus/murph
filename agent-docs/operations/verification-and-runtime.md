@@ -266,41 +266,20 @@ pnpm test:assistant:live -- --test "<unique test-name pattern>"
 ```
 
 The helper requires a name pattern so it cannot accidentally fan out across
-the paid suite. It defaults to `gpt-6-sol` through the authenticated local
+the paid suite. It defaults to `gpt-6.1-sol` through the authenticated local
 ChatGPT/Codex subscription without copying auth material; `--auth provider`
 keeps the existing isolated provider-key route. Read every printed synthetic
 reply and record a `Ready` or `Hold` UX verdict covering correctness, action
 count, repetition, clarity, warmth, autonomy, and truthful recovery. Routine CI
 must never depend on local subscription state or make the paid call.
 
-The separate `.github/workflows/assistant-real-model.yml` acceptance lane runs
-daily on protected `main` or by manual dispatch from protected `main`. Before
-enabling it, configure the `assistant-real-model-sandbox` GitHub Environment to
-allow only `main` and set its `ASSISTANT_REAL_MODEL_SANDBOX_OPENAI_API_KEY` to a
-dedicated budgeted test-project credential. Do not use a production credential.
-The runner `pnpm exec tsx scripts/run-assistant-real-model-gate.ts` pins
-`gpt-6-sol`, the production Responses websocket-enabled provider setting,
-three exact scenario names, serial execution, zero test retries, and a twelve
-minute outer deadline per scenario. Codex's ordinary bounded transport retries
-remain enabled. Missing configuration, missing selection, skipped assertions,
-and absent or invalid execution reports fail the lane. The retained artifact
-contains only commit/run/model/configured-transport and scenario status metadata;
-raw replies and Vitest reports are discarded.
-
-These journeys use production assistant planning and the shipped `vault-cli`
-against synthetic canonical vaults. They prove meal save and fresh-conversation
-readback after assistant process restart and vault snapshot restore; recurring
-reminder save, scheduler fire, outbox acknowledgement/reconciliation and cancel;
-and group privacy refusal, silence, and absence of unauthorized canonical effects.
-The Linq route metadata and delivery sink are synthetic external boundaries.
-The model-created reminder is not patched before execution. Native launch
-arguments add the named permission profiles from the production builder while
-preserving the selected Codex authentication home. This lane does not prove
+The live Codex suite is opt-in local proof; no scheduled workflow runs it.
+The canonical meal persistence, recurring reminder lifecycle, and group
+privacy/quiet journeys remain available through the same focused local runner.
+They exercise production assistant planning and the shipped `vault-cli` against
+synthetic vaults, with synthetic messaging boundaries. Local runs do not prove
 managed-container restart, private Worker egress, Temporal, or actual
 messaging-provider delivery.
-It is post-merge acceptance evidence, separate from PR checks and deploy gates.
-Local subscription runs prove the same owned effects but retain the selected
-local Codex configuration; they do not certify the protected provider transport.
 
 If the default subscription home cannot run the focused journey before any
 provider action because of authentication, quota, startup, or connection
@@ -438,7 +417,9 @@ remain external to the checkout.
 
 The public live wearable workflow dispatches protected-main source to the
 private hosted-runtime executor. It runs daily and on manual
-recovery; it accepts only an exact completed canonical-data receipt. The public
+recovery; it requires an exact completed journey and cleanup receipt. The
+private receipt distinguishes matched canonical data from a successful empty
+provider response; empty-account success does not prove ingestion. The public
 controller has no provider credentials, private checkout, or artifact access.
 See [Live provider canaries](live-provider-canaries.md) for the execution,
 credential-provisioning, and safe migration contract.
@@ -769,6 +750,20 @@ alternate workflow ref could request.
 
 When Crabbox runs, record the command, result, executor, and timing summary
 without recording host, account, or local-path identifiers.
+
+### Refreshing stale dependency build-cache metadata
+
+A restored pnpm installation can retain an old `ignoredBuilds` list even after
+`allowBuilds` explicitly denies those scripts. Confirm a clean frozen install
+is warning-free before treating an ignored-script warning as stale metadata;
+do not enable dependency scripts merely to silence it.
+
+For a one-time cache refresh, set the non-secret Vercel project variable
+`VERCEL_FORCE_NO_BUILD_CACHE=1` for production before the next authorized
+`main` commit. That commit must still use Git integration and pass ordinary
+production admission. Inspect its install logs and cache-upload result, then
+remove the temporary variable to restore normal caching. Verify the next cached
+build stays warning-free. See [Vercel's build-cache guidance](https://vercel.com/docs/deployments/troubleshoot-a-build#managing-build-cache).
 
 ## Verification Matrix
 
@@ -1192,7 +1187,7 @@ it is not permission to send unrelated messages, deploy, or change the webhook.
 - A dedicated onboarding entrypoint exists at `node packages/cli/dist/bin.js onboard ...`; it is routed from `packages/cli/src/bin.ts` instead of the main `vault-cli` manifest so installer-style host provisioning can happen without reshaping the data-plane command graph.
 - The built CLI package shape exposes a `murph` bin alias that targets the same built entrypoint as `vault-cli`; `murph`, `murph --help`, and `murph onboard ...` route to the onboarding surface, while other commands continue through the main operator surface. Interactive TTY onboarding now opens a compact assistant/channel/wearable stepper with inline readiness badges for Telegram, Garmin, Oura, Strava, and WHOOP, restores canonical wearable selections from `bank/preferences.json`, can prompt for missing runtime credentials for the current onboarding run without persisting them, persists the selected wearable providers back into that canonical preferences singleton, opens any selected wearable connect flow that is ready before handoff, defers scheduled-update preset installation until the operator later binds an explicit outbound destination, and then routes to `assistant run` when a configured auto-reply channel remains enabled. The repo's release flow now publishes only `@murphai/murph`, `@murphai/openclaw-plugin`, `@murphai/contracts`, `@murphai/hosted-execution`, and `@murphai/gateway-core` under one shared version and one git tag. Workspace-private runtime and owner packages such as `@murphai/assistant-engine`, `@murphai/operator-config`, `@murphai/runtime-state`, and `@murphai/device-syncd` remain installable from a checkout and are bundled into the relevant public tarballs when needed. The tag-driven GitHub Actions publish job relies on npm trusted publishing for that smaller package set, and npm trust is package-level rather than repo-level, so live npm publication depends on each public `@murphai/*` package being bound to `cobuildwithus/murph` and `.github/workflows/release.yml`. The repo ships `pnpm release:trust:github` to bootstrap those package-level bindings from an npm-authenticated maintainer shell; if a package is already bound incorrectly in npm, maintainers must revoke that package's existing trust entry before rerunning the bootstrap helper.
 - Repo-local host bootstrap is handled by `scripts/setup-host.sh`, which delegates to the existing Homebrew-based `scripts/setup-macos.sh` path on macOS and can reuse or download Node 24.14.1+ locally on Linux before activating `pnpm` through corepack, installing workspace dependencies, building the workspace, and delegating to the built setup entrypoint. `scripts/setup-macos.sh` still hard-fails off macOS, `scripts/setup-linux.sh` hard-fails off non-Linux hosts, and `--dry-run` remains a wrapper-only planning mode for those shell entrypoints.
-- GitHub Actions host-support CI runs `.github/workflows/host-support.yml`, which exercises the focused CLI setup/inbox host-support suite on both `ubuntu-24.04` and `macos-latest`. Its Ubuntu release gate preserves the `pnpm release:check` surface and the stable `Release checks (ubuntu)` required owner. In full mode, a lightweight exact-candidate job executes `scripts/release-verification-plan.mjs` without installing dependencies and publishes the validated six-shard package and four-shard Web-test matrices; documentation mode requires that job to remain skipped. Package coverage remains exhaustive and unique: CLI and Assistant Engine are singleton jobs, the current measured platform owners are divided across two jobs, and Health Commons plus Hosted Local Harness remain singleton jobs. Commands are unchanged and serial within each two-core runner, generated Health Commons preparation remains per checkout, CLI runtime/package-shape proof remains CLI-only, and release build/typecheck owns the prepared Messaging Ingress, Inboxd, and Hosted Local Harness package-boundary checks exactly once. This bounds runner fanout while allowing the measured long package owners to proceed independently; organization-level GitHub concurrency can still queue jobs.
+- GitHub Actions host-support CI runs `.github/workflows/host-support.yml`, which exercises the focused CLI setup/inbox host-support suite on both `ubuntu-24.04` and `macos-latest`. Its Ubuntu release gate preserves the `pnpm release:check` surface and the stable `Release checks (ubuntu)` required owner. In full mode, a lightweight exact-candidate job executes `scripts/release-verification-plan.mjs` without installing dependencies and publishes the validated six-shard package and four-shard Web-test matrices; documentation mode requires that job to remain skipped. Package coverage remains exhaustive and unique: CLI, Assistant Engine, and Assistant Runtime are singleton jobs, the remaining measured platform owners (including Health Commons) are divided across two jobs, and Hosted Local Harness remains a singleton job. Commands are unchanged and serial within each two-core runner, generated Health Commons preparation remains per checkout, CLI runtime/package-shape proof remains CLI-only, and release build/typecheck owns the prepared Messaging Ingress, Inboxd, and Hosted Local Harness package-boundary checks exactly once. This bounds runner fanout while allowing the measured long package owners to proceed independently; organization-level GitHub concurrency can still queue jobs.
 - Ubuntu app verification is split only at existing ownership seams. A Web build lane retains legal-PDF generation, Prisma and Health Commons preparation, lint, measured production Next build, dev smoke, and output-dependent tests. Four release-plan-owned Web test lanes retain the complete Vitest surface and each provision loopback PostgreSQL 17 with `MURPH_SUPPLEMENT_SEARCH_TEST_DB_URL`, preserving the transactional supplement-search corpus. Cloudflare retains one complete verification lane plus pinned Codex upstream-source proof. Web and Cloudflare never execute in the same job or runner, avoiding the memory contention and indefinite stalls documented by Frog #2656; each lane retains a 45-minute bound and frozen install. The final aggregator requires the plan and every app/package/build/fixture/bundle result in full mode, while documentation mode still requires its exact-candidate docs proof and requires the plan plus every runtime-heavy branch to remain skipped. Focused policy mutations reject missing or duplicate owners, same-runner Web/Cloudflare recombination, incorrect Web lanes, package-boundary duplication, and any omitted aggregator dependency.
 - Consent ledger proof runs in those hosted-Web test shards against the separate
   local `murph_consent_test` database selected by `MURPH_CONSENT_TEST_DB_URL`.
@@ -1247,6 +1242,6 @@ it is not permission to send unrelated messages, deploy, or change the webhook.
   origin used only as an inequality guard. An isolated Vercel preview
   database/crypto/control-plane boundary is a prerequisite; production Web or
   production stateful secrets are never a preview bootstrap fallback.
-- `Dockerfile.cloudflare-hosted-runner-base` is the checked-in scaffold for the stable native Cloudflare container base image. It installs the common Linux parser dependencies, creates the non-login runner user, and sets the default parser/runtime environment; hosted transcription has no in-image model and routes through the Worker-owned Workers AI binding. `Dockerfile.cloudflare-hosted-runner` is the small app-layer scaffold that starts from that base image, filters the native bundled Codex catalog to exactly `gpt-5.6-sol`, `gpt-6-sol`, and `gpt-5.6-luna`, adds OpenAI Flex support, forces mixed `tool_mode: code_mode`, and validates both properties for every entry. Mixed mode preserves the code executor while exposing native `tool_search`; dynamic-tool `deferLoading` remains the owner of which broad schemas stay out of the initial model-visible surface. The image then copies the prebuilt `apps/cloudflare/.deploy/runner-bundle/` artifact into `/app` and promotes the pinned native Codex binary plus adjacent sandbox resources into a compact final layer for lazy image loading; the production deploy smoke uses the same catalog for one real `gpt-6-sol` turn. The image starts the private `apps/cloudflare/src/container-entrypoint.ts` bridge inside the container, serves `GET /health` plus `POST /internal/workspace-invocation` on that internal bridge only, and delegates bounded hosted workspace invocation directly to `packages/assistant-runtime`. The entrypoint keeps admission, fencing, health, and fatal reporting in a small static boot kernel, starts one cached heavy-runtime hydration after listen, and overlaps that hydration with the accepted invocation's one-shot workspace restore preparation. The prepared restore remains bound to the exact request and warm vault root and is consumed by the existing runtime owner before mailbox/provider work. The default execution path runs one hosted job at a time in-process, builds runtime config from explicit supervisor env plus worker-supplied runtime fields, and uses per-user warm workspace roots plus invocation-local writable cache/temp roots. The present expectation is Node `>=24.14.1`, the preassembled runner bundle plus its materialized production dependencies, writable temp storage for restore/snapshot work, `PORT`, optional `HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS`, and shared worker/container allowlist extension vars for encrypted per-user env overrides when additional key names must be permitted.
+- `Dockerfile.cloudflare-hosted-runner-base` is the checked-in scaffold for the stable native Cloudflare container base image. It installs the common Linux parser dependencies, creates the non-login runner user, and sets the default parser/runtime environment; hosted transcription has no in-image model and routes through the Worker-owned Workers AI binding. `Dockerfile.cloudflare-hosted-runner` is the small app-layer scaffold that starts from that base image, filters the native bundled Codex catalog to `gpt-6.1-sol`, `gpt-6-sol`, `gpt-6-luna`, `gpt-5.6-sol`, and `gpt-5.6-luna`, with `gpt-6-astra` in the separately authorized expanded catalog, adds OpenAI Flex support, forces mixed `tool_mode: code_mode`, and validates both properties for every entry. Mixed mode preserves the code executor while exposing native `tool_search`; dynamic-tool `deferLoading` remains the owner of which broad schemas stay out of the initial model-visible surface. The image then copies the prebuilt `apps/cloudflare/.deploy/runner-bundle/` artifact into `/app` and promotes the pinned native Codex binary plus adjacent sandbox resources into a compact final layer for lazy image loading; the production deploy smoke validates the `gpt-6.1-sol` default configuration and uses the same catalog for one real `gpt-6-luna` turn. The image starts the private `apps/cloudflare/src/container-entrypoint.ts` bridge inside the container, serves `GET /health` plus `POST /internal/workspace-invocation` on that internal bridge only, and delegates bounded hosted workspace invocation directly to `packages/assistant-runtime`. The entrypoint keeps admission, fencing, health, and fatal reporting in a small static boot kernel, starts one cached heavy-runtime hydration after listen, and overlaps that hydration with the accepted invocation's one-shot workspace restore preparation. The prepared restore remains bound to the exact request and warm vault root and is consumed by the existing runtime owner before mailbox/provider work. The default execution path runs one hosted job at a time in-process, builds runtime config from explicit supervisor env plus worker-supplied runtime fields, and uses per-user warm workspace roots plus invocation-local writable cache/temp roots. The present expectation is Node `>=24.14.1`, the preassembled runner bundle plus its materialized production dependencies, writable temp storage for restore/snapshot work, `PORT`, optional `HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS`, and shared worker/container allowlist extension vars for encrypted per-user env overrides when additional key names must be permitted.
 - The current runner scaffold now ships as a preassembled deploy bundle copied into the native image rather than rebuilding the workspace from repo source inside Docker. `apps/cloudflare/DEPLOY.md` is the durable guide for the current staged manual deploy path.
 - Before adding a runtime target, document entrypoints, environment assumptions, and operational guardrails here.

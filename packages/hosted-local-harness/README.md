@@ -26,6 +26,10 @@ pnpm hosted-local run -- pnpm --dir apps/cloudflare test:workers
 
 Root `pnpm dev` is a thin alias for `pnpm hosted-local up`.
 
+E2E MinIO cleanup uses the suite's existing local build identity, including after
+scenario failure or interruption. It removes that build's exact container and
+matching build-labelled leftovers; other E2E builds keep their storage service.
+
 The manual `native-voice` scenario needs a development OpenAI key entitled to
 GPT Live and a synthetic WAV saying “Read notes/synthetic-code.txt in my vault
 and tell me the code.” It seeds an isolated member and encrypted vault, then

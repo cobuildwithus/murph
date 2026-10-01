@@ -32,7 +32,10 @@ Runtime log and redacted-status validation is owned by
 Workspace checkpoints and runner/Web status compose that same validator;
 receipt-specific reserved keys remain with checkpoint parsing. Shared scalar
 checks stay in `src/parsers/assertions.ts`, while `src/observability.ts` owns
-producer sanitization.
+producer sanitization, exposed through `@murphai/hosted-execution/observability`.
+Mailbox-only fetch/item consumers use `@murphai/hosted-execution/parsers/mailbox`
+to avoid loading device-sync and other control parsers. The existing parser
+barrel retains the same exports.
 Use `@murphai/hosted-execution/assistant-usage` for the hosted assistant usage
 record contract, parser, id helper, and credential-source helper.
 The v2 turn profile may include `knowledgeCounts` on the `vault-cli knowledge`
@@ -70,6 +73,10 @@ mention the deleted generic state.
 
 ## Contract
 
+- modules have no required import-time effects; `sideEffects: false` allows unused
+  contract and parser modules to be removed from consumer bundles. Keep process
+  registration and I/O out of module initialization. Shared display constants
+  belong with dependency-free runtime values, not schema construction.
 - signed callback canonicalization stays timestamped and request-bound across app-local signers and verifiers
 - the shared control/status path layout stays stable between callers and the worker
 - non-direct route-authorized Linq and Telegram conversation wakes may carry an

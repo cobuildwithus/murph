@@ -94,6 +94,8 @@ export function shouldSkipDirectory(name) {
     name === ".next-dev" ||
     isNextSmokeArtifactDirectoryName(name) ||
     name === ".test-dist" ||
+    // Health Commons atomically replaces generated output through these trees.
+    /^\.generated\.\d+\.[0-9a-f-]{36}\.(?:tmp|old)$/u.test(name) ||
     name === ".git" ||
     name === "coverage"
   );

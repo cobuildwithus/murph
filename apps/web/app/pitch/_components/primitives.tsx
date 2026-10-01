@@ -192,7 +192,7 @@ export function SlideHeading({
 }) {
   return (
     <h2
-      className={`mt-5 font-serif text-[clamp(1.9rem,4vw,3.1rem)] font-semibold leading-[1.08] tracking-[-0.03em] ${
+      className={`mt-5 font-serif text-[clamp(2.1rem,4.6vw,3.6rem)] font-semibold leading-[1.03] tracking-[-0.035em] ${
         wide ? "max-w-[40ch]" : "max-w-[22ch]"
       } ${dark ? "text-[#f5f0e8]" : "text-[#2d3436]"}`}
     >

@@ -5,6 +5,7 @@ import {
 import {
   HOSTED_ASSISTANT_ASTRA_MODEL,
   HOSTED_ASSISTANT_GPT_6_SOL_MODEL,
+  HOSTED_ASSISTANT_GPT_61_SOL_MODEL,
   HOSTED_ASSISTANT_GPT_6_LUNA_MODEL,
   HOSTED_ASSISTANT_LUNA_MODEL,
   HOSTED_ASSISTANT_SOL_MODEL,
@@ -36,8 +37,9 @@ import { normalizeNullableString } from '../shared.js'
 // Keep stored pins intact so a provider switch or rollback can resolve them again.
 const AUTOMATION_OPENAI_MODEL_REPLACEMENTS = new Map<string, HostedAssistantProductModel>([
   [HOSTED_ASSISTANT_LUNA_MODEL, HOSTED_ASSISTANT_GPT_6_LUNA_MODEL],
-  [HOSTED_ASSISTANT_SOL_MODEL, HOSTED_ASSISTANT_GPT_6_SOL_MODEL],
-  ['gpt-5.6-terra', HOSTED_ASSISTANT_GPT_6_SOL_MODEL],
+  [HOSTED_ASSISTANT_SOL_MODEL, HOSTED_ASSISTANT_GPT_61_SOL_MODEL],
+  ['gpt-5.6-terra', HOSTED_ASSISTANT_GPT_61_SOL_MODEL],
+  [HOSTED_ASSISTANT_GPT_6_SOL_MODEL, HOSTED_ASSISTANT_GPT_61_SOL_MODEL],
 ])
 const AUTOMATION_OPENAI_MODEL_PROVIDERS = new Set<string>([
   OPENAI_CODEX_MODEL_PROVIDER_ID,
@@ -51,6 +53,7 @@ const AUTOMATION_DEFAULT_REASONING_BY_HOSTED_PRODUCT_MODEL = {
   [HOSTED_ASSISTANT_SOL_MODEL]: 'low',
   [HOSTED_ASSISTANT_ASTRA_MODEL]: 'low',
   [HOSTED_ASSISTANT_GPT_6_SOL_MODEL]: 'low',
+  [HOSTED_ASSISTANT_GPT_61_SOL_MODEL]: 'low',
   [HOSTED_ASSISTANT_GPT_6_LUNA_MODEL]: 'low',
 } as const satisfies Record<
   HostedAssistantProductModel,
@@ -128,15 +131,16 @@ export function automationAssistantTargetOverrideToProviderConfigInput(
 export function resolveAutomationAssistantTargetOverrideForTarget(
   input: AutomationAssistantTargetOverride | null | undefined,
   baseTarget: AssistantModelTarget | null | undefined,
+  scheduledTurn = false,
 ): AssistantProviderConfigInput | null {
-  const storedOverride = compactAutomationAssistantTargetOverride(input)
-  if (!storedOverride) {
-    return null
-  }
-
   const baseConfig = baseTarget
     ? assistantBackendTargetToProviderConfigInput(baseTarget)
     : null
+  const storedOverride = compactAutomationAssistantTargetOverride(input)
+  const inheritedOverride = resolveInheritedScheduledSolOverride(storedOverride, baseConfig, scheduledTurn)
+  if (!storedOverride) {
+    return inheritedOverride
+  }
   const explicitModelProvider = normalizeNullableString(storedOverride.modelProvider)
   const effectiveModelProvider =
     explicitModelProvider ?? normalizeNullableString(baseConfig?.modelProvider)
@@ -161,7 +165,7 @@ export function resolveAutomationAssistantTargetOverrideForTarget(
         (!isHostedAssistantProductModel(override.model) ||
           !HOSTED_ASSISTANT_VENICE_PROVIDER_MODELS[override.model])))
   if (!suppressProductModel && supportsReasoningEffort) {
-    return override
+    return { ...inheritedOverride, ...override }
   }
 
   const model = suppressProductModel ? null : override.model ?? null
@@ -174,4 +178,20 @@ export function resolveAutomationAssistantTargetOverrideForTarget(
     modelProvider: explicitModelProvider,
     reasoningEffort,
   })
+}
+
+function resolveInheritedScheduledSolOverride(
+  input: AutomationAssistantTargetOverride | null | undefined,
+  baseConfig: AssistantProviderConfigInput | null,
+  scheduledTurn: boolean,
+): AssistantProviderConfigInput | null {
+  if (!scheduledTurn || input?.model || baseConfig?.model !== HOSTED_ASSISTANT_GPT_6_SOL_MODEL) {
+    return null
+  }
+  const provider = input?.modelProvider ?? baseConfig.modelProvider
+  if (!provider || !AUTOMATION_OPENAI_MODEL_PROVIDERS.has(provider)) {
+    return null
+  }
+  // Inherited reasoning stays on the conversation target; only replace its model.
+  return { model: AUTOMATION_OPENAI_MODEL_REPLACEMENTS.get(baseConfig.model) }
 }

@@ -1,7 +1,7 @@
 import {
   parseHostedMailboxFetchRequest,
   parseHostedMailboxFetchResponse,
-} from "@murphai/hosted-execution/parsers";
+} from "@murphai/hosted-execution/parsers/mailbox";
 import type { Prisma, PrismaClient } from "@prisma/client";
 import { readHostedRuntimeIngressCryptoContextForWorker } from "@/src/lib/hosted-crypto/domain-root-store";
 
@@ -22,7 +22,7 @@ import {
 import {
   fetchHostedRuntimeMailboxProjection,
   tryMarkHostedMailboxConversationAiUsageDenied,
-} from "@/src/lib/hosted-mailbox/store";
+} from "@/src/lib/hosted-mailbox/projection";
 import {
   resolveHostedRuntimeAiUsageGate,
   hostedRuntimeUsageMemberSelect,
@@ -169,11 +169,6 @@ export async function POST(request: Request): Promise<Response> {
 }
 
 async function readMailboxIngressCryptoContext(input: { prisma: PrismaClient; userId: string }) {
-  const workspace = await input.prisma.hostedWorkspace.findUnique({
-    select: { userId: true },
-    where: { userId: input.userId },
-  });
-  if (!workspace) return null;
   const context = await readHostedRuntimeIngressCryptoContextForWorker(input);
   return { ...context, fetchedAt: new Date().toISOString() };
 }

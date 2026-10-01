@@ -27,7 +27,7 @@ describe('assistant nutrition source grounding', () => {
     )
     expect(food).toContain('Do not let vision or memory answer both.')
     expect(food).toContain(
-      'For every numeric meal estimate—including interactive meal logs, user-sent photos, automatic-meal-capture enrichment, and scheduled closeouts—resolve nutrient density from the hosted food-label database for every identifiable material component.',
+      'For every numeric meal estimate—including interactive meal logs, user-sent photos, automatic-meal-capture enrichment, and scheduled closeouts—reuse already verified label or USDA nutrient density for unchanged components; resolve remaining identifiable material components from the hosted food-label database.',
     )
     expect(food).toContain(
       'use returned label or USDA facts for calories and macros',
@@ -96,7 +96,7 @@ describe('assistant nutrition source grounding', () => {
       'Do not force a nutrition lookup, clarification, or safety preflight just to capture the meal.',
     )
     expect(food).toContain(
-      "If that search has no exact result, read `computer-use` and inspect the restaurant's official nutrition or menu source.",
+      "If that search has no exact result, use the bounded source fallback below.",
     )
     expect(food).toContain(
       'When using that official source, retain its URL in nutrition source detail.',
@@ -105,8 +105,12 @@ describe('assistant nutrition source grounding', () => {
       'Only after the database result, official source, or clearly marked last-resort estimate is resolved may you call `meal add` or `meal edit` with the available nutrition and provenance.',
     )
     expect(food).toContain(
-      'Only after the applicable official source fails may you use a clearly marked memory-based estimate',
+      'After this bounded pass fails, give a clearly marked estimate or useful range',
     )
+    expect(food).not.toContain('use `computer_act` to follow')
+    expect(food).toContain('make one targeted web search for the official label/menu')
+    expect(food).toContain('Quantity corrections and requests for totals do not require re-looking up unchanged products.')
+    expect(food).toContain('Preserve exact evidence requirements for allergies, supplement doses, clinical nutrient limits, and explicit exactness requests.')
     expect(automatic).toContain(
       'Read `$MURPH_ASSISTANT_SKILLS_ROOT/food-journal/SKILL.md` before estimating nutrition',
     )

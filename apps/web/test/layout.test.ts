@@ -21,20 +21,10 @@ const mocks = vi.hoisted(() => ({
   ),
 }));
 
-vi.mock("next/font/google", () => ({
-  Fraunces(input: { variable?: string }) {
+vi.mock("next/font/local", () => ({
+  default(input: { variable?: string }) {
     return {
-      variable: input.variable ?? "font-fraunces",
-    };
-  },
-  DM_Sans(input: { variable?: string }) {
-    return {
-      variable: input.variable ?? "font-sans",
-    };
-  },
-  DM_Mono(input: { variable?: string }) {
-    return {
-      variable: input.variable ?? "font-mono",
+      variable: input.variable ?? "font-local",
     };
   },
 }));

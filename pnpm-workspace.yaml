@@ -8,12 +8,25 @@ allowBuilds:
   esbuild: true
   prisma: true
   sharp: true
+  # These scripts already stay disabled; make that decision explicit.
+  "@nestjs/core": false
+  "@reown/appkit": false
+  "@swc/core": false
+  better-sqlite3: false
+  bufferutil: false
+  cbor-extract: false
+  keccak: false
+  msw: false
+  protobufjs: false
+  unrs-resolver: false
+  utf-8-validate: false
+  workerd: false
 blockExoticSubdeps: true
 engineStrict: true
 managePackageManagerVersions: true
 minimumReleaseAge: 1440
 overrides:
-  '@cobuild/review-gpt@0.5.147>incur': 0.4.5
+  '@cobuild/review-gpt@0.5.151>incur': 0.4.5
   '@cloudflare/vitest-pool-workers@0.16.3>esbuild': 0.28.1
   '@coinbase/cdp-sdk@1.48.3>axios': 1.17.0
   '@lob/lob-typescript-sdk@1.4.0>axios': 1.18.0
@@ -66,7 +79,7 @@ overrides:
   'fast-xml-parser@5.7.2>fast-xml-builder': 1.2.0
 minimumReleaseAgeExclude:
   - '@cobuild/repo-tools@0.1.17'
-  - '@cobuild/review-gpt@0.5.147'
+  - '@cobuild/review-gpt@0.5.151'
   - '@next/env@16.3.0'
   - '@next/eslint-plugin-next@16.3.0'
   - '@next/swc-darwin-arm64@16.3.0'
@@ -80,7 +93,7 @@ minimumReleaseAgeExclude:
   - '@onkernel/sdk@0.76.0'
   - eslint-config-next@16.3.0
   - next@16.3.0
-  - '@openai/codex@0.156.1||0.156.1-darwin-arm64||0.156.1-darwin-x64||0.156.1-linux-arm64||0.156.1-linux-x64||0.156.1-win32-arm64||0.156.1-win32-x64'
+  - '@openai/codex@0.159.1||0.159.1-darwin-arm64||0.159.1-darwin-x64||0.159.1-linux-arm64||0.159.1-linux-x64||0.159.1-win32-arm64||0.159.1-win32-x64'
   - '@temporalio/activity@1.16.3'
   - '@temporalio/client@1.16.3'
   - '@temporalio/common@1.16.3'
@@ -96,7 +109,8 @@ packageManagerStrictVersion: true
 patchedDependencies:
   '@cloudflare/containers@0.3.7': patches/@cloudflare__containers@0.3.7.patch
   '@cobuild/repo-tools@0.1.17': patches/@cobuild__repo-tools@0.1.17.patch
-  '@cobuild/review-gpt@0.5.147': patches/@cobuild__review-gpt@0.5.147.patch
+  '@cobuild/review-gpt@0.5.151': patches/@cobuild__review-gpt@0.5.151.patch
+  frog@1.1.0: patches/frog@1.1.0.patch
   incur@0.4.5: patches/incur@0.4.5.patch
   incur@0.5.1: patches/incur@0.5.1.patch
   ink@6.8.0: patches/ink@6.8.0.patch

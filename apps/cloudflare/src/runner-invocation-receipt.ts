@@ -11,6 +11,18 @@ export interface RunnerInvocationIdentity {
   generation: string;
 }
 
+export interface RunnerProviderContext {
+  workspaceVersion: string;
+  customInferenceEnvelope: string | null;
+  platformAiUsageAllowed: boolean;
+}
+
+export interface RunnerProviderAuthority extends RunnerInvocationIdentity, RunnerProviderContext {
+  userId: string;
+  settlementPending: boolean;
+  retiring: boolean;
+}
+
 export interface RunnerInvocationReceipt extends RunnerInvocationIdentity {
   state: "registered" | "completed";
   immediateRecheckRequested: boolean;
@@ -27,8 +39,13 @@ export class RunnerInvocationReceiptStore {
       attempt_id TEXT NOT NULL,
       generation TEXT NOT NULL,
       state TEXT NOT NULL CHECK (state IN ('registered', 'completed')),
-      immediate_recheck INTEGER NOT NULL DEFAULT 0
+      immediate_recheck INTEGER NOT NULL DEFAULT 0,
+      provider_context TEXT
     )`);
+    if (!sql.exec<{ name: string }>("PRAGMA table_info(runner_invocation_receipt)").toArray()
+      .some(column => column.name === "provider_context")) {
+      sql.exec("ALTER TABLE runner_invocation_receipt ADD COLUMN provider_context TEXT");
+    }
     sql.exec(`CREATE TABLE IF NOT EXISTS runner_usage_settlement (
       report_id TEXT PRIMARY KEY, attempt_id TEXT NOT NULL, generation TEXT NOT NULL,
       state TEXT NOT NULL CHECK (state IN ('pending', 'denied'))
@@ -44,7 +61,7 @@ export class RunnerInvocationReceiptStore {
     return { attemptId: row.attempt_id, generation: row.generation, state: row.state, immediateRecheckRequested: row.immediate_recheck === 1 };
   }
 
-  register(identity: RunnerInvocationIdentity): "new" | "existing" {
+  register(identity: RunnerInvocationIdentity, context?: RunnerProviderContext): "new" | "existing" {
     if (!/^[1-9][0-9]*$/u.test(identity.generation)
       || BigInt(identity.generation) > 9_223_372_036_854_775_807n
       || !/^[A-Za-z0-9._:-]{1,200}$/u.test(identity.attemptId)) {
@@ -57,12 +74,34 @@ export class RunnerInvocationReceiptStore {
       if (current.state !== "completed") throw new Error("Native invocation outcome is unresolved.");
     }
     this.sql.exec(`INSERT INTO runner_invocation_receipt
-      (singleton, attempt_id, generation, state, immediate_recheck) VALUES (1, ?, ?, 'registered', 0)
+      (singleton, attempt_id, generation, state, immediate_recheck, provider_context) VALUES (1, ?, ?, 'registered', 0, ?)
       ON CONFLICT(singleton) DO UPDATE SET attempt_id = excluded.attempt_id,
-        generation = excluded.generation, state = 'registered', immediate_recheck = 0`,
-    identity.attemptId, identity.generation);
+        generation = excluded.generation, state = 'registered', immediate_recheck = 0,
+        provider_context = excluded.provider_context`,
+    identity.attemptId, identity.generation, context ? JSON.stringify(context) : null);
     this.sql.exec("DELETE FROM runner_usage_settlement");
     return "new";
+  }
+
+  readProviderInvocation(): (RunnerInvocationIdentity & {
+    context: RunnerProviderContext | null; settlementPending: boolean;
+  }) | null {
+    const [row] = this.sql.exec<{
+      attempt_id: string; generation: string; provider_context: string | null; settlement_pending: number;
+    }>(`SELECT attempt_id, generation, provider_context,
+        EXISTS (SELECT 1 FROM runner_usage_settlement WHERE attempt_id = receipt.attempt_id
+          AND generation = receipt.generation) AS settlement_pending
+      FROM runner_invocation_receipt AS receipt WHERE singleton = 1 AND state = 'registered'`).toArray();
+    return row ? { attemptId: row.attempt_id, generation: row.generation,
+      context: row.provider_context === null ? null : JSON.parse(row.provider_context) as RunnerProviderContext,
+      settlementPending: row.settlement_pending !== 0 } : null;
+  }
+
+  /** Only predeployment registered invocations need this one-time backfill. */
+  restoreProviderContext(identity: RunnerInvocationIdentity, context: RunnerProviderContext): void {
+    this.sql.exec(`UPDATE runner_invocation_receipt SET provider_context = ?
+      WHERE singleton = 1 AND attempt_id = ? AND generation = ? AND state = 'registered'
+        AND provider_context IS NULL`, JSON.stringify(context), identity.attemptId, identity.generation);
   }
 
   beginUsageSettlement(identity: RunnerInvocationIdentity, reportId: string): boolean {

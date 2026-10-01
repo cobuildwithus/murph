@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { constants } from "node:fs";
+import { constants, existsSync } from "node:fs";
 import { access, copyFile, cp, readFile, rename, rm, symlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { Writable } from "node:stream";
@@ -184,6 +184,7 @@ const cleanupHostedRunnerContainerLocalState = vi.fn<
 const collectDockerDevDiagnostics = vi.fn(async () => "Docker diagnostics:\n- docker version: ok");
 const DEFAULT_CODEX_MODEL_CATALOG_TEXT = JSON.stringify({
   models: [
+    { slug: "gpt-6.1-sol" },
     { slug: "gpt-6-sol" },
     { slug: "gpt-6-luna" },
     {
@@ -248,6 +249,7 @@ const defaultSpawnSyncImplementation = (
     stdout: "",
   };
 };
+const execFileSync = vi.fn<() => Buffer>(() => { throw new Error("caddy not found"); });
 const spawnSync = vi.fn<(
   command: string,
   args: readonly string[],
@@ -351,6 +353,7 @@ vi.mock("node:fs", async (importOriginal) => {
 });
 
 vi.mock("node:child_process", () => ({
+  execFileSync,
   spawnSync,
 }));
 
@@ -628,7 +631,90 @@ describe("hosted local dev stack", () => {
     vi.unstubAllGlobals();
   });
 
+  it.each(["missing Caddy", "missing Caddyfile"])("rejects advertised managed HTTPS with %s", async (missing) => {
+    const environmentModule = await import("../../src/dev-hosted-local/environment.ts");
+    vi.mocked(environmentModule.buildHostedLocalDevOverrides).mockReturnValueOnce({
+      HOSTED_WEB_BASE_URL: "https://local.withmurph.ai:3443",
+    });
+    const original = vi.mocked(existsSync).getMockImplementation()!;
+    if (missing === "missing Caddyfile") {
+      vi.mocked(existsSync).mockImplementation(filePath =>
+        String(filePath).endsWith("Caddyfile") ? false : original(filePath));
+    }
+    try {
+      const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
+      const startup = startHostedLocalDevStack({ env: process.env }).then(async (stack) => {
+        await stack.stop();
+        return "unexpected successful startup";
+      });
+      await expect(startup).rejects.toThrow(
+        missing === "missing Caddy"
+          ? "Canonical local HTTPS requires Caddy on PATH"
+          : "Canonical local HTTPS requires the repository Caddyfile",
+      );
+      expect(waitForHealthyHttpEndpoint).not.toHaveBeenCalled();
+      expect(spawnChildProcess.mock.calls.some(([name]) => name === "tls-proxy")).toBe(false);
+      expect(terminateChildProcessAndWait).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.mocked(existsSync).mockImplementation(original);
+    }
+  });
+
+  it("rejects another session's HTTPS listener before direct health can declare readiness", async () => {
+    execFileSync.mockReturnValueOnce(Buffer.alloc(0));
+    const environmentModule = await import("../../src/dev-hosted-local/environment.ts");
+    const runtimeModule = await import("../../src/dev-hosted-local/runtime.ts");
+    vi.mocked(environmentModule.buildHostedLocalDevOverrides).mockReturnValueOnce({
+      HOSTED_WEB_BASE_URL: "https://local.withmurph.ai:3443",
+    });
+    vi.mocked(runtimeModule.assertPortAvailable).mockImplementation(async (_host, port, message) => {
+      if (port === 3443) throw new Error(message);
+    });
+    try {
+      const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
+      const startup = startHostedLocalDevStack({ env: process.env }).then(async (stack) => {
+        await stack.ready;
+        await stack.stop();
+      });
+      await expect(startup).rejects.toThrow("Canonical local HTTPS is already owned by another listener");
+      expect(runtimeModule.assertPortAvailable).toHaveBeenCalledWith(
+        "127.0.0.1", 3443, expect.stringContaining("explicit handoff"),
+      );
+      expect(waitForHealthyHttpEndpoint).not.toHaveBeenCalled();
+      expect(spawnChildProcess.mock.calls.some(([name]) => name === "tls-proxy")).toBe(false);
+      expect(terminateChildProcessAndWait).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.mocked(runtimeModule.assertPortAvailable).mockImplementation(async () => {});
+    }
+  });
+
+  it("preserves explicit proxy skipping with an advertised HTTPS origin", async () => {
+    const environmentModule = await import("../../src/dev-hosted-local/environment.ts");
+    vi.mocked(environmentModule.buildHostedLocalDevOverrides).mockReturnValueOnce({
+      HOSTED_WEB_BASE_URL: "https://local.withmurph.ai:3443",
+    });
+    const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
+    const stack = await startHostedLocalDevStack({env: {...process.env, MURPH_DEV_SKIP_TLS_PROXY: "1"}});
+    await stack.ready;
+    expect(stack.webBaseUrl).toBe("https://local.withmurph.ai:3443");
+    expect(execFileSync).not.toHaveBeenCalled();
+    const runtimeModule = await import("../../src/dev-hosted-local/runtime.ts");
+    expect(vi.mocked(runtimeModule.assertPortAvailable).mock.calls.some(([, port]) => port === 3443)).toBe(false);
+    await stack.stop();
+  });
+
+  it("keeps direct HTTP ready when optional Caddy is unavailable", async () => {
+    const stderrTarget = new CapturingWritable();
+    const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
+    const stack = await startHostedLocalDevStack({ env: process.env, stderrTarget });
+    await stack.ready;
+    expect(stack.webBaseUrl).toBe("http://localhost:3000");
+    expect(stderrTarget.text()).toContain("skipping local HTTPS proxy");
+    await stack.stop();
+  });
+
   it("starts Cloudflare with web-only process environment overrides", async () => {
+    execFileSync.mockReturnValueOnce(Buffer.alloc(0));
     vi.stubEnv("OPENAI_API_KEY", "local-openai-key");
     const inheritedAppSessionHmacKey = Buffer.alloc(32, 9).toString("base64url");
     const localAppSessionHmacKey = Buffer.alloc(32, 8).toString("base64url");
@@ -688,6 +774,15 @@ describe("hosted local dev stack", () => {
     await stack.stop();
 
     expect(stack.webBaseUrl).toBe("https://local.withmurph.ai:3443");
+    expect(execFileSync).toHaveBeenCalledWith("which", ["caddy"], { stdio: "ignore" });
+    expect(runtimeModule.assertPortAvailable).toHaveBeenCalledWith(
+      "127.0.0.1", 3443, expect.stringContaining("explicit handoff"),
+    );
+    expect(spawnChildProcess).toHaveBeenCalledWith(
+      "tls-proxy", "caddy", expect.arrayContaining(["run", "--config"]),
+      expect.objectContaining({ HOSTED_WEB_BASE_URL: "https://local.withmurph.ai:3443" }),
+      expect.any(Object),
+    );
     expect(process.env.HOSTED_APP_SESSION_HMAC_KEY).toBeUndefined();
     expect(stack.runtimeEnv.LINQ_API_BASE_URL).toBe(
       "http://host.docker.internal:4011",
@@ -957,7 +1052,7 @@ describe("hosted local dev stack", () => {
       }),
     );
     expect(stack.config.workerPersistDir).toBe("/tmp/murph-dev-env-test/wrangler-state");
-    expect(terminateChildProcessAndWait).toHaveBeenCalledTimes(2);
+    expect(terminateChildProcessAndWait).toHaveBeenCalledTimes(3);
     expect(waitForHealthyHttpEndpoint).toHaveBeenCalledTimes(2);
     expect(waitForHealthyHttpEndpoint).toHaveBeenNthCalledWith(1, {
       signal: expect.any(AbortSignal),
@@ -3096,6 +3191,7 @@ describe("hosted local dev stack", () => {
     expect(catalogWrite).toBeDefined();
     expect(JSON.parse(String(catalogWrite?.[1]))).toMatchObject({
       models: [
+        { slug: "gpt-6.1-sol", tool_mode: "code_mode" },
         { slug: "gpt-6-sol", tool_mode: "code_mode" },
         { slug: "gpt-6-luna", tool_mode: "code_mode" },
         {
@@ -3130,7 +3226,7 @@ describe("hosted local dev stack", () => {
       stdout: "{not-json",
     },
     {
-      expectedMessage: "Hosted local dev Codex model catalog is missing gpt-6-sol.",
+      expectedMessage: "Hosted local dev Codex model catalog is missing gpt-6.1-sol.",
       stdout: JSON.stringify({ models: [] }),
     },
   ])(

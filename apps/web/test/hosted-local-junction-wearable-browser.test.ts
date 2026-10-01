@@ -1039,8 +1039,11 @@ describe("hosted-local Junction wearable browser authorization", () => {
     ].join(" "));
   });
 
-  it("completes Garmin's exact two-step consent flow", async () => {
-    let step: "selection" | "confirmation" | "murph" = "selection";
+  it.each(["none", "read", "fill", "unchanged"] as const)(
+    "completes Garmin consent after a login-field transition (%s)",
+    async (transition) => {
+    let step: "login" | "selection" | "confirmation" | "murph" =
+      transition === "none" ? "selection" : "login";
     let now = 0;
     let saveClicks = 0;
     let agreeClicks = 0;
@@ -1095,14 +1098,34 @@ describe("hosted-local Junction wearable browser authorization", () => {
     const currentFrame = () => step === "selection"
       ? selectionFrame
       : confirmationFrame;
+    const staleFieldError = new Error("Login field is no longer available.");
+    const fill = vi.fn(async () => {
+      step = "selection";
+      throw staleFieldError;
+    });
+    const emailInput = {
+      isVisible: async () => true,
+      isEditable: async () => true,
+      inputValue: async () => {
+        if (transition === "fill") return "";
+        if (transition === "read") step = "selection";
+        throw staleFieldError;
+      },
+      fill,
+    };
     const page = {
       frames: () => [currentFrame()],
       getByRole: (...args: Parameters<typeof selectionFrame.getByRole>) =>
         currentFrame().getByRole(...args),
-      locator: vi.fn(() => emptyLocator()),
+      locator: vi.fn((selector: string) =>
+        step === "login" && selector === 'input[type="email"]'
+          ? { count: async (): Promise<number> => 1, nth: () => emailInput }
+          : emptyLocator()),
       mainFrame: currentFrame,
       title: vi.fn(async () => "Garmin Partner Auth"),
-      url: () => step === "murph"
+      url: () => step === "login"
+        ? "https://connect.garmin.com/sign-in"
+        : step === "murph"
         ? "https://app.example.test/home"
         : step === "confirmation"
         ? [
@@ -1119,7 +1142,7 @@ describe("hosted-local Junction wearable browser authorization", () => {
       }),
     };
 
-    await expect(completeExternalJunctionAuthorizationForTest(
+    const authorization = completeExternalJunctionAuthorizationForTest(
       page as never,
       createConfig({
         MURPH_E2E_CONNECT_URL:
@@ -1127,7 +1150,15 @@ describe("hosted-local Junction wearable browser authorization", () => {
         MURPH_E2E_PROVIDER_SOURCE: "garmin",
       }),
       () => now,
-    )).resolves.toBeUndefined();
+    );
+    if (transition === "unchanged") {
+      await expect(authorization).rejects.toBe(staleFieldError);
+      expect(saveClicks).toBe(0);
+      expect(agreeClicks).toBe(0);
+      expect(fill).not.toHaveBeenCalled();
+      return;
+    }
+    await expect(authorization).resolves.toBeUndefined();
 
     expect(checkboxes.every((checkbox) => checkbox.checked)).toBe(true);
     expect(saveClicks).toBe(1);
@@ -1135,6 +1166,7 @@ describe("hosted-local Junction wearable browser authorization", () => {
     expect(cancelClicked).toBe(false);
     expect(disagreeClicked).toBe(false);
     expect(now).toBe(1_500);
+    expect(fill).toHaveBeenCalledTimes(transition === "fill" ? 1 : 0);
   });
 
   it("submits Garmin confirmation only once while route departure is unresolved", async () => {
@@ -1712,7 +1744,7 @@ describe("hosted-local Junction wearable browser authorization", () => {
     }).manualAuthorizationAllowed).toBe(false);
   });
 
-  it("waits for the reloaded connect page before disconnecting", async () => {
+  it.each([200, 503])("waits for page load and diagnoses disconnect HTTP %i", async (status) => {
     const events: string[] = [];
     const dialog = {
       getByRole: vi.fn((role: string) => role === "heading"
@@ -1751,13 +1783,30 @@ describe("hosted-local Junction wearable browser authorization", () => {
           events.push("notice");
         }),
       })),
+      waitForResponse: vi.fn(async (accept: (response: {
+        url: () => string;
+        request: () => { method: () => string };
+      }) => boolean) => {
+        const response = (origin: string, pathname: string, method = "POST") => ({
+          url: () => `${origin}${pathname}`,
+          request: () => ({ method: () => method }),
+        });
+        const route = "/api/settings/device-sync/connections/synthetic/disconnect";
+        expect(accept(response("https://app.example.test", route))).toBe(true);
+        expect(accept(response("https://app.example.test", route.replace("/disconnect", "/sources/garmin/disconnect")))).toBe(true);
+        expect(accept(response("https://other.example.test", route))).toBe(false);
+        expect(accept(response("https://app.example.test", route, "GET"))).toBe(false);
+        expect(accept(response("https://app.example.test", "/unrelated/disconnect"))).toBe(false);
+        events.push("response-listener");
+        return { ok: () => status === 200, status: () => status };
+      }),
       waitForLoadState: vi.fn(async (state: string) => {
         expect(state).toBe("load");
         events.push("load");
       }),
     };
 
-    await disconnectHostedLocalJunctionAccountForTest(
+    const cleanup = disconnectHostedLocalJunctionAccountForTest(
       page as never,
       createConfig({
         MURPH_E2E_CONNECT_URL:
@@ -1766,6 +1815,13 @@ describe("hosted-local Junction wearable browser authorization", () => {
       }),
     );
 
+    if (status !== 200) {
+      await expect(cleanup).rejects.toThrow(`MURPH_E2E_JUNCTION_DISCONNECT_HTTP_${status}`);
+      expect(page.getByText).not.toHaveBeenCalled();
+      expect(events).not.toContain("idle");
+      return;
+    }
+    await cleanup;
     expect(page.waitForLoadState).toHaveBeenCalledWith("load", {
       timeout: 30_000,
     });
@@ -1773,6 +1829,7 @@ describe("hosted-local Junction wearable browser authorization", () => {
       "load",
       "trigger",
       "dialog",
+      "response-listener",
       "confirm",
       "notice",
       "idle",

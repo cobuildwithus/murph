@@ -1077,33 +1077,37 @@ async function resolveHostedSystemMailboxProcessingModeWake(input: {
   systemMailboxWakeReason: string | null;
 }> {
   const now = new Date(input.nowMs);
-  const pendingAssistantInputWakeAt =
-    await resolveHostedPendingAssistantInputWakeAt({
+  // These independent local reads share one observation time. Join every read
+  // on failure before the invocation can release or replace the workspace.
+  const wakeReads = [
+    resolveHostedPendingAssistantInputWakeAt({
       inspectOnly: true,
       now: () => now.toISOString(),
       vaultRoot: input.vaultRoot,
-    });
-  const outboxWakeAt = await resolveHostedAssistantOutboxNextWakeAt({
-    now,
-    vaultRoot: input.vaultRoot,
-  });
-  const providerCleanupWakeAt = await resolveHostedProviderCleanupScheduledWakeAt({
-    nowMs: input.nowMs,
-    vaultRoot: input.vaultRoot,
-  });
-  const systemMailboxWakes = input.systemMailboxWakes
-    ?? await resolveHostedSystemMailboxWakeCandidates({
+    }),
+    resolveHostedAssistantOutboxNextWakeAt({ now, vaultRoot: input.vaultRoot }),
+    resolveHostedProviderCleanupScheduledWakeAt({
+      nowMs: input.nowMs,
+      vaultRoot: input.vaultRoot,
+    }),
+    input.systemMailboxWakes ?? resolveHostedSystemMailboxWakeCandidates({
       now: () => now.toISOString(),
       state: input.systemMailboxState,
       vaultRoot: input.vaultRoot,
+    }),
+    resolveHostedAssistantCronWakeAfterInitialImport({
+      nowMs: input.nowMs,
+      operatorHomeRoot: input.operatorHomeRoot,
+      runtimeEnv: input.runtimeEnv,
+      vaultRoot: input.vaultRoot,
+    }),
+  ] as const;
+  const [pendingAssistantInputWakeAt, outboxWakeAt, providerCleanupWakeAt,
+    systemMailboxWakes, assistantCronWake] = await Promise.all(wakeReads).catch(async (error) => {
+      await Promise.allSettled(wakeReads);
+      throw error;
     });
   const systemMailboxWake = systemMailboxWakes.next;
-  const assistantCronWake = await resolveHostedAssistantCronWakeAfterInitialImport({
-    nowMs: input.nowMs,
-    operatorHomeRoot: input.operatorHomeRoot,
-    runtimeEnv: input.runtimeEnv,
-    vaultRoot: input.vaultRoot,
-  });
   const outboxWake = createHostedRuntimeWakeCandidate(
     outboxWakeAt,
     HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON,
@@ -2371,6 +2375,13 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
     const baseRunnerInput: HostedWorkspaceRunnerInput = {
       awaitBackgroundMaintenanceBarrier: async (barrier) => {
         if (!startExactDetachedAssistantAsk) {
+          if (
+            barrier.foregroundConversationWorkObserved()
+            && !runtimeOwnerHandoffRequested
+            && !backgroundWorkSignal.aborted
+          ) {
+            detachedAssistantAskController?.resume();
+          }
           return;
         }
         await barrier.drainPendingForegroundWake();
@@ -3372,6 +3383,20 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         defaultOwnerWakeObserved = true;
         return true;
       };
+      const qualifySystemMailboxForegroundWake = async (wakeObserved: boolean): Promise<boolean> => {
+        if (!wakeObserved) return false;
+        // A wake is a hint, including an explicit default-owner request. Only
+        // current foreground facts justify yielding background work. Blocked
+        // invocations cannot read conversation input, so retain their handoff.
+        if (assistantExecutionBlocked) return foregroundWakeObserved;
+        if (checkpointReportedConversationInputAhead) return true;
+        await prefetchSystemMailboxAssistantWork();
+        // A checkpoint may report input while the bounded read is in flight.
+        foregroundWakeObserved = checkpointReportedConversationInputAhead
+          || systemMailboxForegroundWakePrefetch !== null;
+        defaultOwnerWakeObserved = foregroundWakeObserved;
+        return foregroundWakeObserved;
+      };
       const checkpointSystemMailboxMode = async (
         stage: string,
         extraCandidates: readonly HostedRuntimeWakeCandidate[] = [],
@@ -3426,28 +3451,16 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       const finishIndependentSystemWorkAfterCheckpoint = async (): Promise<void> => {
         if (systemMailboxForegroundWakePrefetch || readyDurableCheckpointEffects.length === 0) return;
         const completionWakeSignal = createCoalescingRuntimeWakeSignal();
-        const prefetchCompletionForeground = async (): Promise<boolean> => {
-          // Blocked invocations cannot inspect conversation input. Preserve an
-          // already-observed owner handoff instead of treating it as an empty read.
-          if (assistantExecutionBlocked) return foregroundWakeObserved;
-          if (checkpointReportedConversationInputAhead) return true;
-          await prefetchSystemMailboxAssistantWork();
-          // A checkpoint can report newer input while the mailbox read is in flight.
-          foregroundWakeObserved = checkpointReportedConversationInputAhead
-            || systemMailboxForegroundWakePrefetch !== null;
-          defaultOwnerWakeObserved = foregroundWakeObserved;
-          return foregroundWakeObserved;
-        };
         // A hint may already have been consumed during the preceding checkpoint.
         // Confirm that authority too, while retaining checkpoint-reported input.
-        if (foregroundWakeObserved && await prefetchCompletionForeground()) return;
+        if (await qualifySystemMailboxForegroundWake(foregroundWakeObserved)) return;
         systemMailboxWakeSignal = completionWakeSignal;
         const interruption = createHostedRuntimeCheckpointWakeInterruption({
           enabled: true, runtimeWakeSignal: options.runtimeWakeSignal ?? null,
           // Qualify wakes throughout projection, recording, and checkpointing.
           // Scheduler hints alone must not restart already-checkpointed work.
           async shouldInterrupt(notification) {
-            if (!await prefetchCompletionForeground()) return false;
+            if (!await qualifySystemMailboxForegroundWake(true)) return false;
             completionWakeSignal.notify(notification);
             return true;
           },
@@ -3582,7 +3595,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         preempted: boolean;
         prepared: boolean;
       }> => {
-        if (consumeForegroundWake()) {
+        if (await qualifySystemMailboxForegroundWake(consumeForegroundWake())) {
           return { preempted: true, prepared: false };
         }
         const acceptedProgressCheckpointOrdinalBeforePreparation =
@@ -4092,7 +4105,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           );
         }
 
-        if (consumeForegroundWake()) {
+        if (await qualifySystemMailboxForegroundWake(consumeForegroundWake())) {
           return await returnSystemMailboxModeResult();
         }
 
@@ -6056,6 +6069,18 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           const runtimeStateDirtyAfterMailboxImport = runtimeStateDirty;
           runtimeStateDirty = runtimeStateDirtyBeforeMailboxImport;
           try {
+            // Full work admission may release retained Ask kicks only when no
+            // checkpointed effects await draining. Checkpoint-safe import alone
+            // preserves the paused successor; actual foreground batches resume
+            // at their own admission boundary.
+            if (
+              input.systemMailboxAdmission === "all"
+              && readyDurableCheckpointEffects.length === 0
+              && !runtimeOwnerHandoffRequested
+              && !backgroundWorkSignal.aborted
+            ) {
+              detachedAssistantAskController?.resume();
+            }
             return await runForegroundPass({
               ...wakeInput,
               providerStartCriticalPath: foregroundProviderStartCriticalPath,

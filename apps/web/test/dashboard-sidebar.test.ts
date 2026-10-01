@@ -177,7 +177,7 @@ beforeEach(() => {
   mocks.setOpenMobile.mockClear();
 });
 
-test("Sidebar exposes Journal and Patterns but keeps the internal Overview route hidden", () => {
+test("Sidebar exposes primary destinations without Voice or the internal Overview route", () => {
   mocks.usePathname.mockReturnValue("/experiments");
 
   const markup = renderToStaticMarkup(createElement(Sidebar));
@@ -185,8 +185,8 @@ test("Sidebar exposes Journal and Patterns but keeps the internal Overview route
   assert.match(markup, /href="\/home"[^>]*>\s*<svg/);
   assert.match(markup, /href="\/journal"/);
   assert.match(markup, />Journal<\/a>/);
-  assert.match(markup, /href="\/voice"/);
-  assert.match(markup, />Voice<\/a>/);
+  assert.doesNotMatch(markup, /href="\/voice"/);
+  assert.doesNotMatch(markup, />Voice<\/a>/);
   assert.match(markup, /href="\/patterns"/);
   assert.match(markup, />Patterns<\/a>/);
   assert.doesNotMatch(markup, /href="\/overview"/);

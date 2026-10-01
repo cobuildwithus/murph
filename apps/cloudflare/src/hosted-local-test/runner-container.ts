@@ -48,6 +48,7 @@ import {
 
 export interface HostedLocalTestRunnerOutboundContext {
   containerId?: string;
+  className?: string;
   waitUntil?: (promise: Promise<unknown>) => void;
 }
 

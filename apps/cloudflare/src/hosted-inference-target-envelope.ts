@@ -1,7 +1,4 @@
 import {
-  readHostedProviderEgressCredentialSigningSecret,
-} from "./hosted-provider-egress-credential.ts";
-import {
   parseHostedInferenceRuntimeTarget,
   type HostedInferenceRuntimeTarget,
 } from "./hosted-inference-runtime-target.ts";
@@ -140,7 +137,7 @@ function parseHostedInferenceTargetEnvelope(
 async function deriveHostedInferenceTargetEnvelopeKey(
   source: Readonly<Record<string, unknown>>,
 ): Promise<CryptoKey> {
-  const secret = readHostedProviderEgressCredentialSigningSecret(source);
+  const secret = readHostedProviderEncryptionSecret(source);
   const secretBytes =
     HOSTED_INFERENCE_TARGET_ENVELOPE_TEXT_ENCODER.encode(secret);
   let baseKey: CryptoKey;
@@ -198,4 +195,11 @@ function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
   const copy = new Uint8Array(bytes.byteLength);
   copy.set(bytes);
   return copy.buffer;
+}
+
+/** Retained key material also protects existing inference envelopes and Live references. */
+export function readHostedProviderEncryptionSecret(source: Readonly<Record<string, unknown>>): string {
+  const secret = source.HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET;
+  if (typeof secret !== "string" || !secret.trim()) throw new Error("Hosted provider encryption secret is missing.");
+  return secret.trim();
 }

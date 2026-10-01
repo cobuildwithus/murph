@@ -5,8 +5,6 @@ import {
 } from "@murphai/runtime-state";
 import { HostedBillingStatus, type HostedLinqDailyState, type Prisma } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { runtimeAdmission } from "./support/hosted-runtime-admission-fixture";
-import * as runtimeOwnerControl from "@/src/lib/hosted-execution/runtime-owner-control";
 
 import {
   prepareHostedCryptoDomainRootCandidates,
@@ -4649,7 +4647,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       ...values: unknown[]
     ) => {
       const sql = query.join(" ").toLowerCase();
-      if (sql.includes("for update skip locked")) {
+      if (sql.includes("for no key update skip locked")) {
         lockOrder.push("member-row");
       } else if (sql.includes("for no key update")) {
         lockOrder.push("home-route");
@@ -4959,7 +4957,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       ...values: unknown[]
     ) => {
       const sql = query.join(" ").toLowerCase();
-      if (sql.includes("for update skip locked")) {
+      if (sql.includes("for no key update skip locked")) {
         const rows = lockedRows[memberLockAttempt];
         memberLockAttempt += 1;
         return rows ?? [];
@@ -8273,7 +8271,6 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     });
     const typingResult = createDeferred<{ ok: boolean; status: number }>();
     mocks.getPrisma.mockReturnValue(prisma);
-    vi.spyOn(runtimeOwnerControl, "executeHostedRuntimeOwnerCommand").mockResolvedValue(runtimeAdmission(memberId));
     const ensureRuntimeProcessing = vi.fn();
     mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({
       ensureRuntimeProcessing,
@@ -14494,7 +14491,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       ...values: unknown[]
     ) => {
       const sql = query.join(" ").toLowerCase();
-      if (sql.includes("for update skip locked")) {
+      if (sql.includes("for no key update skip locked")) {
         lockOrder.push("member-row");
       } else if (sql.includes("for no key update")) {
         lockOrder.push("home-route");
@@ -15804,7 +15801,7 @@ function asPrismaTransactionClient<T extends PrismaFixtureBase>(
       : (query as { values?: readonly unknown[] }).values ?? [];
     const sql = strings.join(" ").toLowerCase();
     if (sql.includes("hosted_runtime_cutover")) return [{ phase: "legacy" }];
-    return sql.includes("for update skip locked")
+    return sql.includes("for no key update skip locked")
       ? [{ id: values[0] }]
       : [];
   });

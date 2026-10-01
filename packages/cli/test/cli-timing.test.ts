@@ -8,7 +8,7 @@ import path from 'node:path'
 import { Cli, Errors, z } from 'incur'
 import { afterEach, test, vi } from 'vitest'
 
-import { cliTimingCommand, normalizeCliTiming, type CliTiming } from '@murphai/runtime-state/cli-timing'
+import { CLI_TIMING_MAX_REPORT_BYTES, cliTimingCommand, cliTimingValidationFailure, normalizeCliTiming, type CliTiming } from '@murphai/runtime-state/cli-timing'
 import { planVaultCliInvocation } from '../src/vault-cli-routing.ts'
 
 const roots: string[] = []
@@ -435,4 +435,215 @@ test('real research scout-batch rejects before egress and preserves output/exit 
   assert.equal(succeeded.timing.commands[0]!.calls, 1)
   assert.equal(succeeded.timing.commands[0]!.failures, undefined)
   assert.equal(succeeded.wire.includes('PRIVATE_'), false)
+})
+
+test('real event list and knowledge upsert validation preserve output, effects and finite loopback evidence', async () => {
+  const home = await mkdtemp(path.join(os.tmpdir(), 'cli-validation-PRIVATE_SENTINEL-'))
+  roots.push(home)
+  vi.stubEnv('HOME', home)
+  vi.spyOn(process, 'loadEnvFile').mockImplementation(() => {})
+  const fetchImpl = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
+    throw new Error('PRIVATE_SENTINEL unexpected provider request')
+  })
+  const root = await vault()
+  // Observe real registered handlers without substituting their implementation.
+  const knowledge = await import('@murphai/assistant-engine/knowledge')
+  const upsert = vi.spyOn(knowledge, 'upsertKnowledgePage')
+  const services = await import('@murphai/vault-usecases/vault-services')
+  const createServices = services.createIntegratedVaultServices
+  const eventCalls: Array<() => number> = []
+  vi.spyOn(services, 'createIntegratedVaultServices').mockImplementation((...args) => {
+    const value = createServices(...args)
+    const list = vi.spyOn(value.query, 'listEvents')
+    eventCalls.push(() => list.mock.calls.length)
+    return value
+  })
+  // Freeze output dates/durations only; timing still uses the real monotonic clock.
+  vi.spyOn(performance, 'now').mockReturnValue(0)
+  vi.useFakeTimers({ toFake: ['Date'] })
+  vi.setSystemTime(new Date('2030-01-15T10:00:00.000Z'))
+  try {
+    for (const [args, field, code] of [
+      [['event', 'list', '--limit', '201'], 'limit', 'too_big'],
+      [['event', 'list', '--PRIVATE_SENTINEL'], 'arguments', 'custom'],
+      [['knowledge', 'upsert', '--body', '# PRIVATE_SENTINEL', '--PRIVATE_SENTINEL'], 'arguments', 'custom'],
+      [['knowledge', 'upsert', '--body', ''], 'body', 'too_small'],
+      [['knowledge', 'upsert', '--body', '# PRIVATE_SENTINEL', '--related-slug', 'PRIVATE_SENTINEL!'], 'relatedSlug', 'invalid_format'],
+    ] as const) {
+      const argv = [...args, '--vault', root, '--format', 'json']
+      const baseline = await invoke(argv)
+      const captured = await collect(() => invoke(argv))
+      assert.deepEqual(captured.result, baseline)
+      assert.equal(captured.result.thrown, null)
+      assert.deepEqual(captured.result.exits, [1])
+      const output = JSON.parse(captured.result.stdout)
+      assert.equal(output.code, 'VALIDATION_ERROR')
+      assert.equal(output.stage, 'validation')
+      assert.ok(output.fieldErrors.some((issue: { path: string; code: string; missing?: boolean }) =>
+        issue.path === field && issue.code === code && issue.missing === false))
+      assert.equal(captured.timing.reportCount, 1)
+      assert.equal(captured.timing.commands.length, 1)
+      const command = captured.timing.commands[0]!
+      assert.equal(command.command, args.slice(0, 2).join(' '))
+      assert.equal(command.outcome, 'error')
+      assert.equal(command.calls, 1)
+      const validation = { field, code, missing: false }
+      // The projected envelope owns arguments; an original ParseError need not
+      // expose publicIssues. Never synthesize detail at the original-error seam.
+      assert.deepEqual(cliTimingValidationFailure(command.command, output.code, output, 'fieldErrors'), { validation })
+      const expected = { code: 'VALIDATION_ERROR', stage: 'validation', count: 1 }
+      if (field !== 'arguments' || command.failures?.[0]?.validation !== undefined) {
+        assert.deepEqual(command.failures, [{ ...expected, validation }])
+      } else {
+        assert.deepEqual(command.failures, [expected])
+      }
+      assert.equal(command.droppedFailures, undefined)
+      assert.equal(captured.timing.droppedCalls, 0)
+      assert.equal(captured.timing.droppedSpans, 0)
+      assert.ok(Buffer.byteLength(captured.wire) <= CLI_TIMING_MAX_REPORT_BYTES)
+      assert.equal(captured.wire.includes('PRIVATE_SENTINEL'), false)
+    }
+    assert.equal(upsert.mock.calls.length, 0)
+    assert.equal(eventCalls.reduce((sum, count) => sum + count(), 0), 0)
+    assert.equal((await knowledge.listKnowledgePages({ vault: root })).pageCount, 0)
+    for (const args of [
+      ['event', 'list', '--limit', '1'],
+      ['knowledge', 'upsert', '--body', '# Synthetic page\n\nPRIVATE_SENTINEL\n', '--slug', 'synthetic-page'],
+    ]) {
+      const argv = [...args, '--vault', root, '--format', 'json']
+      const baseline = await invoke(argv)
+      const captured = await collect(() => invoke(argv))
+      assert.deepEqual(captured.result, baseline)
+      assert.equal(captured.result.thrown, null)
+      assert.deepEqual(captured.result.exits, [])
+      assert.equal(captured.timing.reportCount, 1)
+      assert.equal(captured.timing.commands.length, 1)
+      assert.equal(captured.timing.commands[0]!.command, args.slice(0, 2).join(' '))
+      assert.equal(captured.timing.commands[0]!.outcome, 'ok')
+      assert.equal(captured.timing.commands[0]!.calls, 1)
+      assert.equal(captured.timing.commands[0]!.failures, undefined)
+      assert.ok(Buffer.byteLength(captured.wire) <= CLI_TIMING_MAX_REPORT_BYTES)
+      assert.equal(captured.wire.includes('PRIVATE_SENTINEL'), false)
+    }
+    assert.equal(upsert.mock.calls.length, 2, 'One real upsert per successful invocation, no retries.')
+    assert.equal(eventCalls.reduce((sum, count) => sum + count(), 0), 2)
+    assert.equal((await knowledge.listKnowledgePages({ vault: root })).pageCount, 1)
+    assert.match(await readFile(path.join(root, 'derived/knowledge/pages/synthetic-page.md'), 'utf8'), /PRIVATE_SENTINEL/u)
+    assert.equal(fetchImpl.mock.calls.length, 0)
+  } finally { vi.useRealTimers() }
+})
+
+test('real meal validation preserves output and mutation boundaries while admitting only finite loopback detail', async () => {
+  const home = await mkdtemp(path.join(os.tmpdir(), 'meal-validation-PRIVATE_SENTINEL-'))
+  roots.push(home)
+  vi.stubEnv('HOME', home)
+  vi.spyOn(process, 'loadEnvFile').mockImplementation(() => {})
+  const fetchImpl = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
+    throw new Error('PRIVATE_SENTINEL unexpected provider request')
+  })
+  const root = await vault()
+  // Spies retain the real canonical writers, not fake successful handlers.
+  const core = await import('@murphai/core')
+  const add = vi.spyOn(core, 'addMeal')
+  const edit = vi.spyOn(core, 'upsertEvent')
+  const records = await import('@murphai/vault-usecases/records')
+  const editRecord = vi.spyOn(records, 'editMealRecord')
+  const runtime = await import('@murphai/vault-usecases/runtime')
+  const importers = vi.spyOn(runtime, 'loadImportersRuntimeModule')
+  vi.spyOn(performance, 'now').mockReturnValue(0)
+  vi.useFakeTimers({ toFake: ['Date'] })
+  vi.setSystemTime(new Date('2030-01-15T12:00:00.000Z'))
+  try {
+    for (const action of ['add', 'edit']) {
+      const schemaResult = await invoke(['meal', action, '--schema', '--format', 'json'])
+      assert.equal(schemaResult.thrown, null)
+      assert.deepEqual(schemaResult.exits, [])
+      const schema = JSON.parse(schemaResult.stdout)
+      for (const field of ['nutritionCalories', 'nutritionSource', 'occurredAt']) {
+        assert.equal(Object.hasOwn(schema.options.properties, field), true, `${action}/${field}`)
+      }
+      // Edit's real positional lookup is syntactically valid but deliberately absent.
+      // Option rejection must precede even the edit lookup, not merely its write.
+      const args = ['meal', action, ...(action === 'edit' ? ['meal_synthetic_missing'] : [])]
+      for (const [flags, field, code] of [
+        [['--nutrition-calories', '-1'], 'nutritionCalories', 'too_small'],
+        [['--nutrition-source', 'PRIVATE_SENTINEL'], 'nutritionSource', 'invalid_value'],
+        [['--PRIVATE_SENTINEL'], 'arguments', 'custom'],
+      ] as const) {
+        const argv = [...args, ...flags, '--note', 'PRIVATE_SENTINEL', '--vault', root, '--format', 'json']
+        const baseline = await invoke(argv)
+        const captured = await collect(() => invoke(argv))
+        assert.deepEqual(captured.result, baseline)
+        assert.equal(captured.result.thrown, null)
+        assert.deepEqual(captured.result.exits, [1])
+        const output = JSON.parse(captured.result.stdout)
+        assert.equal(output.code, 'VALIDATION_ERROR')
+        assert.equal(output.stage, 'validation')
+        assert.equal(output.retryable, false)
+        const validation = { field, code, missing: false }
+        assert.deepEqual(cliTimingValidationFailure(`meal ${action}`, output.code, output, 'fieldErrors'), { validation })
+        assert.equal(captured.timing.reportCount, 1)
+        assert.equal(captured.timing.commands.length, 1)
+        const command = captured.timing.commands[0]!
+        assert.equal(command.command, `meal ${action}`)
+        assert.equal(command.outcome, 'error')
+        assert.equal(command.calls, 1)
+        const failure = { code: 'VALIDATION_ERROR', stage: 'validation', count: 1 }
+        // Incur's ParseError has no original publicIssues. Its existing public
+        // projection supplies arguments/custom for completion attribution only.
+        assert.deepEqual(command.failures, [field === 'arguments' ? failure : { ...failure, validation }])
+        assert.equal(command.droppedFailures, undefined)
+        assert.equal(captured.timing.droppedCalls, 0)
+        assert.equal(captured.timing.droppedSpans, 0)
+        assert.equal(captured.timing.transportTruncated, false)
+        assert.ok(Buffer.byteLength(captured.wire) <= CLI_TIMING_MAX_REPORT_BYTES)
+        assert.equal(captured.wire.includes('PRIVATE_SENTINEL'), false)
+      }
+    }
+    assert.equal(importers.mock.calls.length, 0)
+    assert.equal(editRecord.mock.calls.length, 0)
+    assert.equal(add.mock.calls.length, 0)
+    assert.equal(edit.mock.calls.length, 0)
+    assert.equal((await records.listMealRecords({ vault: root })).count, 0)
+
+    // Follow the unchanged validation recovery with one real save of each kind.
+    const saved = await collect(() => invoke(['meal', 'add', '--note', 'PRIVATE_SENTINEL',
+      '--nutrition-calories', '420', '--nutrition-source', 'estimated',
+      '--occurred-at', '2030-01-15T10:00:00.000Z', '--vault', root, '--format', 'json']))
+    assert.equal(saved.result.thrown, null)
+    assert.deepEqual(saved.result.exits, [])
+    const meal = JSON.parse(saved.result.stdout)
+    assert.equal(typeof meal.mealId, 'string')
+    assert.equal(meal.nutrition.totals.calories, 420)
+    assert.equal(meal.note, 'PRIVATE_SENTINEL')
+    assert.equal(add.mock.calls.length, 1)
+    assert.equal(edit.mock.calls.length, 0)
+    const edited = await collect(() => invoke(['meal', 'edit', meal.mealId,
+      '--day-key-policy', 'keep',
+      '--nutrition-calories', '430', '--nutrition-source', 'estimated',
+      '--occurred-at', '2030-01-15T11:00:00.000Z', '--vault', root, '--format', 'json']))
+    assert.equal(edited.result.thrown, null)
+    assert.deepEqual(edited.result.exits, [])
+    assert.equal(JSON.parse(edited.result.stdout).entity.data.nutrition.totals.calories, 430)
+    assert.equal(add.mock.calls.length, 1)
+    assert.equal(edit.mock.calls.length, 1)
+    assert.equal(importers.mock.calls.length, 1)
+    assert.equal(editRecord.mock.calls.length, 1)
+    assert.equal((await records.listMealRecords({ vault: root })).count, 1)
+    for (const [action, captured] of [['add', saved], ['edit', edited]] as const) {
+      assert.equal(captured.timing.reportCount, 1)
+      assert.equal(captured.timing.commands.length, 1)
+      assert.equal(captured.timing.commands[0]!.command, `meal ${action}`)
+      assert.equal(captured.timing.commands[0]!.outcome, 'ok')
+      assert.equal(captured.timing.commands[0]!.calls, 1)
+      assert.equal(captured.timing.commands[0]!.failures, undefined)
+      assert.equal(captured.timing.commands[0]!.droppedFailures, undefined)
+      assert.equal(captured.timing.droppedCalls, 0)
+      assert.equal(captured.timing.droppedSpans, 0)
+      assert.equal(captured.timing.transportTruncated, false)
+      assert.ok(Buffer.byteLength(captured.wire) <= CLI_TIMING_MAX_REPORT_BYTES)
+      assert.equal(captured.wire.includes('PRIVATE_SENTINEL'), false)
+    }
+    assert.equal(fetchImpl.mock.calls.length, 0)
+  } finally { vi.useRealTimers() }
 })

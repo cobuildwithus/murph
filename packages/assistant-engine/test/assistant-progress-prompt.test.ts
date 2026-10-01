@@ -3,11 +3,35 @@ import { describe, expect, it } from 'vitest'
 import {
   buildAssistantExecutionBehaviorText,
 } from '../src/assistant/model-behavior.ts'
+import { buildAssistantSystemPrompt } from '../src/assistant/system-prompt.ts'
 import {
   MURPH_SEND_PROGRESS_UPDATE_TOOL,
 } from '../src/assistant-codex/dynamic-tools.ts'
 
 describe('assistant progress prompt contract', () => {
+  it('grounds delay updates in observed failure and actual recovery ownership', () => {
+    const prompt = buildAssistantSystemPrompt({
+      assistantCliContract: null, channel: 'linq', conversationScope: 'direct',
+      cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+      currentLocalDate: '2026-10-14', currentTimeZone: 'UTC',
+      modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false,
+    })
+    expect(prompt).toContain('exception to quick-task silence')
+    expect(prompt).toContain('send one brief update before continuing recovery')
+    expect(prompt).toContain('using only observed facts')
+    expect(prompt).toContain('A missing result is not proof of a messaging outage')
+    expect(prompt).toContain('only when an accepted durable continuation owns it')
+    expect(prompt).toContain('never invent a completion time')
+    expect(prompt).toContain('explain the blocker in the final reply instead')
+    for (const route of [
+      { progressUpdatesAvailable: false },
+      { progressUpdateMode: 'group' as const },
+    ]) {
+      expect(buildAssistantExecutionBehaviorText({ profile: 'gpt5-agentic', ...route }))
+        .not.toContain('send one brief update before continuing recovery')
+    }
+  })
+
   it('orients the member only before genuinely noticeable work', () => {
     const prompt = buildAssistantExecutionBehaviorText({
       profile: 'gpt5-agentic',
