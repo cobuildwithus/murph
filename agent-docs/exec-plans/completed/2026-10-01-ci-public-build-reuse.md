@@ -1,6 +1,6 @@
 # Reuse public CI builds and checks
 
-Status: active
+Status: completed
 Created: 2026-10-01
 Updated: 2026-10-01
 
@@ -57,7 +57,22 @@ Exercise actual workflow declarations and artifact validation with mismatched so
 - Claude Opus 5.5 independently audited both repositories. Additional Cloudflare
   check reuse requires proving equivalence after private materialization and is
   deferred; existing release checks remain intact.
-- Focused producer/controller tests: 85 passing. Public tooling typecheck and
+- Focused producer/controller tests: 86 passing. Public tooling typecheck and
   complexity guard pass (no changed function exceeds 20).
-- Private full verification and hosted artifact-token proof are pending.
+- Public full synthetic Web build, typecheck, and relocated asset checks pass;
+  cache-free archive size is 16.2 MiB. Required public CI is green (36 success,
+  three skipped) on the reviewed implementation head.
+- Final ReviewGPT round 2 passed on `152353df8bd6c3c99015ef278f3b335bb1a5697b`.
+  Its accepted round-1 finding was fixed by bounding and tolerating all optional
+  producer steps, reserving the existing private-proof and cleanup budgets.
+- The private implementation baseline passed full verification; cross-repository
+  workflow-token artifact access passed in hosted Actions. The private review's
+  download-coverage finding is resolved with five real ZIP/tar boundary cases.
+- Public delivery is complete in PR #3961. Private companion PR #177 still owns
+  its final cross-repository review and exact-head CI. Follow-up private PR #178
+  owns additional verification cost changes. These separate gates are not
+  represented as passed by closing this public execution plan.
+- No merge, deployment, or realized monthly savings is claimed. After merge,
+  verify the first eligible main build is reused and compare paid runner minutes.
 - Internal CI-only change: no member-facing changelog entry is warranted.
+Completed: 2026-10-01
