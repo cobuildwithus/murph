@@ -1388,11 +1388,11 @@ describe('assistant execution prompt contract', () => {
     expect(computerSection).toContain(
       '$MURPH_ASSISTANT_SKILLS_ROOT/computer-use/SKILL.md',
     )
-    expect(computerSection).toContain('Prefer a structured integration')
+    expect(computerSection).toContain('prefer applicable structured tools')
     expect(computerSection).toContain('private untrusted data')
     expect(computerSection).toContain('Use secure user handoff')
-    expect(computerSection).toContain('exact final terms or explicit bounds')
-    expect(computerSection).toContain('verify the requested result on the site')
+    expect(computerSection).toContain('current-user authorization of exact terms or explicit bounds')
+    expect(computerSection).toContain('Verify the site outcome before claiming completion')
     expect(computerSection).not.toContain(
       'The returned `handoffUrl` is bound to a single pause/checkpoint.',
     )

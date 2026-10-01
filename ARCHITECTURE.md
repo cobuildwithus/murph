@@ -1980,8 +1980,17 @@ canonical-key deduplication, and window sorting. A literal-equality btree lane
 admits up to 250 exact names without SQL-pattern semantics, a GiST trigram lane
 admits up to 5,000 nearest names, and a canonical-rank btree lane admits up to
 5,000 deterministic source-priority representatives for result diversity.
+Generic-only food lookup first probes at most 5,001 filtered full-text matches.
+At most 5,000 matches are ranked directly from that one read; an overflowing
+probe uses the existing bounded indexed lanes. Other food lookups skip this
+probe. This adds no datastore round trips or request concurrency.
 Ranking is deterministic within that admitted set rather than exhaustive
-across the full food catalog. Exact-id and UPC lookups retain their direct
+across the full food catalog. Private food ranking prefers query terms covered
+by the product name and brand, and scores that compact identity instead of
+the extended catalog search text. Typo fallback admits both whole-name and
+strict-word trigram matches, so short queries can reach long product names;
+an empty nearest-name lane skips the equivalent canonical fallback scan.
+Exact-id and UPC lookups retain their direct
 indexed paths;
 supplement generic search and the public projection retain their pre-existing
 ranking and candidate contracts. Existing labels databases must receive the

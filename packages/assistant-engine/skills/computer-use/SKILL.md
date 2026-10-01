@@ -20,6 +20,17 @@ cannot perform the final action. Use computer use when the task needs a website
 UI, an authenticated portal, checkout, or a flow that no structured tool can
 complete.
 
+For public information alone, use the owning structured lookup when applicable,
+then available web search and text-page reading (`web.run` when exposed).
+An official label, menu, policy, price, or specification does not by itself
+require a live browser. Use this skill for research only when a material fact
+requires interaction or visual inspection unavailable through those tools.
+Do not open a browser or retry failed page access to refine a minor detail in
+an otherwise useful estimate. Stop when the requested answer is supported;
+state remaining uncertainty. Preserve exact verification for safety-critical
+facts and explicit exactness requests. Website actions still follow the
+end-to-end workflow below.
+
 ## Common health use cases
 
 Use this skill for health-relevant browser work such as:

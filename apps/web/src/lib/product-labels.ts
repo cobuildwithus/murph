@@ -2050,11 +2050,29 @@ async function searchGenericProductLabels(
   // nearest-name plus canonical-diversity set. This bounded retrieval contract
   // trades exhaustive whole-catalog ranking for completion inside the labels
   // database statement timeout; exact IDs and UPCs use separate direct paths.
+  // Rank compact product identity, not the potentially large extended catalog
+  // text used for indexed retrieval. Complete name/brand matches beat
+  // partial names whose missing query terms occur only in ingredients.
   const stemmed = input.stemmedSearch;
   const excludedDataOriginsSql = productLabelExcludedDataOriginsFilterSql(
     "data_origin",
     input.excludedDataOrigins,
   );
+  // Generic lookups usually have a small matching set. Read it once when it
+  // fits the existing rank bound; a full probe keeps the established indexed
+  // lanes instead of truncating candidates or losing canonical diversity.
+  const probeGenericMatches = input.genericSearchDataOrigins !== null;
+  const indexedLanesSql = probeGenericMatches
+    ? `(SELECT count(*) FROM fts_probe) > ${PRODUCT_LABEL_SEARCH_MATCH_LIMIT} AND`
+    : "";
+  const ftsFilterSql = `${stemmed ? `(
+              to_tsvector('simple', search_text) @@ websearch_to_tsquery('simple', $1)
+              OR to_tsvector('english', search_text) @@ websearch_to_tsquery('english', $1)
+            )` : `to_tsvector('simple', search_text) @@ websearch_to_tsquery('simple', $1)`}
+            AND ($2::boolean OR off_market = false)
+            AND ${PRODUCT_LABEL_SOURCE_FILTER_SQL}
+            AND ($4::text[] IS NULL OR data_origin = ANY($4::text[]))
+            AND ${excludedDataOriginsSql}`;
   const queryText = `
         WITH query AS (
           SELECT
@@ -2062,6 +2080,14 @@ async function searchGenericProductLabels(
             websearch_to_tsquery('simple', $1) AS tsq${stemmed ? `,
             websearch_to_tsquery('english', $1) AS stemmed_tsq` : ""}
         ),
+        ${probeGenericMatches ? `fts_probe AS MATERIALIZED (
+          SELECT
+            id, canonical_key, data_origin, data_origin_id, name, brand,
+            upc, off_market, data_origin_priority
+          FROM ${tableSql}
+          WHERE ${ftsFilterSql}
+          LIMIT ${PRODUCT_LABEL_SEARCH_MATCH_LIMIT + 1}
+        ),` : ""}
         fts_exact_name_matches AS MATERIALIZED (
           SELECT
             id,
@@ -2072,19 +2098,12 @@ async function searchGenericProductLabels(
             brand,
             upc,
             off_market,
-            search_text,
             data_origin_priority
           FROM ${tableSql}
           WHERE
+            ${indexedLanesSql}
             lower(name) = lower($1::text)
-            AND ${stemmed ? `(
-              to_tsvector('simple', search_text) @@ websearch_to_tsquery('simple', $1)
-              OR to_tsvector('english', search_text) @@ websearch_to_tsquery('english', $1)
-            )` : `to_tsvector('simple', search_text) @@ websearch_to_tsquery('simple', $1)`}
-            AND ($2::boolean OR off_market = false)
-            AND ${PRODUCT_LABEL_SOURCE_FILTER_SQL}
-            AND ($4::text[] IS NULL OR data_origin = ANY($4::text[]))
-            AND ${excludedDataOriginsSql}
+            AND ${ftsFilterSql}
           ORDER BY
             lower(name) ASC,
             data_origin_priority ASC,
@@ -2101,23 +2120,16 @@ async function searchGenericProductLabels(
             brand,
             upc,
             off_market,
-            search_text,
             data_origin_priority
           FROM ${tableSql}
           WHERE
+            ${indexedLanesSql}
             -- With stemming on, match both dictionaries: 'simple' keeps
             -- exact tokens that 'english' would drop or mangle
             -- (stopword-shaped brands like "NOW"), while 'english' stems so
             -- singular/plural queries reach rows indexed under the other
             -- form. Both arms are GIN-indexed.
-            ${stemmed ? `(
-              to_tsvector('simple', search_text) @@ websearch_to_tsquery('simple', $1)
-              OR to_tsvector('english', search_text) @@ websearch_to_tsquery('english', $1)
-            )` : `to_tsvector('simple', search_text) @@ websearch_to_tsquery('simple', $1)`}
-            AND ($2::boolean OR off_market = false)
-            AND ${PRODUCT_LABEL_SOURCE_FILTER_SQL}
-            AND ($4::text[] IS NULL OR data_origin = ANY($4::text[]))
-            AND ${excludedDataOriginsSql}
+            ${ftsFilterSql}
           -- The GiST trigram index admits the closest names without scoring
           -- and sorting the entire FTS match set.
           ORDER BY name <->>> $1::text
@@ -2133,18 +2145,11 @@ async function searchGenericProductLabels(
             brand,
             upc,
             off_market,
-            search_text,
             data_origin_priority
           FROM ${tableSql}
           WHERE
-            ${stemmed ? `(
-              to_tsvector('simple', search_text) @@ websearch_to_tsquery('simple', $1)
-              OR to_tsvector('english', search_text) @@ websearch_to_tsquery('english', $1)
-            )` : `to_tsvector('simple', search_text) @@ websearch_to_tsquery('simple', $1)`}
-            AND ($2::boolean OR off_market = false)
-            AND ${PRODUCT_LABEL_SOURCE_FILTER_SQL}
-            AND ($4::text[] IS NULL OR data_origin = ANY($4::text[]))
-            AND ${excludedDataOriginsSql}
+            ${indexedLanesSql}
+            ${ftsFilterSql}
           -- The canonical-rank btree keeps this diversity lane deterministic
           -- and selects the highest-priority representative for each key.
           ORDER BY
@@ -2154,6 +2159,9 @@ async function searchGenericProductLabels(
           LIMIT ${PRODUCT_LABEL_SEARCH_MATCH_LIMIT}
         ),
         fts_matches AS MATERIALIZED (
+          ${probeGenericMatches ? `SELECT * FROM fts_probe
+          WHERE (SELECT count(*) FROM fts_probe) <= ${PRODUCT_LABEL_SEARCH_MATCH_LIMIT}
+          UNION` : ""}
           SELECT * FROM fts_exact_name_matches
           UNION
           SELECT * FROM fts_nearest_matches
@@ -2171,14 +2179,15 @@ async function searchGenericProductLabels(
             upc,
             off_market AS "offMarket",
             ${stemmed ? `greatest(
-              ts_rank_cd(to_tsvector('simple', search_text), query.tsq),
-              ts_rank_cd(to_tsvector('english', search_text), query.stemmed_tsq)
-            )` : `ts_rank_cd(to_tsvector('simple', search_text), query.tsq)`} AS search_rank,
+              ts_rank_cd(to_tsvector('simple', name || ' ' || coalesce(brand, '')), query.tsq),
+              ts_rank_cd(to_tsvector('english', name || ' ' || coalesce(brand, '')), query.stemmed_tsq)
+            )` : `ts_rank_cd(to_tsvector('simple', name || ' ' || coalesce(brand, '')), query.tsq)`} AS search_rank,
             strict_word_similarity(query.raw_q, name) AS name_similarity,
             CASE
-              WHEN strpos(' ' || lower(query.raw_q) || ' ', ' ' || lower(name) || ' ') > 0 THEN 1
+              WHEN to_tsvector('simple', name || ' ' || coalesce(brand, '')) @@ query.tsq${stemmed ? `
+                OR to_tsvector('english', name || ' ' || coalesce(brand, '')) @@ query.stemmed_tsq` : ""} THEN 1
               ELSE 0
-            END AS name_phrase_match,
+            END AS identity_match,
             CASE
               WHEN strpos(' ' || lower(query.raw_q) || ' ', ' ' || lower(name) || ' ') > 0 THEN char_length(name)
               ELSE 0
@@ -2204,7 +2213,7 @@ async function searchGenericProductLabels(
           FROM ${tableSql}
           WHERE
             NOT EXISTS (SELECT 1 FROM fts_matches)
-            AND name % $1::text
+            AND (name % $1::text OR name %>> $1::text)
             AND ($2::boolean OR off_market = false)
             AND ${PRODUCT_LABEL_SOURCE_FILTER_SQL}
             AND ($4::text[] IS NULL OR data_origin = ANY($4::text[]))
@@ -2226,7 +2235,10 @@ async function searchGenericProductLabels(
           FROM ${tableSql}
           WHERE
             NOT EXISTS (SELECT 1 FROM fts_matches)
-            AND name % $1::text
+            -- Both lanes share the same filters; an empty nearest lane proves
+            -- there are no canonical matches either, avoiding a second miss scan.
+            AND EXISTS (SELECT 1 FROM trigram_nearest_matches)
+            AND (name % $1::text OR name %>> $1::text)
             AND ($2::boolean OR off_market = false)
             AND ${PRODUCT_LABEL_SOURCE_FILTER_SQL}
             AND ($4::text[] IS NULL OR data_origin = ANY($4::text[]))
@@ -2255,9 +2267,10 @@ async function searchGenericProductLabels(
             0::real AS search_rank,
             strict_word_similarity(query.raw_q, name) AS name_similarity,
             CASE
-              WHEN strpos(' ' || lower(query.raw_q) || ' ', ' ' || lower(name) || ' ') > 0 THEN 1
+              WHEN to_tsvector('simple', name || ' ' || coalesce(brand, '')) @@ query.tsq${stemmed ? `
+                OR to_tsvector('english', name || ' ' || coalesce(brand, '')) @@ query.stemmed_tsq` : ""} THEN 1
               ELSE 0
-            END AS name_phrase_match,
+            END AS identity_match,
             CASE
               WHEN strpos(' ' || lower(query.raw_q) || ' ', ' ' || lower(name) || ' ') > 0 THEN char_length(name)
               ELSE 0
@@ -2280,7 +2293,7 @@ async function searchGenericProductLabels(
             row_number() OVER (
               PARTITION BY canonical_key
               ORDER BY
-                name_phrase_match DESC,
+                identity_match DESC,
                 name_phrase_length DESC,
                 stemmed_name_match DESC,
                 name_similarity DESC,
@@ -2297,7 +2310,7 @@ async function searchGenericProductLabels(
             *,
             row_number() OVER (
               ORDER BY
-                name_phrase_match DESC,
+                identity_match DESC,
                 name_phrase_length DESC,
                 stemmed_name_match DESC,
                 name_similarity DESC,
@@ -2309,7 +2322,7 @@ async function searchGenericProductLabels(
           FROM ranked
           WHERE dedupe_rank = 1
           ORDER BY
-            name_phrase_match DESC,
+            identity_match DESC,
             name_phrase_length DESC,
             stemmed_name_match DESC,
             name_similarity DESC,

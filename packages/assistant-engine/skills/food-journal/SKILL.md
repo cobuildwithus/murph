@@ -109,10 +109,13 @@ Treat every calorie or macro estimate as two separate questions:
 1. Which nutrient density or exact label facts apply?
 2. How much was actually eaten, including preparation and additions?
 
-Do not let vision or memory answer both. For every numeric meal estimate—including
+Do not let vision or memory answer both. For numeric meal estimates—including
 interactive meal logs, user-sent photos, automatic-meal-capture enrichment, and
-scheduled closeouts—resolve nutrient density from the hosted food-label database
-for every identifiable material component. Use the photo, description,
+scheduled closeouts—reuse applicable label or USDA facts already verified in
+the conversation or saved record. Resolve missing nutrient density from the
+hosted food-label database for identifiable material components. Do not repeat
+a lookup merely because the user changes a quantity or asks for the total.
+Use the photo, description,
 and conversation to estimate identity, quantity, and preparation; use returned
 label or USDA facts for calories and macros. If another meal skill says to
 estimate visible ingredients or portions, that means estimate those quantities
@@ -168,12 +171,36 @@ Before calculating a meal total:
   could materially move the total. Avoid fake precision; set confidence from
   the weakest material identity, quantity, or preparation assumption.
 
-Increase the result limit only when the first match is ambiguous or missing a
-likely variant. If the database is unavailable or incomplete, use an
-official label, manufacturer, or restaurant menu source. Only after those fail
-may you use a clearly marked memory-based estimate with the assumptions and
-material uncertainty stated. Never invent an exact label or imply that a visual
-portion estimate was database-measured.
+For routine calorie and macro estimates, make one initial database pass for
+unresolved components, batched as above. If it returns the wrong product, no
+match, or an error, make one targeted web search for the unresolved facts,
+preferably batching independent queries. Prefer an official label,
+manufacturer, restaurant, or authoritative label archive. A returned excerpt
+is sufficient when it clearly identifies the product, serving basis, and
+needed values; read the source page as text only when those facts are missing
+or conflicting. Use the computer-use escalation rule rather than opening a
+browser just because the source is official. A precise identifier or newly
+supplied label can justify a targeted recheck; repeating similar queries or
+increasing limits without new evidence does not.
+
+If that bounded source pass is unavailable or still inconclusive, finish with
+a clearly marked estimate or range and the material assumptions. A minor
+variant or portion uncertainty should not block the whole meal's useful
+breakdown. Never invent an exact label or imply that a visual portion estimate
+was database-measured. This shortcut applies to routine calories and macros,
+not allergen safety, supplement dosing, clinical nutrient limits, or an explicit
+request for exact verification. For those, resolve the critical fact or state
+what cannot be verified and ask only for the missing material evidence.
+
+For a correction, use the latest confirmed ingredients and quantities. Remove
+excluded items without researching them; rescale unchanged verified facts and
+look up only additions or materially changed products. Read the saved meal
+once if needed to identify or update it. When asked for a breakdown, provide
+the estimated calories and macros with the key assumptions, not just an
+ingredient list or another minor clarification. If a meal edit is authorized,
+apply it to the existing meal and verify the result before saying it is saved;
+an answer-only request does not itself authorize a new meal record. Preserve
+the safety exceptions and response-card rules above.
 
 For a fridge or pantry photo, enumerate distinct visible products and resolve
 them in one batch. Summarize only relevant nutrition, ingredient, allergen, and

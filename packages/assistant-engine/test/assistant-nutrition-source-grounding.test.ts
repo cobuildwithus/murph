@@ -27,7 +27,7 @@ describe('assistant nutrition source grounding', () => {
     )
     expect(food).toContain('Do not let vision or memory answer both.')
     expect(food).toContain(
-      'For every numeric meal estimate—including interactive meal logs, user-sent photos, automatic-meal-capture enrichment, and scheduled closeouts—resolve nutrient density from the hosted food-label database for every identifiable material component.',
+      'reuse applicable label or USDA facts already verified in the conversation or saved record.',
     )
     expect(food).toContain(
       'use returned label or USDA facts for calories and macros',
@@ -81,7 +81,7 @@ describe('assistant nutrition source grounding', () => {
       'Do not silently assume restaurant or prepared food has no added fat.',
     )
     expect(food).toContain(
-      'Only after those fail may you use a clearly marked memory-based estimate',
+      'If that bounded source pass is unavailable or still inconclusive, finish with a clearly marked estimate or range',
     )
     expect(automatic).toContain(
       'Read `$MURPH_ASSISTANT_SKILLS_ROOT/food-journal/SKILL.md` before estimating nutrition',
@@ -121,5 +121,20 @@ describe('assistant nutrition source grounding', () => {
     expect(supplementSkill).toContain(
       'If a returned serving, amount, or ingredient field is absent or source-null, do not infer it',
     )
+  })
+
+  it('bounds routine research while preserving safety-critical verification and correction provenance', async () => {
+    const food = compact(await readFile(
+      path.join(resolveAssistantSkillsRoot(), 'food-journal', 'SKILL.md'),
+      'utf8',
+    ))
+
+    expect(food).toContain('one initial database pass for unresolved components')
+    expect(food).toContain('make one targeted web search for the unresolved facts')
+    expect(food).toContain('Remove excluded items without researching them')
+    expect(food).toContain('rescale unchanged verified facts')
+    expect(food).toContain('not allergen safety, supplement dosing, clinical nutrient limits, or an explicit request for exact verification')
+    expect(food).toContain('verify the result before saying it is saved')
+    expect(food).toContain('an answer-only request does not itself authorize a new meal record')
   })
 })

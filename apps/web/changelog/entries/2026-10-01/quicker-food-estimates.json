@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-10-01",
+  "order": 100,
+  "item": {
+    "id": "quicker-food-estimates",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Less back-and-forth for food estimates",
+    "summary": "Murph reuses checked nutrition facts when you correct a meal and keeps routine ingredient research bounded.",
+    "details": "Food search better distinguishes complete product names and finds longer names from short misspelled queries. When a routine label lookup is inconclusive, Murph can give a clearly marked estimate; exact allergen and dosing questions still need verified evidence.",
+    "relevanceTags": ["nutrition", "food-journal"],
+    "sourcePullRequests": []
+  }
+}
