@@ -23,6 +23,40 @@ export class HostedOnboardingError extends Error {
   }
 }
 
+const HOSTED_AUTH_MIGRATION_CONFLICT_REASONS = [
+  "member_missing",
+  "provider_binding_mismatch",
+  "verified_credential_missing",
+  "source_snapshot_changed",
+  "credential_binding_mismatch",
+  "credential_not_in_projection",
+  "pending_contact_ambiguous",
+  "invite_member_mismatch",
+  "invite_not_pristine",
+  "legacy_binding_present",
+  "login_projection_missing",
+  "prepared_state_changed",
+] as const;
+
+export type HostedAuthMigrationConflictReason =
+  (typeof HOSTED_AUTH_MIGRATION_CONFLICT_REASONS)[number];
+
+export class HostedAuthMigrationConflictError extends HostedOnboardingError {
+  constructor(readonly reconciliationReason?: HostedAuthMigrationConflictReason) {
+    super({ code: "AUTH_IDENTITY_RECONCILIATION_REQUIRED", httpStatus: 409, message: "Authentication identity needs reconciliation before migration." });
+    this.name = "HostedAuthMigrationConflictError";
+  }
+}
+
+export function getHostedAuthMigrationConflictReasonForLog(
+  error: unknown,
+): HostedAuthMigrationConflictReason | undefined {
+  if (!(error instanceof HostedAuthMigrationConflictError)) return undefined;
+  // Read only this diagnostic's data property; never invoke getters or coerce values.
+  const reason: unknown = Object.getOwnPropertyDescriptor(error, "reconciliationReason")?.value;
+  return HOSTED_AUTH_MIGRATION_CONFLICT_REASONS.find((allowed) => allowed === reason);
+}
+
 export const HOSTED_STRIPE_EFFECT_PENDING_ERROR_CODE =
   "HOSTED_STRIPE_EFFECT_PENDING";
 export const HOSTED_STRIPE_EFFECT_PENDING_MESSAGE =
