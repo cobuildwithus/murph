@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
+import { generateKeyPairSync } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+
+import { createGitHubAppTokenSupplier } from "./native-android-hosted-e2e-native.mjs";
 
 import { inspectWearableCanaryProof, inspectWearableCanaryRun, runWearableCanary, wearableCanaryProofDigest } from "./github-wearable-canary.mjs";
 
@@ -12,7 +15,8 @@ const digest = wearableCanaryProofDigest({ privateSha, publicSha, requestId });
 const env = {
   GITHUB_EVENT_NAME: "schedule", GITHUB_REF: "refs/heads/main", GITHUB_REF_PROTECTED: "true",
   GITHUB_REPOSITORY: "cobuildwithus/murph", GITHUB_RUN_ID: "12", GITHUB_RUN_ATTEMPT: "1",
-  GITHUB_SHA: publicSha, GITHUB_TOKEN: "public-fixture", WEARABLE_CANARY_PRIVATE_GITHUB_TOKEN: "private-fixture",
+  GITHUB_SHA: publicSha, GITHUB_TOKEN: "public-fixture", WEARABLE_CANARY_GITHUB_APP_ID: "123",
+  WEARABLE_CANARY_GITHUB_APP_PRIVATE_KEY: "x".repeat(256),
 };
 const run = {
   id: 42, workflow_id: 7, name: "Private Junction Garmin Canary", path: ".github/workflows/junction-wearable-canary.yml",
@@ -50,6 +54,7 @@ function harness(overrides = {}) {
       const replacement = overrides[calls.at(-1).endpoint];
       return new Response(JSON.stringify(replacement ?? body), { headers: { "content-type": "application/json" } });
     },
+    tokenSupplier: async () => "private-fixture",
     now: () => now,
     sleepImpl: async () => { throw new Error("Unexpected sleep"); },
   };
@@ -66,7 +71,7 @@ test("dispatches one protected-main journey and accepts its exact completed busi
 test("missing credentials and untrusted events fail before any provider dispatch", async () => {
   for (const override of [
     { GITHUB_REF: "refs/heads/topic" }, { GITHUB_REF_PROTECTED: "false" }, { GITHUB_EVENT_NAME: "pull_request" }, { GITHUB_EVENT_NAME: "push" },
-    { WEARABLE_CANARY_PRIVATE_GITHUB_TOKEN: "" }, { GITHUB_RUN_ID: "private/input" },
+    { GITHUB_TOKEN: "" }, { WEARABLE_CANARY_GITHUB_APP_PRIVATE_KEY: "" }, { WEARABLE_CANARY_GITHUB_APP_ID: "" }, { GITHUB_RUN_ID: "private/input" },
   ]) {
     const options = harness();
     await assert.rejects(runWearableCanary({ ...env, ...override }, options));
@@ -171,10 +176,111 @@ test("an ambiguous dispatch response is never retried or accepted as proof", asy
 test("public workflow grants only private dispatch authority and never provider credentials", async () => {
   const workflow = await readFile(new URL("../.github/workflows/junction-wearable-canary.yml", import.meta.url), "utf8");
   assert.match(workflow, /environment: temporal-compatibility/u);
-  assert.match(workflow, /permission-actions: write/u);
-  assert.match(workflow, /permission-contents: read/u);
+  assert.match(workflow, /WEARABLE_CANARY_GITHUB_APP_ID: \$\{\{ vars\.TEMPORAL_COMPATIBILITY_GITHUB_APP_ID \}\}/u);
+  assert.match(workflow, /WEARABLE_CANARY_GITHUB_APP_PRIVATE_KEY: \$\{\{ secrets\.TEMPORAL_COMPATIBILITY_GITHUB_APP_PRIVATE_KEY \}\}/u);
+  assert.doesNotMatch(workflow, /WEARABLE_CANARY_PRIVATE_GITHUB_TOKEN|create-github-app-token/u);
   assert.match(workflow, /cancel-in-progress: false/u);
   assert.match(workflow, /schedule:/u);
   assert.doesNotMatch(workflow, /\n  push:/u);
   assert.doesNotMatch(workflow, /JUNCTION_API_KEY|GARMIN_PASSWORD|KERNEL_API_KEY|pull_request|actions\/download-artifact|pnpm install|force-cancel/u);
+});
+
+
+test("refreshes expired private credentials and accepts the original run after one hour", async () => {
+  const options = harness();
+  let instant = now;
+  let mints = 0;
+  let installations = 0;
+  const tokenSupplier = createGitHubAppTokenSupplier({
+    appId: "123",
+    createJwt: () => "fixture-jwt",
+    privateKey: "x".repeat(256),
+    repository: "cobuildwithus/murph-cloud",
+    now: () => instant,
+    fetchJsonImpl: async (url, init) => {
+      assert.equal(init.headers.authorization, "Bearer fixture-jwt");
+      if (url.endsWith("/installation")) {
+        installations += 1;
+        return { id: 77 };
+      }
+      assert.deepEqual(JSON.parse(init.body), {
+        repositories: ["murph-cloud"], permissions: { actions: "write", contents: "read" },
+      });
+      mints += 1;
+      return { token: mints === 1 ? "private-fixture" : "refreshed-fixture",
+        expires_at: new Date(instant + 60 * 60_000).toISOString() };
+    },
+  });
+  const fetchImpl = async (url, init) => {
+    if (url.includes("/murph-cloud/")) {
+      const expected = instant < now + 60 * 60_000 ? "private-fixture" : "refreshed-fixture";
+      if (init.headers.authorization !== `Bearer ${expected}`) return new Response(null, { status: 401 });
+    } else assert.equal(init.headers.authorization, "Bearer public-fixture");
+    const response = await options.fetchImpl(url, init);
+    if (url.endsWith("/actions/runs/42") && instant < now + 62 * 60_000) {
+      return new Response(JSON.stringify({ ...run, status: "in_progress", conclusion: null }));
+    }
+    if (url.includes("/jobs?")) return new Response(JSON.stringify({ ...proof,
+      jobs: [{ ...proof.jobs[0], completed_at: new Date(instant).toISOString() }],
+    }));
+    return response;
+  };
+  const result = await runWearableCanary(env, { ...options, fetchImpl, tokenSupplier,
+    now: () => instant, sleepImpl: async () => { instant += 31 * 60_000; },
+  });
+  assert.equal(result.completedAt, new Date(now + 62 * 60_000).toISOString());
+  assert.equal(result.journeyExecuted, true);
+  assert.equal(installations, 1);
+  assert.equal(mints, 2);
+  assert.equal(options.calls.filter(({ method }) => method === "POST").length, 1);
+  assert.ok(options.calls.every(({ endpoint }) => !/cancel|rerun/u.test(endpoint)));
+});
+
+
+test("the default credential owner mints only a repository-scoped installation token", async () => {
+  const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048,
+    privateKeyEncoding: { type: "pkcs8", format: "pem" }, publicKeyEncoding: { type: "spki", format: "pem" },
+  });
+  const options = harness();
+  delete options.tokenSupplier;
+  const originalFetch = globalThis.fetch;
+  const credentialCalls = [];
+  globalThis.fetch = async (url, init) => {
+    credentialCalls.push(url);
+    assert.match(init.headers.authorization, /^Bearer ey/u);
+    if (url === "https://api.github.com/repos/cobuildwithus/murph-cloud/installation") {
+      return new Response(JSON.stringify({ id: 77 }));
+    }
+    assert.equal(url, "https://api.github.com/app/installations/77/access_tokens");
+    assert.deepEqual(JSON.parse(init.body), {
+      permissions: { actions: "write", contents: "read" }, repositories: ["murph-cloud"],
+    });
+    return new Response(JSON.stringify({ token: "private-fixture",
+      expires_at: new Date(now + 60 * 60_000).toISOString(),
+    }));
+  };
+  try {
+    assert.equal((await runWearableCanary({ ...env, WEARABLE_CANARY_GITHUB_APP_PRIVATE_KEY: privateKey }, options)).journeyExecuted, true);
+    assert.equal(credentialCalls.length, 2);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("refresh failure preserves private cleanup ownership and redacts credential errors", async () => {
+  const options = harness({ "cobuildwithus/murph-cloud/actions/runs/42": { ...run, status: "in_progress", conclusion: null } });
+  let instant = now;
+  await assert.rejects(runWearableCanary(env, { ...options,
+    now: () => instant,
+    sleepImpl: async () => { instant += 62 * 60_000; },
+    tokenSupplier: async () => {
+      if (instant > now) throw new Error("private-credential-response");
+      return "private-fixture";
+    },
+  }), (error) => {
+    assert.equal(error.message, "Wearable canary GitHub request failed; no private response was exposed.");
+    return true;
+  });
+  assert.equal(options.calls.filter(({ method }) => method === "POST").length, 1);
+  assert.ok(options.calls.every(({ endpoint }) => !/cancel|rerun/u.test(endpoint)));
 });

@@ -421,6 +421,9 @@ recovery; it requires an exact completed journey and cleanup receipt. The
 private receipt distinguishes matched canonical data from a successful empty
 provider response; empty-account success does not prove ingestion. The public
 controller has no provider credentials, private checkout, or artifact access.
+It renews its repository-scoped installation token through the existing GitHub
+App supplier so the bounded wait can outlive one token. Refresh keeps the same
+dispatched run and never cancels private cleanup.
 See [Live provider canaries](live-provider-canaries.md) for the execution,
 credential-provisioning, and safe migration contract.
 
