@@ -25,8 +25,8 @@ Native email canary work continues separately in its existing PRs.
 - [x] Verify bounded provider diagnostics for an unsuccessful live data proof.
 - [x] Verify the provider query includes the entire final closed calendar day.
 - [x] Distinguish missing inventory from absent timestamps and probe the bounded historical range across activity, sleep, and workouts.
-- [ ] Give canonical ingestion enough time to observe the ordinary fifteen-minute empty-history retry, preserving shorter authorization limits.
-- [ ] Refresh the controller installation token throughout the extended wait before enabling the private deadline.
+- [x] Give canonical ingestion enough time to observe the ordinary fifteen-minute empty-history retry, preserving shorter authorization limits.
+- [x] Refresh the controller installation token throughout the extended wait before enabling the private deadline.
 - [ ] Run the hosted canary and require canonical ingestion plus cleanup.
 
 ## Evidence and risks
@@ -77,4 +77,43 @@ successful receipt at minute sixty-two. Reuse the existing GitHub App token
 supplier for each private request, preserving the same run, digest, repository
 scope, and non-canceling cleanup owner. The public workflow supplies the same
 protected App credentials to that supplier instead of minting one static token.
-The private deadline stays unmerged until this follow-up is reviewed and verified.
+The public correction passed final review and exact-head CI in PR #3960 before
+the private deadline activated in Murph Cloud PR #176, whose review and CI gates
+also passed.
+
+## Latest hosted evidence
+
+The protected run completed the full twenty-minute provider-data wait. Real
+authorization, persisted connection reload, browser disconnect, and cleanup
+worked. The strict canonical proof failed because the provider returned no
+eligible records. Bounded diagnostics also found empty activity, sleep, and
+workout summaries across the ninety-day historical range. All three resource
+inventory entries were present and their historical pull status was successful;
+none had a newest-data timestamp. Historical completion therefore still does
+not establish actual delivery. No credentials, member identifiers, or health
+values belong in this record.
+
+Evidence: [public run](https://github.com/cobuildwithus/murph/actions/runs/36917945131)
+and [private run](https://github.com/cobuildwithus/murph-cloud/actions/runs/36917996960).
+The data wait and controller changes are delivered; live ingestion remains
+unqualified. The missing local webhook receiver cannot by itself explain empty
+upstream reads. Do not weaken the oracle or infer that a production vault is
+empty from this separate sandbox connection.
+
+The intended data-bearing login has been confirmed and reapplied to the private
+canary environment. A fresh hosted run is pending. Its persistent browser can
+reuse a prior Garmin session, so refreshed secrets alone do not prove account
+identity. Check that boundary before treating account selection as resolved. A read-only Opus 5.5 consultation
+reached the same ordering; longer asynchronous delivery remains an unproven
+alternative. Preserve the current cleanup contract unless a separately scoped
+bounded delayed-delivery probe is justified.
+
+## Historical diagnostics follow-up
+
+Extend the existing failure-only introspection summary with closed categories
+for the requested history range relative to the oracle window and whether the
+provider reports any days with data. Reuse already-fetched metadata, adding no
+requests, persisted state, provider mutation, or timeout. Historical range
+overlap and reported data are diagnostic only; neither can satisfy the strict
+canonical-value proof. Verify missing, malformed, disjoint and overlapping
+ranges, zero/positive/unknown counts, identity isolation, and output privacy.

@@ -29,9 +29,9 @@ describe("live Garmin provider diagnostics", () => {
       }] },
     });
     expect(summary).toEqual([
-      { resource: "activity", inventory: "present", latestData: "before_window", history: "success" },
-      { resource: "sleep", inventory: "present", latestData: "in_window", history: "unknown" },
-      { resource: "workouts", inventory: "present", latestData: "after_window", history: "not_pulled" },
+      { resource: "activity", inventory: "present", latestData: "before_window", history: "success", historyRequestedWindow: "unknown", historyReportedData: "present" },
+      { resource: "sleep", inventory: "present", latestData: "in_window", history: "unknown", historyRequestedWindow: "unknown", historyReportedData: "unknown" },
+      { resource: "workouts", inventory: "present", latestData: "after_window", history: "not_pulled", historyRequestedWindow: "unknown", historyReportedData: "unknown" },
     ]);
     expect(JSON.stringify(summary)).not.toMatch(/private|2026|45|synthetic|unrelated/u);
   });
@@ -54,6 +54,43 @@ describe("live Garmin provider diagnostics", () => {
     }
   });
 
+  it.each([
+    [null, null, null, "unknown", "unknown"],
+    ["2026-08-01T00:00:00Z", null, 0, "unknown", "empty"],
+    ["invalid-private-date", "2026-08-14T23:59:59Z", 2, "invalid", "present"],
+    ["2026-08-14T00:00:00Z", "2026-08-01T00:00:00Z", -1, "invalid", "unknown"],
+    ["2026-07-01T00:00:00Z", "2026-07-31T23:59:59.999Z", 0, "before_window", "empty"],
+    ["2026-08-15T00:00:00Z", "2026-08-16T00:00:00Z", 1, "after_window", "present"],
+    ["2026-07-01T00:00:00Z", "2026-08-01T00:00:00Z", 1, "overlaps_window", "present"],
+    ["2026-08-14T23:59:59.999Z", "2026-08-16T00:00:00Z", 0, "overlaps_window", "empty"],
+    ["2026-08-03T12:00:00Z", "2026-08-04T12:00:00Z", 0.5, "overlaps_window", "unknown"],
+    ["2026-07-01T00:00:00Z", "2026-09-01T00:00:00Z", Number.NaN, "overlaps_window", "unknown"],
+  ])("classifies requested history separately from delivery (%s to %s)", (rangeStart, rangeEnd, daysWithData, historyRequestedWindow, historyReportedData) => {
+    const summary = summarizeLiveGarminProviderDiagnostics({
+      availability: null, userId, window,
+      history: { matchedUser: true, sources: [{
+        sourceProviderSlug: "garmin", notPulledResources: [], pulledResources: [{
+          resource: "activity", status: "success", rangeStart, rangeEnd, daysWithData, errorDetails: "private-error",
+        }],
+      }] },
+    });
+    expect(summary[0]).toMatchObject({ historyRequestedWindow, historyReportedData, latestData: "unknown" });
+    expect(JSON.stringify(summary)).not.toMatch(/2026|private|synthetic|NaN/u);
+  });
+
+  it.each([[false, "garmin"], [true, "oura"]])("does not report history belonging to another identity (%s, %s)", (matchedUser, sourceProviderSlug) => {
+    const summary = summarizeLiveGarminProviderDiagnostics({
+      availability: null, userId, window,
+      history: { matchedUser, sources: [{
+        sourceProviderSlug, notPulledResources: [], pulledResources: [{
+          resource: "activity", status: "success", daysWithData: 12, errorDetails: null,
+          rangeStart: "2026-08-01T00:00:00Z", rangeEnd: "2026-08-14T23:59:59Z",
+        }],
+      }] },
+    });
+    expect(summary[0]).toMatchObject({ history: "unknown", historyRequestedWindow: "unknown", historyReportedData: "unknown" });
+  });
+
   it("keeps either API failure private while preserving the other diagnostic", async () => {
     const client = {
       listSummary: vi.fn().mockResolvedValue([]),
@@ -67,7 +104,7 @@ describe("live Garmin provider diagnostics", () => {
     }));
     expect(result.resourcesQuery).toBe("rejected");
     expect(result.historyQuery).toBe("fulfilled");
-    expect(result.resources[0]).toEqual({ resource: "activity", inventory: "invalid_response", latestData: "unknown", history: "not_pulled", historyRangeData: "empty" });
+    expect(result.resources[0]).toEqual({ resource: "activity", inventory: "invalid_response", latestData: "unknown", history: "not_pulled", historyRequestedWindow: "unknown", historyReportedData: "unknown", historyRangeData: "empty" });
     expect(client.introspectResources).toHaveBeenCalledWith({
       userId, userLimit: 1, sourceProviderSlug: "garmin", signal: expect.any(AbortSignal),
     });
