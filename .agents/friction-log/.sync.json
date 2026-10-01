@@ -753,6 +753,10 @@
       "path": ".agents/friction-log/20260831035755-release-app-verification/friction.md"
     },
     {
+      "issue": "cobuildwithus/murph#2661",
+      "path": ".agents/friction-log/20260831181230-hosted-local-e2e/friction.md"
+    },
+    {
       "issue": "cobuildwithus/murph#2662",
       "path": ".agents/friction-log/20260830084003-automation-supplied-task/friction.md"
     },
