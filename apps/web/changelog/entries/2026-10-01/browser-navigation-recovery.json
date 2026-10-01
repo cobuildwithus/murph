@@ -9,6 +9,6 @@
     "summary": "Murph gives a slow-loading page time to finish opening and return its contents.",
     "details": "Opening a page now leaves time to read it after navigation. Websites can still time out or return errors.",
     "relevanceTags": ["computer-use", "reliability"],
-    "sourcePullRequests": []
+    "sourcePullRequests": [3941]
   }
 }
