@@ -725,7 +725,7 @@ async function runLiveJunctionWearableProof(
     );
   }
 
-  let dataOutcome: "matched" | "no_provider_data" | null = null;
+  let dataOutcome: "matched" | null = null;
   const connectedNotBefore = Date.now();
   const result = await runJunctionWearableBrowser({
     config,

@@ -6,7 +6,7 @@ import * as coreRuntime from "@murphai/core";
 import { importDeviceProviderSnapshot } from "@murphai/importers";
 import { buildMetricProjection, readVault, readVaultRawTolerant } from "@murphai/query";
 import { createBrowserVaultReplica } from "@murphai/query/browser";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { hasCanonicalGarminSteps, readGarminStepExpectations, waitForLiveGarminCanonicalData } from "./helpers/hosted-local-junction-live-data.js";
 
@@ -75,8 +75,9 @@ describe("live Garmin canonical data oracle", () => {
 
 
 describe("live Garmin empty-account boundary", () => {
+  afterEach(() => vi.restoreAllMocks());
   function setup() {
-    const requestJson = vi.fn(async (): Promise<never> => { throw new Error("synthetic status failure"); });
+    const requestJson = vi.fn(async (): Promise<string> => { throw new Error("synthetic status failure"); });
     const input: Parameters<typeof waitForLiveGarminCanonicalData>[0] = {
       client: {
         resolveUser: vi.fn().mockResolvedValue({ userId: "synthetic-provider-user" }),
@@ -85,18 +86,43 @@ describe("live Garmin empty-account boundary", () => {
       clientUserId: "synthetic-client-user",
       memberId: "synthetic-member",
       notBefore: Date.now(),
-      scenario: { harness: { requestJson } },
+      scenario: { harness: { requestJson: async <T>(): Promise<T> => JSON.parse(await requestJson()) } },
       signal: new AbortController().signal,
       timeoutMs: 1000,
     };
     return { input, requestJson };
   }
 
-  it("accepts a successful empty provider read without claiming canonical ingestion", async () => {
+  it("fails rather than passing when provider data stays empty until the deadline", async () => {
     const { input, requestJson } = setup();
-    await expect(waitForLiveGarminCanonicalData(input)).resolves.toBe("no_provider_data");
+    input.timeoutMs = 30;
+    requestJson.mockImplementation(async () => JSON.stringify({
+      inFlight: false, mailboxLag: [], userId: input.memberId, workspace: null,
+    }));
+    await expect(waitForLiveGarminCanonicalData(input))
+      .rejects.toThrow("MURPH_E2E_GARMIN_RECENT_PROVIDER_DATA_MISSING");
     expect(input.client.listSummary).toHaveBeenCalledOnce();
-    expect(requestJson).not.toHaveBeenCalled();
+    expect(requestJson).toHaveBeenCalledOnce();
+  });
+
+  it("polls again after an empty initial pull instead of disconnecting before data arrives", async () => {
+    const { input, requestJson } = setup();
+    let now = Date.now();
+    vi.spyOn(Date, "now").mockImplementation(() => now);
+    input.timeoutMs = 30_000;
+    vi.mocked(input.client.listSummary).mockResolvedValueOnce([]).mockResolvedValue([activity]);
+    requestJson.mockImplementationOnce(async () => {
+      now += 15_000;
+      return JSON.stringify({
+        inFlight: false, mailboxLag: [], userId: input.memberId, workspace: null,
+      });
+    });
+    // The second status read fails deliberately: it proves that newly available
+    // provider data enters the canonical check rather than accepting empty data.
+    await expect(waitForLiveGarminCanonicalData(input))
+      .rejects.toThrow("MURPH_E2E_GARMIN_DATA_PROOF_FAILED");
+    expect(input.client.listSummary).toHaveBeenCalledTimes(2);
+    expect(requestJson).toHaveBeenCalledTimes(2);
   });
 
   it("does not turn provider errors or missing identities into empty-account success", async () => {

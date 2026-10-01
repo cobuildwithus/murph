@@ -102,7 +102,7 @@ export async function waitForLiveGarminCanonicalData(input: {
   scenario: GarminCanaryScenario;
   signal: AbortSignal;
   timeoutMs: number;
-}): Promise<"matched" | "no_provider_data"> {
+}): Promise<"matched"> {
   const deadline = Date.now() + input.timeoutMs;
   const signal = AbortSignal.any([input.signal, AbortSignal.timeout(input.timeoutMs)]);
   const closedDay = new Date();
@@ -132,10 +132,8 @@ export async function waitForLiveGarminCanonicalData(input: {
           windowStart: window.from,
         });
         signal.throwIfAborted();
-        // A successful empty provider response is an explicit limited outcome,
-        // never evidence that canonical ingestion succeeded. Malformed/nonempty
-        // data and provider failures must still fail the proof.
-        if (records.length === 0 && !observedProviderData) return "no_provider_data";
+        // An empty response can precede Junction's initial provider pull.
+        // Keep polling within the same deadline; only a canonical match passes.
         expected = readGarminStepExpectations(records, window);
         observedProviderData ||= records.length > 0;
         nextProviderRead = Date.now() + 15_000;
