@@ -125,6 +125,8 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
     'usageReferralsAsBeneficiary HostedUsageReferral[] @relation("HostedUsageReferralBeneficiary")',
     'usageReferralsAsIntroduced HostedUsageReferral[] @relation("HostedUsageReferralIntroducedMember")',
     'usageReferralsAsReferrer HostedUsageReferral[] @relation("HostedUsageReferralReferrer")',
+    "wearableCommands CompanionWearableCommand[]",
+    "wearableSessions CompanionWearableSession[]",
     'createdAt DateTime @default(now()) @map("created_at")',
     'updatedAt DateTime @updatedAt @map("updated_at")',
   ],
@@ -1225,6 +1227,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260921190000_conversation_polls",
       "20260922170000_hosted_sponsorship_topup_margin",
       "20260922220000_poll_result_notifications",
+      "20261001140000_companion_wearable_haptics",
       "migration_lock.toml",
     ]);
     expect(migrationEntries).toEqual(

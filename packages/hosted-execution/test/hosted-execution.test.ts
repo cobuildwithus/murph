@@ -842,6 +842,7 @@ describe("hosted execution coverage gaps", () => {
       "./temporal-env",
       "./vault-share",
       "./voice-control",
+      "./wearable-haptics",
       "./workspace-snapshot-store",
       "./workspace-snapshot-v2",
     ]);

@@ -1,6 +1,6 @@
 # Companion wrist reminders
 
-Status: active
+Status: completed
 Created: 2026-10-01
 Updated: 2026-10-01
 
@@ -71,9 +71,34 @@ Only `prompt_cache_key` is excluded from decoded provider-visible JSON.
   tools for groups.
 - Exact target-model tokenizer is unavailable. No token estimate is reported.
 
-## Remaining
+## Final review and handoff
 
-Complete parent candidate review, scoped commits, draft PR evidence, routed final
-ReviewGPT and exact-head CI. Full target-tokenizer input counts are unavailable;
-complete provider-request byte captures are recorded above with that limitation.
-Physical-device validation and deployment are separate, unperformed steps.
+Final ReviewGPT round 1 passed on
+`c14dffc6e35c978231b62efda5de71dcb6e8d845`. The Mountain lane selected GPT-6 Pro,
+confirmed the full source attachment, and captured the exact committed turn and
+`REVIEW_COMPLETE` response after 608 seconds. The reviewer checked all changed
+blob hashes and reverse patch application and ran 13 independent service checks.
+No Critical, High or material Complexity Collapse finding qualified. Parent
+review accepts the result; physical and PostgreSQL-concurrency limits remain
+explicit. The first browser launch failed before submission and produced no
+substantive review.
+
+CI then identified stale export/migration/member-relation test inventories and
+an unindexed durable reference. Only those isolated tests and the documentation
+index were corrected after the reviewed head. Ten package inventory tests, ten
+schema/migration tests, the affected typechecks and doc gardening pass. No
+production behavior, schema or contract changed after review, so the documented
+non-production review exception applies.
+
+Both final live assistant scenarios pass on the current default model. The WHOOP
+reply reports queued/unacknowledged delivery; Garmin reports uncertainty with
+one request and no retry. A prior overbroad wording assertion was corrected,
+then both complete live scenarios were rerun successfully.
+
+The companion implementation and local independent review are complete in
+[murph-ios #173](https://github.com/cobuildwithus/murph-ios/pull/173). Final exact-head
+CI is tracked by [murph #3949](https://github.com/cobuildwithus/murph/pull/3949).
+No deployment or real phone/Bluetooth action occurred. Real WHOOP vibration is
+excluded; phone UI checks await the other session's handoff. Hardware validation
+is not implied by protocol fixtures, simulator evidence or the backend review.
+Completed: 2026-10-01
