@@ -21,16 +21,23 @@ Native email canary work continues separately in its existing PRs.
 
 - [x] Poll through initially empty provider responses and fail at the deadline.
 - [x] Reject empty-data success in the private receipt consumer.
-- [ ] Verify regression tests, typechecks, required review and exact-head CI.
+- [x] Verify the original receipt changes with regression tests, typechecks, required review and exact-head CI.
+- [ ] Verify bounded provider diagnostics for an unsuccessful live data proof.
 - [ ] Run the hosted canary and require canonical ingestion plus cleanup.
 
 ## Evidence and risks
 
-Current producer returns immediately for an empty provider response; the current
-consumer accepts that limited outcome as a successful job. The latest scheduled
-run failed during PostgreSQL image download before reaching provider work.
+The producer now polls empty responses and the consumer rejects empty-data
+receipts. Both changes are merged. The hosted proof remains unqualified;
+connection and cleanup alone do not establish canonical ingestion.
 The oracle requires positive steps on a completed day in its bounded window;
 recent open-day data cannot safely support exact-value equality.
+
+The next diagnostic reads account-scoped resource availability and historical
+pull status only after the data deadline. Its output uses closed resource,
+window-relative availability, and status categories. A ten-second bound fits
+inside the existing browser cleanup grace period. It cannot certify ingestion,
+change the proof result, or log provider payloads, dates, IDs, or health values.
 
 ## Verification
 
