@@ -1,5 +1,6 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  parseHostedRuntimeLogEntry,
   parseHostedRuntimeLogRequest,
   parseHostedRuntimeRedactedJson,
 } from "@murphai/hosted-execution/parsers";
@@ -138,7 +139,10 @@ describe("hosted computer runtime logs", () => {
     );
     expect(read).toEqual(entry?.redactedJson);
     expect(read).toEqual({
-      ...(category ? { computerFailureCategory: category } : {}),
+      computerFailureCategory: category ?? "unclassified",
+      computerOperationElapsedMs: expect.any(Number),
+      kernelExecutionTimeoutMs: 20_000,
+      kernelExecutionElapsedMs: expect.any(Number),
       computerOperationKind: "act",
       httpStatus: 502,
       kernelErrorPresent: present[0],
@@ -224,6 +228,7 @@ describe("hosted computer runtime logs", () => {
         redactedJson: {
         computerFailureCategory: "strict_mode_violation",
         computerOperationKind: "act",
+        computerOperationElapsedMs: expect.any(Number),
         httpStatus: 502,
         kernelErrorPresent: true,
         kernelStderrPresent: true,
@@ -270,6 +275,8 @@ describe("hosted computer runtime logs", () => {
         phase: "error",
         redactedJson: {
         computerOperationKind: "open",
+        computerOperationElapsedMs: expect.any(Number),
+        computerFailureCategory: "unclassified",
         kernelErrorPresent: false,
         kernelStderrPresent: false,
         kernelStdoutPresent: false,
@@ -283,6 +290,51 @@ describe("hosted computer runtime logs", () => {
     expect(JSON.stringify(mocks.writeHostedRuntimeLogs.mock.calls[0]?.[0])).toContain(
       "page context closed",
     );
+  });
+
+  it("persists execution timing alongside closed failure diagnostics", async () => {
+    const message = "private unrecognized failure";
+    const category = "unclassified";
+    const clock = vi.spyOn(performance, "now").mockReturnValueOnce(100).mockReturnValueOnce(850);
+    const error = computerUseError({
+      code: "HOSTED_COMPUTER_EVAL_FAILED", httpStatus: 502,
+      message: "Computer browser evaluation failed.", retryable: true,
+      details: { kernelError: message, kernelExecutionTimeoutMs: 23000, kernelExecutionElapsedMs: 700 },
+    });
+    try {
+      await expect(runtimeLogModule.withHostedComputerToolFailureRuntimeLog({
+        memberId: "member_123", operation: "open", run: async () => { throw error; },
+      })).rejects.toBe(error);
+      const entry = mocks.writeHostedRuntimeLogs.mock.calls.at(-1)?.[0].entries[0];
+      expect(entry.redactedJson).toMatchObject({
+        computerFailureCategory: category, computerOperationElapsedMs: 750,
+        kernelExecutionTimeoutMs: 23000, kernelExecutionElapsedMs: 700,
+      });
+      expect(parseHostedRuntimeLogEntry(entry)).toEqual(entry);
+      expect(JSON.stringify(entry)).not.toContain(message);
+    } finally { clock.mockRestore(); }
+  });
+
+  it("retains only valid upstream statuses and timing values without changing SDK failures", async () => {
+    for (const status of [429, 503, "private-status", 200, 999]) {
+      const error = Object.assign(new Error("Computer provider unavailable."), { status });
+      await expect(runtimeLogModule.withHostedComputerToolFailureRuntimeLog({
+        memberId: "member_123", operation: "act", run: async () => { throw error; },
+      })).rejects.toBe(error);
+      const entry = mocks.writeHostedRuntimeLogs.mock.calls.at(-1)?.[0].entries[0];
+      expect(entry.redactedJson.providerHttpStatus).toBe(status === 429 || status === 503 ? status : undefined);
+      expect(parseHostedRuntimeLogEntry(entry)).toEqual(entry);
+    }
+    const error = computerUseError({
+      code: "HOSTED_COMPUTER_EVAL_FAILED", httpStatus: 502, message: "Computer browser evaluation failed.",
+      details: { kernelExecutionTimeoutMs: "private-value", kernelExecutionElapsedMs: Infinity },
+    });
+    await expect(runtimeLogModule.withHostedComputerToolFailureRuntimeLog({
+      memberId: "member_123", operation: "open", run: async () => { throw error; },
+    })).rejects.toBe(error);
+    const entry = mocks.writeHostedRuntimeLogs.mock.calls.at(-1)?.[0].entries[0];
+    expect(entry.redactedJson).not.toHaveProperty("kernelExecutionTimeoutMs");
+    expect(entry.redactedJson).not.toHaveProperty("kernelExecutionElapsedMs");
   });
 
   it.each([false, true])("preserves failures when logging fails (after unavailable: %s)", async (afterUnavailable) => {

@@ -12,6 +12,13 @@ const verificationPattern = /^VE[0-9a-f]{32}$/iu;
 type VerifyFailure = "invalid_request" | "configuration" | "transaction" | "transport"
   | "aborted" | "timeout" | "provider_http" | "invalid_response" | "binding_mismatch";
 
+type VerifyResponseFailure = {
+  code?: number;
+  parameter?: string;
+  parameterKind?: "recognized" | "unrecognized" | "missing";
+  responseKind: "parsed" | "missing" | "oversized" | "invalid_json" | "invalid_shape" | "read_failed";
+};
+
 /** Only closed statuses and bound verification IDs escape this provider boundary. */
 export function hostedAuthSmsVerification(signal?: AbortSignal): HostedAuthSmsVerification {
   return {
@@ -65,7 +72,7 @@ async function requestVerify(
       return null;
     }
     const failure = await readVerifyFailure(response);
-    throw verificationError(operation, "provider_http", response.status, failure?.code, failure?.parameter);
+    throw verificationError(operation, "provider_http", response.status, failure);
   }
   const result: unknown = await response.json().catch(() => { throw verificationError(operation, "invalid_response"); });
   if (!result || typeof result !== "object" || Array.isArray(result)
@@ -76,9 +83,9 @@ async function requestVerify(
 
 // Twilio messages can contain contacts. Retain only its numeric error code and
 // exact known parameter labels; never attach the provider body or thrown cause.
-async function readVerifyFailure(response: Response): Promise<{ code?: number; parameter?: string } | undefined> {
+async function readVerifyFailure(response: Response): Promise<VerifyResponseFailure> {
   const reader = response.body?.getReader();
-  if (!reader) return undefined;
+  if (!reader) return { responseKind: "missing" };
   const chunks: Uint8Array[] = [];
   let bytes = 0;
   try {
@@ -86,23 +93,31 @@ async function readVerifyFailure(response: Response): Promise<{ code?: number; p
       const { done, value } = await reader.read();
       if (done) break;
       bytes += value.byteLength;
-      if (bytes > 4096) return undefined;
+      if (bytes > 4096) return { responseKind: "oversized" };
       chunks.push(value);
     }
-    const result: unknown = JSON.parse(Buffer.concat(chunks).toString("utf8"));
-    if (!result || typeof result !== "object") return undefined;
-    const code = "code" in result && typeof result.code === "number" && Number.isInteger(result.code)
-      && result.code >= 10000 && result.code <= 99999 ? result.code : undefined;
-    const parameter = code === 60200 && "message" in result && typeof result.message === "string"
-      ? /^Invalid parameter: (To|Channel|RiskCheck|Code|VerificationSid)$/u.exec(result.message)?.[1]
-      : undefined;
-    return { code, parameter };
-  } catch { /* Missing diagnostics must preserve the provider's HTTP failure. */ }
+    return parseVerifyFailure(Buffer.concat(chunks).toString("utf8"));
+  } catch { return { responseKind: "read_failed" }; }
   finally {
     await reader.cancel().catch(() => {});
     reader.releaseLock();
   }
-  return undefined;
+}
+
+function parseVerifyFailure(body: string): VerifyResponseFailure {
+  let result: unknown;
+  try { result = JSON.parse(body); } catch { return { responseKind: "invalid_json" }; }
+  if (!result || typeof result !== "object" || Array.isArray(result)) return { responseKind: "invalid_shape" };
+  const code = "code" in result && typeof result.code === "number" && Number.isInteger(result.code)
+    && result.code >= 10000 && result.code <= 99999 ? result.code : undefined;
+  const message = "message" in result && typeof result.message === "string" ? result.message : "";
+  const parameter = code === 60200
+    ? /^Invalid parameter: (To|Channel|RiskCheck|Code|VerificationSid)$/u.exec(message)?.[1]
+    : undefined;
+  return {
+    code, parameter, responseKind: "parsed",
+    ...(code === 60200 ? { parameterKind: parameter ? "recognized" as const : message ? "unrecognized" as const : "missing" as const } : {}),
+  };
 }
 
 function readVerifyConfig() {
@@ -115,16 +130,16 @@ function readVerifyConfig() {
   return { account, key, secret, service };
 }
 
-function verificationError(operation: "send" | "check", reason: VerifyFailure, status?: number, providerCode?: number, parameter?: string) {
+function verificationError(operation: "send" | "check", reason: VerifyFailure, status?: number, failure?: VerifyResponseFailure) {
   if (operation === "send" && reason === "provider_http" && status === 400
-    && providerCode === 60200 && parameter === "To") {
+    && failure?.code === 60200 && failure.parameter === "To") {
     return hostedOnboardingError({
       code: "AUTH_REQUEST_INVALID", httpStatus: 400,
       message: "Check your phone number, including its country code, and try again.",
     });
   }
   return hostedOnboardingError({
-    cause: new Error(`Twilio Verify ${operation}: ${reason}${status === undefined ? "" : `; HTTP ${status}`}${providerCode === undefined ? "" : `; code ${providerCode}`}${parameter === undefined ? "" : `; parameter ${parameter}`}.`),
+    cause: new Error(`Twilio Verify ${operation}: ${reason}${status === undefined ? "" : `; HTTP ${status}`}${failure?.code === undefined ? "" : `; code ${failure.code}`}${failure?.parameter === undefined ? "" : `; parameter ${failure.parameter}`}${failure ? `; response ${failure.responseKind}` : ""}${failure?.parameterKind ? `; parameterKind ${failure.parameterKind}` : ""}.`),
     code: operation === "send" ? "AUTH_DELIVERY_UNAVAILABLE" : "AUTH_VERIFICATION_UNAVAILABLE",
     httpStatus: 503,
     message: operation === "send" ? "We could not send a sign-in code. Try again shortly."

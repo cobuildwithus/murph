@@ -302,13 +302,18 @@ export class KernelComputerClient implements ComputerKernelClient {
     sessionId: string;
     timeoutMs: number;
   }): Promise<KernelPlaywrightResult> {
+    const startedAt = performance.now();
     const response = await this.kernel.browsers.playwright.execute(input.sessionId, {
       code: input.code,
       timeout_sec: Math.ceil(input.timeoutMs / 1000),
     });
 
     if (!response.success) {
-      const details = buildKernelPlaywrightFailureDetails(response);
+      const details = {
+        ...buildKernelPlaywrightFailureDetails(response),
+        kernelExecutionTimeoutMs: Math.ceil(input.timeoutMs / 1000) * 1000,
+        kernelExecutionElapsedMs: Math.round(performance.now() - startedAt),
+      };
       throw computerUseError({
         code: "HOSTED_COMPUTER_EVAL_FAILED",
         details,

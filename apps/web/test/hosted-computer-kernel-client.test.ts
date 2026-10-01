@@ -382,6 +382,19 @@ describe("KernelComputerClient", () => {
     });
   });
 
+  it("records the actual rounded execution budget and elapsed provider time on evaluation failure", async () => {
+    const clock = vi.spyOn(performance, "now").mockReturnValueOnce(100).mockReturnValueOnce(20100);
+    try {
+      kernelSdkMocks.playwrightExecute.mockResolvedValueOnce({ success: false, error: "TimeoutError" });
+      const client = new KernelComputerClient({ apiKey: "test-kernel-key" });
+      await expect(client.executePlaywright({ code: "return null;", sessionId: "synthetic-session", timeoutMs: 22500 }))
+        .rejects.toMatchObject({ details: { kernelExecutionTimeoutMs: 23000, kernelExecutionElapsedMs: 20000 } });
+      expect(kernelSdkMocks.playwrightExecute).toHaveBeenCalledExactlyOnceWith("synthetic-session", {
+        code: "return null;", timeout_sec: 23,
+      });
+    } finally { clock.mockRestore(); }
+  });
+
   it("bounds long Playwright evaluation diagnostics", async () => {
     const client = new KernelComputerClient({ apiKey: "test-kernel-key" });
     kernelSdkMocks.playwrightExecute.mockResolvedValueOnce({
