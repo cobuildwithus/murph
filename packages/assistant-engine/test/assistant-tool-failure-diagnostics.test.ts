@@ -498,6 +498,14 @@ describe('bounded CLI validation completion metadata', () => {
     ['event list', 'limit', 'too_big', false],
     ['event list', 'arguments', 'custom', false],
     ['knowledge append-section', 'heading', 'invalid_type', true],
+    ['meal add', 'nutritionCalories', 'too_small', false],
+    ['meal add', 'nutritionSource', 'invalid_value', false],
+    ['meal add', 'occurredAt', 'custom', false],
+    ['meal add', 'arguments', 'custom', false],
+    ['meal edit', 'nutritionCalories', 'too_small', false],
+    ['meal edit', 'nutritionSource', 'invalid_value', false],
+    ['meal edit', 'occurredAt', 'invalid_format', false],
+    ['meal edit', 'arguments', 'custom', false],
   ] as const)('selects one finite %s %s issue from the existing error envelope', (command, field, code, missing) => {
     const error = { ...envelope('VALIDATION_ERROR'), fieldErrors: [
       { path: `body.${sentinel}`, code: 'invalid_type', missing: true },
@@ -556,6 +564,18 @@ describe('bounded CLI validation completion metadata', () => {
     ['automation list', [{ path: 'limit', code: 'too_big', missing: false }, { path: 'status', code: 'invalid_value', missing: false }]],
     ['event list', [{ path: 'limit', code: 'too_big', missing: false }, { path: 'arguments', code: 'custom', missing: false }]],
     ['knowledge upsert', [{ path: 'body', code: 'too_small', missing: false }, { path: 'arguments', code: 'custom', missing: false }]],
+    ['meal add', [
+      { path: 'nutritionCalories', code: 'too_small', missing: false },
+      { path: 'nutritionSource', code: 'invalid_value', missing: false },
+      { path: 'occurredAt', code: 'custom', missing: false },
+      { path: 'arguments', code: 'custom', missing: false },
+    ]],
+    ['meal edit', [
+      { path: 'nutritionCalories', code: 'too_small', missing: false },
+      { path: 'nutritionSource', code: 'invalid_value', missing: false },
+      { path: 'occurredAt', code: 'invalid_format', missing: false },
+      { path: 'arguments', code: 'custom', missing: false },
+    ]],
   ] as const)('round-trips %s detail and absence through the existing issue sanitizer and parser', async (command, details) => {
     const issues = [undefined, ...details].map((detail) => {
       const issue = commandIssue(JSON.stringify({ ...envelope('VALIDATION_ERROR', 'validation'),

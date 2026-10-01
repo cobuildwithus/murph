@@ -1551,6 +1551,12 @@ static field names are admitted:
 - `knowledge upsert`: body, slug, title, pageType, status, clearLibraryLinks,
   relatedSlug, librarySlug, sourcePath, plus the fixed Incur invocation field arguments.
 - `knowledge append-section`: slug, heading, body, title, position, sourcePath.
+- `meal add` and `meal edit`: nutritionCalories, nutritionSource, occurredAt,
+  plus the fixed Incur invocation field arguments. These options are registered
+  in `packages/cli/src/commands/meal.ts`; edit inherits occurredAt from
+  `record-mutation-command-helpers.ts`. No other meal fields are admitted: no
+  base vault/request/environment fields, free-text/media fields, nested nutrition
+  paths, arrays/indices, arbitrary option names or values.
 
 Issue codes use the closed standard vocabulary in `CliValidationDiagnostic`;
 `missing` is retained only when explicitly boolean. Absent is not false, and
@@ -1667,6 +1673,21 @@ commit for the history-backed runtime-state test. No schema bump, migration,
 backfill or new event is required. Only after approved telemetry rollout and
 consumer/producer convergence, observe natural traffic; do not induce calls.
 
+The `meal add` / `meal edit` extension follows the same reader-before-writer
+order: Web/hosted usage, engine/profile and completion consumers, including warm
+processes, before runner/CLI producers. Run the existing history-backed test with
+`MURPH_CLI_MEAL_VALIDATION_COMPAT_BASE=214c131d913b5a31251d82fa18a52669322e3d6c`.
+The old reader drops the new tuples and coalesces their code/stage counts without
+losing envelopes, phases, outcomes, calls or drops; new readers accept old reports.
+The real CLI probe checks distinct option failures before mutation/provider
+work, output/exit parity and nearby successful saves. Unknown-option parsing
+supplies arguments/custom in the public envelope; an original ParseError without
+public issues remains code/stage-only in timing. Do not infer the missing tuple.
+The 8 KiB envelope and all existing caps, events and counters remain unchanged.
+Historical meal failures cannot be attributed or backfilled from this extension.
+These probes prove diagnostic loss, not a preventable meal-behavior cause.
+No automatic rollback is authorized or required by a new attribution.
+
 The `knowledge show`, `event payload-schema` and `measurement entry list` field
 extensions use that same consumer-first Web/reader, then runner/CLI-producer
 rollout. Run the history-backed reader tests with
@@ -1763,12 +1784,14 @@ needed for this extension's unchanged output contract.
 #### Command-specific validation inspection (including singletons)
 
 For `automation list`, `knowledge show`, `knowledge upsert`, `event list`,
-`event payload-schema` and `measurement entry list` with
+`event payload-schema`, `measurement entry list`, `meal add` and `meal edit` with
 `VALIDATION_ERROR / validation`, **any newly
 attributed event warrants inspection, including one event in one turn**; the two-turn
 implementation-investigation threshold above does not gate this inspection.
 Attribution is not an automatic behavior or prompt change. Reproduce the exact
-attributed path synthetically and establish its cause before proposing one.
+attributed path synthetically and prove the earliest violated behavioral invariant
+before proposing one. This also applies to a single newly attributed meal failure;
+its field/code does not establish why the input was selected.
 For the event-list/upsert probe, `arguments / custom` identifies an Incur
 invocation rejection, not a particular option or its value. A specific option
 such as `limit / too_big` supports inspecting that option's existing contract;
@@ -1804,7 +1827,7 @@ WITH rows AS MATERIALIZED (
   CROSS JOIN LATERAL jsonb_array_elements(t -> 'commands') c
   WHERE t ->> 'schema' = 'murph.cli-timing.v1'
     AND c ->> 'command' IN ('automation list', 'knowledge show', 'knowledge upsert',
-      'event list', 'event payload-schema', 'measurement entry list')
+      'event list', 'event payload-schema', 'measurement entry list', 'meal add', 'meal edit')
     AND c ->> 'outcome' = 'error'
 ), per_turn AS (
   SELECT turn_id, c ->> 'command' AS command, f.field, f.issue_code, f.missing,
@@ -1821,6 +1844,8 @@ WITH rows AS MATERIALIZED (
                  'kind', 'from', 'to', 'tag', 'experiment', 'limit', 'arguments')
                OR c ->> 'command' = 'event payload-schema' AND e -> 'validation' ->> 'field' IN ('kind', 'for')
                OR c ->> 'command' = 'measurement entry list' AND e -> 'validation' ->> 'field' IN ('metric', 'from', 'to', 'limit')
+               OR c ->> 'command' IN ('meal add', 'meal edit') AND e -> 'validation' ->> 'field' IN (
+                 'nutritionCalories', 'nutritionSource', 'occurredAt', 'arguments')
              THEN e -> 'validation' ->> 'field' END AS field,
            CASE WHEN e -> 'validation' ->> 'code' IN (
              'invalid_type', 'too_big', 'too_small', 'invalid_format', 'not_multiple_of',
