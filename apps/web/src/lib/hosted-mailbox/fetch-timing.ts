@@ -8,6 +8,7 @@ type MailboxFetchPhase =
   | "transaction_finish" | "group_presentation" | "ingress_context" | "serialize";
 
 const SLOW_FETCH_MS = 250;
+const timingModuleLoadedAt = performance.now();
 let firstRequestInModule = true;
 
 /** One content-free record, with no additional database or network work. */
@@ -24,6 +25,8 @@ export async function runWithHostedMailboxFetchTiming<T>(
   firstRequestInModule = false;
   const handlerStartedAtMs = Date.now();
   const startedAt = performance.now();
+  const processUptimeMs = Math.round(process.uptime() * 1_000);
+  const timingModuleAgeMs = Math.max(0, Math.round(startedAt - timingModuleLoadedAt));
   const phases: Partial<Record<MailboxFetchPhase, number>> = {};
   const operations: PrismaOperationTiming[] = [];
   const poolAcquisitions: PrismaPoolAcquisitionTiming[] = [];
@@ -82,6 +85,9 @@ export async function runWithHostedMailboxFetchTiming<T>(
           event: "hosted-mailbox.fetch.timing",
           completed,
           firstRequestInModule: firstRequest,
+          // A platform-hot process can still be loading this route for the first time.
+          processUptimeMs,
+          timingModuleAgeMs,
           handlerStartedAt: new Date(handlerStartedAtMs).toISOString(),
           signedAt,
           signedRequestToHandlerMs,
