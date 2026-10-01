@@ -94,7 +94,7 @@ describe("KernelComputerClient", () => {
     });
   });
 
-  it("starts automation on a blank page while preserving login state and disabling telemetry", async () => {
+  it("starts automation without loading or saving a prior account session", async () => {
     kernelSdkMocks.browserCreate.mockResolvedValueOnce({
       cdp_ws_url: "wss://cdp.test-browser.onkernel.com/session/1",
       session_id: "kernel-session-1",
@@ -103,8 +103,6 @@ describe("KernelComputerClient", () => {
 
     await expect(client.createAutomationBrowser({
       headless: true,
-      profileName: "profile-1",
-      saveChanges: true,
       timeoutSeconds: 480,
     })).resolves.toEqual({
       cdpWsUrl: "wss://cdp.test-browser.onkernel.com/session/1",
@@ -113,10 +111,6 @@ describe("KernelComputerClient", () => {
 
     expect(kernelSdkMocks.browserCreate).toHaveBeenCalledWith({
       headless: true,
-      profile: {
-        name: "profile-1",
-        save_changes: true,
-      },
       start_url: "about:blank",
       stealth: true,
       telemetry: { enabled: false },

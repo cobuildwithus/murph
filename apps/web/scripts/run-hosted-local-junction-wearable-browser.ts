@@ -301,12 +301,8 @@ async function openBrowserSession(config: BrowserConfig): Promise<BrowserSession
   }
   const tunnelPort = requireKernelTunnelPort(config.webBaseUrl);
   const kernelClient = new KernelComputerClient({ apiKey });
-  const kernelProfile = `murph-junction-${config.source}-canary`;
-  await kernelClient.ensureProfile(kernelProfile);
   const kernelBrowser = await kernelClient.createAutomationBrowser({
     headless: config.headless,
-    profileName: kernelProfile,
-    saveChanges: true,
     timeoutSeconds: Math.ceil((config.timeoutMs
       + (config.awaitCanonicalData ? config.dataTimeoutMs + 60_000 : 0) + 60_000) / 1_000),
   });

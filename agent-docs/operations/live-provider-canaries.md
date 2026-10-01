@@ -109,7 +109,8 @@ revalidated before acceptance. The controller polls boundedly for 54 minutes
 and never retries an ambiguous dispatch or cancels provider work.
 
 The private executor owns managed Temporal, the worker package, local PostgreSQL,
-runner, dedicated Garmin browser profile, and sandbox provider authority. Its
+runner, a fresh provider browser without saved login state, and sandbox provider
+authority. Its
 new `junction-wearable-canary` Environment must be separately provisioned by an
 authorized operator with the existing dedicated sandbox credentials. Local
 agents must not retrieve or copy those credentials. Missing configuration fails closed. A successful empty provider result is
